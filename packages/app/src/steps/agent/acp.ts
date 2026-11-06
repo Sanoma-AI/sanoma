@@ -213,7 +213,7 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
           const home = join(boxHome, OWN_AGENTS_DIR);
           const dir = join(home, name);
           // A first install under way is waited for even by a new message (it has a time limit of its
-          // own): the box's stop would end it, and another turn may be waiting on it too.
+          // own): the box's stop would end it.
           const [cloned, installed, shimmed] = await Promise.allSettled([
             carryIn(box, step.source, chat.id, { home: boxHome, signal }),
             install(box, agent, dir),

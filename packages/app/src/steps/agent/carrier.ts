@@ -71,7 +71,7 @@ export async function carryIn(
     const { bytes, head } = await repository.bundle(id, since === undefined ? {} : { since });
     const bundle = bytes.length ? BUNDLE : "";
     if (bundle) await box.write(bundle, bytes);
-    await inBox(box, IN, { BRANCH: draftBranch(id), HEAD: head, BUNDLE: bundle }, signal);
+    await inBox(box, IN, { BRANCH: draftBranch(id), HEAD: head, BUNDLE: bundle }, { signal });
     return head;
   };
   const since = known ? new TextDecoder().decode(known).trim() : undefined;
@@ -87,8 +87,7 @@ export async function carryIn(
   }
   try {
     // Never longer than this, whatever the registry does.
-    const stop = AbortSignal.timeout(INSTALL_TIMEOUT_MS);
-    await inBox(box, INSTALL, {}, signal ? AbortSignal.any([signal, stop]) : stop);
+    await inBox(box, INSTALL, {}, { signal, limit: INSTALL_TIMEOUT_MS });
   } catch (err) {
     if (!signal?.aborted) console.error(`sanoma app: the install in the box ${box.id} failed:`, errorMessage(err));
   }
@@ -98,7 +97,10 @@ export async function carryIn(
 /** How long the clone's install may take. */
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 
-/** The box's side of `carryIn`, in its home: the clone at the draft's head, clean (a lock a turn that died left, too). */
+/**
+ * The box's side of `carryIn`, in its home: the clone at the draft's head, clean (a lock a turn
+ * that died left too, and what another draft's turn left, ignored files but the install included).
+ */
 const IN = `set -eu
 mkdir -p ${CLONE}
 cd ${CLONE}
@@ -109,23 +111,23 @@ if [ -n "$BUNDLE" ]; then
 fi
 rm -f .git/index.lock
 git checkout --quiet --force -B "$BRANCH" "$HEAD"
-git clean --quiet --force -d
+git clean --quiet --force -d -x -e node_modules
 printf %s "$HEAD" > ${HEAD_FILE}`;
 
-/** The clone's install, when its lockfile is not the one last installed: no script of the repository's runs (the agent wrote them, and may run none). */
+/** The clone's install, when its lockfile is not the one last installed: no script or `.pnpmfile.cjs` of the repository's runs (the agent wrote them, and may run none). */
 const INSTALL = `set -eu
 cd ${CLONE}
 [ -f pnpm-lock.yaml ] || exit 0
 lock=$(git hash-object pnpm-lock.yaml)
 [ "$lock" = "$(cat ${LOCK_FILE} 2>/dev/null || true)" ] && exit 0
-pnpm install --frozen-lockfile --ignore-scripts
+pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile
 printf %s "$lock" > ${LOCK_FILE}`;
 
 /**
  * Brings what the turn changed in `box`'s clone back to the draft `id`: committed there as `author`
  * with `message`, bundled since `since` (the head `carryIn` gave), and fetched into the draft's
  * checkout as a fast-forward (`Source.unbundle`). Whether it brought any commit. Never stopped by
- * the turn's signal: a stopped turn's edits are kept too. When it fails (a box that stopped
+ * the turn's signal (a stopped turn's edits are kept too), only by a time limit. When it fails (a box that stopped
  * mid-turn, a draft that moved meanwhile), the turn's edits are lost, and it says so: the next turn
  * starts again from the draft.
  */
@@ -176,13 +178,13 @@ const NO_EMAIL = "noreply@sanoma.invalid";
 /**
  * The box's side of `carryOut`, in its home: a bundle only when the branch moved, said so, and its
  * new head kept as the one the instance knows of (were the instance to lack it, its next bundle is
- * the whole branch). Edits off the draft's branch, or a branch whose history was rewritten, are
- * refused rather than dropped unsaid.
+ * the whole branch). Edits on another branch (or none) the agent moved to are the draft's branch's
+ * from where it left it; a history that no longer holds the head given is refused, never dropped unsaid.
  */
 const OUT = `set -eu
 rm -f ${BUNDLE}
 cd ${CLONE}
-[ "$(git symbolic-ref -q HEAD || true)" = "refs/heads/$BRANCH" ] || { echo "the agent left the branch $BRANCH" >&2; exit 3; }
+[ "$(git symbolic-ref -q HEAD || true)" = "refs/heads/$BRANCH" ] || git checkout --quiet -B "$BRANCH"
 git add --all
 git diff --cached --quiet || git commit --quiet --no-verify -m "$MESSAGE"
 head=$(git rev-parse "refs/heads/$BRANCH")
@@ -207,9 +209,25 @@ const GIT_ENV = {
   GIT_CONFIG_VALUE_1: "false",
 };
 
-/** Runs `script` in `box`'s home with `env`: what it printed, trimmed; an error with its exit code and the end of its output, unless it exits 0. */
-async function inBox(box: Box, script: string, env: Record<string, string>, signal?: AbortSignal): Promise<string> {
-  const ran = await box.run(script, { cwd: ".", env: { ...GIT_ENV, ...env }, ...(signal && { signal }) });
+/** How long a carry's script in a box may take: a box that hangs is stopped, and freed for the next turn. */
+const CARRY_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Runs `script` in `box`'s home with `env`, stopped by `signal` or after `limit` ms: what it
+ * printed, trimmed; an error with its exit code and the end of its output, unless it exits 0.
+ */
+async function inBox(
+  box: Box,
+  script: string,
+  env: Record<string, string>,
+  { signal, limit = CARRY_TIMEOUT_MS }: { signal?: AbortSignal | undefined; limit?: number } = {},
+): Promise<string> {
+  const stop = AbortSignal.timeout(limit);
+  const ran = await box.run(script, {
+    cwd: ".",
+    env: { ...GIT_ENV, ...env },
+    signal: signal ? AbortSignal.any([signal, stop]) : stop,
+  });
   const [out, err, { exitCode }] = await Promise.all([
     new Response(ran.stdout).text(),
     new Response(ran.stderr).text(),

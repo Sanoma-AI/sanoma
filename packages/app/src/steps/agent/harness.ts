@@ -111,21 +111,24 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
         const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root, home, ports: [port] });
         // However the turn ended (an error too): the session destroyed, so nothing in the box writes
         // again, then what it changed committed in the box and carried back to the draft. A failed
-        // carry is the turn's error (its edits are lost); a failed destroy, otherwise.
-        await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id }).finally(async () => {
-          const destroyed = await Promise.resolve(sandbox.destroy()).then(
-            () => undefined,
-            (err: unknown) => err,
-          );
-          try {
-            const message = turnMessage(turn, ENGINE_NAMES[name]);
-            carried = await carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id });
-          } catch (err) {
-            if (destroyed) console.error(`sanoma app: destroying the session in the box ${box.id} failed:`, destroyed);
-            throw err;
-          }
-          if (destroyed) throw destroyed;
+        // carry is the turn's error (its edits are lost), what failed before it logged; else the
+        // turn's own error, or a failed destroy.
+        const failed: unknown[] = [];
+        await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id }).catch((err: unknown) => {
+          failed.push(err);
         });
+        await Promise.resolve(sandbox.destroy()).catch((err: unknown) => {
+          failed.push(err);
+        });
+        try {
+          const message = turnMessage(turn, ENGINE_NAMES[name]);
+          carried = await carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id });
+        } catch (err) {
+          for (const before of failed) console.error(`sanoma app: the turn in the box ${box.id} failed:`, before);
+          throw err;
+        }
+        if (failed.length > 1) console.error(`sanoma app: the turn in the box ${box.id} failed:`, failed[1]);
+        if (failed.length) throw failed[0];
       },
     );
   } finally {

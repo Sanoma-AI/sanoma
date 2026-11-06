@@ -176,10 +176,16 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
   /** Stops the box: every command, and what a bridge started too. */
   stop = () => this.#box.stop();
 
-  /** Kills what it started, so no bridge writes again, then deletes its `.agent-runs` (the bridge's start files, the model's key in them). */
+  /** Kills what it started and waits for it to exit, so no bridge writes again, then deletes its `.agent-runs` (the bridge's start files, the model's key in them). */
   destroy = async () => {
-    for (const started of this.#started) started.kill();
+    const started = [...this.#started];
     this.#started.clear();
+    await Promise.all(
+      started.map((command) => {
+        command.kill("SIGKILL");
+        return command.wait();
+      }),
+    );
     const removed = await this.#box.run('rm -rf -- "$RUNS"', { env: { RUNS: this.#runs } });
     const { exitCode } = await removed.wait();
     if (exitCode !== 0) throw new Error(`The session's run files were not deleted (exit ${exitCode})`);
