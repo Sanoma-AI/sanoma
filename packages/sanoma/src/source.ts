@@ -10,7 +10,8 @@ import {
   symlinkSync,
   unlinkSync,
 } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -140,6 +141,19 @@ async function fetchSource(cwd: string, url: string, ref?: string): Promise<stri
 const behindIn = async (cwd: string, from: string, folder: string) =>
   Number(await gitIn(cwd, ["rev-list", "--count", `HEAD..${from}`, "--", `apps/${folder}`, "package.json"]));
 
+/** A commit's id, as a bundle's `since` must be: never an option or a revision range. */
+const COMMIT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+/** `use` of a file of its own in a temporary directory, deleted after. */
+async function inTemp<T>(use: (file: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), "sanoma-bundle-"));
+  try {
+    return await use(join(dir, "draft.bundle"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 /** Paths git printed with `-z`. */
 const pathsOf = (z: string) => z.split("\0").filter(Boolean);
 
@@ -239,6 +253,7 @@ async function keepOurs(cwd: string, paths: string[]): Promise<void> {
  * draft's `sanoma check` runs on `<databaseUrl>_check` (the launcher's database when it is not given).
  * A draft takes an app (`git merge --allow-unrelated-histories` of its source) and updates one
  * (a merge of its source's default branch); `behind` fetches an app's source into the checkout.
+ * A draft's branch travels to an agent box's clone and back as a git bundle (`bundle`, `unbundle`).
  */
 export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: string } = {}): Source {
   const git = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(root, args, env);
@@ -378,6 +393,48 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         // Forced: whatever it holds uncommitted goes with it, and one whose directory is gone too.
         if ((await listed()).has(id)) await git(["worktree", "remove", "--force", at]);
         if (await branched(branch)) await git(["branch", "--quiet", "-D", branch]);
+      });
+    },
+    async bundle(id, { since } = {}) {
+      const ref = `refs/heads/${branchOf(id)}`;
+      // A commit the clone says it has, by its id alone, that this repository has too; else the whole branch.
+      const [tip, base] = await Promise.all([
+        head(ref),
+        since !== undefined && COMMIT_ID.test(since)
+          ? holds(root, ["rev-parse", "--verify", "--quiet", `${since}^{commit}`]).then((has) =>
+              has ? since : undefined,
+            )
+          : undefined,
+      ]);
+      // Git refuses an empty bundle: the clone has every commit.
+      if (base !== undefined && (await holds(root, ["merge-base", "--is-ancestor", tip, base]))) {
+        return { bytes: new Uint8Array(), head: tip };
+      }
+      return inTemp(async (file) => {
+        await git(["bundle", "create", "--quiet", file, ref, ...(base === undefined ? [] : [`^${base}`])]);
+        return { bytes: await readFile(file), head: tip };
+      });
+    },
+    async unbundle(id, bytes) {
+      const [branch, at] = [branchOf(id), draftAt(id)];
+      if (!(await listed()).get(id)) throw new Error(`The draft ${id} is not open`);
+      // Its branch moves under no check running in it.
+      await checkingAt.get(at);
+      return inTemp(async (file) => {
+        await writeFile(file, bytes);
+        return serial(async () => {
+          // It was made where an agent ran: fsck'd as it arrives by a git that checks a bundle's
+          // objects (2.39 does not); checkout's own path checks hold either way.
+          const pull = ["-c", "fetch.fsckObjects=true", "pull", "--quiet", "--ff-only", "--no-rebase", "--no-tags"];
+          await gitIn(at, [...pull, "--", file, `refs/heads/${branch}`]).catch(
+            (err: { stderr?: string; message: string }) => {
+              throw new Error(
+                `The draft ${id} could not take the bundle's ${branch} as a fast-forward: ${err.stderr?.trim() || err.message}`,
+              );
+            },
+          );
+          return { head: await head("HEAD", at) };
+        });
       });
     },
     check: async (id) => checks(draftAt(id), databaseUrl, async () => (await listed()).get(id) === true),

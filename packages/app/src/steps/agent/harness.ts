@@ -14,17 +14,19 @@ import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../..
 import { modelRegistry } from "../../server/models.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { boxSession, homeOf, openBox } from "./box-session.ts";
-import { allowedPath, commitTurn, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
+import { boxTurn, carryIn, carryOut } from "./carrier.ts";
+import { allowedPath, boxName, NO_SHELL, openDraft, outsideCheckout, showCommits, turnMessage } from "./checkout.ts";
 import { freePort } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's second engine: an existing coding agent driven by the AI SDK's `HarnessAgent` in a
-// session of ours over the person's box (`boxSession`), in the chat's draft, on the company's
-// model key. Pi runs in this process; Claude Code through its adapter's bridge, in the box.
-// A turn opens the box and is one harness session: made, run to its end (its permission requests
-// answered by the checkout rule), destroyed; the box is stopped. Then what the agent changed is
-// committed on the draft and checked.
+// session of ours over the person's box (`boxSession`), in the box's clone of the chat's draft, on
+// the company's model key. Pi runs in this process; Claude Code through its adapter's bridge, in
+// the box. A turn opens the box (one turn in it at a time), carries the draft into it (`carryIn`)
+// and is one harness session: made, run to its end (its permission requests answered by the
+// checkout rule), destroyed (what it started killed). Then what the agent changed is committed in
+// the box and carried back to the draft (`carryOut`), the box is stopped, and the draft checked.
 
 /** The connector whose model (`<vendor>/default`) and key the coding agents use, with its key's variable and its base URL's. */
 const VENDOR = "anthropic";
@@ -90,23 +92,45 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
   // The agent works in the chat's draft from its first turn, in the person's box, opened last
   // so that nothing that fails before leaves it running.
   const [draft, model, port] = await Promise.all([openDraft(step, chat), modelFor(step, RUNTIMES[name]), freePort()]);
-  const box = await openBox(step);
+  /** Whether the box's commits reached the draft. */
+  let carried = false;
   try {
-    // Kept across turns: a bridge installs its agent under it once.
-    const home = await homeOf(box);
-    const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root: draft.root, home, ports: [port] });
-    try {
-      await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id });
-    } finally {
-      await sandbox.destroy();
-    }
+    await boxTurn(
+      boxName(step.resolved.appName, step.by.id),
+      () => openBox(step),
+      async (box) => {
+        // Kept across turns: a bridge installs its agent under it once, and the clone stays.
+        const home = await homeOf(box);
+        const cloned = await carryIn(box, step.source, chat.id, { home, signal: step.signal }).catch((err: unknown) => {
+          // A stopped turn says nothing.
+          if (step.signal.aborted) return undefined;
+          throw err;
+        });
+        if (!cloned) return;
+        const { root, head } = cloned;
+        const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root, home, ports: [port] });
+        // However the turn ended (an error too): the session destroyed, so nothing in the box writes
+        // again, then what it changed committed in the box and carried back to the draft. A failed
+        // carry is the turn's error (its edits are lost), the one before it logged.
+        const ended = await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id })
+          .finally(() => sandbox.destroy())
+          .then(
+            () => undefined,
+            (err: unknown) => ({ err }),
+          );
+        try {
+          const message = turnMessage(turn, ENGINE_NAMES[name]);
+          carried = await carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id });
+        } catch (err) {
+          if (ended) console.error(`sanoma app: the turn in the box ${box.id} failed:`, ended.err);
+          throw err;
+        }
+        if (ended) throw ended.err;
+      },
+    );
   } finally {
-    // However the turn ended (an error too): its error, if any, follows the commit.
-    try {
-      await commitTurn(turn, draft, ENGINE_NAMES[name], writer);
-    } finally {
-      await box.stop();
-    }
+    // Checked once the box is free: the turn's error, if any, follows the card.
+    if (carried) await showCommits(turn, draft, writer);
   }
   writer.write({ type: "finish" });
 }

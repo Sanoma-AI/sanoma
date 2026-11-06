@@ -51,7 +51,7 @@ type Block = { type: "text"; text: string } | { type: "tool_use"; id: string; na
 type Message = { role: string; content: string | { type: string; text?: string; content?: unknown }[] };
 type Tool = { name: string; input_schema?: { properties?: Record<string, unknown> } };
 
-/** The draft's checkout, where the agents work. */
+/** The draft's clone in the person's box, where the agents work. */
 let draftRoot = "";
 
 /**
@@ -262,7 +262,8 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
     "edits the draft as the checkout rule allows, commits and checks it, and shows the draft card",
     async () => {
       const id = `${engine}-${RUN}`;
-      draftRoot = join(dir, ".sanoma/drafts", id);
+      const box = join(dir, ".sanoma/agent-home/boxes/sanoma-harness%2Dtest-ada");
+      draftRoot = join(box, "repo");
       sent.length = 0;
       const started = Date.now();
       const reply = await send(id, engine, "Add a laptop step to offboarding");
@@ -297,11 +298,17 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
       expect(git("log", "--format=%s", `draft/${id}`)).toBe(`${name}: Add a laptop step to offboarding\nFirst`);
       expect(git("show", `draft/${id}:workflows/offboarding.ts`)).toContain("Collected ${person}'s laptop");
       expect(git("status", "--porcelain")).toBe("");
+      // Edited in the box's clone and carried back: the draft's checkout is at the box's commit.
+      expect(readFileSync(join(dir, ".sanoma/drafts", id, "workflows/offboarding.ts"), "utf8")).toContain(
+        "Collected ${person}'s laptop",
+      );
+      expect(git("-C", draftRoot, "rev-parse", "HEAD")).toBe(git("rev-parse", `draft/${id}`));
+      expect(git("-C", draftRoot, "remote")).toBe("");
 
       // The chat keeps its engine, its draft and its transcript; the session's run files are gone.
       expect(await testApp.client.chats.get(id)).toMatchObject({ engine, draftId: id });
       await waitFor(async () => (await testApp.client.chats.load(id)).length === 2);
-      const runs = join(dir, ".sanoma/agent-home/boxes/sanoma-harness%2Dtest-ada/.ai-sdk-harness/.agent-runs");
+      const runs = join(box, ".ai-sdk-harness/.agent-runs");
       expect(existsSync(runs) ? readdirSync(runs) : []).toEqual([]);
       // The session's state is all in the person's box, beside people's own agents'.
       expect(readdirSync(join(dir, ".sanoma/agent-home")).toSorted()).toEqual(["boxes", "people"]);

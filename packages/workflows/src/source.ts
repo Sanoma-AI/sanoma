@@ -41,6 +41,20 @@ export interface Source {
   /** Closes the draft `id`: its checkout removed and its branch deleted, whatever it held; nothing when it is gone. */
   closeDraft?(id: string): Promise<void>;
   /**
+   * The draft `id`'s branch as a git bundle (`git bundle create`), for a clone elsewhere (an agent
+   * box's) to fetch: its commits since `since`, a commit that clone has, or the whole branch when
+   * `since` is absent or a commit this repository lacks; no bytes when the clone has them all.
+   * The branch's head beside it. A bundle holds commits and the branch's name alone: no remote,
+   * no config, no credential.
+   */
+  bundle?(id: string, opts?: { since?: string }): Promise<{ bytes: Uint8Array; head: string }>;
+  /**
+   * Takes a bundle of the draft `id`'s branch made elsewhere (an agent box's new commits on it):
+   * its commits fetched, then the draft's checkout fast-forwarded to them. Refused unless that is
+   * a fast-forward that leaves what the checkout holds uncommitted in place. The branch's head after.
+   */
+  unbundle?(id: string, bytes: Uint8Array): Promise<{ head: string }>;
+  /**
    * `sanoma check` on the draft `id`, as a child in its checkout, one at a time in the process. A
    * check that gives no result (a config that does not load, no install, a timeout) is a result
    * of one problem saying why.

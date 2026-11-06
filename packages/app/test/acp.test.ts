@@ -201,9 +201,11 @@ const paste = (chat: string, code: string, actor = "ada") =>
   });
 
 describe("the chat on a person's own agent", () => {
-  it("edits the draft as the checkout rule answers, relays the agent's updates, commits and checks the draft, and shows its card", async () => {
+  it("edits the box's clone of the draft as the checkout rule answers, relays the agent's updates, carries its commit back, checks the draft, and shows its card", async () => {
     const id = `work-${RUN}`;
     const draftRoot = join(dir, ".sanoma/drafts", id);
+    // The draft's clone in the person's box, where the agent works.
+    const clone = join(dir, ".sanoma/agent-home/boxes", boxName("acp-test", "ada"), "repo");
     const reply = await send(id, "acp-opencode", "Add a laptop step to offboarding");
     expect(textOfReply(reply)).toBe("Drafted: offboarding now collects the laptop.");
 
@@ -221,7 +223,7 @@ describe("the chat on a person's own agent", () => {
       errorText: expect.stringContaining("is outside your checkout, or under .git or node_modules"),
     });
     expect(steps[2]).toMatchObject({ errorText: expect.stringMatching(/^No shell commands in this chat/) });
-    expect(steps[3]!.output).toBe(`Changed ${join(draftRoot, "workflows/offboarding.ts")}`);
+    expect(steps[3]!.output).toBe(`Changed ${join(clone, "workflows/offboarding.ts")}`);
 
     // The checkout rule's answers: only an option offered, never allow_always.
     const log = logged("opencode");
@@ -236,11 +238,12 @@ describe("the chat on a person's own agent", () => {
       readOther: false,
       error: expect.stringContaining("is outside your checkout"),
     });
+    expect(existsSync(join(clone, "node_modules/evil.js"))).toBe(false);
     expect(existsSync(join(draftRoot, "node_modules/evil.js"))).toBe(false);
 
-    // The agent ran in the person's box, in the draft, with the box's home as its own, signs in and
-    // reads files as the client says it can, and none of this process's credentials reached it or
-    // its terminal.
+    // The agent ran in the person's box, in its clone of the draft, with the box's home as its
+    // own, signs in and reads files as the client says it can, and none of this process's
+    // credentials reached it or its terminal.
     const personal = agentsHome("ada");
     const start = log.find((entry) => "start" in entry)!;
     expect(start).toMatchObject({ start: ["acp"], home: personal });
@@ -265,16 +268,17 @@ describe("the chat on a person's own agent", () => {
       _meta: { "terminal-auth": true },
     });
     expect(log.find((entry) => "terminal" in entry)).toEqual({
-      terminal: `home=${personal} token=none\n${draftRoot}\n`,
+      terminal: `home=${personal} token=none\n${clone}\n`,
       exit: { exitCode: 0 },
     });
-    expect(log.find((entry) => "session" in entry)).toEqual({ session: draftRoot });
+    expect(log.find((entry) => "session" in entry)).toEqual({ session: clone });
     // The rules and who asks, then the message, as one prompt.
     expect(String(log.find((entry) => "prompt" in entry)!.prompt)).toMatch(
       /^You are the operator agent[\s\S]*You act for ada\.[\s\S]*\n\nada: Add a laptop step to offboarding$/,
     );
 
-    // The edit is the draft's commit, checked; the live checkout is as it was.
+    // The edit is the draft's commit, carried back from the box and checked; the live checkout is
+    // as it was.
     expect(reply!.parts.filter((part) => part.type === "data-draft").map((part) => part.data)).toEqual([
       {
         draft: id,

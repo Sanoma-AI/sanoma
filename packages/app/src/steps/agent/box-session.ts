@@ -4,7 +4,7 @@ import {
   harnessStateDirectoryPath,
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
-import type { AppStepContext, Box } from "@sanoma-ai/workflows";
+import type { AppStepContext, Box, Process } from "@sanoma-ai/workflows";
 import { agentHome, allowedPath, boxName, realWithin, within } from "./checkout.ts";
 import { localBackend } from "./local-box.ts";
 
@@ -19,7 +19,7 @@ type At = { path: string; abortSignal?: AbortSignal };
 export interface BoxSessionOptions {
   /** The harness session's id (`createSession({ sessionId })`), whose `.agent-runs` it deletes when destroyed. */
   id: string;
-  /** The draft's checkout (`Draft.root`): where the agent works, and the only files of the repository it may touch. */
+  /** The draft's checkout in the box (`carryIn`'s clone): where the agent works, and the only files of the repository it may touch. */
   root: string;
   /**
    * The box's home (`homeOf`), kept across turns: a bridge installs its agent under it once
@@ -59,7 +59,8 @@ export async function homeOf(box: Box): Promise<string> {
 /**
  * The session over `box`, `HarnessV1NetworkSandboxSession`. A path is the checkout's as the
  * checkout rule allows it (`allowedPath`), or under the box's home, or refused. `stop` stops the
- * box; `destroy` stops it and deletes the session's `.agent-runs`, which a bridge writes the
+ * box; `destroy` kills what the session started (so the box stays up for the turn's carry back,
+ * and its opener stops it) and deletes the session's `.agent-runs`, which a bridge writes the
  * model's key into; `HarnessAgentSession.destroy()` leaves a session it was given running.
  */
 export const boxSession = (box: Box, options: BoxSessionOptions): HarnessV1NetworkSandboxSession =>
@@ -75,6 +76,8 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
   readonly #home: string;
   /** Its own run files (`.agent-runs/<id>`), which a bridge writes the model's key into. */
   readonly #runs: string;
+  /** What it started, killed when it is destroyed. */
+  readonly #started = new Set<Process>();
 
   constructor(box: Box, { id, root, home, ports }: BoxSessionOptions) {
     this.#box = box;
@@ -91,9 +94,14 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
     const full = resolve(this.defaultWorkingDirectory, path);
     // Its home, by real paths (a link there leads nowhere else), but no other session's run files
     // (a bridge's start config holds the key) and nothing of the person's own agents (`OWN_AGENTS_DIR`:
-    // their sign-ins, and what they run), in any case (macOS's file system ignores it).
-    const home = within(this.#home, full) ? await realWithin(this.#home, full) : undefined;
-    if (home !== undefined) {
+    // their sign-ins, and what they run), in any case (macOS's file system ignores it), and not the
+    // checkout when the home holds it (the box's clone), nor a link there into it: those are the
+    // checkout rule's.
+    const home =
+      within(this.#home, full) && !within(this.defaultWorkingDirectory, full)
+        ? await realWithin(this.#home, full)
+        : undefined;
+    if (home !== undefined && !(await realWithin(this.defaultWorkingDirectory, home.full))) {
       const inside = home.inside.toLowerCase();
       const runs = relative(this.#home, this.#runs).toLowerCase();
       const own = within(OWN_AGENTS_DIR, inside);
@@ -137,6 +145,7 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
       ...(env && { env }),
       ...(abortSignal && { signal: abortSignal }),
     });
+    this.#started.add(started);
     return {
       stdout: started.stdout,
       stderr: started.stderr,
@@ -167,9 +176,16 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
   /** Stops the box: every command, and what a bridge started too. */
   stop = () => this.#box.stop();
 
-  /** Stops the box, so no bridge writes again, then deletes its `.agent-runs` (the bridge's start files, the model's key in them). */
+  /** Kills what it started and waits for it to exit, so no bridge writes again, then deletes its `.agent-runs` (the bridge's start files, the model's key in them). */
   destroy = async () => {
-    await this.stop();
+    const started = [...this.#started];
+    this.#started.clear();
+    await Promise.all(
+      started.map((command) => {
+        command.kill("SIGKILL");
+        return command.wait();
+      }),
+    );
     const removed = await this.#box.run('rm -rf -- "$RUNS"', { env: { RUNS: this.#runs } });
     const { exitCode } = await removed.wait();
     if (exitCode !== 0) throw new Error(`The session's run files were not deleted (exit ${exitCode})`);

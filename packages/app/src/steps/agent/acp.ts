@@ -6,21 +6,33 @@ import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "@sanoma-ai/work
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
 import { homeOf, openBox, OWN_AGENTS_DIR } from "./box-session.ts";
-import { allowedPath, commitTurn, mustAllow, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
+import { boxTurn, carryIn, carryOut } from "./carrier.ts";
+import {
+  allowedPath,
+  boxName,
+  mustAllow,
+  NO_SHELL,
+  openDraft,
+  outsideCheckout,
+  showCommits,
+  turnMessage,
+} from "./checkout.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's third engine: a person's own coding agent, driven over the Agent Client Protocol by
-// this client of ours, in the chat's draft, on that person's own subscription. The agent runs in
-// the person's box (`openBox`, the harness engine's too) with `.acp` under the box's home as its
-// HOME (`OWN_AGENTS_DIR`, out of a company-key session's reach), installed on first use there
-// (`.acp/<agent>`), so a sign-in lives in the box and nowhere else, and nothing of ours reads it
-// (on the local backend a box is a directory of this machine and every person's agent runs as
-// its user: what an agent runs itself can reach other people's). One
-// process per turn: the box opened, the agent started, told the chat's earlier messages as text,
-// prompted, killed, the box stopped. Its permission requests, file reads and writes are answered
-// by the checkout rule; the commands it runs through our terminal are its own, in the box. A
-// sign-in it asks for is shown in the chat as the vendor's own flow.
+// this client of ours, in the box's clone of the chat's draft, on that person's own subscription.
+// The agent runs in the person's box (`openBox`, the harness engine's too) with `.acp` under the
+// box's home as its HOME (`OWN_AGENTS_DIR`, out of a company-key session's reach), installed on
+// first use there (`.acp/<agent>`), so a sign-in lives in the box and nowhere else, and nothing of
+// ours reads it (on the local backend a box is a directory of this machine and every person's
+// agent runs as its user: what an agent runs itself can reach other people's). One process per
+// turn: the box opened (one turn in it at a time), the chat's draft carried into its clone
+// (`carryIn`), the agent started there, told the chat's earlier messages as text, prompted,
+// killed, what it changed committed in the box and carried back (`carryOut`), the box stopped.
+// Its permission requests, file reads and writes are answered by the checkout rule; the commands
+// it runs through our terminal are its own, in the box. A sign-in it asks for is shown in the chat
+// as the vendor's own flow.
 
 /** How a person signs in to their agent from the chat. */
 type SignIn =
@@ -182,42 +194,68 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
   const draft = await openDraft(step, chat);
   writer.write({ type: "start", messageId: generateId() });
   const relay = new Relay(writer);
-  // Opened last, so that nothing that fails before leaves it running; stopped however the turn ends.
-  let box: Box | undefined;
+  /** Whether the box was opened, and whether its commits reached the draft. */
+  let opened = false;
+  let carried = false;
   try {
-    let turn: AcpTurn | undefined;
-    try {
-      box = await openBox(step);
-      // The person's own agents' HOME, kept across turns in the box: their installs and sign-ins.
-      const home = join(await homeOf(box), OWN_AGENTS_DIR);
-      const dir = join(home, name);
-      // A first install under way is waited for even by a new message (it has a time limit of its
-      // own): the box's stop would end it, and another turn may be waiting on it too.
-      const [installed, shimmed] = await Promise.allSettled([install(box, agent, dir), shims(box, home)]);
-      if (installed.status === "rejected") throw installed.reason;
-      if (shimmed.status === "rejected") throw shimmed.reason;
-      turn = new AcpTurn(agent, relay, signal, {
-        box,
-        chatId: chat.id,
-        onCode: step.onCode,
-        // S3: the draft's clone in the box; until then the box is this machine and its worktree is the draft's.
-        root: draft.root,
-        home,
-        shimsDir: shimmed.value,
-        bins: join(dir, "node_modules", ".bin"),
-      });
-      const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
-      await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
-    } catch (err) {
-      // A dead or missing agent is said in the reply; a stopped turn says nothing.
-      if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
-    } finally {
-      await turn?.stop();
-    }
+    // Opened last, so that nothing that fails before leaves it running; stopped however the turn ends.
+    carried = await boxTurn(
+      boxName(step.resolved.appName, principal.id),
+      () => openBox(step),
+      async (box) => {
+        opened = true;
+        let turn: AcpTurn | undefined;
+        /** The draft's head the box's clone was given, once it was. */
+        let since: string | undefined;
+        try {
+          const boxHome = await homeOf(box);
+          // The person's own agents' HOME, kept across turns in the box: their installs and sign-ins.
+          const home = join(boxHome, OWN_AGENTS_DIR);
+          const dir = join(home, name);
+          // A first install under way is waited for even by a new message (it has a time limit of its
+          // own): the box's stop would end it.
+          const [cloned, installed, shimmed] = await Promise.allSettled([
+            carryIn(box, step.source, chat.id, { home: boxHome, signal }),
+            install(box, agent, dir),
+            shims(box, home),
+          ]);
+          if (cloned.status === "rejected") throw cloned.reason;
+          if (installed.status === "rejected") throw installed.reason;
+          if (shimmed.status === "rejected") throw shimmed.reason;
+          since = cloned.value.head;
+          turn = new AcpTurn(agent, relay, signal, {
+            box,
+            chatId: chat.id,
+            onCode: step.onCode,
+            // The draft's clone in the box.
+            root: cloned.value.root,
+            home,
+            shimsDir: shimmed.value,
+            bins: join(dir, "node_modules", ".bin"),
+          });
+          const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
+          await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
+        } catch (err) {
+          // A dead or missing agent is said in the reply; a stopped turn says nothing.
+          if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
+        } finally {
+          await turn?.stop();
+        }
+        relay.finish();
+        // What it changed in the clone, committed there and carried back to the draft.
+        if (since === undefined) return false;
+        const message = turnMessage(engineTurn, agent.title);
+        return carryOut(box, step.source, chat.id, { since, message, author: principal.id });
+      },
+    );
+  } catch (err) {
+    if (opened) throw err;
+    // A box that would not open, or that runs another turn: said in the reply, as a dead agent is.
+    if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
     relay.finish();
-    await commitTurn(engineTurn, draft, agent.title, writer);
   } finally {
-    await box?.stop();
+    // Checked once the box is free: the turn's error, if any, follows the card.
+    if (carried) await showCommits(engineTurn, draft, writer);
   }
   writer.write({ type: "finish" });
 }

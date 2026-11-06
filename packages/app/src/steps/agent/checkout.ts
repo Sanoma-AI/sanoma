@@ -138,24 +138,22 @@ export async function tellCommits(client: SanomaClient, id: string, by: Principa
 /** What `changeEvent` fails with for a draft with no change under way. */
 const NO_CHANGE = new Set(["run_not_found", "run_ended"]);
 
+/** A coding agent's turn's commit message: the engine's `title` and the person's message. */
+export const turnMessage = ({ messages }: Pick<EngineTurn, "messages">, title: string) =>
+  `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
+
 /**
- * The end of a coding agent's turn, however it ended (an error too): what it changed committed on
- * the chat's draft as the person, under `title` and their message, its change told (`tellCommits`),
- * then, unless a new message stopped it (the next turn shows the card), the draft's card
- * (`data-draft`) from its checks and its diff.
+ * A coding agent's turn's new commits on the chat's draft, made in its box and carried back (`carryOut`), its
+ * change told (`tellCommits`), then, unless a new message stopped the turn (the next turn shows
+ * the card), the draft's card (`data-draft`) from its checks and its diff.
  */
-export async function commitTurn(
-  { step, chat, messages }: EngineTurn,
+export async function showCommits(
+  { step, chat }: EngineTurn,
   draft: Draft,
-  title: string,
   writer: UIMessageStreamWriter<ChatMessage>,
 ) {
-  const { by } = step;
-  const message = `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
-  const committed = (await draft.commit({ paths: ["."], message, author: by.id })) !== undefined;
-  if (!committed) return;
   // Told even when the turn was stopped: the commit has landed.
-  const told = tellCommits(step.client, chat.id, by);
+  const told = tellCommits(step.client, chat.id, step.by);
   if (step.signal.aborted) return told;
   const [checked, diff] = await Promise.all([checks(step, chat.id), drafting(step).diff(chat.id), told]);
   writer.write({

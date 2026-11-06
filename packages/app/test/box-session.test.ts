@@ -136,6 +136,22 @@ describe("boxSession over a local box", () => {
     expect(existsSync(join(base, "outside.txt"))).toBe(false);
   });
 
+  it("holds a checkout inside its home (the box's clone) to the checkout rule, not the home's", async () => {
+    const clone = join(home, "repo");
+    mkdirSync(join(clone, ".git"), { recursive: true });
+    mkdirSync(join(clone, "node_modules"), { recursive: true });
+    execFileSync("ln", ["-s", join(clone, ".git"), join(home, "git-link")]);
+    const local = boxSession(box, { id: "c", root: clone, home, ports: [] });
+    await local.writeTextFile({ path: "workflows/new.ts", content: "export {};\n" });
+    expect(readFileSync(join(clone, "workflows/new.ts"), "utf8")).toBe("export {};\n");
+    for (const path of [".git/sanoma-head", join(clone, "node_modules/x.js"), join(home, "git-link/config")]) {
+      await expect(local.writeTextFile({ path, content: "no" }), path).rejects.toThrow(/outside the checkout/);
+    }
+    // The rest of its home is still its own.
+    await local.writeTextFile({ path: join(home, ".pi/agent/settings.json"), content: "{}" });
+    expect(existsSync(join(home, ".pi/agent/settings.json"))).toBe(true);
+  });
+
   it("never reaches another person's box, a person's own-agent sign-ins or the own agents' installs beside its home", async () => {
     const local = session();
     // A link in its home leads nowhere else.
