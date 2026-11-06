@@ -2,6 +2,7 @@ import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
 import {
   byCodePoint,
   type ImportColumn,
+  type ImportEntry,
   importEntry,
   type ImportInput,
   importRows,
@@ -126,11 +127,7 @@ export function guessMapping(
 }
 
 /** What the import will do with a row of the sheet, by its number in the sheet. */
-export type Planned =
-  | { row: number; key: string; will: "add"; record: Record<string, unknown> }
-  | { row: number; key: string; will: "update"; record: Record<string, unknown>; was: Record<string, unknown> }
-  | { row: number; key: string; will: "keep" }
-  | { row: number; key?: string; will: "fix"; reason: string };
+export type Planned = ImportEntry & { row: number; key?: string };
 
 /**
  * What importing `input` into `collection` will do with each row, in the sheet's order, given the
@@ -143,10 +140,10 @@ export function planImport(
   found: ReadonlyMap<string, Saved>,
 ): Planned[] {
   const { rows, problems } = importRows(collection, input);
-  const planned = rows.map(({ row, key, ...read }): Planned => ({
-    row,
-    key,
-    ...importEntry(collection, { row, key, ...read }, found.get(key)),
+  const planned = rows.map((row): Planned => ({
+    row: row.row,
+    key: row.key,
+    ...importEntry(collection, row, found.get(row.key)),
   }));
   const refused = problems.map((problem): Planned => ({ ...problem, will: "fix" }));
   return [...planned, ...refused].toSorted((a, b) => a.row - b.row);

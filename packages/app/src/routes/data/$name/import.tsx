@@ -11,7 +11,7 @@ import {
 } from "@sanoma-ai/workflows/shared";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { z } from "zod";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { plural } from "#/lib/utils.ts";
@@ -50,8 +50,8 @@ function ImportPage() {
   const { name } = Route.useParams();
   const { step } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const select = useMemo(
-    () => (config: ConfigDescription) => ({
+  const select = useCallback(
+    (config: ConfigDescription) => ({
       collection: collectionNamed(name)(config),
       people: personsOf(config.resources),
     }),
@@ -67,16 +67,23 @@ function ImportPage() {
   const [mapping, setMapping] = useState<ImportInput["mapping"]>([]);
   const at = sheet ? (step ?? "upload") : "upload";
   const go = (next: "match" | "review" | undefined) => void navigate({ search: { step: next } });
-  const input: ImportInput | undefined = sheet && {
-    collection: name,
-    mapping,
-    rows: sheet.rows,
-    // Declared people, so the run refuses anyone else; none declared, any id is taken.
-    ...(people.length > 0 && { people: people.map((person) => person.id) }),
-  };
-  const ready = input !== undefined && mappingProblems(collection, mapping).length === 0;
-  const keys = ready ? importRows(collection, input).rows.map((row) => row.key) : [];
-  const range = keyRange(keys);
+  const input = useMemo<ImportInput | undefined>(
+    () =>
+      sheet && {
+        collection: name,
+        mapping,
+        rows: sheet.rows,
+        people: people.map((person) => person.id),
+      },
+    [name, mapping, sheet, people],
+  );
+  const wrong = mappingProblems(collection, mapping);
+  const ready = input !== undefined && wrong.length === 0;
+  // The sheet read once per mapping, not per render: the keys' range, and what each row will do.
+  const range = useMemo(
+    () => (ready ? keyRange(importRows(collection, input).rows.map((row) => row.key)) : undefined),
+    [collection, input, ready],
+  );
   // The records the sheet's keys have, read as you: one range of keys, a page at a time.
   const found = useQuery({
     queryKey: ["data", name, "import", range ?? null],
@@ -94,6 +101,10 @@ function ImportPage() {
     },
     enabled: at === "review" && ready && actor !== null,
   });
+  const planned = useMemo(
+    () => (ready && found.data ? planImport(collection, input, found.data) : undefined),
+    [collection, input, ready, found.data],
+  );
   const start = useStartRun();
 
   const read = async (file: File) => {
@@ -144,16 +155,14 @@ function ImportPage() {
           onNext={() => go("review")}
         />
       ) : !ready ? (
-        <Notice variant="destructive">
-          Match the columns first: {mappingProblems(collection, mapping).join("; ")}.
-        </Notice>
+        <Notice variant="destructive">Match the columns first: {wrong.join("; ")}.</Notice>
       ) : found.isError ? (
         <Notice variant="destructive">{errorMessage(found.error)}</Notice>
-      ) : found.data ? (
+      ) : planned ? (
         <>
           {start.isError && <Notice variant="destructive">{errorMessage(start.error)}</Notice>}
           <Review
-            planned={planImport(collection, input, found.data)}
+            planned={planned}
             fields={mapping.flatMap((column) => (column ? [column.field] : []))}
             starting={start.isPending}
             onBack={() => go("match")}

@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "#/co
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { plural } from "#/lib/utils.ts";
 import { CardHeading, Notice, ToneBadge } from "../kit.tsx";
-import { columnOf, fieldNamed, type Person, type Sheet, valuesToMap } from "./sheet.ts";
+import { columnOf, fieldNamed, type Person, type Sheet, type ValueToMap, valuesToMap } from "./sheet.ts";
 
 // The import's second step: each column of the sheet matched to a field, the values a field does
 // not take as written mapped to one it does, and the rows the fields would still refuse.
@@ -160,7 +160,7 @@ function ValuesToMap({
 }: {
   heading: string;
   column: ImportColumn;
-  values: ReturnType<typeof valuesToMap>;
+  values: ValueToMap[];
   choices: { value: string; label: string }[];
   onColumn(column: ImportColumn): void;
 }) {

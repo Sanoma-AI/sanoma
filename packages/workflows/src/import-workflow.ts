@@ -1,13 +1,13 @@
 import { z } from "zod";
 import type { Collection } from "./collection.ts";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
+import { errorCode, vendorCodeOf } from "./errors.ts";
 import {
   byCodePoint,
   IMPORT_BATCH,
   importEntry,
   type ImportInput,
   type ImportOutput,
-  type ImportProblem,
   importRows,
   mappingProblems,
 } from "./import.ts";
@@ -46,7 +46,7 @@ const ImportColumnSchema = z.strictObject({
 });
 
 /** The import's input (`ImportInput`), before it is checked against a collection's fields. */
-export const ImportInputSchema = z.strictObject({
+const ImportInputSchema = z.strictObject({
   collection: z.string().min(1),
   mapping: z.array(ImportColumnSchema.nullable()),
   rows: z.array(z.array(z.string())),
@@ -59,23 +59,18 @@ export const ImportInputSchema = z.strictObject({
  * other failure, which ends the run.
  */
 function refusedBy(err: unknown): Map<string, string> | undefined {
-  const { code, data, vendorCode, conflicts } = (err ?? {}) as {
-    code?: unknown;
+  const { data, conflicts } = (err ?? {}) as {
     data?: { deniedFor?: Record<string, string> };
-    vendorCode?: unknown;
     conflicts?: { key: string }[];
   };
-  if (code === "policy_denied" && data?.deniedFor) {
+  if (errorCode(err) === "policy_denied" && data?.deniedFor) {
     return new Map(Object.entries(data.deniedFor).map(([key, why]) => [key, `the policy denies saving it: ${why}`]));
   }
-  if (vendorCode === "record_changed" && conflicts?.length) {
+  if (vendorCodeOf(err) === "record_changed" && conflicts?.length) {
     return new Map(conflicts.map(({ key }) => [key, "it changed while the sheet was imported: import it again"]));
   }
   return undefined;
 }
-
-/** A row left for the person, by its number in the sheet and its key, and why. */
-const left = ({ row, key }: Pick<Entry, "row" | "key">, reason: string): ImportProblem => ({ row, key, reason });
 
 /** The built-in import workflow over the config's collections: `resolveConfig` adds it when there are any. */
 export function importWorkflow(collections: ReadonlyMap<string, Collection>): WorkflowDefinition<any, any> {
@@ -124,7 +119,7 @@ export function importWorkflow(collections: ReadonlyMap<string, Collection>): Wo
         for (const row of batch) {
           const existing = found.get(row.key);
           const entry = importEntry(collection, row, existing);
-          if (entry.will === "fix") problems.push(left(row, entry.reason));
+          if (entry.will === "fix") problems.push({ row: row.row, key: row.key, reason: entry.reason });
           else if (entry.will === "keep") unchanged++;
           else {
             const guard = existing ? { ifRecord: existing.record } : { ifAbsent: true as const };
@@ -146,7 +141,7 @@ export function importWorkflow(collections: ReadonlyMap<string, Collection>): Wo
             if (kept.length === entries.length) throw err;
             for (const entry of entries) {
               const why = refused!.get(entry.key);
-              if (why !== undefined) problems.push(left(entry, why));
+              if (why !== undefined) problems.push({ row: entry.row, key: entry.key, reason: why });
             }
             entries = kept;
           }

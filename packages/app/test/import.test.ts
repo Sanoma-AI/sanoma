@@ -1,6 +1,4 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
@@ -11,6 +9,7 @@ import { executablePath, launch } from "puppeteer-core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
+import { rootWith } from "../../workflows/test/harness.ts";
 import { ACTOR_COOKIE } from "../src/api.ts";
 import { guessMapping, keyRange, planImport, readSheet, valuesToMap } from "../src/components/import/sheet.ts";
 import { type App, startApp } from "../src/index.ts";
@@ -42,22 +41,16 @@ const csv = readFileSync(new URL("./fixtures/import/leads.csv", import.meta.url)
 
 // The outbound fixture with named people and the policy data.test.ts has: it denies a lead
 // `lost` and holds one `won` for `lead`.
-const root = mkdtempSync(join(tmpdir(), "sanoma-import-"));
-cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
-writeFileSync(
-  join(root, "resources/people.ts"),
-  `import { sanoma } from "sanoma/resources";
+const root = rootWith(
+  {
+    "resources/people.ts": `import { sanoma } from "sanoma/resources";
 
 export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@example.test" });
 export const bo = sanoma.person({ id: "bo", name: "Bo" });
 export const cy = sanoma.person({ id: "cy" });
 export const lead = sanoma.person({ id: "lead" });
 `,
-);
-mkdirSync(join(root, "policies"));
-writeFileSync(
-  join(root, "policies/leads.cedar"),
-  `@reason("leads are not lost")
+    "policies/leads.cedar": `@reason("leads are not lost")
 forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
 when { context.input.record.stage == "lost" };
 
@@ -65,8 +58,9 @@ when { context.input.record.stage == "lost" };
 forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
 when { context.input.record.stage == "won" };
 `,
+  },
+  fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)),
 );
-afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const people = [
   { id: "ada", name: "Ada Lovelace", email: "ada@example.test" },

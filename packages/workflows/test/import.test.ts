@@ -101,6 +101,13 @@ describe("importRows and importEntry", () => {
     ]);
   });
 
+  it("takes any id for a person while nobody is declared", () => {
+    for (const declared of [undefined, []]) {
+      const { rows } = importRows(outbound, { mapping, people: declared, rows: [row("Acme").with(3, "T. Nguyen")] });
+      expect(rows.map((r) => r.fields.owner)).toEqual(["T. Nguyen"]);
+    }
+  });
+
   it("takes a date as the collection's schema does, no more", () => {
     const dates = [
       "2026-11-01",

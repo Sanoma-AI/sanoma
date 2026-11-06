@@ -19,7 +19,7 @@ export interface ImportInput {
   mapping: (ImportColumn | null)[];
   /** The sheet's rows after its header, each a list of cells as text. */
   rows: string[][];
-  /** The declared people's ids: a person field refuses anyone else. Without it, any text is taken as an id. */
+  /** The declared people's ids: a person field refuses anyone else. Without it, or with none declared, any text is taken as an id. */
   people?: string[];
 }
 
@@ -89,7 +89,7 @@ export function mappingProblems({ key, fields }: ImportTarget, mapping: ImportIn
  * or a key an earlier row has. A cell is trimmed, then given its column's `values`, then read as
  * its field's type: a number as JavaScript writes one, true or false as yes, no, true, false, 1
  * or 0, a date as ISO 8601 (a day, or a time with its offset), an enum's value as written, and a
- * person as one of `people` when given. Throws on a mapping `mappingProblems` refuses.
+ * person as one of `people` when any are given. Throws on a mapping `mappingProblems` refuses.
  */
 export function importRows(
   collection: ImportTarget,
@@ -97,7 +97,7 @@ export function importRows(
 ): { rows: ImportRow[]; problems: ImportProblem[] } {
   const wrong = mappingProblems(collection, mapping);
   if (wrong.length) throw new Error(`The import's columns are wrong: ${wrong.join("; ")}`);
-  const declared = people && new Set(people);
+  const declared = people?.length ? new Set(people) : undefined;
   const read: ImportRow[] = [];
   const problems: ImportProblem[] = [];
   const firstWith = new Map<string, number>();
