@@ -441,15 +441,19 @@ export function DataGrid({
   const before = items[0]?.start ?? 0;
   const after = hydrated ? virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0) : 0;
   // The focused cell has the focus while the grid has it, or when an edit ends from the keyboard;
-  // a row out of the virtual rows' window (a record added at the end) is scrolled to first.
+  // a row out of the virtual rows' window (a record added at the end) is scrolled to first. Put
+  // there once per focused cell: a scroll after that leaves the focus where it is (a conflict's
+  // button), never scrolled back.
   const focusedId = focused?.id;
   const focusedIndex = focused?.row.getDisplayIndex();
+  const placed = useRef<string>(undefined);
   useEffect(() => {
     if (!grid || !focusedId || editing) return;
-    if (!refocus.current && !grid.contains(document.activeElement)) return;
+    if (!refocus.current && (placed.current === focusedId || !grid.contains(document.activeElement))) return;
     const cell = grid.querySelector<HTMLElement>(`[data-cell="${CSS.escape(focusedId)}"]`);
     if (!cell) return void (focusedIndex !== undefined && virtualizer.scrollToIndex(focusedIndex));
     refocus.current = false;
+    placed.current = focusedId;
     cell.focus();
   }, [grid, focusedId, focusedIndex, editing, before, virtualizer]);
   const conflictsByKey = Map.groupBy([...conflicts.values(), ...change.conflicts], (conflict) => conflict.key);

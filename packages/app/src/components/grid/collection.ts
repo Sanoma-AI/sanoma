@@ -373,7 +373,7 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
      * conflict, and nothing is sent (one the read no longer finds is the server's to answer); a
      * read that fails throws, the change still staged. A refusal for a conflict keeps every step;
      * one for the policy drops the records it denied, a new one by the key typed into it; anything
-     * else rolls the change back, nothing changed, and throws.
+     * else (the network, the server) throws, nothing saved and the change still staged.
      */
     async save(only?: ReadonlySet<string>): Promise<SaveOutcome> {
       const open = staged;
@@ -425,7 +425,7 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
             reopen(without(open.steps, (key) => dropped.has(key)));
             return { denied: [...denied], error: err };
           }
-          reopen([]);
+          reopen(open.steps);
           throw err;
         } finally {
           committing = false;

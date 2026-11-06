@@ -315,15 +315,18 @@ describe("a staged change of the Data page's records", () => {
     expect(collection.has("Acme")).toBe(false);
   });
 
-  it("rolls the whole change back when saveMany fails: nothing changed", async () => {
+  it("keeps the whole change staged when saveMany fails, nothing saved, and saves it on the next Save", async () => {
     const { collection, stage } = staged();
     stage.add(paste);
     const failure = new Error("The network is down");
     calls.saveMany.mockRejectedValueOnce(failure);
     await expect(stage.save()).rejects.toBe(failure);
+    expect(stage.current()?.steps).toEqual([paste]);
+    expect(collection.get("Acme")?.record.stage).toBe("replied");
+    expect(collection.get("Globex")?.record.stage).toBe("won");
+    calls.saveMany.mockImplementationOnce(savedManyBy);
+    await expect(stage.save()).resolves.toEqual({ saved: 2 });
     expect(stage.current()).toBeUndefined();
-    expect(collection.get("Acme")?.record).toEqual(ACME.record);
-    expect(collection.get("Globex")?.record).toEqual(GLOBEX.record);
   });
 
   it("drops the records the policy denied, a new one by the key typed into it, and keeps the rest staged", async () => {

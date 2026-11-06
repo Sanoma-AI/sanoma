@@ -433,7 +433,7 @@ export function useStagedChange({
           toast.success(`Saved ${plural(outcome.saved, "record")}`);
         }
       } catch (err) {
-        toast.error("Could not save: nothing changed", { description: errorMessage(err) });
+        toast.error("Could not save: nothing saved, the change still staged", { description: errorMessage(err) });
       }
     },
     /** A conflict a Save found, settled: Keep theirs drops your change to the cell; the last settled, the change is saved over theirs. */

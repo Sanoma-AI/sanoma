@@ -27,8 +27,9 @@ const CELL_END = /[\t\r\n]/g;
 /**
  * A paste's text as rows of cells, as Excel and Sheets write a range to the clipboard: a tab
  * between cells, a line break (CRLF, LF or CR) between rows, a cell that holds a tab, a quote or
- * a line break in quotes, its quotes doubled (`delimited`'s own). The line break after the last
- * row starts none; no text is no cells.
+ * a line break in quotes, its quotes doubled (`delimited`'s own). A cell is quoted only where its
+ * closing quote ends it: other text with quotes (`"Pro" plan`, an unclosed `"`) is read as it is.
+ * The line break after the last row starts none; no text is no cells.
  */
 export function pastedCells(text: string): string[][] {
   const rows: string[][] = [];
@@ -37,20 +38,20 @@ export function pastedCells(text: string): string[][] {
   while (at < text.length || row.length > 0) {
     let cell = "";
     if (text[at] === '"') {
-      // Quoted: up to the quote that is not doubled, then whatever follows it up to the cell's end.
-      at++;
-      for (;;) {
-        const quote = text.indexOf('"', at);
-        if (quote === -1) {
-          cell += text.slice(at);
-          at = text.length;
-          break;
+      // Quoted: up to the quote that is not doubled, taken only where the cell ends after it.
+      let quoted = "";
+      for (let from = at + 1; ;) {
+        const quote = text.indexOf('"', from);
+        if (quote === -1) break;
+        quoted += text.slice(from, quote);
+        from = quote + 1;
+        if (text[from] === '"') {
+          quoted += '"';
+          from++;
+          continue;
         }
-        cell += text.slice(at, quote);
-        at = quote + 1;
-        if (text[at] !== '"') break;
-        cell += '"';
-        at++;
+        if (from === text.length || "\t\r\n".includes(text[from]!)) [cell, at] = [quoted, from];
+        break;
       }
     }
     CELL_END.lastIndex = at;

@@ -72,8 +72,11 @@ describe("the grid's cells as text", () => {
     ]);
     // A quote inside a cell that does not start with one is the cell's own.
     expect(pastedCells('5" pipe\tx')).toEqual([['5" pipe', "x"]]);
-    // Text after a closing quote stays with its cell; an unclosed quote runs to the end.
-    expect(pastedCells('"a"b\tc\n"open')).toEqual([["ab", "c"], ["open"]]);
+    // Quotes that do not close the cell, or never close, are the text's own.
+    expect(pastedCells('"Pro" plan\tc\n"open\tx')).toEqual([
+      ['"Pro" plan', "c"],
+      ['"open', "x"],
+    ]);
   });
 
   it("reads back what the grid copies, cell for cell", () => {
