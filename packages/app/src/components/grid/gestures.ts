@@ -32,7 +32,7 @@ export function useGestures({
   fields: ReadonlyMap<string, ScalarField>;
   keyField: string;
   changeOfKey: ReadonlyMap<string, RecordChange>;
-  stage: (step: Step) => void;
+  stage: (step: Step) => boolean;
 }) {
   const rows = table.getRowModel().rows;
   const visible = table.getVisibleLeafColumns();
@@ -83,14 +83,17 @@ export function useGestures({
       const row = rows[top + i]?.original;
       return { line, added: !row, saved: row ?? { key: newKey(), record: {}, updatedAt: "", updatedBy: "" } };
     });
-    stage({
+    const adds = lines.flatMap(({ added, saved }) => (added ? [saved.key] : []));
+    const staged = stage({
       what: "paste",
       said: `Pasted ${plural(pasted.length, "row")} × ${plural(width, "column")} at row ${top + 1}, ${focused.column.id}`,
-      adds: lines.flatMap(({ added, saved }) => (added ? [saved.key] : [])),
+      adds,
       cells: lines.flatMap(({ line, saved }) =>
         line.slice(0, width).flatMap((value, j) => changeOf(saved, visible[left + j]!.id, value)),
       ),
     });
+    // A paste refused leaves no new rows to select.
+    if (!staged && adds.length > 0) return;
     // What was pasted is the selection.
     table.selectCellRange({
       anchorRowId: focused.row.id,
@@ -159,8 +162,7 @@ export function useGestures({
   /** Shift+Enter: a new record below the rows, its key cell focused. */
   const addRecord = () => {
     const key = newKey();
-    stage({ what: "new record", said: "Added a record", adds: [key] });
-    table.setFocusedCell(key, keyField);
+    if (stage({ what: "new record", said: "Added a record", adds: [key] })) table.setFocusedCell(key, keyField);
   };
 
   return { changeable, changeOf, selectedCells, paste, fillFrom, fillTo, setFillTo, clear, addRecord };

@@ -312,13 +312,15 @@ export function StagedNote({ staged, changes }: { staged: Staged; changes: numbe
  * The change staged over `view`'s records, as the grid shows it and saves it: each record's
  * change, the cells to fix, the conflicts a Save found, what the last Save said, and `stage`,
  * `save` and `settle`. `listed` is the rows shown: a record read or saved since may hold a new
- * one's key. `onSaved` is told when a Save saved.
+ * one's key. `onSaved` is told when a Save saved. `reading` says another search's records are
+ * being read: the rows shown are the last search's, whose change that search would lose.
  */
 export function useStagedChange({
   view: { collection: records, stage },
   keyField,
   required,
   listed,
+  reading,
   onSaved,
 }: {
   view: RecordsView;
@@ -326,6 +328,7 @@ export function useStagedChange({
   /** The fields a new record needs. */
   required: readonly string[];
   listed: readonly Saved[];
+  reading: boolean;
   onSaved: () => void;
 }) {
   const staged = useSyncExternalStore(stage.subscribe, stage.current, stage.current);
@@ -342,9 +345,11 @@ export function useStagedChange({
     [staged, keyField, required, records, listed],
   );
   const issueAt = useMemo(() => new Map(issues.map((issue) => [conflictId(issue), issue])), [issues]);
-  // The conflicts a Save found, while their record is still in the change.
+  // The conflicts a Save found, while their record is still in the change: one whose record
+  // leaves it (discarded, undone, saved, denied) is let go, never shown again over a later change.
   const [found, setFound] = useState<ReadonlyMap<string, Conflict>>(new Map());
   const conflicts = [...found.values()].filter((c) => changeOfKey.has(c.key));
+  if (conflicts.length !== found.size) setFound(new Map(conflicts.map((c) => [conflictId(c), c])));
   const blocked = new Set([...issues, ...conflicts].map((c) => c.key));
   const [reviewing, setReviewing] = useState(false);
   // Nothing staged, nothing to review: the next change opens without the card.
@@ -372,15 +377,18 @@ export function useStagedChange({
     held,
     closeHeld: () => setHeld(undefined),
     denied,
-    /** Stages `step`: what the last Save said gives way to it. */
-    add(step: Step) {
-      if (busy()) return;
+    /** Stages `step`, answering whether it did: what the last Save said gives way to it, not to a step refused. */
+    add(step: Step): boolean {
+      if (reading) return (toast.info("Reading the records: try again once they show"), false);
+      if (busy() || !stage.add(step)) return false;
       setHeld(undefined);
       setDenied(new Set());
-      stage.add(step);
+      return true;
     },
     /** Saves the change, or the records `only` names, as one `saveMany`, and says what came of it. */
     async save(only?: ReadonlySet<string>) {
+      // A Save under way answers for itself: the stage would answer this one as nothing saved.
+      if (busy()) return;
       try {
         const outcome = await stage.save(only);
         if ("conflicts" in outcome) {

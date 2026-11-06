@@ -736,13 +736,15 @@ export function asApiError(err: unknown): ApiError {
     const reason = codes.includes(failure.code ?? "") ? failure.code! : "unavailable";
     return new ApiError(reason === "conflict" ? 409 : 400, { error: `Secret store: ${reason.replaceAll("_", " ")}` });
   }
-  // A collection's record changed since the caller read it (`ifRecord`): the caller's to resolve,
-  // with the record as it stands when the error carries it.
-  if (vendorCodeOf(err) === "record_changed") {
+  // A collection's record changed since the caller read it (`ifRecord`), or there already
+  // (`ifAbsent`): the caller's to resolve, with the record as it stands when the error carries it,
+  // or, for a batch, each entry's.
+  const vendorCode = vendorCodeOf(err);
+  if (vendorCode === "record_changed" || vendorCode === "record_exists") {
     const { current, conflicts } = err as Pick<ErrorResponse, "current" | "conflicts">;
     return new ApiError(409, {
       error: errorMessage(err),
-      code: "record_changed",
+      code: vendorCode,
       ...(current !== undefined && { current }),
       ...(Array.isArray(conflicts) && { conflicts }),
     });

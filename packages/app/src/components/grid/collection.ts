@@ -332,9 +332,12 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
-    /** Stages `step`, opening a change when none is: shown at once, saved by nothing until `save`. */
-    add(step: Step) {
-      if (!idle() || (!step.adds?.length && !step.cells?.length && !step.deletes?.length)) return;
+    /**
+     * Stages `step`, opening a change when none is: shown at once, saved by nothing until `save`.
+     * Answers whether it did: a step that changes nothing, or one under a Save, is refused.
+     */
+    add(step: Step): boolean {
+      if (!idle() || (!step.adds?.length && !step.cells?.length && !step.deletes?.length)) return false;
       const tx = staged?.tx ?? opened();
       const rows = storedRows();
       for (const key of keysOf([step])) {
@@ -343,6 +346,7 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
       }
       tx.mutate(() => apply(tx, step));
       show({ tx, steps: [...(staged?.steps ?? []), step] });
+      return true;
     },
     /** Takes back the last step. */
     undo: () => staged && idle() && reopen(staged.steps.slice(0, -1)),
@@ -389,6 +393,9 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
         const count = open.tx.mutations.filter((m) => sent(m.key) && isChange(m)).length;
         if (count > SAVE_MANY_MAX)
           throw new Error(`One change saves at most ${SAVE_MANY_MAX} records: save some first`);
+        // Rolled back during the read by another edit's refusal: `opened` has made the change
+        // again from its steps, and a commit of this one would fail and discard it.
+        if (open.tx.state !== "pending") throw new Error("An edit before it was not saved: save again");
         open.tx.metadata.only = only;
         committing = true;
         try {

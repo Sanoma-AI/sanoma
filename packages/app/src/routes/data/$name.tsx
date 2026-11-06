@@ -1,10 +1,10 @@
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { errorMessage, personsOf } from "@sanoma-ai/workflows/shared";
 import { hashKey, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, notFound, useBlocker } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, type ShouldBlockFn, useBlocker } from "@tanstack/react-router";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.tsx";
@@ -31,6 +31,7 @@ import {
   closeRecord,
   collectionNamed,
   configQuery,
+  countQuery,
   DataSearch,
   listQueryOf,
   recordsQuery,
@@ -118,16 +119,19 @@ function CollectionPage() {
     () => view?.stage.current() !== undefined,
     () => false,
   );
-  // What a location's search reads, which a staged change is over.
-  const reads = (location: { search: unknown }) => hashKey([listQueryOf(collection, location.search as DataSearch)]);
-  useBlocker({
-    disabled: !staged,
-    shouldBlockFn: ({ current, next }) => {
+  // Once per collection: a new function each render would register the blocker again each render.
+  const shouldBlockFn = useCallback<ShouldBlockFn>(
+    ({ current, next }) => {
+      // What a location's search reads, which a staged change is over.
+      const reads = (location: { search: unknown }) =>
+        hashKey([listQueryOf(collection, location.search as DataSearch)]);
       const leaves = next.pathname !== current.pathname || reads(next) !== reads(current);
       if (leaves) toast.info(STAGED_FIRST);
       return leaves;
     },
-  });
+    [collection],
+  );
+  useBlocker({ disabled: !staged, shouldBlockFn });
   const navigate = Route.useNavigate();
   const close = () => void navigate({ search: closeRecord, resetScroll: false });
   const formOpen = search.new === true || search.record !== undefined;
@@ -176,8 +180,9 @@ function CollectionPage() {
                 view={view}
                 order={shown.order}
                 open={search.record}
-                filtered={shown.where !== undefined}
+                where={shown.where}
                 limit={shown.limit}
+                reading={records.isPlaceholderData}
                 hide={search.hide}
                 people={people}
               />
@@ -213,7 +218,11 @@ function CollectionPage() {
                     saved={saved}
                     staged={staged}
                     actor={actor}
-                    onDone={close}
+                    onDone={() => {
+                      close();
+                      // An add or a delete changes how many match.
+                      void queryClient.invalidateQueries({ queryKey: countQuery(name, shown.where).queryKey });
+                    }}
                   />
                 ) : records.data ? (
                   <Notice>

@@ -869,7 +869,7 @@ describe("errors the app answers with", () => {
     expect(api.body).toEqual({ error: "Something went wrong" });
   });
 
-  it("answers a batch's refusals with what each entry needs: the keys denied, the records changed as they stand", () => {
+  it("answers a collection's refusals with what each needs: the keys denied, the records changed or there already as they stand", () => {
     const denied = asApiError(
       new SanomaError("policy_denied", "data.leads.saveMany was denied by policy: Globex: lost", {
         op: "data.leads.saveMany",
@@ -892,6 +892,25 @@ describe("errors the app answers with", () => {
     );
     expect(changed.status).toBe(409);
     expect(changed.body).toEqual({ error: expect.any(String), code: "record_changed", conflicts });
+    // A single save's `ifAbsent` on a taken key: a 409 with the record there, never a 500.
+    const current = {
+      key: "Acme",
+      record: { company: "Acme" },
+      updatedAt: "2026-11-05T00:00:00.000Z",
+      updatedBy: "ada",
+    };
+    const exists = asApiError(
+      Object.assign(
+        new DriverError("Collection record already exists", {
+          retryable: false,
+          status: 409,
+          vendorCode: "record_exists",
+        }),
+        { current },
+      ),
+    );
+    expect(exists.status).toBe(409);
+    expect(exists.body).toEqual({ error: expect.any(String), code: "record_exists", current });
   });
 
   it("answers an argument a schema refuses, a server function's included, with 400 and the issues", () => {

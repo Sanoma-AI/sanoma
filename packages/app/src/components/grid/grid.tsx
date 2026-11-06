@@ -1,7 +1,7 @@
 import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
-import { errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
+import { errorMessage, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
 import { useLiveQuery } from "@tanstack/react-db";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useNavigate } from "@tanstack/react-router";
 import {
   type CellSelectionDirection,
@@ -27,8 +27,8 @@ import { errorBodyOf } from "../../api.ts";
 import type { UntypedApi } from "../../api-client.ts";
 import { fieldsOf, type ScalarField, type ScalarValue } from "../../form/schema.ts";
 import { plural } from "../../lib/utils.ts";
-import { api, type DataSearch, heldQuery } from "../../queries.ts";
-import { FLOAT_CARD, Nothing, StatusDot, Tip, When } from "../common.tsx";
+import { api, countQuery, type DataSearch, heldQuery } from "../../queries.ts";
+import { FLOAT_CARD, Nothing, StatusDot, When } from "../common.tsx";
 import { FROM, IssuesFlag, SortHead, Value } from "../data-grid.tsx";
 import { CellEditor, draftOf, recordWith } from "./cell.tsx";
 import { cellText, csv, delimited } from "./clipboard.ts";
@@ -99,15 +99,16 @@ interface Editing {
 /**
  * The grid: `view` the records `list` read for the page's search, `order` its sort, `open` the
  * record in the side panel, `hide` the fields left out, `people` the declared people's ids (what
- * a person field chooses from). Says how many match, or that there may be more than `limit`.
+ * a person field chooses from). Says how many match, past `limit` as `count` answers for `where`.
  */
 export function DataGrid({
   collection,
   view,
   order,
   open,
-  filtered,
+  where,
   limit,
+  reading,
   hide,
   people,
 }: {
@@ -116,8 +117,11 @@ export function DataGrid({
   order: string | undefined;
   /** The key of the record open in the side panel. */
   open: string | undefined;
-  filtered: boolean;
+  /** The search's filters, which the footer counts the records of. */
+  where: ListQuery<Record<string, unknown>>["where"];
   limit: number;
+  /** Another search's records are being read: the rows are the last search's, and take no staged change. */
+  reading: boolean;
   hide: string[] | undefined;
   people: readonly string[];
 }) {
@@ -160,7 +164,21 @@ export function DataGrid({
   );
   const required = useMemo(() => [...fields.values()].filter((f) => f.required).map((f) => f.key), [fields]);
   const [savedAt, setSavedAt] = useState<number>();
-  const change = useStagedChange({ view, keyField, required, listed, onSaved: () => setSavedAt(Date.now()) });
+  // How many match, read once the rows reach the limit: a Save may change it.
+  const counted = countQuery(name, where);
+  const matches = useQuery({ ...counted, enabled: listed.length >= limit }).data;
+  const queryClient = useQueryClient();
+  const change = useStagedChange({
+    view,
+    keyField,
+    required,
+    listed,
+    reading,
+    onSaved: () => {
+      setSavedAt(Date.now());
+      void queryClient.invalidateQueries({ queryKey: counted.queryKey });
+    },
+  });
   const { staged, saving, changeOfKey } = change;
   const columns = useMemo(
     () =>
@@ -269,6 +287,8 @@ export function DataGrid({
 
   /** Use mine: what you typed over the record as it is now, read again when the conflict did not say. */
   async function takeMine(conflict: Conflict) {
+    // Saved on its own, it would land outside the change staged since, under the records it is over.
+    if (stage.current()) return void toast.info(STAGED_FIRST);
     let current = conflict.current;
     if (current === undefined) {
       try {
@@ -434,8 +454,8 @@ export function DataGrid({
 
   if (listed.length === 0) {
     return (
-      <Nothing title={filtered ? "No record matches" : "No records yet"}>
-        {filtered ? "Change the filters to see others." : "Add one, or save one from a workflow."}
+      <Nothing title={where ? "No record matches" : "No records yet"}>
+        {where ? "Change the filters to see others." : "Add one, or save one from a workflow."}
       </Nothing>
     );
   }
@@ -691,7 +711,7 @@ export function DataGrid({
       <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-3 py-2 text-xs text-muted-foreground">
         <span>
           {listed.length >= limit
-            ? `The first ${limit} records: filter them, or show more, to see the rest`
+            ? `The first ${limit}${matches === undefined ? "" : ` of ${matches}`} records: filter them, or show more, to see the rest`
             : listed.length === 1
               ? "1 record matches"
               : `${listed.length} records match`}
@@ -723,14 +743,18 @@ export function DataGrid({
   );
 }
 
-/** A record's key, opening it in the form: disabled while a change is staged, as the form saves nothing then. */
+/**
+ * A record's key, opening it in the form: disabled while a change is staged, as the form saves
+ * nothing then, and says so as a `title`, one per row (a Tip's tooltip is too much for every row).
+ */
 function KeyLink({ name, recordKey, staged }: { name: string; recordKey: string; staged: boolean }) {
-  const link = (
+  return (
     <Link
       to={FROM}
       params={{ name }}
       search={(prev: DataSearch) => ({ ...prev, record: recordKey, new: undefined })}
       disabled={staged}
+      title={staged ? STAGED_FIRST : undefined}
       resetScroll={false}
       preload={false}
       tabIndex={-1}
@@ -739,5 +763,4 @@ function KeyLink({ name, recordKey, staged }: { name: string; recordKey: string;
       {recordKey}
     </Link>
   );
-  return staged ? <Tip tip={STAGED_FIRST}>{link}</Tip> : link;
 }

@@ -668,6 +668,18 @@ export const recordsQuery = (name: string, query: ListQuery<Record<string, unkno
   });
 
 /**
+ * How many of a collection's records `where` matches (`data.<name>.count`), as the person asking:
+ * the grid's footer once its rows reach their limit. Read again after a save that may change it.
+ */
+export const countQuery = (name: string, where: ListQuery<Record<string, unknown>>["where"]) =>
+  queryOptions({
+    queryKey: [...DATA_KEY, name, "count", where ?? null],
+    queryFn: async () =>
+      ((await (api as UntypedApi).data[name].count(where ? { where } : {})) as { count: number }).count,
+    staleTime: 5_000,
+  });
+
+/**
  * The keys of a collection's records whose save or delete waits for an approval: the pending
  * policy holds of `data.<name>.save`, `.delete` and `.saveMany` (each of its records and
  * deletes) among the runs waiting (`waitingRunsQuery`, the Inbox's), so a decision, or the run
