@@ -54,28 +54,19 @@ export const ImportInputSchema = z.strictObject({
 }) satisfies z.ZodType<ImportInput>;
 
 /**
- * The entries a batch's save refused, each with why: a policy's denial (`data.denied`, the
- * reason naming each key in turn) or a record changed since it was read (`conflicts`). Undefined
- * for any other failure, which ends the run.
+ * The entries a batch's save refused, each with why: a policy's denial (`data.deniedFor`, each
+ * denied key's reason) or a record changed since it was read (`conflicts`). Undefined for any
+ * other failure, which ends the run.
  */
 function refusedBy(err: unknown): Map<string, string> | undefined {
   const { code, data, vendorCode, conflicts } = (err ?? {}) as {
     code?: unknown;
-    data?: { denied?: string[]; reason?: string };
+    data?: { deniedFor?: Record<string, string> };
     vendorCode?: unknown;
     conflicts?: { key: string }[];
   };
-  if (code === "policy_denied" && data?.denied?.length) {
-    // `<key>: <why>; <key>: <why>`, in the order of `denied`.
-    const reason = data.reason ?? "";
-    return new Map(
-      data.denied.map((key, i) => {
-        const from = reason.indexOf(`${key}: `) + key.length + 2;
-        const next = data.denied![i + 1];
-        const to = next === undefined ? reason.length : reason.indexOf(`; ${next}: `, from);
-        return [key, `the policy denies saving it: ${reason.slice(from, to === -1 ? undefined : to)}`];
-      }),
-    );
+  if (code === "policy_denied" && data?.deniedFor) {
+    return new Map(Object.entries(data.deniedFor).map(([key, why]) => [key, `the policy denies saving it: ${why}`]));
   }
   if (vendorCode === "record_changed" && conflicts?.length) {
     return new Map(conflicts.map(({ key }) => [key, "it changed while the sheet was imported: import it again"]));

@@ -90,14 +90,19 @@ const there = [
 ];
 
 describe("a CSV file as a sheet", () => {
-  it("reads RFC 4180: quoted cells with commas and doubled quotes, CRLF, a byte-order mark, its header, no blank rows", () => {
+  it("reads RFC 4180: quoted cells with commas and doubled quotes, CRLF, a byte-order mark, its header, no blank rows at the end", () => {
     expect(sheet.columns).toEqual(["Company", "Contact", "Stage", "Owner", "Last touched", "Seats", "Phone"]);
     expect(sheet.rows.map((row) => row[0])).toEqual(["Acme", "Globex, Inc.", "Initech", "Lost Co", "Hooli", "Won Co"]);
     expect(sheet.rows[1]).toEqual(["Globex, Inc.", "bo@globex.test", "replied", "Bo", "", "", '555 "main"']);
-    expect(readSheet("lf.csv", 'a,"b\nc"\n1,2\n')).toEqual({
+    // A blank row between keeps its place, so the rows below keep their numbers.
+    expect(readSheet("lf.csv", 'a,"b\nc"\n1,2\n,\n3,4\n\n')).toEqual({
       file: "lf.csv",
       columns: ["a", "b\nc"],
-      rows: [["1", "2"]],
+      rows: [
+        ["1", "2"],
+        ["", ""],
+        ["3", "4"],
+      ],
     });
     expect(readSheet("empty.csv", "")).toBeUndefined();
   });

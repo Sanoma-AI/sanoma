@@ -103,12 +103,14 @@ export function importRows(
   const firstWith = new Map<string, number>();
   rows.forEach((cells, i) => {
     const row = FIRST_ROW + i;
+    // A blank row is no record, and keeps its number so the rows below keep theirs.
+    if (cells.every((cell) => cell.trim() === "")) return;
     const fields: Record<string, unknown> = {};
     const refused: string[] = [];
     mapping.forEach((column, at) => {
       if (!column) return;
       const cell = (cells[at] ?? "").trim();
-      const text = column.values?.[cell] ?? cell;
+      const text = column.values && Object.hasOwn(column.values, cell) ? column.values[cell]! : cell;
       if (text === "") return;
       const value = valueOf(collection.fields[column.field]!, text, declared);
       if ("refused" in value) refused.push(`${column.field}: "${cell}" ${value.refused}`);
@@ -118,9 +120,12 @@ export function importRows(
     const first = typeof key === "string" ? firstWith.get(key) : undefined;
     if (typeof key !== "string") refused.unshift(`no ${collection.key}, the key`);
     else if (first !== undefined) refused.unshift(`${collection.key} "${key}" is row ${first}'s too`);
-    else firstWith.set(key, row);
     if (refused.length) problems.push({ row, ...(typeof key === "string" && { key }), reason: refused.join("; ") });
-    else read.push({ row, key: key as string, fields });
+    else {
+      // A key is the first accepted row's: a refused row leaves it to a corrected one below.
+      firstWith.set(key as string, row);
+      read.push({ row, key: key as string, fields });
+    }
   });
   return { rows: read, problems };
 }
@@ -183,7 +188,9 @@ const isDay = (text: string) => {
   const m = DAY.exec(text);
   if (!m) return false;
   const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const date = new Date(Date.UTC(year, month - 1, day));
+  // `setUTCFullYear`, as `Date.UTC` reads years 0 to 99 as 1900 to 1999.
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 };
 

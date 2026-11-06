@@ -51,6 +51,9 @@ describe("importRows and importEntry", () => {
         ["Hooli", "h@hooli.test", "talking", "T. Nguyen", "11/01/2026", "ten"],
         ["", "x@nobody.test", "lead", "ada"],
         ["Acme", "again@acme.test", "won", "ada"],
+        [" ", "", ""],
+        ["Hooli", "h@hooli.test", "won", "ada"],
+        ["Initech", "i@initech.test", "constructor", "ada"],
       ],
     });
     expect(rows).toEqual([
@@ -72,6 +75,8 @@ describe("importRows and importEntry", () => {
         key: "Globex",
         fields: { company: "Globex", stage: "contacted", owner: "lead", lastTouched: "2026-11-01T09:30:00+02:00" },
       },
+      // A blank row is skipped, keeping its number; a key a refused row had is the corrected row's.
+      { row: 8, key: "Hooli", fields: { company: "Hooli", contact: "h@hooli.test", stage: "won", owner: "ada" } },
     ]);
     expect(problems).toEqual([
       {
@@ -87,6 +92,12 @@ describe("importRows and importEntry", () => {
         reason: 'no company, the key; stage: "lead" is not one of researched, contacted, replied, meeting, won, lost',
       },
       { row: 6, key: "Acme", reason: 'company "Acme" is row 2\'s too' },
+      // A column's values are its own: not the prototype's.
+      {
+        row: 9,
+        key: "Initech",
+        reason: 'stage: "constructor" is not one of researched, contacted, replied, meeting, won, lost',
+      },
     ]);
   });
 
@@ -94,6 +105,7 @@ describe("importRows and importEntry", () => {
     const dates = [
       "2026-11-01",
       "2028-02-29",
+      "0050-01-01",
       "2026-02-30",
       "2026-11-01T10:00:00Z",
       "2026-11-01T10:00:00.5-07:00",
@@ -202,6 +214,8 @@ describe("the built-in import", () => {
       row("Lost Co", "lost"),
       row("Hooli", "researched", ["", "ten"]),
       [...row("Pied Piper").slice(0, 3), "T. Nguyen"],
+      // Denied too, and its key ends another's: each denied key has its own reason.
+      row("t Co", "lost"),
     ]);
     expect(await app.client.result(runId)).toEqual({
       added: 1,
@@ -211,6 +225,7 @@ describe("the built-in import", () => {
         { row: 5, key: "Lost Co", reason: "the policy denies saving it: leads are not lost" },
         { row: 6, key: "Hooli", reason: 'seats: "ten" is not a number' },
         { row: 7, key: "Pied Piper", reason: 'owner: "T. Nguyen" is nobody declared' },
+        { row: 8, key: "t Co", reason: "the policy denies saving it: leads are not lost" },
       ],
     });
     expect(await keys()).toEqual([
@@ -218,7 +233,7 @@ describe("the built-in import", () => {
       ["Globex", "replied"],
       ["Initech", "contacted"],
     ]);
-    // One read of the batch's keys, its save denied whole for Lost Co, then saved without it; each
+    // One read of the batch's keys, its save denied whole for Lost Co and t Co, then saved without them; each
     // entry decided and recorded as the collection's save, the new one with ifAbsent.
     const made = await called(runId);
     expect(made.map(({ op, target, decision }) => [op, target, decision.kind])).toEqual([
@@ -226,6 +241,7 @@ describe("the built-in import", () => {
       ["data.outbound.save", "data:outbound/Acme", "allow"],
       ["data.outbound.save", "data:outbound/Globex", "allow"],
       ["data.outbound.save", "data:outbound/Lost Co", "deny"],
+      ["data.outbound.save", "data:outbound/t Co", "deny"],
       ["data.outbound.save", "data:outbound/Acme", "allow"],
       ["data.outbound.save", "data:outbound/Globex", "allow"],
     ]);

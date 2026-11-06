@@ -23,8 +23,9 @@ export interface Sheet {
 
 /**
  * A CSV file's text as a sheet (RFC 4180, `cellsOf`): its first row the header (an empty name
- * is `Column <n>`), the rows under it but those with no text, a byte-order mark left out.
- * Undefined for a file with no header.
+ * is `Column <n>`), the rows under it but the blank ones at its end, a byte-order mark left out.
+ * A blank row between keeps its place, so each row keeps its number in the file (`importRows`
+ * skips it). Undefined for a file with no header.
  */
 export function readSheet(file: string, text: string): Sheet | undefined {
   const [header, ...rows] = cellsOf(text.replace(/^﻿/, ""), ",");
@@ -32,7 +33,7 @@ export function readSheet(file: string, text: string): Sheet | undefined {
   return {
     file,
     columns: header.map((name, i) => name.trim() || `Column ${i + 1}`),
-    rows: rows.filter((row) => row.some((cell) => cell.trim() !== "")),
+    rows: rows.slice(0, rows.findLastIndex((row) => row.some((cell) => cell.trim() !== "")) + 1),
   };
 }
 

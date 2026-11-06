@@ -71,7 +71,8 @@ function ImportPage() {
     collection: name,
     mapping,
     rows: sheet.rows,
-    people: people.map((person) => person.id),
+    // Declared people, so the run refuses anyone else; none declared, any id is taken.
+    ...(people.length > 0 && { people: people.map((person) => person.id) }),
   };
   const ready = input !== undefined && mappingProblems(collection, mapping).length === 0;
   const keys = ready ? importRows(collection, input).rows.map((row) => row.key) : [];
