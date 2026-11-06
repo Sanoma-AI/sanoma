@@ -721,9 +721,10 @@ describe("scenarios and sandbox runs", () => {
     sandboxId = started.body.runId;
 
     // The app decides nothing: the run waits on its approval as a live run does, and the worker checks it as it waits.
+    // Until it has, the app shows the Then steps unanswered (none `ok`).
     const held = await waitFor(
       () => detail(sandboxId),
-      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
+      (d) => d.approvals.some((a) => a.status === "pending") && d.checks?.some((check) => check.ok) === true,
     );
     expect(held.run).toMatchObject({ status: "waiting", sandbox: SCENARIO, startedBy: { id: "tester" } });
     expect(held.ledger.find((r) => r.type === "scenario.seeded")).toMatchObject({
@@ -759,7 +760,7 @@ describe("scenarios and sandbox runs", () => {
     const id = started.body.runId;
     const held = await waitFor(
       () => detail(id),
-      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
+      (d) => d.approvals.some((a) => a.status === "pending") && d.checks?.some((check) => check.ok) === true,
     );
     // A call not made so far may still be made: not settled, though met.
     expect(held.checks).toEqual([
