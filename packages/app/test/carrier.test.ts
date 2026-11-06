@@ -178,7 +178,7 @@ describe("the carrier", () => {
     );
   });
 
-  it("takes the whole branch when the clone lacks the head it says it has, runs none of the clone's own hooks, carries edits off the draft's branch, and refuses a rewritten history", async () => {
+  it("takes the whole branch when the clone lacks the head it says it has, runs none of the clone's own hooks, carries edits off the draft's branch, refuses a rewritten history, and cleans what another draft left", async () => {
     const source = localGitSource(dir);
     const draft = await source.draft!("d3");
     let root = "";
@@ -219,17 +219,11 @@ touch "${join(root, "..", "ran")}"
     );
     expect(readFileSync(join(draft.root, "offboarding.ts"), "utf8")).toBe("export const steps = [];\n");
     const edited = await source.head(draft.branch);
-    // What a turn left that the repository ignores: gone from the next turn, the install but kept.
-    writeFileSync(join(root, ".env"), "LEFT=1\n");
-    mkdirSync(join(root, "node_modules"), { recursive: true });
-    writeFileSync(join(root, "node_modules/kept.js"), "");
     await boxTurn(
       opening.name,
       () => sandbox.backend.open(opening),
       async (box) => {
         const carried = await carryIn(box, source, "d3", { home: await homeOf(box) });
-        expect(existsSync(join(root, ".env"))).toBe(false);
-        expect(existsSync(join(root, "node_modules/kept.js"))).toBe(true);
         // A history that no longer holds the head given is refused, never dropped unsaid.
         await inBox(box, "git reset --quiet --hard HEAD~1", root);
         writeFileSync(join(root, "offboarding.ts"), "export const steps = [1];\n");
@@ -239,6 +233,20 @@ touch "${join(root, "..", "ran")}"
       },
     );
     expect(await source.head(draft.branch)).toBe(edited);
+
+    // What a turn left that the repository ignores: kept for its draft, gone from another draft's turn, the install but kept.
+    writeFileSync(join(root, ".env"), "LEFT=1\n");
+    mkdirSync(join(root, "node_modules"), { recursive: true });
+    writeFileSync(join(root, "node_modules/kept.js"), "");
+    await source.draft!("d4");
+    const open = () => sandbox.backend.open(opening);
+    await boxTurn(opening.name, open, async (box) => {
+      await carryIn(box, source, "d3", { home: await homeOf(box) });
+      expect(existsSync(join(root, ".env"))).toBe(true);
+      await carryIn(box, source, "d4", { home: await homeOf(box) });
+      expect(existsSync(join(root, ".env"))).toBe(false);
+      expect(existsSync(join(root, "node_modules/kept.js"))).toBe(true);
+    });
   });
 
   it("refuses a second turn in a box while one runs there, and stops the box at each turn's end however it ends", async () => {

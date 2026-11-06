@@ -199,7 +199,7 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
   let carried = false;
   try {
     // Opened last, so that nothing that fails before leaves it running; stopped however the turn ends.
-    await boxTurn(
+    carried = await boxTurn(
       boxName(step.resolved.appName, principal.id),
       () => openBox(step),
       async (box) => {
@@ -243,10 +243,9 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
         }
         relay.finish();
         // What it changed in the clone, committed there and carried back to the draft.
-        if (since !== undefined) {
-          const message = turnMessage(engineTurn, agent.title);
-          carried = await carryOut(box, step.source, chat.id, { since, message, author: principal.id });
-        }
+        if (since === undefined) return false;
+        const message = turnMessage(engineTurn, agent.title);
+        return carryOut(box, step.source, chat.id, { since, message, author: principal.id });
       },
     );
   } catch (err) {

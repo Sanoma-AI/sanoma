@@ -99,7 +99,7 @@ const INSTALL_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * The box's side of `carryIn`, in its home: the clone at the draft's head, clean (a lock a turn
- * that died left too, and what another draft's turn left, ignored files but the install included).
+ * that died left too; from another draft, what the repository ignores too, but the install).
  */
 const IN = `set -eu
 mkdir -p ${CLONE}
@@ -110,8 +110,9 @@ if [ -n "$BUNDLE" ]; then
   rm -f "$HOME/$BUNDLE"
 fi
 rm -f .git/index.lock
+was=$(git symbolic-ref -q HEAD || true)
 git checkout --quiet --force -B "$BRANCH" "$HEAD"
-git clean --quiet --force -d -x -e node_modules
+if [ "$was" = "refs/heads/$BRANCH" ]; then git clean --quiet --force -d; else git clean --quiet --force -d -x -e node_modules; fi
 printf %s "$HEAD" > ${HEAD_FILE}`;
 
 /** The clone's install, when its lockfile is not the one last installed: no script or `.pnpmfile.cjs` of the repository's runs (the agent wrote them, and may run none). */
@@ -176,9 +177,8 @@ const lost = (where: string, err: unknown) =>
 const NO_EMAIL = "noreply@sanoma.invalid";
 
 /**
- * The box's side of `carryOut`, in its home: a bundle only when the branch moved, said so, and its
- * new head kept as the one the instance knows of (were the instance to lack it, its next bundle is
- * the whole branch). Edits on another branch (or none) the agent moved to are the draft's branch's
+ * The box's side of `carryOut`, in its home: a bundle only when the branch moved, said so (the
+ * head the instance knows of is the one `carryIn` gave, so a bundle it never took is sent again). Edits on another branch (or none) the agent moved to are the draft's branch's
  * from where it left it; a history that no longer holds the head given is refused, never dropped unsaid.
  */
 const OUT = `set -eu
@@ -191,7 +191,6 @@ head=$(git rev-parse "refs/heads/$BRANCH")
 [ "$head" = "$SINCE" ] && exit 0
 git merge-base --is-ancestor "$SINCE" "$head" || { echo "the agent rewrote the branch's history" >&2; exit 3; }
 git bundle create --quiet "$HOME/${BUNDLE}" "refs/heads/$BRANCH" "^$SINCE"
-printf %s "$head" > ${HEAD_FILE}
 echo bundled`;
 
 /**
