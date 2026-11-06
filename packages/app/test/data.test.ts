@@ -14,7 +14,7 @@ import { ACTOR_COOKIE, ApiError, CallRequest, type ErrorResponse } from "../src/
 import { type App, startApp } from "../src/index.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
-import { callApi, serverFnFailure, validate } from "../src/server/core.ts";
+import { callApi, recordHistory, serverFnFailure, validate } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when dist/server/server.js
@@ -28,7 +28,8 @@ import { appSnapshot } from "../src/snapshot-build.ts";
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 
 // The outbound fixture, copied to a root of its own: its collection, declared in resources/data.ts,
-// with its people and a policy that allows, but denies a lead `lost` and holds one `won` for `lead`.
+// with its people and a policy that allows, but denies a lead `lost`, holds one `won` for `lead`,
+// and denies dee a lead's `get` (and so its history).
 const root = mkdtempSync(join(tmpdir(), "sanoma-data-"));
 cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
 writeFileSync(
@@ -39,6 +40,7 @@ export const ada = sanoma.person({ id: "ada" });
 export const bo = sanoma.person({ id: "bo" });
 export const cy = sanoma.person({ id: "cy" });
 export const lead = sanoma.person({ id: "lead" });
+export const dee = sanoma.person({ id: "dee" });
 `,
 );
 mkdirSync(join(root, "policies"));
@@ -51,6 +53,9 @@ when { context.input.record.stage == "lost" };
 @hold("lead")
 forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
 when { context.input.record.stage == "won" };
+
+@reason("dee reads no lead by its key")
+forbid (principal == Sanoma::Principal::"dee", action == Sanoma::Action::"data.outbound.get", resource);
 `,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -113,23 +118,43 @@ const searchOf = (search: Record<string, unknown>) =>
     Object.entries(search).map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)]),
   ).toString();
 
-/** `callFn` as the page's form calls it, as `actor`: its answer, or the ApiError's status and body. */
-async function callAs(actor: string, data: CallRequest) {
-  const context = {
-    resolved: resolveConfig(testApp.config),
-    snapshot: await appSnapshot(testApp.config),
-    client: testApp.client,
-    place: "this-computer" as const,
-    login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
-  };
+/** The app's context, as the server functions get it. */
+const contextOf = async () => ({
+  resolved: resolveConfig(testApp.config),
+  snapshot: await appSnapshot(testApp.config),
+  client: testApp.client,
+  place: "this-computer" as const,
+  login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
+});
+
+/** What a server function's `call` answers: its answer, or the ApiError's status and body. */
+async function answerOf(call: () => Promise<unknown>) {
   try {
-    return { body: (await callApi(context, { id: actor }, validate(CallRequest)(data))) as any };
+    return { body: (await call()) as any };
   } catch (err) {
     const failure = serverFnFailure(err, "POST");
     if (!(failure instanceof ApiError)) throw failure;
     return { status: failure.status, body: failure.body as ErrorResponse };
   }
 }
+
+/** `callFn` as the page's form calls it, as `actor`. */
+const callAs = async (actor: string, data: CallRequest) => {
+  const context = await contextOf();
+  return answerOf(() => callApi(context, { id: actor }, validate(CallRequest)(data)));
+};
+
+/** `getHistory` as the record's side panel reads it, as `actor`. */
+const historyAs = async (actor: string, key: string) => {
+  const context = await contextOf();
+  return answerOf(() => recordHistory(context, { id: actor }, { name: "outbound", key }));
+};
+
+/** The record's side panel's history lines, as text. */
+const historyLines = (html: string) =>
+  [...html.matchAll(/<li data-slot="history-line">([\s\S]*?)<\/li>/g)].map(([, line]) =>
+    line!.replaceAll(/<[^>]+>/g, ""),
+  );
 
 describe("the Data section", () => {
   beforeAll(async () => {
@@ -327,6 +352,56 @@ describe("the Data section", () => {
       await callAs("cy", { name: "data.outbound.delete", input: { key: "Hooli" }, id: crypto.randomUUID() }),
     ).toEqual({ body: { key: "Hooli", deleted: true } });
     expect(rowKeys((await page(`/data/outbound${searchOf({ key: "Hoo" })}`)).html)).toEqual([]);
+  });
+
+  it("shows a record's writes in its side panel, from the ledger, to whoever the policy lets read it", async () => {
+    // A key of its own: the ledger outlives a run, and every write of a key is its history.
+    const key = `Umbrella ${crypto.randomUUID().slice(0, 8)}`;
+    const first = await callAs("cy", {
+      name: "data.outbound.save",
+      input: { record: lead(key) },
+      id: crypto.randomUUID(),
+    });
+    const read = (first.body as { record: Record<string, unknown> }).record;
+    // A read in between is not a write, and a refused save writes nothing.
+    await callAs("bo", { name: "data.outbound.get", input: { key } });
+    await callAs("bo", { name: "data.outbound.save", input: { record: { ...read, stage: "lost" } } });
+    await callAs("bo", {
+      name: "data.outbound.save",
+      input: { record: { ...read, stage: "contacted", seats: 3 }, ifRecord: read },
+      id: crypto.randomUUID(),
+    });
+    expect((await historyAs("ada", key)).body).toEqual({
+      more: false,
+      writes: [
+        expect.objectContaining({
+          by: "bo",
+          workflow: "call",
+          runId: expect.stringMatching(/^direct:bo:/),
+          change: [
+            { field: "stage", before: "researched", after: "contacted" },
+            { field: "seats", after: 3 },
+          ],
+        }),
+        expect.objectContaining({ by: "cy", change: "created" }),
+      ],
+    });
+    const { html } = await page(`/data/outbound${searchOf({ record: key })}`);
+    expect(html).toContain("History · from the ledger");
+    // Newest first; a direct write has no run page to link to.
+    expect(historyLines(html)).toEqual([
+      expect.stringMatching(/ · bo · stage researched → contacted, seats - → 3$/),
+      expect.stringMatching(/ · cy · created$/),
+    ]);
+    // The ledger holds the record's values: dee, whom the policy refuses a lead's read, gets none of them.
+    expect(await historyAs("dee", key)).toMatchObject({
+      status: 403,
+      body: { code: "policy_denied", error: expect.stringMatching(/dee reads no lead by its key/) },
+    });
+    const refused = (await page(`/data/outbound${searchOf({ record: key })}`, "dee")).html;
+    expect(refused).toContain(`>Edit ${key}</h2>`);
+    expect(historyLines(refused)).toEqual([]);
+    expect(refused).toContain("dee reads no lead by its key");
   });
 
   it("saves a batch as one change, all or nothing: a denied entry, a stale ifRecord, a taken key or a hold leave every row as it was", async () => {
@@ -548,6 +623,9 @@ describe("the Data section", () => {
       await tab.keyboard.type("new@cell.test");
       await tab.keyboard.press("Enter");
       await tab.waitForSelector(`[data-sonner-toast]::-p-text(Saved contact for ${key})`);
+      // Its key links to the record's history, the record open in the side panel.
+      const history = await tab.$eval(`[data-sonner-toast] a[title="Its history, from the ledger"]`, (a) => a.href);
+      expect(new URL(history).searchParams.get("record")).toBe(key);
       expect(await record()).toMatchObject({
         record: { contact: "new@cell.test", stage: "researched" },
         updatedBy: "ada",

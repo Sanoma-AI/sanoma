@@ -27,9 +27,10 @@ import { errorBodyOf } from "../../api.ts";
 import type { UntypedApi } from "../../api-client.ts";
 import { fieldsOf, type ScalarField, type ScalarValue } from "../../form/schema.ts";
 import { plural } from "../../lib/utils.ts";
-import { api, countQuery, type DataSearch, heldQuery } from "../../queries.ts";
+import { api, countQuery, heldQuery, openRecord } from "../../queries.ts";
 import { FLOAT_CARD, Nothing, StatusDot, When } from "../common.tsx";
 import { FROM, IssuesFlag, SortHead, Value } from "../data-grid.tsx";
+import { HistoryLink } from "../record-history.tsx";
 import { CellEditor, draftOf, recordWith } from "./cell.tsx";
 import { cellText, csv, delimited } from "./clipboard.ts";
 import { isNew, type RecordsView, savedIn, withValue } from "./collection.ts";
@@ -260,17 +261,22 @@ export function DataGrid({
         // A change staged since: an edit is one of its steps now, so no Undo saves on its own.
         else if (stage.current()) toast.success(`Saved ${field} for ${key}`);
         else
-          toast.success(`Saved ${field} for ${key}`, {
-            // The one field back, over the record as it is now: edits since to its other fields stay.
-            action: {
-              label: "Undo",
-              onClick: () => {
-                if (stage.current()) return void toast.info(STAGED_FIRST);
-                const now = records.get(key);
-                if (now) save(key, field, withValue(now.record, field, before), true);
+          toast.success(
+            <>
+              Saved {field} for <HistoryLink name={name} recordKey={key} />
+            </>,
+            {
+              // The one field back, over the record as it is now: edits since to its other fields stay.
+              action: {
+                label: "Undo",
+                onClick: () => {
+                  if (stage.current()) return void toast.info(STAGED_FIRST);
+                  const now = records.get(key);
+                  if (now) save(key, field, withValue(now.record, field, before), true);
+                },
               },
             },
-          });
+          );
       },
       (err: unknown) => {
         const body = errorBodyOf(err);
@@ -758,7 +764,7 @@ function KeyLink({ name, recordKey, staged }: { name: string; recordKey: string;
     <Link
       to={FROM}
       params={{ name }}
-      search={(prev: DataSearch) => ({ ...prev, record: recordKey, new: undefined })}
+      search={openRecord(recordKey)}
       disabled={staged}
       title={staged ? STAGED_FIRST : undefined}
       resetScroll={false}

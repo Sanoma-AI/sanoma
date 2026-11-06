@@ -139,8 +139,9 @@ const without = (steps: readonly Step[], drop: (key: string, field?: string) => 
 /**
  * What a page's records are made from: `query`, `recordsQuery(name, search)` (what the loader
  * prefetched); `key`, the collection's key field, which names a staged new record to the server;
- * `calls`, the collection's operations as `api.data.<name>` makes them; and `held`, which says a
- * call is held for an approval (`toastIfHeld`) and answers whether it was.
+ * `calls`, the collection's operations as `api.data.<name>` makes them; `held`, which says a
+ * call is held for an approval (`toastIfHeld`) and answers whether it was; and `history`, the
+ * key of a record's history (`historyQuery`), read again once a call on it answers.
  */
 export interface RecordsSource {
   key: string;
@@ -158,9 +159,10 @@ export interface RecordsSource {
     }) => Promise<ManyAnswer[]>;
   };
   held: (err: unknown, queryClient: QueryClient) => boolean;
+  history: (key: string) => QueryKey;
 }
 
-function createRecordsView(queryClient: QueryClient, { query, key: keyField, calls, held }: RecordsSource) {
+function createRecordsView(queryClient: QueryClient, { query, key: keyField, calls, held, history }: RecordsSource) {
   // The records as the collection last read or saved them (the query's rows, which its writes
   // keep), by key: what an update is saved over, never an edit before it still on screen, which
   // its call may have held or saved reshaped. Not the collection's `base`, which holds a save's
@@ -175,6 +177,7 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
           await calls.delete({ key: mutation.key });
           await collection.utils.writeDelete(mutation.key);
           transaction.metadata[mutation.key] = null;
+          void queryClient.invalidateQueries({ queryKey: history(mutation.key) });
           continue;
         }
         const { record } = mutation.modified;
@@ -188,6 +191,7 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
         );
         await collection.utils.writeUpsert(answer);
         transaction.metadata[answer.key] = answer;
+        void queryClient.invalidateQueries({ queryKey: history(answer.key) });
       } catch (err) {
         // A call held for an approval is not refused: it waits, as a run of `call`. Nothing is
         // written, so the row shows the record as it is stored, not the change, until that run
@@ -299,6 +303,7 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
       // What the server saved, in the collection before the change's own rows let go of it.
       await collection.utils.writeUpsert(answers.filter((answer): answer is Saved => "record" in answer));
       await collection.utils.writeDelete(answers.flatMap((answer) => ("record" in answer ? [] : [answer.key])));
+      for (const { key } of answers) void queryClient.invalidateQueries({ queryKey: history(key) });
     } catch (err) {
       // Held for an approval: the batch waits as one run of `call`, and counts as sent.
       if (!held(err, queryClient)) throw err;

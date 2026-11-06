@@ -511,6 +511,40 @@ export const CallRequest = z.object({
 });
 export type CallRequest = z.infer<typeof CallRequest>;
 
+/** What `getHistory` reads: the history of the record `key` of the collection `name`. */
+export const HistoryRequest = z.object({ name: z.string().min(1), key: z.string().min(1) });
+export type HistoryRequest = z.infer<typeof HistoryRequest>;
+
+/** A field one write changed: its value before and after, each absent where the field was not set. */
+export interface FieldChange {
+  field: string;
+  before?: unknown;
+  after?: unknown;
+}
+
+/**
+ * One write of a record, from the ledger (`getHistory`): when, as whom, in which run of which
+ * workflow (`call` for a person's own, a `direct:` run having no page), and what it did: made
+ * the record (`created`, its first save or the first after a delete), `deleted` it, or changed
+ * these fields of the one before (none for a save of the same record).
+ */
+export interface HistoryEntry {
+  at: number;
+  by: string;
+  workflow: string;
+  runId: string;
+  change: "created" | "deleted" | FieldChange[];
+}
+
+/**
+ * A record's history (`getHistory`): its writes, newest first, and `more` when the ledger held
+ * more calls on it than were read (its reads count), so older writes are not among them.
+ */
+export interface RecordHistory {
+  writes: HistoryEntry[];
+  more: boolean;
+}
+
 /** What `previewFn` asks (`PreviewRequest` without its principal): at most 200 actions, each on a target when known. */
 export const PreviewQuery = z
   .array(

@@ -22,7 +22,15 @@ import {
   SanomaError,
   vendorCodeOf,
 } from "@sanoma-ai/workflows";
-import { apiNameOf, isVisitor, flatten, LOGIN_CODE_WORKFLOW, notLoaded } from "@sanoma-ai/workflows/shared";
+import {
+  apiNameOf,
+  CALL_WORKFLOW,
+  isVisitor,
+  flatten,
+  LOGIN_CODE_WORKFLOW,
+  notLoaded,
+  type Saved,
+} from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, permissionsGrid } from "@sanoma-ai/workflows/describe";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import { z } from "zod";
@@ -43,6 +51,10 @@ import {
   type DecideCall,
   type EnforcementResponse,
   type ErrorResponse,
+  type FieldChange,
+  type HistoryEntry,
+  type RecordHistory,
+  type HistoryRequest,
   type PermissionsResponse,
   type PreviewQuery,
   type RunDetail,
@@ -623,6 +635,79 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
     default:
       throw notCallable(name);
   }
+}
+
+/** How many of a record's calls `recordHistory` reads: a run's reads of it count, so one a workflow polls still shows its writes. */
+const HISTORY_CALLS = 500;
+
+/**
+ * The record `key` of the collection `name`, its writes newest first (`HistoryEntry`), from the
+ * ledger's calls on its target (`SanomaClient.history`): those that wrote it, a run's reads and
+ * the failed calls left out, each save against the write before it; `more` when there were
+ * more calls than `HISTORY_CALLS`.
+ */
+export async function recordHistory(
+  app: AppContext,
+  actor: Principal,
+  { name, key }: HistoryRequest,
+): Promise<RecordHistory> {
+  // The ledger keeps every record a write saved, and `history` answers whoever asks: so only
+  // someone the policy lets read the record reads its history, asked as `callFn` asks the read
+  // (its refusal, a 403, is the answer). A direct read is not recorded, so asking adds no line.
+  // One id per record, so a read the policy holds is one run for the person however often the
+  // panel asks again, not an approval each time.
+  const get = `data.${name}.get`;
+  await callApi(app, actor, { name: get, input: { key }, id: `history:${name}/${key}` });
+  // The read answered, so the collection is there, and its target is the one its calls are recorded on.
+  const target = app.resolved.ops.get(get)!.target!({ key });
+  // Its fields in the order declared, then any a record holds that it no longer declares.
+  const declared = Object.keys(app.resolved.collections.get(name)!.fields);
+  const deleteOp = `data.${name}.delete`;
+  // One more than the limit, to know whether there are more.
+  const read = await app.client.history(target, HISTORY_CALLS + 1);
+  const more = read.length > HISTORY_CALLS;
+  const writes = read.slice(0, HISTORY_CALLS).filter(
+    (r): r is Extract<LedgerRecord, { type: "op.called" }> =>
+      r.type === "op.called" &&
+      r.effect === "write" &&
+      r.output !== undefined &&
+      // A delete of a record that was not there changed nothing.
+      (r.op !== deleteOp || (r.output as { deleted: boolean }).deleted),
+  );
+  // A sandbox run's writes went to its fakes, not to the collection: only its run says it is one.
+  const runs = [...new Set(writes.filter((r) => r.workflow !== CALL_WORKFLOW).map((r) => r.runId))];
+  const sandbox = new Set(
+    (await Promise.all(runs.map((id) => app.client.run(id)))).flatMap((run) => (run?.sandbox ? [run.runId] : [])),
+  );
+  // Newest first, as `history` reads them: each against the write after it in the list, the one before it in time.
+  const kept = writes.filter((w) => !sandbox.has(w.runId));
+  const recordOf = (r: (typeof kept)[number] | undefined) =>
+    r && r.op !== deleteOp ? (r.output as Saved).record : undefined;
+  const entries = kept.map((r, i): HistoryEntry => {
+    const after = recordOf(r);
+    const before = recordOf(kept[i + 1]);
+    return {
+      at: r.at,
+      by: r.actor.id,
+      workflow: r.workflow,
+      runId: r.runId,
+      change: !after ? "deleted" : before ? fieldChanges(declared, before, after) : "created",
+    };
+  });
+  // With more, the oldest write read may not be the record's first: it is only what the next changed.
+  return { writes: more ? entries.slice(0, -1) : entries, more };
+}
+
+/** The fields whose values differ between two records, those `declared` first in its order. */
+function fieldChanges(
+  declared: string[],
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): FieldChange[] {
+  const fields = new Set([...declared, ...Object.keys(after), ...Object.keys(before)]);
+  return [...fields]
+    .filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]))
+    .map((field) => ({ field, before: before[field], after: after[field] }));
 }
 
 /**

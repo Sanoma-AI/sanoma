@@ -26,6 +26,7 @@ import { recordsView } from "../../components/grid/collection.ts";
 import { DataGrid } from "../../components/grid/grid.tsx";
 import { STAGED_FIRST } from "../../components/grid/staged.tsx";
 import { RecordForm } from "../../components/record-form.tsx";
+import { RecordHistory } from "../../components/record-history.tsx";
 import {
   api,
   closeRecord,
@@ -33,6 +34,7 @@ import {
   configQuery,
   countQuery,
   DataSearch,
+  historyQuery,
   listQueryOf,
   recordsQuery,
   usedBy,
@@ -51,13 +53,19 @@ export const Route = createFileRoute("/data/$name")({
   // name, the collection's title. The records are read as the person asking: while the server
   // renders (the loopback login's cookie), here, so the page arrives with them; in the browser,
   // by the page, which keeps the rows on screen while a filter's are read, waits for a name, and
-  // reads nothing for a link's preload. A refusal is the page's to show, not the loader's.
-  loader: async ({ context: { queryClient }, params, deps }) => {
+  // reads nothing for a link's preload. A refusal is the page's to show, not the loader's. The
+  // open record's history the same way: on the server, from the search the request came with.
+  loader: async ({ context: { queryClient }, params, deps, location }) => {
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const collection = collectionNamed(params.name)(config);
     if (!collection) throw notFound();
-    if (import.meta.env.SSR)
-      await queryClient.prefetchQuery(recordsQuery(collection.name, listQueryOf(collection, deps)));
+    if (import.meta.env.SSR) {
+      const { record } = location.search as DataSearch;
+      await Promise.all([
+        queryClient.prefetchQuery(recordsQuery(collection.name, listQueryOf(collection, deps))),
+        record !== undefined && queryClient.prefetchQuery(historyQuery(collection.name, record)),
+      ]);
+    }
     return { crumb: collection.title ?? collection.name };
   },
   head: ({ loaderData, params }) => pageTitle(loaderData?.crumb ?? params.name),
@@ -108,6 +116,7 @@ function CollectionPage() {
         key: collection.key,
         calls: (api as UntypedApi).data[name],
         held: toastIfHeld,
+        history: (key) => historyQuery(name, key).queryKey,
       })
     : undefined;
   // A change is staged over the view of one search: a search that reads other records, or
@@ -209,21 +218,24 @@ function CollectionPage() {
               </CardHeader>
               <CardContent>
                 {view && (search.new || saved) ? (
-                  <RecordForm
-                    // A new record's people start as whoever is asking: drawn again once the
-                    // browser has read who (none while the server renders).
-                    key={search.new ? `new:${actor ?? ""}` : search.record}
-                    collection={collection}
-                    view={view}
-                    saved={saved}
-                    staged={staged}
-                    actor={actor}
-                    onDone={() => {
-                      close();
-                      // An add or a delete changes how many match.
-                      void queryClient.invalidateQueries({ queryKey: countQuery(name, shown.where).queryKey });
-                    }}
-                  />
+                  <div className="flex flex-col gap-6">
+                    <RecordForm
+                      // A new record's people start as whoever is asking: drawn again once the
+                      // browser has read who (none while the server renders).
+                      key={search.new ? `new:${actor ?? ""}` : search.record}
+                      collection={collection}
+                      view={view}
+                      saved={saved}
+                      staged={staged}
+                      actor={actor}
+                      onDone={() => {
+                        close();
+                        // An add or a delete changes how many match.
+                        void queryClient.invalidateQueries({ queryKey: countQuery(name, shown.where).queryKey });
+                      }}
+                    />
+                    {saved && <RecordHistory name={name} recordKey={saved.key} />}
+                  </div>
                 ) : records.data ? (
                   <Notice>
                     No record <code>{search.record}</code> among those listed: it may be filtered out, or gone.

@@ -50,6 +50,7 @@ import {
   getGoLiveChoices,
   getGoLiveProgress,
   getHostDerived,
+  getHistory,
   getHostEnforcement,
   getLastRuns,
   getNextFires,
@@ -668,6 +669,18 @@ export const recordsQuery = (name: string, query: ListQuery<Record<string, unkno
   });
 
 /**
+ * The record `key`'s writes, newest first (`getHistory`), for the record's side panel: read only
+ * by someone the policy lets read the record. The records collection reads it again once a
+ * save or a delete of the record answers (`RecordsSource.history`).
+ */
+export const historyQuery = (name: string, key: string) =>
+  queryOptions({
+    queryKey: [...DATA_KEY, name, "history", key],
+    queryFn: () => getHistory({ data: { name, key } }),
+    staleTime: 5_000,
+  });
+
+/**
  * How many of a collection's records `where` matches (`data.<name>.count`), as the person asking:
  * the grid's footer once its rows reach their limit. Read again after a save that may change it.
  */
@@ -771,6 +784,11 @@ export const ConnectSearch = z.object({
 
 /** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */
 export const closeRecord = (prev: DataSearch): DataSearch => ({ ...prev, record: undefined, new: undefined });
+
+/** The grid's search with the record `key` open in the form: for a link's `search`. */
+export const openRecord =
+  (key: string) =>
+  (prev: DataSearch): DataSearch => ({ ...prev, record: key, new: undefined });
 
 /** The highest code point: after every string that starts with a prefix, under `list`'s byte order. */
 const LAST = "\u{10FFFF}";

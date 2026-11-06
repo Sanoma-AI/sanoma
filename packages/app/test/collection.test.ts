@@ -37,6 +37,7 @@ const sourceOf = (query: object) => ({
   key: "company",
   calls,
   held,
+  history: (key: string) => ["data", "leads", "history", key],
 });
 
 /** The page's view of `rows`, as the loader's prefetch leaves them in the query client. */
@@ -88,9 +89,10 @@ describe("the Data page's records collection", () => {
     await vi.waitFor(() => expect(again.collection.get("Acme")?.record.stage).toBe("new"));
   });
 
-  it("saves an update over the record it found (ifRecord), and keeps what the save answered", async () => {
+  it("saves an update over the record it found (ifRecord), keeps what the save answered, and reads its history again", async () => {
     const view = viewOf(row("Acme", { stage: "new" }));
-    const { collection } = view;
+    const { collection, queryClient } = view;
+    queryClient.setQueryData(["data", "leads", "history", "Acme"], []);
     calls.save.mockImplementationOnce(savedBy);
     const tx = setStage(view, "Acme", "replied");
     // At once, before the call answers.
@@ -102,6 +104,7 @@ describe("the Data page's records collection", () => {
     });
     expect(savedIn(tx, "Acme")).toMatchObject({ record: { stage: "replied" }, updatedBy: "ada" });
     expect(collection.get("Acme")).toMatchObject({ record: { stage: "replied" }, updatedBy: "ada" });
+    expect(queryClient.getQueryState(["data", "leads", "history", "Acme"])?.isInvalidated).toBe(true);
   });
 
   it("saves the grid's edits one after another, each over the record the one before saved", async () => {
