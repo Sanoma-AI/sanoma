@@ -15,7 +15,7 @@ export const RUNNER_HEALTH = "/runner/health";
  * The protocol's version, which the runner's health answers: a backend replaces a runner
  * that answers another, one an earlier release started in a box that slept.
  */
-export const RUNNER_PROTOCOL = 1;
+export const RUNNER_PROTOCOL = 2;
 
 /** What the runner's health (`RUNNER_HEALTH`) answers: its protocol, and its pid, which a backend replacing it ends. */
 export interface RunnerHealth {
