@@ -16,6 +16,7 @@ import type { UntypedApi } from "../../../api-client.ts";
 import { ButtonLink, CardHeading, CrumbHeader, Notice, toastIfHeld, UsedBy } from "../../../components/common.tsx";
 import { GridFilters } from "../../../components/data-grid.tsx";
 import { recordsView } from "../../../components/grid/collection.ts";
+import { ColumnPanel } from "../../../components/grid/columns.tsx";
 import { DataGrid } from "../../../components/grid/grid.tsx";
 import { STAGED_FIRST } from "../../../components/grid/staged.tsx";
 import { RecordForm } from "../../../components/record-form.tsx";
@@ -133,6 +134,9 @@ function CollectionPage() {
   const navigate = Route.useNavigate();
   const close = () => void navigate({ search: closeRecord, resetScroll: false });
   const formOpen = search.new === true || search.record !== undefined;
+  // The column panel takes the form's place: one or the other beside the grid.
+  const { column } = search;
+  const sideOpen = formOpen || column !== undefined;
   // The record as the collection has it, an edit of it still saving included: the form must not
   // build its values from the rows as stored and save over that edit.
   const saved = search.record === undefined ? undefined : view?.collection.get(search.record);
@@ -176,7 +180,7 @@ function CollectionPage() {
         {/* Its own per collection: a filter typed on one never lands on another. */}
         <GridFilters key={name} collection={collection} search={search} staged={staged} />
         {/* The form beside the grid on a wide screen, under it on a narrow one; the grid scrolls sideways in its column. */}
-        <div className={cn("grid items-start gap-4", formOpen && "lg:grid-cols-[minmax(0,1fr)_24rem]")}>
+        <div className={cn("grid items-start gap-4", sideOpen && "lg:grid-cols-[minmax(0,1fr)_24rem]")}>
           <div className="min-w-0">
             {view ? (
               <DataGrid
@@ -200,6 +204,15 @@ function CollectionPage() {
               <Skeleton role="status" aria-label="Loading the records" className="h-40 w-full" />
             )}
           </div>
+          {column && !formOpen && (
+            <ColumnPanel
+              // Its fields start from what it changes: another column's is a panel of its own.
+              key={JSON.stringify(column)}
+              collection={collection}
+              column={column}
+              rows={records.data ?? []}
+            />
+          )}
           {formOpen && (
             <Card aria-label="Record" role="region" className="lg:sticky lg:top-4">
               <CardHeader>

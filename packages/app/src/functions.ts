@@ -14,6 +14,7 @@ import {
   HistoryRequest,
   InviteRequest,
   PreviewQuery,
+  ProposeColumnChange,
   RunsQuery,
   SetCredentialRequest,
 } from "./api.ts";
@@ -50,6 +51,7 @@ import {
   validate,
 } from "./server/core.ts";
 import { availableConnectors } from "./server/available.ts";
+import { proposeColumnChange } from "./server/columns.ts";
 import { goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
 import { hostDerived } from "./server/host-derived.ts";
 import { invitePerson, peopleSignIns } from "./server/people.ts";
@@ -257,6 +259,15 @@ export const getHistory = createServerFn(READ)
   .middleware([withPrincipal])
   .validator(validate(HistoryRequest))
   .handler(({ data, context }) => recordHistory(context.app, context.principal, data));
+
+/**
+ * A change to a collection's columns, from the grid's column menu or its New column panel: the
+ * collection's declaration edited by a `patch` run, the change it opened carrying the plan (`proposeColumnChange`).
+ */
+export const proposeColumnChangeFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(ProposeColumnChange))
+  .handler(({ data, context }) => proposeColumnChange(context.app, context.principal, data));
 
 /**
  * A site's `api` (api-client.ts): an operation called directly, or a workflow started or its runs

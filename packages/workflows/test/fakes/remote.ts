@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -295,9 +295,24 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
       const id = draftOf(target.ref);
       if (remote && id !== undefined) remote.push(target.ref, draftAt(id).head);
     },
+    // A draft not edited yet starts as a copy of the root, as a branch off main would, and takes
+    // its commits' files as edits (an app step's `patch`, say).
     async draft(id) {
+      if (!drafts.has(id)) {
+        const copy = mkdtempSync(join(dir, `${id}-`));
+        cpSync(root, copy, { recursive: true });
+        drafts.set(id, { root: copy, files: new Map(), head: "", edits: 0 });
+      }
       const draft = draftAt(id);
-      return { branch: draftBranch(id), root: draft.root, commit: () => undefined };
+      return {
+        branch: draftBranch(id),
+        root: draft.root,
+        commit: ({ paths }) => {
+          for (const path of paths) draft.files.set(path, readFileSync(join(draft.root, path), "utf8"));
+          draft.head = sha(`${id} ${++draft.edits}`);
+          return { revision: draft.head };
+        },
+      };
     },
     async drafts() {
       return [...drafts.keys()].toSorted();

@@ -740,8 +740,18 @@ export const DataSearch = z.object({
   record: z.string().min(1).optional().catch(undefined),
   new: WorkflowSearch.shape.new,
   hide: z.array(z.string().min(1)).min(1).optional().catch(undefined),
+  column: z
+    .object({
+      change: z.enum(["add", "rename", "retype", "convert", "delete"]),
+      field: z.string().min(1).optional(),
+      key: z.string().min(1).optional(),
+    })
+    .optional()
+    .catch(undefined),
 });
 export type DataSearch = z.infer<typeof DataSearch>;
+/** The column panel's search (`?column=`): what to change of which field (a free-form field's `key` to make a column), or a new column. */
+export type ColumnSearch = NonNullable<DataSearch["column"]>;
 
 /**
  * A list's app tab (`?app=` on Data, Workflows and Permissions, `components/app-scope.tsx`): an
@@ -783,12 +793,17 @@ export const ConnectSearch = z.object({
 });
 
 /** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */
-export const closeRecord = (prev: DataSearch): DataSearch => ({ ...prev, record: undefined, new: undefined });
+export const closeRecord = (prev: DataSearch): DataSearch => ({
+  ...prev,
+  record: undefined,
+  new: undefined,
+  column: undefined,
+});
 
 /** The grid's search with the record `key` open in the form: for a link's `search`. */
 export const openRecord =
   (key: string) =>
-  (prev: DataSearch): DataSearch => ({ ...prev, record: key, new: undefined });
+  (prev: DataSearch): DataSearch => ({ ...prev, record: key, new: undefined, column: undefined });
 
 /** The highest code point: after every string that starts with a prefix, under `list`'s byte order. */
 const LAST = "\u{10FFFF}";

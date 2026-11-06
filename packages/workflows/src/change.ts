@@ -48,12 +48,17 @@ export const ChangeFacts = z.object({
 });
 export type ChangeFacts = z.infer<typeof ChangeFacts>;
 
-/** What opening a change takes: its draft's id, and the pull request's title, body and the change page's link. */
+/**
+ * What opening a change takes: its draft's id, and the pull request's title, body and the change
+ * page's link; for a change to a collection's columns, its plan as the app drafted it, which the
+ * change's review shows (`ChangeState.plan`): JSON the runtime carries and does not read.
+ */
 export const ChangeInput = z.object({
   id: z.string().regex(DRAFT_ID),
   title: z.string().min(1),
   body: z.string().optional(),
   page: z.string().url().optional(),
+  plan: z.json().optional(),
 });
 export type ChangeInput = z.infer<typeof ChangeInput>;
 
@@ -403,6 +408,8 @@ export interface ChangeState {
   branch: string;
   title: string;
   page?: string;
+  /** A change to a collection's columns: its plan, as opening it was given it (`ChangeInput.plan`). */
+  plan?: ChangeInput["plan"];
   phase:
     | "opening"
     | "planning"
@@ -443,6 +450,7 @@ export const initialChangeState = (input: ChangeInput): ChangeState => ({
   branch: "",
   title: input.title,
   ...(input.page !== undefined && { page: input.page }),
+  ...(input.plan !== undefined && { plan: input.plan }),
   phase: "opening",
   card: NO_CARD,
 });

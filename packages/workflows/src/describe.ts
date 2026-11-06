@@ -49,13 +49,14 @@ import { sourceKeyIds } from "./host.ts";
 export * from "./description.ts";
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 export { admit, loadDataFiles, readPeople, type DataFiles, type DeclaredPeople } from "./resources.ts";
-// The writer: setting a resource's fields in its data file, and rendering a new one.
+// The writer: setting, renaming and removing a declaration's fields in its data file, and rendering a new one.
 export {
   type DataFileContent,
   type DataValue,
   formatOptions,
   NotLiteral,
   Reference,
+  renameFields,
   renderDataFile,
   setFields,
 } from "./writer.ts";

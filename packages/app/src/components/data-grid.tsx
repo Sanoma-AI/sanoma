@@ -13,6 +13,8 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
 import { Field, FieldLabel } from "#/components/ui/field.tsx";
@@ -131,7 +133,8 @@ export function GridFilters({
 
 /**
  * Which fields the grid shows (`?hide=`): a menu of the fields but the key, which names each
- * row, and, while some are hidden, a chip saying how many that shows them all again.
+ * row, and New column (the column panel, `grid/columns.tsx`); while some are hidden, a chip
+ * saying how many that shows them all again.
  */
 function HiddenFields({
   collection,
@@ -148,7 +151,6 @@ function HiddenFields({
     const next = shown ? hidden.filter((f) => f !== field) : [...hidden, field];
     set({ hide: next.length ? next : undefined });
   };
-  if (fields.length === 0) return null;
   return (
     <div className="flex items-center gap-2">
       <DropdownMenu>
@@ -166,6 +168,10 @@ function HiddenFields({
               {field}
             </DropdownMenuCheckboxItem>
           ))}
+          {fields.length > 0 && <DropdownMenuSeparator />}
+          <DropdownMenuItem onClick={() => set({ column: { change: "add" }, record: undefined, new: undefined })}>
+            New column
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       {hidden.length > 0 && (
