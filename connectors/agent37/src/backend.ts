@@ -4,8 +4,9 @@ import { gzipSync } from "node:zlib";
 import {
   type Box,
   RUNNER_PORT,
-  runnerAnswers,
+  RUNNER_PROTOCOL,
   runnerBox,
+  runnerHealth,
   runnerScript,
   type SandboxBackend,
   type SandboxContext,
@@ -117,9 +118,8 @@ export function agent37Backend(
 /** How long `stop` waits for the runner to kill what runs in the box, in ms. */
 const STOP_MS = 30_000;
 
-/** Where the runner is kept in a box, under the home of the image's user, its pid and its log. */
+/** Where the runner is kept in a box, under the home of the image's user, and its log. */
 const RUNNER = ".sanoma/runner.cjs";
-const PID = ".sanoma/runner.pid";
 const LOG = ".sanoma/runner.log";
 /** The most of the packed runner one exec carries: its body takes 128 KB. */
 const CHUNK = 96_000;
@@ -128,9 +128,11 @@ let packing: Promise<string> | undefined;
 
 /**
  * Starts the runner in the instance `id` unless it answers at `url` with this release's protocol:
- * writes it in with exec (gzip in base64, in chunks), ends the one it replaces, starts it
- * detached, and waits until it answers, up to `deadline`. A box that slept kept it running; one
- * that was stopped booted fresh without it.
+ * writes it in with exec (gzip in base64, in chunks), ends the one that answered another protocol
+ * (by the pid it answered), starts it detached, and waits until a runner of this protocol
+ * answers, up to `deadline`. A box that slept kept it running; one that was stopped booted fresh
+ * without it. One that answered nothing is never killed: when it was there all along, the new one
+ * finds its port taken and ends, and the old one answers.
  */
 async function runnerUp(
   api: Agent37Api,
@@ -139,14 +141,22 @@ async function runnerUp(
   headers: Record<string, string>,
   deadline: number,
 ): Promise<void> {
-  if (await runnerAnswers(url, headers)) return;
+  const found = await runnerHealth(url, headers);
+  if (isCurrent(found)) return;
   const sh = async (command: string) => {
     const { exit_code, stderr } = await api.exec(id, `cd && ${command}`);
     if (exit_code !== 0) {
       throw new Error(`agent37: starting the runner in ${id} failed (exit ${exit_code}): ${stderr.trim()}`);
     }
   };
-  const packed = await (packing ??= runnerScript().then((script) => gzipSync(script).toString("base64")));
+  const packed = await (packing ??= runnerScript().then(
+    (script) => gzipSync(script).toString("base64"),
+    (error: unknown) => {
+      // A runner not built yet is not cached: the next open reads it again.
+      packing = undefined;
+      throw error;
+    },
+  ));
   // A file of its own, so two opens at once write theirs apart.
   const part = `.sanoma/runner-${randomBytes(4).toString("hex")}`;
   const writes: string[] = [];
@@ -154,19 +164,25 @@ async function runnerUp(
     // Base64 is safe unquoted.
     writes.push(`mkdir -p .sanoma && printf %s ${packed.slice(at, at + CHUNK)} >${at ? ">" : ""} ${part}.b64`);
   }
-  // The last write starts it, detached, its output to a file: exec answers once nothing holds its
-  // own. The runner it replaces (another release's) ends first, and with it what it started.
+  // The runner it replaces (another release's) ends first, and with it what it started: SIGTERM,
+  // then SIGKILL after 5 s.
+  const end = found
+    ? `kill ${found.pid} 2>/dev/null; i=0; while kill -0 ${found.pid} 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; kill -9 ${found.pid} 2>/dev/null; `
+    : "";
+  // The last write starts it, detached, its output to a file: exec answers once nothing holds its own.
   writes[writes.length - 1] +=
     ` && base64 -d <${part}.b64 | gunzip >${part}.cjs && rm ${part}.b64 && mv ${part}.cjs ${RUNNER} && ` +
-    `{ old=$(cat ${PID} 2>/dev/null); [ -n "$old" ] && kill $old 2>/dev/null && while kill -0 $old 2>/dev/null; do sleep 0.1; done; ` +
-    `nohup node ${RUNNER} >${LOG} 2>&1 </dev/null & echo $! >${PID}; }`;
+    `{ ${end}nohup node ${RUNNER} >${LOG} 2>&1 </dev/null & }`;
   for (const write of writes) await sh(write);
   // Node starts it in a fraction of a second.
-  while (!(await runnerAnswers(url, headers))) {
+  while (!isCurrent(await runnerHealth(url, headers))) {
     if (Date.now() > deadline) throw new Error(`agent37: the runner in ${id} does not answer; its log is ~/${LOG}`);
     await delay(200);
   }
 }
+
+/** Whether a runner's health is this release's protocol. */
+const isCurrent = (health?: { protocol: number }) => health?.protocol === RUNNER_PROTOCOL;
 
 /** The instances that hold the box `name`, but those on their way out. */
 const holding = async (api: Agent37Api, name: string) =>

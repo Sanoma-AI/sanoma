@@ -6,10 +6,16 @@
 export const RUNNER_PORT = 7700;
 
 /**
- * The protocol's version, which the runner's `GET /health` answers (`{ protocol }`): a backend
- * restarts a runner that answers another, one an earlier release started in a box that slept.
+ * The protocol's version, which the runner's `GET /health` answers: a backend replaces a runner
+ * that answers another, one an earlier release started in a box that slept.
  */
 export const RUNNER_PROTOCOL = 1;
+
+/** What the runner's `GET /health` answers: its protocol, and its pid, which a backend replacing it ends. */
+export interface RunnerHealth {
+  protocol: number;
+  pid: number;
+}
 
 /** What a binary frame's bytes are: a process's stdin, stdout or stderr, or a file read or written. */
 export const STDIN = 0;

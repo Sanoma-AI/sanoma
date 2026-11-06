@@ -263,8 +263,8 @@ export {
   type SandboxSpec,
 } from "./sandbox-contract.ts";
 export { LOCAL_SANDBOX, localBackend } from "./local-sandbox.ts";
-export { runnerAnswers, runnerBox, runnerScript } from "./runner-box.ts";
-export { RUNNER_PORT, RUNNER_PROTOCOL } from "./runner-protocol.ts";
+export { runnerBox, runnerHealth, runnerScript } from "./runner-box.ts";
+export { RUNNER_PORT, RUNNER_PROTOCOL, type RunnerHealth } from "./runner-protocol.ts";
 export type { Chat, Chats } from "./chats.ts";
 export type { Tokens } from "./tokens.ts";
 export { type InviteRequest, openInvite, sealInvite, sealLoginCode } from "./seal.ts";

@@ -10,6 +10,7 @@ import {
   RUNNER_PORT,
   RUNNER_PROTOCOL,
   type RunnerAnswer,
+  type RunnerHealth,
   type RunnerRequest,
   STDERR,
   STDIN,
@@ -34,8 +35,9 @@ const port = Number(process.env.SANOMA_RUNNER_PORT ?? RUNNER_PORT);
 const host = process.env.SANOMA_RUNNER_HOST ?? "0.0.0.0";
 
 /**
- * How long an exited command's output still queued here may take to be sent before its exit, in
- * ms: `localBox` has waited for its pipes already, unless what it left running holds them.
+ * How long an exited command's output may go quiet before its exit is sent, in ms: `localBox` has
+ * waited for its pipes already, unless what it left running holds them. Output held back for a
+ * slow connection is not quiet.
  */
 const LAST_OUTPUT = 50;
 /** How much a connection may hold unsent before a command's output waits for it, in bytes. */
@@ -49,7 +51,9 @@ const box = localBox("runner", homedir(), own as Record<string, string>);
 
 const server = createServer((req, res) => {
   if (req.url !== "/health") return void res.writeHead(404).end();
-  res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ protocol: RUNNER_PROTOCOL }));
+  res
+    .writeHead(200, { "content-type": "application/json" })
+    .end(JSON.stringify({ protocol: RUNNER_PROTOCOL, pid: process.pid } satisfies RunnerHealth));
 });
 new WebSocketServer({ server })
   .on("connection", serve)
@@ -79,13 +83,18 @@ function serve(ws: WebSocket) {
     for (const id of inputs.keys()) endInput(id);
   });
   ws.on("message", (data: Buffer, binary) => {
-    if (binary) return received(unframe(data));
+    // A frame that is not the protocol's is answered, never a crash of the runner.
+    if (binary) {
+      if (data.length < 5) return say({ op: "error", message: "a binary frame is an id, a stream and bytes" });
+      return received(unframe(data));
+    }
     let request: RunnerRequest;
     try {
       request = JSON.parse(String(data));
     } catch {
       return say({ op: "error", message: "a text frame is JSON" });
     }
+    if (typeof request !== "object" || request === null) return say({ op: "error", message: "a request is an object" });
     handle(request).catch((error: unknown) => say({ op: "error", id: request.id, message: errorMessage(error) }));
   });
 
@@ -95,17 +104,23 @@ function serve(ws: WebSocket) {
         const { id, command, cwd, env, stdin } = request;
         const starting = box.run(command, { cwd, env, stdin });
         processes.set(id, starting);
-        if (stdin)
-          inputs.set(
-            id,
-            starting.then((started) => started.stdin.getWriter()),
-          );
+        if (stdin) {
+          const input = starting.then((started) => started.stdin.getWriter());
+          // A run that fails to start is answered below; its stdin's rejection is not another.
+          input.catch(() => {});
+          inputs.set(id, input);
+        }
         try {
           const started = await starting;
-          const pumped = Promise.all([pump(id, STDOUT, started.stdout), pump(id, STDERR, started.stderr)]);
+          const moved = { at: Date.now(), done: false };
+          const pumped = Promise.all([
+            pump(id, STDOUT, started.stdout, moved),
+            pump(id, STDERR, started.stderr, moved),
+          ]).finally(() => (moved.done = true));
           const { exitCode } = await started.wait();
-          // Unless what it left running holds its pipes, what it printed last goes out first.
-          await Promise.race([pumped, delay(LAST_OUTPUT)]);
+          // What it printed last goes out first, unless what it left running holds its pipes.
+          moved.at = Date.now();
+          while (!moved.done && Date.now() - moved.at < LAST_OUTPUT) await Promise.race([pumped, delay(10)]);
           return say({ op: "exit", id, code: exitCode });
         } finally {
           processes.delete(id);
@@ -152,13 +167,17 @@ function serve(ws: WebSocket) {
     return input?.then((writer) => writer.close()).catch(() => {});
   }
 
-  /** Sends what `from` prints, until it ends or fails. */
-  async function pump(id: number, stream: number, from: ReadableStream<Uint8Array>) {
+  /** Sends what `from` prints, until it ends or fails, keeping in `moved` when it last sent or waited to. */
+  async function pump(id: number, stream: number, from: ReadableStream<Uint8Array>, moved: { at: number }) {
     try {
       for await (const chunk of from) {
         // Its output waits for a slow connection, and so the command does, its pipe full.
-        while (ws.readyState === ws.OPEN && ws.bufferedAmount > UNSENT) await delay(10);
+        while (ws.readyState === ws.OPEN && ws.bufferedAmount > UNSENT) {
+          moved.at = Date.now();
+          await delay(10);
+        }
         send(frame(id, stream, chunk));
+        moved.at = Date.now();
       }
     } catch {
       // A pipe that failed has nothing more to say.

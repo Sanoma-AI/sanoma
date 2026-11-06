@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { checkSandbox } from "@sanoma-ai/testing/sandbox";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runnerBox, runnerScript } from "../src/runner-box.ts";
+import { runnerBox, runnerHealth, runnerScript } from "../src/runner-box.ts";
 import { RUNNER_PROTOCOL } from "../src/runner-protocol.ts";
 import type { Box, SandboxBackend } from "../src/sandbox-contract.ts";
 
@@ -59,7 +59,9 @@ const text = (stream: ReadableStream<Uint8Array>) => new Response(stream).text()
 
 describe("the sandbox runner", () => {
   it("answers its health check", async () => {
-    expect(await (await fetch(`${url}/health`)).json()).toEqual({ protocol: RUNNER_PROTOCOL });
+    expect(await (await fetch(`${url}/health`)).json()).toEqual({ protocol: RUNNER_PROTOCOL, pid: runner.pid });
+    expect(await runnerHealth(url)).toEqual({ protocol: RUNNER_PROTOCOL, pid: runner.pid });
+    expect(await runnerHealth(`${url}/other`)).toBeUndefined();
     expect((await fetch(`${url}/other`)).status).toBe(404);
   });
 
@@ -116,6 +118,20 @@ describe("the sandbox runner", () => {
     const found = await two.run("pgrep -fx 'sleep 4247' || true");
     expect(await text(found.stdout)).toBe("");
     await Promise.all([one.stop(), two.stop()]);
+  });
+
+  it("answers frames that are not the protocol's, and goes on", async () => {
+    const ws = new WebSocket(url.replace(/^http/, "ws"));
+    const said: string[] = [];
+    ws.addEventListener("message", ({ data }) => said.push(String(data)));
+    await new Promise((done) => ws.addEventListener("open", done, { once: true }));
+    ws.send(new Uint8Array([1, 2]));
+    ws.send("null");
+    ws.send("{");
+    await expect.poll(() => said.length).toBe(3);
+    expect(said.map((s) => JSON.parse(s).op)).toEqual(["error", "error", "error"]);
+    ws.close();
+    expect(await runnerHealth(url)).toEqual({ protocol: RUNNER_PROTOCOL, pid: runner.pid });
   });
 
   it("fails what it cannot do as the runner's error", async () => {

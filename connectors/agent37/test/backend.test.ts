@@ -1,4 +1,5 @@
 import { checkSandbox } from "@sanoma-ai/testing/sandbox";
+import { RUNNER_PORT, runnerHealth } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { agent37Api } from "../src/api.ts";
 import { agent37Backend, BOX, labelOf } from "../src/backend.ts";
@@ -162,11 +163,10 @@ describe("agent37Backend", () => {
     // Another release's runner, in its place: it answers another protocol.
     await api.stop(box.id);
     await api.start(box.id);
-    const old = `require("node:http").createServer((q, s) => s.end('{"protocol":0}')).listen(process.env.SANOMA_RUNNER_PORT, "127.0.0.1")`;
-    await api.exec(
-      box.id,
-      `cd && { nohup node -e '${old}' >/dev/null 2>&1 </dev/null & echo $! >.sanoma/runner.pid; }`,
-    );
+    const old = `require("node:http").createServer((q, s) => s.end(JSON.stringify({ protocol: 0, pid: process.pid }))).listen(process.env.SANOMA_RUNNER_PORT, "127.0.0.1")`;
+    await api.exec(box.id, `cd && { nohup node -e '${old}' >/dev/null 2>&1 </dev/null & }`);
+    const health = () => runnerHealth(vendor.edge(box.id, RUNNER_PORT), { "X-Agent37-Key": KEY });
+    await expect.poll(health).toMatchObject({ protocol: 0 });
     vendor.sent.length = 0;
     const again = await open(backend, "sanoma-old");
     expect(execs(box.id)).toBeGreaterThan(0);

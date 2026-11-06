@@ -3,8 +3,8 @@ import { fileURLToPath } from "node:url";
 import {
   FILE,
   frame,
-  RUNNER_PROTOCOL,
   type RunnerAnswer,
+  type RunnerHealth,
   type RunnerRequest,
   STDERR,
   STDIN,
@@ -31,13 +31,18 @@ export async function runnerScript(): Promise<Uint8Array> {
 }
 
 /**
- * Whether the runner at `url` (asked with `headers`) answers, and speaks this release's protocol:
- * a backend starts one when it does not, and replaces one that speaks another.
+ * What the runner at `url` (asked with `headers`) answers at `/health`, or undefined when nothing
+ * answers as a runner: a backend starts one then, and replaces one of another `protocol`.
  */
-export const runnerAnswers = (url: string, headers?: Record<string, string>): Promise<boolean> =>
+export const runnerHealth = (url: string, headers?: Record<string, string>): Promise<RunnerHealth | undefined> =>
   fetch(`${url}/health`, { headers, signal: AbortSignal.timeout(5_000) })
-    .then(async (res) => res.ok && ((await res.json()) as { protocol?: unknown }).protocol === RUNNER_PROTOCOL)
-    .catch(() => false);
+    .then(async (res) => {
+      const health = res.ok ? ((await res.json()) as Partial<RunnerHealth> | null) : null;
+      return typeof health?.protocol === "number" && typeof health.pid === "number"
+        ? { protocol: health.protocol, pid: health.pid }
+        : undefined;
+    })
+    .catch(() => undefined);
 
 const encoder = new TextEncoder();
 
@@ -198,11 +203,15 @@ export function runnerBox({
       await ask({ op: "write", path, mode }, bytes);
     },
     async stop() {
-      await ask({ op: "stop" });
-      // The next call opens a new connection, not this closing one.
-      const closing = current;
-      current = undefined;
-      (await closing)?.ws.close();
+      // This connection, not one a call opens meanwhile after a drop.
+      const closing = connect();
+      try {
+        await ask({ op: "stop" });
+      } finally {
+        // The next call opens a new connection, not this closing one.
+        if (current === closing) current = undefined;
+        (await closing.catch(() => undefined))?.ws.close();
+      }
     },
   };
 }
