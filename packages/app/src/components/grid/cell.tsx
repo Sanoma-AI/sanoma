@@ -2,6 +2,7 @@ import { Checkbox } from "#/components/ui/checkbox.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { buildInput, initialValue, type ScalarField, type ScalarValue } from "../../form/schema.ts";
+import { withValue } from "./collection.ts";
 
 // A cell's editor, by its field's kind (`fieldsOf(collection.record)`): text and a number in an
 // input, a date in a date input, yes or no a checkbox, an enum's values and the declared people
@@ -44,15 +45,30 @@ export function recordWith(
   return { record: withValue(base, field.key, input[field.key]) };
 }
 
+/** Yes or no as spreadsheets write them (TRUE, FALSE), and as people do. */
+const YES = /^(true|yes)$/i;
+const NO = /^(false|no)$/i;
+
 /**
- * `record` with `field` set to `value`, or left out when `value` is undefined: in the record's
- * own order, so an edit that changes nothing reads as the record it was.
+ * A cell's text as the field's value, as a paste, a fill or an edit of a selection writes it:
+ * read as the form reads what is typed (`buildInput`), an enum by its value's text and yes or no
+ * from TRUE and FALSE; no text clears an optional field. What it cannot be read as is an `error`.
  */
-export function withValue(record: Record<string, unknown>, field: string, value: unknown): Record<string, unknown> {
-  const next = { ...record };
-  if (value === undefined) delete next[field];
-  else next[field] = value;
-  return next;
+export function valueOf(field: ScalarField, text: string): { value: unknown } | { error: string } {
+  const trimmed = text.trim();
+  if (trimmed === "") return field.required ? { error: "Needs a value" } : { value: undefined };
+  let draft: ScalarValue = text;
+  if (field.kind === "boolean") {
+    if (!YES.test(trimmed) && !NO.test(trimmed)) return { error: "Not yes or no" };
+    draft = YES.test(trimmed);
+  } else if (field.kind === "enum") {
+    const index = field.options?.findIndex((option) => String(option) === trimmed) ?? -1;
+    if (index === -1) return { error: "Not one of its choices" };
+    draft = String(index);
+  }
+  const { input, errors } = buildInput([field], { [field.key]: draft });
+  const error = errors[field.key];
+  return error ? { error } : { value: input[field.key] };
 }
 
 /** Focuses an editor once it mounts, its caret after the text. */

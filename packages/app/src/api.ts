@@ -586,10 +586,11 @@ export type EnforcementResponse = (HostEnforcement & { host: string }) | null;
 export interface ErrorResponse {
   error: string;
   /**
-   * The runtime's code, when the error has one, or `record_changed`: a collection's `save` with
-   * `ifRecord` finding the record changed since, or gone. Branch on this, never on `error`.
+   * The runtime's code, when the error has one, `record_changed`: a collection's `save` with
+   * `ifRecord` finding the record changed since, or gone (a `saveMany` any entry's, `ifAbsent`
+   * too), or `record_exists`: a `save` with `ifAbsent` finding one. Branch on this, never on `error`.
    */
-  code?: ErrorCode | "record_changed";
+  code?: ErrorCode | "record_changed" | "record_exists";
   /** For `invalid_input`: what is wrong with the request or the input. */
   issues?: InputIssue[];
   /** For `not_approver`: who may decide. */
@@ -600,8 +601,12 @@ export interface ErrorResponse {
   runId?: string;
   /** For a form's Save refused (`invalid_input` from a `patch` run): the field its file computes, by dotted path, which only the code changes. */
   field?: string;
-  /** For `record_changed`, when the runtime says: the record as it stands now, or null once it is gone. */
+  /** For `record_changed` and `record_exists`, when the runtime says: the record as it stands now, or null once it is gone. */
   current?: Saved<Record<string, Json>> | null;
+  /** For a `saveMany`'s `record_changed`: every record it found changed, or gone, as it stands now. */
+  conflicts?: { key: string; current: Saved<Record<string, Json>> | null }[];
+  /** For a `saveMany`'s `policy_denied`: the keys of every entry the policy denied, saves and deletes alike. */
+  denied?: string[];
 }
 
 /** A JSON value, as a record's fields hold them. */

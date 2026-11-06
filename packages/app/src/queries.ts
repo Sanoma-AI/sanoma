@@ -681,9 +681,22 @@ export const historyQuery = (name: string, key: string) =>
   });
 
 /**
+ * How many of a collection's records `where` matches (`data.<name>.count`), as the person asking:
+ * the grid's footer once its rows reach their limit. Read again after a save that may change it.
+ */
+export const countQuery = (name: string, where: ListQuery<Record<string, unknown>>["where"]) =>
+  queryOptions({
+    queryKey: [...DATA_KEY, name, "count", where ?? null],
+    queryFn: async () =>
+      ((await (api as UntypedApi).data[name].count(where ? { where } : {})) as { count: number }).count,
+    staleTime: 5_000,
+  });
+
+/**
  * The keys of a collection's records whose save or delete waits for an approval: the pending
- * policy holds of `data.<name>.save` and `.delete` among the runs waiting (`waitingRunsQuery`,
- * the Inbox's), so a decision, or the run ending, takes the key off.
+ * policy holds of `data.<name>.save`, `.delete` and `.saveMany` (each of its records and
+ * deletes) among the runs waiting (`waitingRunsQuery`, the Inbox's), so a decision, or the run
+ * ending, takes the key off.
  */
 export const heldQuery = ({ name, key }: Pick<CollectionEntry, "name" | "key">) =>
   queryOptions({
@@ -693,10 +706,20 @@ export const heldQuery = ({ name, key }: Pick<CollectionEntry, "name" | "key">) 
         .filter((run) => run.workflow === CALL_WORKFLOW)
         .flatMap(pendingApprovals)
         .flatMap(({ op, input }) => {
-          const held = input as { key?: unknown; record?: Record<string, unknown> } | undefined;
+          type Entry = { key?: unknown; record?: Record<string, unknown> } | undefined;
+          const held = input as (Entry & { records?: Entry[]; deletes?: Entry[] }) | undefined;
           const at =
-            op === `data.${name}.save` ? held?.record?.[key] : op === `data.${name}.delete` ? held?.key : undefined;
-          return typeof at === "string" ? [at] : [];
+            op === `data.${name}.save`
+              ? [held?.record?.[key]]
+              : op === `data.${name}.delete`
+                ? [held?.key]
+                : op === `data.${name}.saveMany`
+                  ? [
+                      ...(held?.records ?? []).map((entry) => entry?.record?.[key]),
+                      ...(held?.deletes ?? []).map((entry) => entry?.key),
+                    ]
+                  : [];
+          return at.filter((k): k is string => typeof k === "string");
         }),
   });
 

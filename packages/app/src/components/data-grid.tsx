@@ -22,6 +22,7 @@ import { TableHead } from "#/components/ui/table.tsx";
 import { issueText } from "../form/schema.ts";
 import { type DataSearch, enumFields, LIMIT_CHOICES } from "../queries.ts";
 import { plural, Tip, ToneBadge } from "./common.tsx";
+import { STAGED_FIRST } from "./grid/staged.tsx";
 
 // A collection's grid's pieces around the cells (`grid/` draws the grid): its filters, sorted by
 // any field, filtered by key and by each enum field, at most `limit` of them, some fields hidden;
@@ -34,8 +35,19 @@ export const FROM = "/data/$name";
 /** How long the key's filter waits after a keystroke before it reads the records again. */
 const TYPING_MS = 250;
 
-/** The filters of a collection's grid: a key's start, each enum field's value, and the limit. */
-export function GridFilters({ collection, search }: { collection: CollectionEntry; search: DataSearch }) {
+/**
+ * The filters of a collection's grid: a key's start, each enum field's value, and the limit;
+ * disabled while a change is `staged`, which another search's records would lose.
+ */
+export function GridFilters({
+  collection,
+  search,
+  staged,
+}: {
+  collection: CollectionEntry;
+  search: DataSearch;
+  staged: boolean;
+}) {
   const navigate = useNavigate({ from: FROM });
   const set = (next: Partial<DataSearch>) =>
     void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true, resetScroll: false });
@@ -58,8 +70,8 @@ export function GridFilters({ collection, search }: { collection: CollectionEntr
     // Typing alone writes the URL: not the URL's own change, which the effect above follows.
   }, [key]);
   const limit = search.limit ?? LIST_LIMIT.default;
-  return (
-    <div className="flex flex-wrap items-end gap-3">
+  const filters = (
+    <fieldset disabled={staged} className="flex flex-wrap items-end gap-3">
       <Field className="w-56">
         <FieldLabel htmlFor="grid-key">{collection.key} starts with</FieldLabel>
         <div className="relative">
@@ -112,8 +124,9 @@ export function GridFilters({ collection, search }: { collection: CollectionEntr
         </NativeSelect>
       </Field>
       <HiddenFields collection={collection} hide={search.hide} set={set} />
-    </div>
+    </fieldset>
   );
+  return staged ? <Tip tip={STAGED_FIRST}>{filters}</Tip> : filters;
 }
 
 /**
@@ -167,31 +180,36 @@ function HiddenFields({
 }
 
 /**
- * A field's heading, sorting by it: ascending, then descending, then by key again. Not preloaded:
- * hovering a heading would read the records in its order.
+ * A field's heading, sorting by it: ascending, then descending, then by key again; disabled while
+ * a change is `staged`. Not preloaded: hovering a heading would read the records in its order.
  */
 export function SortHead({
   field,
   order,
+  staged,
   children,
   ...props
-}: { field: string; order: string | undefined } & ComponentProps<typeof TableHead>) {
+}: { field: string; order: string | undefined; staged: boolean } & ComponentProps<typeof TableHead>) {
   const sort = order === field ? "ascending" : order === `-${field}` ? "descending" : undefined;
   const next = sort === undefined ? field : sort === "ascending" ? `-${field}` : undefined;
   const Icon = sort === "ascending" ? ArrowUpIcon : sort === "descending" ? ArrowDownIcon : ArrowsDownUpIcon;
+  const link = (
+    <Link
+      from={FROM}
+      search={(prev) => ({ ...prev, order: next })}
+      disabled={staged}
+      replace
+      resetScroll={false}
+      preload={false}
+      className="inline-flex items-center gap-1 underline-offset-4 hover:underline aria-disabled:no-underline"
+    >
+      {field}
+      <Icon aria-hidden className={sort ? "size-3.5" : "size-3.5 text-muted-foreground"} />
+    </Link>
+  );
   return (
     <TableHead aria-sort={sort} {...props}>
-      <Link
-        from={FROM}
-        search={(prev) => ({ ...prev, order: next })}
-        replace
-        resetScroll={false}
-        preload={false}
-        className="inline-flex items-center gap-1 underline-offset-4 hover:underline"
-      >
-        {field}
-        <Icon aria-hidden className={sort ? "size-3.5" : "size-3.5 text-muted-foreground"} />
-      </Link>
+      {staged ? <Tip tip={STAGED_FIRST}>{link}</Tip> : link}
       {children}
     </TableHead>
   );

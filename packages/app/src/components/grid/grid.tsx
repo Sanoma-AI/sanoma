@@ -1,7 +1,7 @@
 import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
-import { errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
+import { errorMessage, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
 import { useLiveQuery } from "@tanstack/react-db";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useNavigate } from "@tanstack/react-router";
 import {
   type CellSelectionDirection,
@@ -11,6 +11,7 @@ import {
   type ColumnSizingState,
   columnVisibilityFeature,
   createColumnHelper,
+  type ReactTable,
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
@@ -25,23 +26,26 @@ import { cn } from "#/lib/utils.ts";
 import { errorBodyOf } from "../../api.ts";
 import type { UntypedApi } from "../../api-client.ts";
 import { fieldsOf, type ScalarField, type ScalarValue } from "../../form/schema.ts";
-import { api, heldQuery, openRecord } from "../../queries.ts";
-import { Nothing, StatusDot, When } from "../common.tsx";
+import { plural } from "../../lib/utils.ts";
+import { api, countQuery, heldQuery, openRecord } from "../../queries.ts";
+import { FLOAT_CARD, Nothing, StatusDot, When } from "../common.tsx";
 import { FROM, IssuesFlag, SortHead, Value } from "../data-grid.tsx";
 import { HistoryLink } from "../record-history.tsx";
-import { CellEditor, draftOf, recordWith, withValue } from "./cell.tsx";
-import { csv, delimited } from "./clipboard.ts";
-import { type RecordsView, savedIn } from "./collection.ts";
+import { CellEditor, draftOf, recordWith } from "./cell.tsx";
+import { cellText, csv, delimited } from "./clipboard.ts";
+import { isNew, type RecordsView, savedIn, withValue } from "./collection.ts";
 import { type Conflict, conflictId, ConflictRow } from "./conflicts.tsx";
+import { useGestures } from "./gestures.ts";
 import { typedCharacter, useGridKeys } from "./keys.ts";
+import { HeldBar, ReviewCard, STAGED_FIRST, StagedBar, StagedNote, useStagedChange } from "./staged.tsx";
 
-// A collection's records as a spreadsheet: a column per field, in the collection's order, then
-// when each record was saved and by whom. Click or arrow to a cell, type or press Enter to edit
-// it, Enter to save it: one edit is an optimistic update of the page's records collection
-// (`collection.ts`), saved with `ifRecord`, the record as the edit found it, so a record someone
-// changed since comes back as a conflict, never overwritten. The first page renders on the
-// server as rows; the selection, the editors and the virtual rows mount in the browser.
-// Sorting, filtering and hiding are the page's search (`DataSearch`).
+// A collection's records as a spreadsheet. One edit is an optimistic update of the page's
+// records collection (`collection.ts`), saved with `ifRecord`, the record as the edit found it,
+// so a record someone changed since comes back as a conflict, never overwritten. A gesture over
+// many cells (`gestures.ts`) is staged instead, and saved as one `saveMany` (`staged.tsx`), so
+// a paste is one run, all of it or none; while a change is staged, an edit is a step of it too.
+// The first page renders on the server as rows; the selection, the editors and the virtual rows
+// mount in the browser. Sorting, filtering and hiding are the page's search (`DataSearch`).
 
 const features = tableFeatures({
   cellSelectionFeature,
@@ -50,6 +54,8 @@ const features = tableFeatures({
   columnResizingFeature,
 });
 const column = createColumnHelper<typeof features, Saved>();
+/** The grid's table, which its gestures read the selection from. */
+export type GridTable = ReactTable<typeof features, Saved>;
 
 /** The columns after the fields, by ids no field can have. */
 const UPDATED = "@updated";
@@ -94,15 +100,16 @@ interface Editing {
 /**
  * The grid: `view` the records `list` read for the page's search, `order` its sort, `open` the
  * record in the side panel, `hide` the fields left out, `people` the declared people's ids (what
- * a person field chooses from). Says how many match, or that there may be more than `limit`.
+ * a person field chooses from). Says how many match, past `limit` as `count` answers for `where`.
  */
 export function DataGrid({
   collection,
-  view: { collection: records, edit },
+  view,
   order,
   open,
-  filtered,
+  where,
   limit,
+  reading,
   hide,
   people,
 }: {
@@ -111,12 +118,16 @@ export function DataGrid({
   order: string | undefined;
   /** The key of the record open in the side panel. */
   open: string | undefined;
-  filtered: boolean;
+  /** The search's filters, which the footer counts the records of. */
+  where: ListQuery<Record<string, unknown>>["where"];
   limit: number;
+  /** Another search's records are being read: the rows are the last search's, and take no staged change. */
+  reading: boolean;
   hide: string[] | undefined;
   people: readonly string[];
 }) {
   const { name, key: keyField } = collection;
+  const { collection: records, edit, stage } = view;
   // In the order `list` read them: by the sorted field, records without it last, then by key,
   // text as Postgres orders it under `COLLATE "C"`.
   const sortField = order?.replace(/^-/, "");
@@ -133,6 +144,14 @@ export function DataGrid({
       return sorted.orderBy(({ saved }) => saved.key, { direction: "asc", stringSort: "lexical" });
     },
   }).data;
+  // New records, staged, after the rest, in the order they were added.
+  const ordered = useMemo(
+    () => [
+      ...listed.filter((saved) => !isNew(saved.key)),
+      ...listed.filter((saved) => isNew(saved.key)).toSorted((a, b) => (a.key < b.key ? -1 : 1)),
+    ],
+    [listed],
+  );
   const navigate = useNavigate({ from: FROM });
   const hydrated = useHydrated();
   const fields = useMemo(
@@ -144,6 +163,26 @@ export function DataGrid({
       ),
     [collection.record],
   );
+  const required = useMemo(() => [...fields.values()].filter((f) => f.required).map((f) => f.key), [fields]);
+  const [savedAt, setSavedAt] = useState<number>();
+  // How many match, read once the rows reach the limit: a Save may change it.
+  const counted = countQuery(name, where);
+  // The rows read, not the new ones staged.
+  const read = listed.filter((saved) => !isNew(saved.key)).length;
+  const matches = useQuery({ ...counted, enabled: read >= limit }).data;
+  const queryClient = useQueryClient();
+  const change = useStagedChange({
+    view,
+    keyField,
+    required,
+    listed,
+    reading,
+    onSaved: () => {
+      setSavedAt(Date.now());
+      void queryClient.invalidateQueries({ queryKey: counted.queryKey });
+    },
+  });
+  const { staged, saving, changeOfKey } = change;
   const columns = useMemo(
     () =>
       column.columns([
@@ -170,7 +209,7 @@ export function DataGrid({
   const table = useTable({
     features,
     columns,
-    data: listed,
+    data: ordered,
     getRowId: (saved) => saved.key,
     state: { columnVisibility, columnSizing: widths },
     onColumnSizingChange: setWidths,
@@ -192,6 +231,7 @@ export function DataGrid({
     if (wasHeld.current?.some((k) => !held?.includes(k))) void records.utils.refetch();
     wasHeld.current = held;
   }, [held, records]);
+  // The conflicts one edit's save found.
   const [conflicts, setConflicts] = useState<ReadonlyMap<string, Conflict>>(new Map());
   const dropConflict = (conflict: Conflict) =>
     setConflicts((all) => {
@@ -199,7 +239,6 @@ export function DataGrid({
       next.delete(conflictId(conflict));
       return next;
     });
-  const [savedAt, setSavedAt] = useState<number>();
 
   /**
    * Edits `key`'s record to `record`, the one cell `field` changed, after the grid's edits before
@@ -219,6 +258,8 @@ export function DataGrid({
         if (!saved) return;
         setSavedAt(Date.parse(saved.updatedAt));
         if (undoing) toast.success(`Undid ${field} for ${key}`);
+        // A change staged since: an edit is one of its steps now, so no Undo saves on its own.
+        else if (stage.current()) toast.success(`Saved ${field} for ${key}`);
         else
           toast.success(
             <>
@@ -229,6 +270,7 @@ export function DataGrid({
               action: {
                 label: "Undo",
                 onClick: () => {
+                  if (stage.current()) return void toast.info(STAGED_FIRST);
                   const now = records.get(key);
                   if (now) save(key, field, withValue(now.record, field, before), true);
                 },
@@ -253,6 +295,8 @@ export function DataGrid({
 
   /** Use mine: what you typed over the record as it is now, read again when the conflict did not say. */
   async function takeMine(conflict: Conflict) {
+    // Saved on its own, it would land outside the change staged since, under the records it is over.
+    if (stage.current()) return void toast.info(STAGED_FIRST);
     let current = conflict.current;
     if (current === undefined) {
       try {
@@ -297,8 +341,13 @@ export function DataGrid({
   const share = (size: number) => `${(size / total) * 100}%`;
   const focused = table.getFocusedCell();
   const focusedField = focused && fields.get(focused.column.id);
-  /** The field the focused cell edits: none for the key, Updated and By, or a field the form cannot hold. */
-  const editable = focusedField && focusedField.key !== keyField ? focusedField : undefined;
+  const visible = table.getVisibleLeafColumns();
+  const gestures = useGestures({ table, fields, keyField, changeOfKey, stage: change.add });
+  const { fillFrom, fillTo, setFillTo } = gestures;
+
+  /** The field the focused cell edits: none for an existing record's key, Updated and By, or a field the form cannot hold. */
+  const editable =
+    focused && focusedField && gestures.changeable(focused.row.original, focusedField.key) ? focusedField : undefined;
 
   const startEditing = (typed?: string) => {
     if (!focused || !editable) return;
@@ -316,14 +365,32 @@ export function DataGrid({
     const field = fields.get(cell.field) as ScalarField;
     // Over the record as it shows, the edits before it still saving included.
     const shown = records.get(cell.key);
+    // The cells the edit is typed into, before the selection moves.
+    const targets = gestures.selectedCells();
     refocus.current = fromKeyboard;
     setEditing(null);
     if (then) table.moveCellSelection(then);
     // Left as it opened: never a save, even of a value the editor cannot hold (an enum's value
-    // its options no longer have), which it would drop.
-    if (!shown || cell.draft === cell.start) return;
+    // its options no longer have), which it would drop; typed into a selection, every cell takes it.
+    if (!shown || (cell.draft === cell.start && targets.length <= 1)) return;
     const next = recordWith(field, shown.record, cell.draft);
     if ("error" in next) return void toast.error(`${cell.field}: ${next.error}`);
+    const value = next.record[cell.field];
+    if (targets.length > 1) {
+      // Typed once, into every selected cell.
+      const text = cellText(value);
+      const cells = targets.flatMap(({ saved, id }) => gestures.changeOf(saved, id, text));
+      return change.add({ what: "edit", said: `Set ${plural(cells.length, "cell")} to ${text || "nothing"}`, cells });
+    }
+    // While a change is staged, an edit is a step of it: Save saves it with the rest.
+    if (staged) {
+      const called = isNew(cell.key) ? cellText(shown.record[keyField]) || "the new record" : cell.key;
+      return change.add({
+        what: "edit",
+        said: `Changed ${cell.field} of ${called}`,
+        cells: [{ key: cell.key, field: cell.field, value }],
+      });
+    }
     save(cell.key, cell.field, next.record);
   };
 
@@ -342,6 +409,8 @@ export function DataGrid({
       setEditing(null);
     },
     expand: () => {
+      // While a change is staged, the record form saves nothing (and a staged new record has no record to open).
+      if (staged) return void toast.info(STAGED_FIRST);
       if (focused)
         void navigate({ search: (prev) => ({ ...prev, record: focused.row.id, new: undefined }), resetScroll: false });
     },
@@ -354,16 +423,14 @@ export function DataGrid({
         .then(() => navigator.clipboard.writeText(text))
         .catch(() => toast.error("Could not copy the cells"));
     },
+    clear: gestures.clear,
+    // A Save under way takes no step back: the stage refuses it.
+    undo: stage.undo,
+    add: () => {
+      refocus.current = true;
+      gestures.addRecord();
+    },
   });
-
-  // The focused cell has the focus while the grid has it, or when an edit ends from the keyboard.
-  const focusedId = focused?.id;
-  useEffect(() => {
-    if (!grid || !focusedId || editing) return;
-    if (!refocus.current && !grid.contains(document.activeElement)) return;
-    refocus.current = false;
-    grid.querySelector<HTMLElement>(`[data-cell="${CSS.escape(focusedId)}"]`)?.focus();
-  }, [grid, focusedId, editing]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -379,13 +446,28 @@ export function DataGrid({
     : rows.map((_, index) => ({ index, start: index * ROW_PX, end: (index + 1) * ROW_PX }));
   const before = items[0]?.start ?? 0;
   const after = hydrated ? virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0) : 0;
-  const visible = table.getVisibleLeafColumns();
-  const conflictsByKey = Map.groupBy(conflicts.values(), (conflict) => conflict.key);
+  // The focused cell has the focus while the grid has it, or when an edit ends from the keyboard;
+  // a row out of the virtual rows' window (a record added at the end) is scrolled to first. Put
+  // there once per focused cell: a scroll after that leaves the focus where it is (a conflict's
+  // button), never scrolled back.
+  const focusedId = focused?.id;
+  const focusedIndex = focused?.row.getDisplayIndex();
+  const placed = useRef<string>(undefined);
+  useEffect(() => {
+    if (!grid || !focusedId || editing) return;
+    if (!refocus.current && (placed.current === focusedId || !grid.contains(document.activeElement))) return;
+    const cell = grid.querySelector<HTMLElement>(`[data-cell="${CSS.escape(focusedId)}"]`);
+    if (!cell) return void (focusedIndex !== undefined && virtualizer.scrollToIndex(focusedIndex));
+    refocus.current = false;
+    placed.current = focusedId;
+    cell.focus();
+  }, [grid, focusedId, focusedIndex, editing, before, virtualizer]);
+  const conflictsByKey = Map.groupBy([...conflicts.values(), ...change.conflicts], (conflict) => conflict.key);
 
   if (listed.length === 0) {
     return (
-      <Nothing title={filtered ? "No record matches" : "No records yet"}>
-        {filtered ? "Change the filters to see others." : "Add one, or save one from a workflow."}
+      <Nothing title={where ? "No record matches" : "No records yet"}>
+        {where ? "Change the filters to see others." : "Add one, or save one from a workflow."}
       </Nothing>
     );
   }
@@ -400,7 +482,19 @@ export function DataGrid({
   };
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-lg border">
+    <div className={cn(FLOAT_CARD, "flex flex-col overflow-hidden rounded-lg border")}>
+      {change.reviewing && (
+        <ReviewCard
+          changes={change.changes}
+          issues={change.issues.map((issue) => ({ ...issue, name: changeOfKey.get(issue.key)?.name ?? issue.key }))}
+          blocked={change.blocked}
+          saving={saving}
+          onSave={() =>
+            void change.save(new Set(change.changes.flatMap((c) => (change.blocked.has(c.key) ? [] : [c.key]))))
+          }
+          onClose={() => change.setReviewing(false)}
+        />
+      )}
       <div ref={scroller} className="max-h-[min(70vh,48rem)] overflow-auto">
         <table
           ref={setGrid}
@@ -419,6 +513,12 @@ export function DataGrid({
             if (typed === undefined || !editable || (event.target as HTMLElement).dataset.cell === undefined) return;
             event.preventDefault();
             startEditing(typed);
+          }}
+          onPaste={(event) => {
+            // An editor's own paste is its own.
+            if (editing) return;
+            event.preventDefault();
+            gestures.paste(event.clipboardData.getData("text/plain"));
           }}
         >
           <TableHeader>
@@ -444,7 +544,7 @@ export function DataGrid({
                     {resizer}
                   </TableHead>
                 ) : (
-                  <SortHead key={header.id} field={header.id} order={order} {...head}>
+                  <SortHead key={header.id} field={header.id} order={order} staged={staged !== undefined} {...head}>
                     {resizer}
                   </SortHead>
                 );
@@ -461,17 +561,34 @@ export function DataGrid({
               const row = rows[index]!;
               const saved = row.original;
               const rowConflicts = conflictsByKey.get(saved.key) ?? [];
+              const type = changeOfKey.get(saved.key)?.type;
               return [
                 <TableRow
                   key={row.id}
                   aria-rowindex={index + 2}
                   data-state={saved.key === open ? "selected" : undefined}
-                  className="hover:bg-transparent"
+                  data-staged={type}
+                  className={cn(
+                    "hover:bg-transparent",
+                    type === "insert" && "bg-tone-ok/10 hover:bg-tone-ok/10",
+                    type === "delete" && "line-through opacity-60",
+                  )}
                 >
                   {row.getVisibleCells().map((cell, c) => {
                     const id = cell.column.id;
                     const field = fields.get(id);
                     const conflict = rowConflicts.find((other) => other.field === id);
+                    const cellId = conflictId({ key: saved.key, field: id });
+                    const issue = change.issueAt.get(cellId);
+                    const changed = change.changedCells.has(cellId);
+                    const filling =
+                      fillFrom !== undefined &&
+                      fillTo !== undefined &&
+                      index > fillFrom.maxRowIndex &&
+                      index <= fillTo &&
+                      c >= fillFrom.minColumnIndex &&
+                      c <= fillFrom.maxColumnIndex;
+                    const edges = cell.getSelectionEdges();
                     const isEditing = editing?.key === saved.key && editing.field === id && field;
                     // Before anything is focused, the first cell is the grid's one stop for Tab.
                     const tabIndex = !focused && index === 0 && c === 0 ? 0 : cell.getTabIndex();
@@ -481,14 +598,20 @@ export function DataGrid({
                         data-cell={cell.id}
                         tabIndex={tabIndex}
                         aria-selected={cell.getIsSelected()}
-                        aria-invalid={conflict ? true : undefined}
+                        aria-invalid={conflict || issue ? true : undefined}
+                        data-changed={changed || undefined}
+                        title={issue?.error}
                         style={{ width: share(cell.column.getSize()) }}
                         className={cn(
-                          "h-9 truncate border-b px-2 py-0 outline-none select-none",
+                          "relative h-9 truncate border-b px-2 py-0 outline-none select-none",
                           id === keyField && "font-medium",
                           (id === UPDATED || id === BY) && "text-muted-foreground",
                           cell.getIsSelected() && "bg-primary/5",
+                          // Staged, not saved: the waiting tone with its bar at the left; a cell to fix, the bad tone.
+                          changed && "bg-tone-waiting shadow-[inset_3px_0_0_var(--color-tone-waiting-foreground)]",
+                          issue && "bg-tone-bad shadow-[inset_3px_0_0_var(--color-tone-bad-foreground)]",
                           conflict && "bg-tone-waiting text-tone-waiting-foreground",
+                          filling && "bg-primary/5 shadow-[inset_0_0_0_1px_var(--color-ring)]",
                           cell.getIsFocused() && "shadow-[inset_0_0_0_2px_var(--color-ring)]",
                           isEditing && "px-0.5",
                         )}
@@ -496,7 +619,11 @@ export function DataGrid({
                           if (e.target === e.currentTarget && !cell.getIsFocused()) table.setFocusedCell(row.id, id);
                         }}
                         onMouseDown={isEditing ? undefined : cell.getSelectionStartHandler()}
-                        onMouseEnter={cell.getSelectionExtendHandler()}
+                        onMouseEnter={
+                          fillTo === undefined
+                            ? cell.getSelectionExtendHandler()
+                            : () => setFillTo(Math.max(index, fillFrom?.maxRowIndex ?? index))
+                        }
                         onDoubleClick={() => startEditing()}
                       >
                         {isEditing ? (
@@ -508,19 +635,13 @@ export function DataGrid({
                             onDraft={(draft) => setEditing({ ...editing, draft })}
                             onBlur={() => commit(undefined, false)}
                           />
+                        ) : id === keyField && isNew(saved.key) ? (
+                          cellText(saved.record[id]) || (
+                            <span className="font-normal text-muted-foreground italic">needs a key</span>
+                          )
                         ) : id === keyField ? (
                           <span className="flex items-center gap-2">
-                            <Link
-                              to={FROM}
-                              params={{ name }}
-                              search={openRecord(saved.key)}
-                              resetScroll={false}
-                              preload={false}
-                              tabIndex={-1}
-                              className="shrink-0 underline-offset-4 hover:underline"
-                            >
-                              {saved.key}
-                            </Link>
+                            <KeyLink name={name} recordKey={saved.key} staged={staged !== undefined} />
                             {saved.issues && <IssuesFlag issues={saved.issues} />}
                             {held?.includes(saved.key) && (
                               // The key names the row, so it keeps its width: the note is what a narrow column cuts.
@@ -532,13 +653,33 @@ export function DataGrid({
                                 <span className="truncate">waits for approval</span>
                               </span>
                             )}
+                            {change.denied.has(saved.key) && (
+                              <span className="truncate text-xs font-normal text-tone-bad-foreground">refused</span>
+                            )}
                           </span>
                         ) : id === UPDATED ? (
-                          <When at={Date.parse(saved.updatedAt)} />
+                          saved.updatedAt === "" ? (
+                            <span className="italic">new</span>
+                          ) : (
+                            <When at={Date.parse(saved.updatedAt)} />
+                          )
                         ) : id === BY ? (
                           saved.updatedBy
                         ) : (
                           <Value value={conflict ? conflict.mine : saved.record[id]} />
+                        )}
+                        {hydrated && !editing && fillFrom && edges.bottom && edges.right && (
+                          // The fill handle: drag it down to repeat the selection's values.
+                          <span
+                            aria-hidden
+                            data-fill-handle
+                            className="absolute right-0 bottom-0 size-2 cursor-crosshair bg-ring"
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setFillTo(fillFrom.maxRowIndex);
+                            }}
+                          />
                         )}
                       </TableCell>
                     );
@@ -549,8 +690,10 @@ export function DataGrid({
                     key={`${row.id}:conflicts`}
                     conflicts={rowConflicts}
                     columns={visible.length}
-                    onKeep={keepTheirs}
-                    onUseMine={(conflict) => void takeMine(conflict)}
+                    onKeep={(conflict) => (conflict.staged ? change.settle(conflict, "theirs") : keepTheirs(conflict))}
+                    onUseMine={(conflict) =>
+                      conflict.staged ? change.settle(conflict, "mine") : void takeMine(conflict)
+                    }
                   />
                 ),
               ];
@@ -563,13 +706,27 @@ export function DataGrid({
           </TableBody>
         </table>
       </div>
+      {staged ? (
+        <StagedBar
+          staged={staged}
+          counts={change.counts}
+          issues={change.issues.length}
+          conflicts={change.conflicts.length}
+          saving={saving}
+          onReview={() => change.setReviewing(true)}
+          onDiscard={stage.discard}
+          onSave={() => void change.save()}
+        />
+      ) : (
+        change.held && <HeldBar count={change.held.held} runId={change.held.runId} onClose={change.closeHeld} />
+      )}
       <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-3 py-2 text-xs text-muted-foreground">
         <span>
-          {listed.length >= limit
-            ? `The first ${limit} records: filter them, or show more, to see the rest`
-            : listed.length === 1
+          {read >= limit
+            ? `The first ${limit}${matches === undefined ? "" : ` of ${matches}`} records: filter them, or show more, to see the rest`
+            : read === 1
               ? "1 record matches"
-              : `${listed.length} records match`}
+              : `${read} records match`}
         </span>
         {savedAt !== undefined && (
           <>
@@ -579,6 +736,7 @@ export function DataGrid({
             </span>
           </>
         )}
+        {staged && <StagedNote staged={staged} changes={change.counts.changes} />}
         <span className="ml-auto" role="status">
           {focused && (
             <>
@@ -594,5 +752,27 @@ export function DataGrid({
         </Button>
       </footer>
     </div>
+  );
+}
+
+/**
+ * A record's key, opening it in the form: disabled while a change is staged, as the form saves
+ * nothing then, and says so as a `title`, one per row (a Tip's tooltip is too much for every row).
+ */
+function KeyLink({ name, recordKey, staged }: { name: string; recordKey: string; staged: boolean }) {
+  return (
+    <Link
+      to={FROM}
+      params={{ name }}
+      search={openRecord(recordKey)}
+      disabled={staged}
+      title={staged ? STAGED_FIRST : undefined}
+      resetScroll={false}
+      preload={false}
+      tabIndex={-1}
+      className="shrink-0 underline-offset-4 hover:underline aria-disabled:no-underline"
+    >
+      {recordKey}
+    </Link>
   );
 }

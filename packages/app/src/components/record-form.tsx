@@ -23,6 +23,7 @@ import { errorsOf, FieldView, FormFoot, useSchemaForm } from "../form/start-form
 import { api } from "../queries.ts";
 import { Notice } from "./common.tsx";
 import { type RecordsView, savedIn } from "./grid/collection.ts";
+import { STAGED_FIRST } from "./grid/staged.tsx";
 import { HistoryLink } from "./record-history.tsx";
 
 // A collection's record form: one form, drawn from the record's JSON Schema as the start form is
@@ -30,7 +31,8 @@ import { HistoryLink } from "./record-history.tsx";
 // records collection, the grid's (`grid/collection.ts`; an edit in its queue of the record's
 // edits, after the grid's), whose handler calls the collection's operation, `data.<name>.save`
 // (`ifAbsent` for a new record, `ifRecord` for an edit) or `.delete`, through `api` as the
-// person; a held call's toast is the collection's.
+// person; a held call's toast is the collection's. While the grid has a change staged, Save and
+// Delete wait for it: the grid's bar saves or discards it.
 
 /** An issue's path in a save's input (`record.<field>`), as the form's. */
 const inRecord = (path: (string | number)[]) => (path[0] === "record" ? path.slice(1) : path);
@@ -46,12 +48,15 @@ export function RecordForm({
   collection: { name, key, record },
   view: { collection: records, edit },
   saved,
+  staged,
   actor,
   onDone,
 }: {
   collection: CollectionEntry;
   view: RecordsView;
   saved?: Saved | undefined;
+  /** While the grid has a change staged, its bar is the one way to save: the form waits for it. */
+  staged: boolean;
   actor: string | null | undefined;
   onDone: () => void;
 }) {
@@ -112,10 +117,11 @@ export function RecordForm({
             <FieldView key={field.key} form={form} field={field} path={[field.key]} />
           ),
         )}
+        {staged && <Notice>{STAGED_FIRST}, in the grid's bar.</Notice>}
         <FormFoot form={form}>
           {(submitting) => (
             <>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={submitting || staged}>
                 {submitting ? (
                   <Spinner data-icon="inline-start" />
                 ) : (
@@ -124,7 +130,12 @@ export function RecordForm({
                 {submitting ? "Saving…" : "Save"}
               </Button>
               {saved && (
-                <DeleteRecord records={records} recordKey={saved.key} disabled={submitting} onDeleted={onDone} />
+                <DeleteRecord
+                  records={records}
+                  recordKey={saved.key}
+                  disabled={submitting || staged}
+                  onDeleted={onDone}
+                />
               )}
             </>
           )}
