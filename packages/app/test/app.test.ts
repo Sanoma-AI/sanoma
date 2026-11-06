@@ -1142,6 +1142,21 @@ describe("the page", () => {
     expect(run.html).not.toMatch(/<dt[^>]*>Error<\/dt>/);
   });
 
+  it("says a call that failed on a secret with no value changed nothing at the vendor", async () => {
+    blog.failNext(
+      "ghost.post.create",
+      new DriverError("The secret GHOST_KEY has no value", { retryable: false, vendorCode: "secret_not_set" }),
+    );
+    const started = await startAs({ workflow: "announce", input: input("No key") }, { actor: "alice" });
+    await waitFor(
+      () => detail(started.body.runId),
+      (d) => d.run.status === "failed",
+    );
+    const run = await page(`/workflows/announce/runs/${started.body.runId}`);
+    expect(run.text).toContain("Not retried: it stopped before changing anything at Ghost.");
+    expect(run.text).not.toContain("Check Ghost before starting again");
+  });
+
   it("renders the workflows on the server: a row for each linking to its page, whose About has its operations and input", async () => {
     const { version } = ctx.snapshot.description;
     const workflows = await page("/workflows");

@@ -50,11 +50,13 @@ describe("resolveSecrets", () => {
     expect(ensure).toHaveBeenCalledTimes(2);
   });
 
-  it("fails the call, for good, on a secret nothing stored", async () => {
+  it("fails the call, for good, on a secret nothing stored, saying so before any vendor call", async () => {
     await expect(resolveSecrets({ token: secret("MISSING") }, memorySecrets())).rejects.toMatchObject({
       code: "driver_failed",
       retryable: false,
-      message: "The secret MISSING is not set: store it before applying",
+      vendorCode: "secret_not_set",
+      message:
+        "The secret MISSING has no value: store it (or, where sanoma.config.ts binds it, set what the binding reads), then try again",
     });
   });
 });

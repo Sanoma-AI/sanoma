@@ -301,12 +301,22 @@ describe("explicit host environment delivery through apply", () => {
       expect(history).not.toContain(value);
   });
 
-  it("refuses missing explicit values instead of silently omitting them", async () => {
+  it("plans a binding given to the host with no value as a problem, leaving the host out before any vendor call", async () => {
     delete process.env.TEST_HOST_BOOTSTRAP;
+    const problem = expect.objectContaining({
+      file: "resources/sanoma/infra.ts",
+      message: expect.stringMatching(
+        /^host: PROVISIONING_BOOTSTRAP \(`host: true`\) has no value where apply runs, .*: set TEST_HOST_BOOTSTRAP, /,
+      ),
+    });
     const run = await harness.client.apply({}, { startedBy: { id: "alice" } });
     const report = await harness.client.applyReport(run);
-    expect(report.results).toContainEqual(expect.objectContaining({ status: "failed" }));
+    expect(report.plan.problems).toEqual([problem]);
+    expect(report.plan.steps.map((s) => s.id)).not.toContain("resources/sanoma/infra.ts#host");
+    expect(report.results).toEqual([]);
     expect(delivered).toEqual({});
-    expect(JSON.stringify(report)).toContain("PROVISIONING_BOOTSTRAP");
+    // Drift reads the files as apply does: Hosting shows its check's problems.
+    const drift = await harness.client.drift({ startedBy: { id: "alice" } });
+    expect((await harness.client.driftReport(drift)).problems).toEqual([problem]);
   });
 });
