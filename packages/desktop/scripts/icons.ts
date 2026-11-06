@@ -1,5 +1,5 @@
-// Draws icons/icon.icns and icons/icon.ico (forge.config.mts) from icons/icon.svg and, where the S
-// is small, icons/icon-small.svg, in the computer's Chrome. Run it by hand on a Mac after changing
+// Draws icons/icon.icns and icons/icon.ico (forge.config.mts) from the app's icon.svg and, where
+// the S is small, icon-small.svg, in the computer's Chrome. Run it by hand on a Mac after changing
 // a drawing, and commit the results.
 //
 //   node packages/desktop/scripts/icons.ts
@@ -11,8 +11,8 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const icons = fileURLToPath(new URL("../icons/", import.meta.url));
-const large = readFileSync(join(icons, "icon.svg"), "utf8");
-const small = readFileSync(join(icons, "icon-small.svg"), "utf8");
+const large = readFileSync(new URL("../../app/src/icon.svg", import.meta.url), "utf8");
+const small = readFileSync(new URL("../../app/src/icon-small.svg", import.meta.url), "utf8");
 // In a square this size or under, icon.svg's fine strokes break up.
 const SMALL_SQUARE = 52;
 

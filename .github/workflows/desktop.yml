@@ -7,6 +7,8 @@ on:
     branches: [main]
     paths: &paths
       - packages/desktop/**
+      # Sanoma's mark, which the start screen and the app icons draw.
+      - packages/app/src/icon*.svg
       # What New Company runs first: the launcher's process code and the template, whose `engines` the
       # shipped Node must satisfy. Not the whole workspace it installs, or these jobs would run on most pull requests.
       - packages/sanoma/src/cli.ts
