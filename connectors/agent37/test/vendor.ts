@@ -4,14 +4,15 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { RUNNER_PORT } from "@sanoma-ai/workflows";
+import { RUNNER_HEALTH, RUNNER_PORT } from "@sanoma-ai/workflows";
 
 // Agent37 on this machine, for the backend's tests: its Sandbox API as a `fetch` that answers
 // `https://api.agent37.com/v1` from memory (every other URL goes out), its exec `sh -c` here, each
 // instance's home a directory of its own, and its edge a port of this machine per instance's port:
 // the runner the backend starts with exec listens on one of its own (`SANOMA_RUNNER_PORT`). A
 // stop, a delete and `close` end what an instance's execs left running, as a fresh boot would; a
-// sleep keeps it. `answer` puts a reply ahead of the next request.
+// sleep keeps it. The edge answers `/health` itself, on every port, as Agent37's does. `answer`
+// puts a reply ahead of the next request.
 
 export const KEY = "sk_live_test";
 
@@ -66,7 +67,7 @@ export async function fakeAgent37Vendor() {
     while (await listening(runner.port)) await delay(50);
   }
   const listening = (port: number) =>
-    realFetch(`http://127.0.0.1:${port}/health`).then(
+    realFetch(`http://127.0.0.1:${port}${RUNNER_HEALTH}`).then(
       () => true,
       () => false,
     );
@@ -156,8 +157,9 @@ export async function fakeAgent37Vendor() {
     const request = new Request(input, init);
     const url = new URL(request.url);
     if (url.host !== "api.agent37.com") {
-      // The edge's: what the runner's health check carried.
-      if (url.pathname === "/health") headersSeen.push(String(request.headers.get("x-agent37-key")));
+      // The edge's: it answers `/health` itself, and keeps what the runner's health check carried.
+      if (url.pathname === "/health") return json(200, { ok: true });
+      if (url.pathname === RUNNER_HEALTH) headersSeen.push(String(request.headers.get("x-agent37-key")));
       return realFetch(input, init);
     }
     const path = url.pathname.replace(/^\/v1/, "");

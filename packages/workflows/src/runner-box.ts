@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
   FILE,
   frame,
+  RUNNER_HEALTH,
   type RunnerAnswer,
   type RunnerHealth,
   type RunnerRequest,
@@ -31,11 +32,11 @@ export async function runnerScript(): Promise<Uint8Array> {
 }
 
 /**
- * What the runner at `url` (asked with `headers`) answers at `/health`, or undefined when nothing
+ * What the runner at `url` (asked with `headers`) answers at `RUNNER_HEALTH`, or undefined when nothing
  * answers as a runner: a backend starts one then, and replaces one of another `protocol`.
  */
 export const runnerHealth = (url: string, headers?: Record<string, string>): Promise<RunnerHealth | undefined> =>
-  fetch(`${url}/health`, { headers, signal: AbortSignal.timeout(5_000) })
+  fetch(`${url}${RUNNER_HEALTH}`, { headers, signal: AbortSignal.timeout(5_000) })
     .then(async (res) => {
       const health = res.ok ? ((await res.json()) as Partial<RunnerHealth> | null) : null;
       return typeof health?.protocol === "number" && typeof health.pid === "number"
