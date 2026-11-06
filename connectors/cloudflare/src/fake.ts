@@ -12,7 +12,7 @@ import { APP_BUNDLE_HEADER, APP_BUNDLE_PATH } from "@sanoma-ai/workflows/shared"
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { Instance, type ObjectState, serve } from "../worker/instance.js";
 import { caaContent, cloudflareOps, host } from "./connector.ts";
-import { OBJECT_CLASS } from "./deploy.ts";
+import { OBJECT_CLASS, type WorkerModule } from "./deploy.ts";
 import {
   alarmOps,
   type Application,
@@ -59,6 +59,12 @@ export interface FakeCloudflareOptions extends FakeOptions {
   bundle?: (revision: string) => AppBundle;
   /** The zones the account holds, by name. Default: every one asked for, as a sandbox's account holds its domains. */
   zones?: readonly string[];
+  /**
+   * How many requests to a Worker the version before an upload still answers once it is made (none
+   * for a new Worker: workers.dev's 404), as an upload takes a while to reach every location.
+   * Default 0: the next request runs it.
+   */
+  propagation?: number;
 }
 
 export interface FakeCloudflareState extends Record<string, unknown> {
@@ -76,8 +82,11 @@ export interface FakeCloudflareState extends Record<string, unknown> {
       images: Record<string, string>;
       main_module?: string;
       modules?: string[];
+      compatibility_date?: string;
       compatibility_flags?: string[];
       assets?: Record<string, string>;
+      /** The latest version's tag (`annotations["workers/tag"]`). */
+      tag?: string;
     }
   >;
   /** The account's Hyperdrive configs, by id: each one's name and its origin, its password left out. */
@@ -438,6 +447,15 @@ function fakeObject(
 
 type FakeObject = ReturnType<typeof fakeObject>;
 
+/** One version of a Worker, as it runs in this process (`fakeCloudflare`'s `workers`). */
+interface FakeVersion {
+  env: Record<string, unknown>;
+  loadApp: () => Promise<{ default: AppBundleModule }>;
+  images: Record<string, string>;
+  assets?: Record<string, string>;
+  modules: WorkerModule[];
+}
+
 /**
  * An in-memory Cloudflare account for tests, as the API answers: Workers in `state.scripts`,
  * container applications in `state.applications`, Hyperdrive configs in `state.hyperdrives`
@@ -455,9 +473,12 @@ type FakeObject = ReturnType<typeof fakeObject>;
  * process: its container runs `start`'s runtime (the image and the revision label it was started
  * at, the Worker's text bindings as its environment), its port's `/__sanoma/app-bundle` answers
  * `bundle`'s as the runtime's route does, SIGTERM stops the runtime, its storage is in memory, and
- * its alarm rings on a timer, again after a throw. An upload restarts the object over the new
+ * its alarm rings on a timer, again after a throw. An upload answers once `propagation` more
+ * requests went to the version before (none: at once), and then restarts the object over the new
  * bindings and images, its container, storage and alarm kept: the object finds the labels changed
- * at the next start, and drains and replaces it. `copyImage` pins its copy by a made-up digest,
+ * at the next start, and drains and replaces it. `settings` and `content` give the latest upload
+ * back, its tag and its modules, and an upload that keeps its assets (`keep_assets`) serves the
+ * version before's. `copyImage` pins its copy by a made-up digest,
  * and `prepareImage` answers ready for an image pinned in the account's registry. An assets upload
  * session asks for the hashes `state.assets` lacks, in one bucket, and an upload that redeems its
  * completion jwt keeps each path's hash on the Worker (`state.scripts[…].assets`). `stop(name)`
@@ -470,14 +491,13 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   const servers = new Map<string, { server: Server; url: string }>();
   const objects = new Map<string, FakeObject>();
   /**
-   * Each Worker as its last upload runs it: its env (its bindings' text, the secrets' with it,
-   * which the state does not keep, its database, assets and object), and its app, the upload's
-   * `app/index.js` imported from a folder of its own on the first request.
+   * Each Worker's versions: the one that answers (`live`), and the latest upload until it does
+   * (`next`, after `after` more requests). A version as it runs: its env (its bindings' text, the
+   * secrets' with it, which the state does not keep, its database, assets and object), its app,
+   * the upload's `app/index.js` imported from a folder of its own on the first request, the images
+   * its object may start, its assets (each path's hash) and its modules, as its content gives them.
    */
-  const workers = new Map<
-    string,
-    { env: Record<string, unknown>; loadApp: () => Promise<{ default: AppBundleModule }> }
-  >();
+  const workers = new Map<string, { live?: FakeVersion; next?: FakeVersion; after: number }>();
   /** Where each upload's modules are written, to be imported as files. */
   let uploads: string | undefined;
   /** Each Hyperdrive config's database URL, which the state does not keep: its password is in it. */
@@ -490,11 +510,24 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   /** The completion jwts an upload may redeem: the Worker's name and its manifest, each path's hash. */
   const completed = new Map<string, { script: string; manifest: Record<string, string> }>();
 
-  /** The asset of the Worker named `script` at the request's path, if its last upload has one. */
-  const assetOf = (state: FakeCloudflareState, script: string, request: Request) => {
-    const hash = state.scripts[script]?.assets?.[new URL(request.url).pathname];
+  /** The asset at the request's path among `assets` (each path's hash), if it is one. */
+  const assetOf = (assets: Record<string, string> | undefined, request: Request) => {
+    const hash = assets?.[new URL(request.url).pathname];
     const found = hash === undefined ? undefined : contents.get(hash);
     return found && new Response(found.content, { headers: { "content-type": found.contentType } });
+  };
+  /** Makes the Worker's latest upload the version that answers: its object made again over its env, as a deploy restarts it. */
+  const promote = (script: string, versions: { live?: FakeVersion; next?: FakeVersion }) => {
+    const object = objects.get(script)!;
+    versions.live = versions.next;
+    versions.next = undefined;
+    object.restart(new Instance(object.ctx, versions.live!.env));
+  };
+  /** The version that answers the Worker's next request: its latest upload's once that has waited its requests out. */
+  const answering = (script: string) => {
+    const versions = workers.get(script);
+    if (versions?.next && versions.after-- <= 0) promote(script, versions);
+    return versions?.live;
   };
   /**
    * The request to the Worker named `script`, as workers.dev passes it on: a path under
@@ -508,10 +541,10 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
     request: Request,
     visitor = "127.0.0.1",
   ): Promise<Response> => {
-    const worker = workers.get(script);
+    const worker = answering(script);
     if (!worker || !state.scripts[script]?.subdomain) return nothingHere();
     if (new URL(request.url).pathname.startsWith("/assets/")) {
-      const asset = assetOf(state, script, request);
+      const asset = assetOf(worker.assets, request);
       if (asset) return asset;
     }
     const headers = new Headers(request.headers);
@@ -586,17 +619,47 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
     const recordsOf = (zoneId: string) => state.dns[zoneNamed(zoneId)] ?? [];
     return {
       workerUrl: (script) => listenAt(state, script),
-      async bindings(script) {
-        return structuredClone(state.scripts[script]?.bindings);
+      async settings(script) {
+        const found = state.scripts[script];
+        return (
+          found && {
+            bindings: structuredClone(found.bindings),
+            compatibility_date: found.compatibility_date,
+            compatibility_flags: [...(found.compatibility_flags ?? [])],
+            ...(found.tag !== undefined && { annotations: { "workers/tag": found.tag } }),
+          }
+        );
       },
-      async upload(script, { modules, main_module, bindings, containers, migrations, assets, compatibility_flags }) {
+      async content(script) {
+        const versions = workers.get(script);
+        const latest = versions?.next ?? versions?.live;
+        if (!latest) throw fail(404, 10007, `workers/scripts/${script}: This Worker does not exist on your account.`);
+        return structuredClone(latest.modules);
+      },
+      async upload(
+        script,
+        {
+          modules,
+          main_module,
+          bindings,
+          containers,
+          migrations,
+          assets,
+          keep_assets,
+          annotations,
+          compatibility_date,
+          compatibility_flags,
+        },
+      ) {
         if (!modules.some((m) => m.name === main_module)) throw fail(400, 10021, `no module named ${main_module}`);
         if (!modules.some((m) => m.name === "app/index.js")) throw fail(400, 10021, "no module named app/index.js");
-        const redeemed = assets && completed.get(assets.jwt);
-        if (assets && redeemed?.script !== script) {
+        const redeemed = assets?.jwt === undefined ? undefined : completed.get(assets.jwt);
+        if (assets?.jwt !== undefined && redeemed?.script !== script) {
           throw fail(400, 10203, "the assets' completion jwt is not one this Worker's upload session gave");
         }
-        if (bindings.some((b) => b.type === "assets") !== Boolean(assets)) {
+        // The assets redeemed, else with `keep_assets` the version before's.
+        const manifest = redeemed?.manifest ?? (keep_assets ? state.scripts[script]?.assets : undefined);
+        if (bindings.some((b) => b.type === "assets") !== Boolean(manifest)) {
           throw fail(400, 10021, "an assets binding needs assets, and assets an assets binding");
         }
         const runs = containers.find((c) => c.class_name === OBJECT_CLASS);
@@ -609,6 +672,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         if (!known && !migrations?.new_sqlite_classes.includes(OBJECT_CLASS)) {
           throw fail(400, 10061, `Cannot create binding for class ${OBJECT_CLASS}: it is not a Durable Object yet`);
         }
+        // The version's id, as Cloudflare answers an upload and the version's metadata binding names it.
+        const version = `00000000-0000-4000-9000-${String(++state.seq).padStart(12, "0")}`;
         const env: Record<string, unknown> = {};
         for (const binding of bindings) {
           if (binding.type === "durable_object_namespace") {
@@ -623,13 +688,14 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
             if (url === undefined) throw fail(400, 10021, `no Hyperdrive config ${binding.id}`);
             // The direct URL: Hyperdrive's pooled one is Cloudflare's own.
             env[binding.name] = { connectionString: url };
+          } else if (binding.type === "version_metadata") {
+            env[binding.name] = { id: version, tag: annotations?.["workers/tag"] ?? "", timestamp: "" };
           } else if (binding.type === "assets") {
             env[binding.name] = {
-              fetch: async (request: Request) => assetOf(state, script, request) ?? new Response(null, { status: 404 }),
+              fetch: async (request: Request) => assetOf(manifest, request) ?? new Response(null, { status: 404 }),
             };
           } else env[binding.name] = binding.text;
         }
-        workers.set(script, { env, loadApp: written(modules) });
         // The namespace the first upload made, kept across uploads as Cloudflare keeps it.
         const namespace_id = state.scripts[script]?.bindings.find((b) => b.namespace_id)?.namespace_id ?? nextId();
         state.scripts[script] = {
@@ -644,21 +710,36 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           images: { ...runs.images },
           main_module,
           modules: modules.map((m) => m.name),
+          compatibility_date,
           ...(compatibility_flags.length > 0 && { compatibility_flags: [...compatibility_flags] }),
-          ...(redeemed && { assets: { ...redeemed.manifest } }),
+          ...(manifest && { assets: { ...manifest } }),
+          ...(annotations && { tag: annotations["workers/tag"] }),
         };
-        if (assets) completed.delete(assets.jwt);
-        const object =
-          objects.get(script) ??
-          fakeObject(
-            start,
-            bundle,
-            () => state.scripts[script]?.images ?? {},
-            (image) => appOf(script) && (state.images[image] ?? image),
-            started,
+        if (redeemed) completed.delete(assets!.jwt!);
+        if (!objects.has(script)) {
+          objects.set(
+            script,
+            fakeObject(
+              start,
+              bundle,
+              () => workers.get(script)?.live?.images ?? {},
+              (image) => appOf(script) && (state.images[image] ?? image),
+              started,
+            ),
           );
-        objects.set(script, object);
-        object.restart(new Instance(object.ctx, env));
+        }
+        const versions = workers.get(script) ?? { after: 0 };
+        versions.next = {
+          env,
+          loadApp: written(modules),
+          images: { ...runs.images },
+          ...(manifest && { assets: { ...manifest } }),
+          modules: structuredClone(modules),
+        };
+        versions.after = options.propagation ?? 0;
+        workers.set(script, versions);
+        if (!versions.after) promote(script, versions);
+        return version;
       },
       async enableSubdomain(script) {
         const found = state.scripts[script];

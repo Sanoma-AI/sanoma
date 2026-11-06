@@ -20,10 +20,18 @@ export const HEALTH_PATH = "/__sanoma/health";
 export const APP_BUNDLE_PATH = "/__sanoma/app-bundle";
 /** The Host contract's wake: the Worker has the worker started now (a wakeup's `GET {url}/wake`). */
 const HOST_WAKE_PATH = "/wake";
+/**
+ * The header on every answer of the object: the id of the Worker version that answered (its
+ * `VERSION_METADATA`'s), so a deploy tells its own upload's answers from an earlier version's, and
+ * the object's answers from anyone else's.
+ */
+export const DEPLOYMENT_HEADER = "x-sanoma-deployment";
 /** The header the app reads the visitor's address from (`CLIENT_IP_HEADER` in `@sanoma-ai/workflows`). */
 export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
 /** How long the container keeps running after the object's last request: Cloudflare stops it then. */
 export const INACTIVITY_MS = 10 * 60 * 1000;
+/** The Worker version's metadata binding (`version_metadata`): its `id`, which each upload answers with. */
+export const VERSION_METADATA = "CF_VERSION_METADATA";
 /** The binding that names the object, in the Worker's env. */
 export const NAMESPACE = "SANOMA_INSTANCE";
 /** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
@@ -94,7 +102,6 @@ export class Instance {
   #exit;
   /** The start whose `monitor` may set `#exit`: an earlier container's end is not this one's. */
   #started;
-
   constructor(ctx, env) {
     this.ctx = ctx;
     this.env = env;
@@ -107,8 +114,17 @@ export class Instance {
     return Number(this.env.PORT);
   }
 
-  /** The object's routes; never a visitor's request, which the app answers on the Worker. */
+  /** The object's routes, each answer marked with this version's id (`DEPLOYMENT_HEADER`). */
   async fetch(request) {
+    const answer = await this.#answer(request);
+    // A copy: the headers of the container's own answer cannot be changed.
+    const marked = new Response(answer.body, answer);
+    marked.headers.set(DEPLOYMENT_HEADER, this.env[VERSION_METADATA]?.id ?? "");
+    return marked;
+  }
+
+  /** Never a visitor's request, which the app answers on the Worker. */
+  async #answer(request) {
     const url = new URL(request.url);
     if (url.pathname === WAKE_PATH) return this.wake(request);
     if (url.pathname === HEALTH_PATH && !url.searchParams.has("start")) return this.health(200);

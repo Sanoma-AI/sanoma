@@ -8,6 +8,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   APP_BUNDLE_PATH,
   CLIENT_IP_HEADER,
+  DEPLOYMENT_HEADER,
   digestLabel,
   Instance,
   INACTIVITY_MS,
@@ -252,6 +253,33 @@ describe("the Worker's object", () => {
       expect(await (await object.fetch(route(START))).json()).toEqual({ revision: "r2", running: true, ready: true });
     },
   );
+
+  it("marks each answer with its version's id, the worker's passed on included, so a deploy tells its upload's from an earlier version's", async () => {
+    const { ctx } = stubCtx({
+      answer: (r) =>
+        new URL(r.url).pathname === APP_BUNDLE_PATH
+          ? Response.json({ building: "r3" }, { status: 202, headers: { "x-sanoma-app-bundle": "1" } })
+          : new Response("ok"),
+    });
+    const serving = "00000002-0000-4000-a000-000000000000";
+    const env = { ...ENV, CF_VERSION_METADATA: { id: serving, tag: "", timestamp: "" } };
+    const object = new Instance(ctx, env);
+    const answers = [
+      await object.fetch(route("/__sanoma/health")),
+      await object.fetch(route(`${APP_BUNDLE_PATH}?revision=r3`, "swi_another")),
+      await object.fetch(route("/elsewhere")),
+    ];
+    await started(object);
+    answers.push(await object.fetch(route(`${APP_BUNDLE_PATH}?revision=r3`)));
+    expect(answers.map((a) => [a.status, a.headers.get(DEPLOYMENT_HEADER)])).toEqual([
+      [200, serving],
+      [401, serving],
+      [404, serving],
+      [202, serving],
+    ]);
+    // The worker's own answer, its marks kept.
+    expect(answers[3]!.headers.get("x-sanoma-app-bundle")).toBe("1");
+  });
 
   it("destroys a container whose worker has not stopped once the drain's time is up", async () => {
     vi.useFakeTimers();
@@ -573,7 +601,7 @@ describe("the Worker script", () => {
     expect(seen!.request.headers.get(CLIENT_IP_HEADER)).toBe("");
   });
 
-  it("imports the app the upload puts under app/ from its entry, and the placeholder answers 503 until the first bundle", async () => {
+  it("imports the app the upload puts under app/ from its entry, and the placeholder answers 503 on a Worker that never served an app", async () => {
     // The Worker as the upload lays it out: the package's modules, and `app/index.js` beside them.
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-worker-")));
     try {

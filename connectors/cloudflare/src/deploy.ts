@@ -5,6 +5,7 @@ import { DriverError, errorMessage } from "@sanoma-ai/workflows";
 import { APP_BUNDLE_HEADER, APP_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
 import mime from "mime";
 import { refused } from "./errors.ts";
+import { DEPLOYMENT_HEADER } from "../worker/instance.js";
 import type { AssetFile, CloudflareApi, ContainerOptions } from "./ops.ts";
 
 // What a deploy uploads as the company's Worker script: the package's `worker/` (the entry and the
@@ -18,7 +19,7 @@ export const MAIN_MODULE = "index.js";
 /** The Durable Object class the Worker exports, which the container application runs behind. */
 export const OBJECT_CLASS = "SanomaInstance";
 /** Where the app bundle's modules go in the upload: the entry imports `app/index.js`. */
-const APP = "app/";
+export const APP = "app/";
 
 /** One module of the Worker: its name in the upload, its source, and its kind (an ES module unless it says). */
 export interface WorkerModule {
@@ -93,26 +94,40 @@ export async function waitFor<T>(
   }
 }
 
+interface BundleAsk {
+  script: string;
+  url: string;
+  token: string;
+  revision: string;
+  /**
+   * The id of the Worker version this deploy uploaded, whose answers alone count; undefined to
+   * ask whichever version is deployed, which may be `{ stale }`.
+   */
+  deployment?: string;
+}
+
 /**
  * The app bundle at `revision`, asked of the Worker at `url` with the instance token until it
  * gives it: the object starts its container when it is stopped, and both it and the worker answer
- * 202 meanwhile. A failed build or a revision the route refuses is a refusal. A deployment that
- * cannot build it is `{ stale }`, why: a token refused (the deployed Worker or its container holds
- * another), a container that ended, or, from an earlier deployment (`earlier`), a 404 the route
- * did not mark (a runtime without it). Any other answer (no answer, an error of Cloudflare's, a
- * body cut off, a workers.dev URL not routed yet) is asked again. Still none
- * after `startTimeoutMs` is a retryable `DriverError` that says what the last ask saw. One ask
- * may take the whole budget: a bundle is large.
+ * 202 meanwhile. A failed build, a revision the route refuses or, from the version this deploy
+ * uploaded, a container that ended is a refusal. Asked of whichever version is deployed, one that
+ * cannot build it is `{ stale }`, why: a token refused (the Worker or its container holds another),
+ * a container that ended, or a 404 the route did not mark (a Worker without it). Asked of the
+ * version uploaded (`deployment`), an answer without its deployment is an earlier version's, still
+ * answering while the upload reaches every location: asked again, whatever its status. Any other
+ * answer (no answer, an error of Cloudflare's, a body cut off, a workers.dev URL not routed yet) is
+ * asked again. Still none after `startTimeoutMs` is a retryable `DriverError` that says what the
+ * last ask saw. One ask may take the whole budget: a bundle is large.
  */
-export async function appBundle(
+export function appBundle(
   cf: CloudflareApi,
-  {
-    script,
-    url,
-    token,
-    revision,
-    earlier,
-  }: { script: string; url: string; token: string; revision: string; earlier: boolean },
+  ask: BundleAsk & { deployment: string },
+  polling: Polling,
+): Promise<AppBundle>;
+export function appBundle(cf: CloudflareApi, ask: BundleAsk, polling: Polling): Promise<AppBundle | { stale: string }>;
+export function appBundle(
+  cf: CloudflareApi,
+  { script, url, token, revision, deployment }: BundleAsk,
   polling: Polling,
 ): Promise<AppBundle | { stale: string }> {
   return waitFor<AppBundle | { stale: string }>(
@@ -126,15 +141,21 @@ export async function appBundle(
           signal: AbortSignal.timeout(polling.startTimeoutMs),
         });
         const route = res.headers.has(APP_BUNDLE_HEADER);
+        const by = res.headers.get(DEPLOYMENT_HEADER);
+        if (deployment !== undefined && by !== deployment) {
+          await res.body?.cancel();
+          return { last: `an earlier version (${by || "unmarked"}) answered ${res.status}` };
+        }
         // Undefined when it is none (a body cut off where the JSON is).
         const body = (await res.json().catch(() => undefined)) as { error?: unknown; exit?: unknown } | undefined;
         if (route && res.status === 200 && body !== undefined) return { value: body as unknown as AppBundle };
         const said = typeof body?.error === "string" ? body.error : `${APP_BUNDLE_PATH} answered ${res.status}`;
-        if (res.status === 401 || typeof body?.exit === "string" || (earlier && !route && res.status === 404)) {
+        const exit = typeof body?.exit === "string";
+        if (deployment === undefined && (res.status === 401 || exit || (!route && res.status === 404))) {
           return { value: { stale: said } };
         }
-        // The worker's own refusal: the build's failure, a revision it refuses.
-        if (route && res.status !== 200 && res.status !== 202)
+        // The worker's own refusal (the build's failure, a revision it refuses), or the uploaded version's container ended.
+        if (exit || (route && res.status !== 200 && res.status !== 202))
           throw refused(`${script}: no app bundle at ${revision}: ${said}`);
         return {
           last: res.status === 202 ? (route ? "the worker is building it" : "its container is starting") : said,

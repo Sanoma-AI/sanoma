@@ -66,6 +66,10 @@ const state = {
   healthy: true,
 };
 
+/** `answer` to a restart's health (`?start=1`); the fixture's for an upload's wait to be live. */
+const restart = (request: Request, answer: Response) =>
+  new URL(request.url).searchParams.has("start") ? answer : undefined;
+
 /** The exchanges of `name` that match `keep`. */
 const only = (name: string, keep: (e: Exchange, i: number) => boolean) => fixture(name).filter(keep);
 const apiPath = (path: string) => `${API}${path}`;
@@ -78,8 +82,22 @@ const createWith = (...asks: Exchange[]) => [
   ),
   ...asks,
 ];
-/** The header the worker's bundle route marks its answers with. */
-const ROUTE = { "x-sanoma-app-bundle": "1" };
+/** The version the create's Worker without an app answers with: its second upload's, after the application. */
+const CREATED = { "x-sanoma-deployment": "00000002-0000-4000-a000-000000000000" };
+/** The version of a Worker at def456 serving the app at abc123, uploaded by a stale deployment's deploy. */
+const SERVING = "00000007-0000-4000-a000-000000000000";
+/** `e` answered by the version `SERVING`, or, an upload's, answering with it. */
+const servingAbc = (e: Exchange) =>
+  e.method === "PUT"
+    ? {
+        ...e,
+        body: { ...(e.body as object), result: { ...(e.body as { result: object }).result, deployment_id: SERVING } },
+      }
+    : { ...e, headers: { ...e.headers, "x-sanoma-deployment": SERVING } };
+/** The deploy's reads of what is deployed, between its writes. */
+const reads = (r: string) => r === "GET /workers/subdomain" || r.endsWith("/settings") || r.includes(PREPARATIONS);
+/** The header the worker's bundle route marks its answers with, as the create's object passes them on. */
+const ROUTE = { "x-sanoma-app-bundle": "1", ...CREATED };
 const reply = (path: string, status: number, body: unknown, method = "GET"): Exchange => ({
   method,
   path,
@@ -216,20 +234,23 @@ describe.skipIf(live)("cloudflareDriver", () => {
         "POST /containers/applications",
         // Again, once the application exists: the object's namespace learns it from this deployment.
         "PUT /workers/scripts/sanoma-company",
+        // Live: the object answers as the version uploaded.
+        "GET /__sanoma/health",
         // 1. The bundle: the object starts the container, then the worker builds it.
         `GET ${BUNDLE}`,
         `GET ${BUNDLE}`,
         `GET ${BUNDLE}`,
         "POST /workers/scripts/sanoma-company/assets-upload-session",
         "POST /workers/assets/upload?base64=true",
-        // 2. One upload.
+        // 2. One upload, live.
         "PUT /workers/scripts/sanoma-company",
+        "GET /__sanoma/health",
         // 3. The restart.
         "GET /__sanoma/health?start=1",
       ]);
       // Compared, not printed: a failure must not show a live token.
       expect(sent.slice(0, 12).every((r) => r.headers.get("authorization") === "Bearer test-token")).toBe(true);
-      expect(sent.slice(12, 15).every((r) => r.headers.get("authorization") === `Bearer ${TOKEN}`)).toBe(true);
+      expect(sent.slice(13, 16).every((r) => r.headers.get("authorization") === `Bearer ${TOKEN}`)).toBe(true);
       expect(sent.at(-1)!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
       const again = await metadataOf(await formOf(sent[11]!));
       expect(again.migrations).toBeUndefined();
@@ -262,6 +283,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       ]);
       expect(metadata.bindings.map((b: { name: string }) => b.name)).toEqual([
         "SANOMA_INSTANCE",
+        "CF_VERSION_METADATA",
         "SANOMA_SOURCE",
         "SANOMA_REF",
         "SANOMA_REVISION",
@@ -317,7 +339,8 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(metadata.containers[0].images).toEqual({ runtime: PINNED_NEXT });
       expect(sent.find((r) => r.path.endsWith(PREPARATIONS))!.body).toEqual({ image: PINNED_NEXT });
       expect(sent.some((r) => r.method === "POST" && r.path.includes("/containers/applications"))).toBe(false);
-      expect(sent.filter((r) => r.path === "/__sanoma/health?start=1")).toHaveLength(2);
+      // R's container, started for the bundle, runs at R already.
+      expect(sent.filter((r) => r.path === "/__sanoma/health?start=1")).toHaveLength(1);
     });
 
     it("copies a ghcr.io image into the account's registry first, with credentials Cloudflare makes, and runs the copy pinned", async () => {
@@ -451,7 +474,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       // The Worker's `SANOMA_IMAGE` binding holds the declared image; the application its copy.
       play(
         "plan-the-copy",
-        only("update-to-a-new-image", (_, i) => i < 3).map((exchange) =>
+        only("update", (_, i) => i < 3).map((exchange) =>
           JSON.parse(
             JSON.stringify(exchange).replaceAll(`"text":"${PINNED}"`, '"text":"ghcr.io/sanoma-ai/runtime:0.7.0"'),
           ),
@@ -467,7 +490,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     it("refuses an update whose plan changed since it was approved", async () => {
       play(
         "plan-changed",
-        only("update-to-a-new-image", (_, i) => i < 3),
+        only("update", (_, i) => i < 3),
       );
       await expect(
         op("container.update", {
@@ -481,7 +504,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     it("refuses an update that is a replace, without uploading", async () => {
       play(
         "update-is-a-replace",
-        only("update-to-a-new-image", (_, i) => i < 3),
+        only("update", (_, i) => i < 3),
       );
       await expect(
         op("container.update", { id: "company", desired: { ...desired, name: "elsewhere" } }),
@@ -495,7 +518,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("reads what the Worker runs from its bindings, and no secret's value", async () => {
       play("read-only", [
-        ...only("update-to-a-new-image", (_, i) => i < 3),
+        ...only("update", (_, i) => i < 3),
         reply("/__sanoma/health", 200, { revision: "abc123", running: false }),
       ]);
       // Stopped is healthy: the read asks without starting it.
@@ -504,7 +527,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("reads a Worker whose container does not answer as unhealthy", async () => {
       play("unhealthy", [
-        ...only("update-to-a-new-image", (_, i) => i < 3),
+        ...only("update", (_, i) => i < 3),
         reply("/__sanoma/health", 503, { error: "the container did not start" }),
       ]);
       expect(await op("container.read", { id: "company" })).toMatchObject({ gone: false, state: { healthy: false } });
@@ -524,7 +547,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     it("deletes the application, then the Worker with its object's storage, then its database's config", async () => {
       play(
         "delete-only",
-        only("delete", (_, i) => i >= 18 && i < 24),
+        only("delete", (_, i) => i >= 20 && i < 26),
       );
       expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
       expect(sent.map((r) => `${r.method} ${r.path.replace(API, "")}`)).toEqual([
@@ -610,6 +633,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
           jwt: "eyJhbGciOiJIUzI1NiJ9.completion.signature",
           config: { html_handling: "none", not_found_handling: "none", run_worker_first: ["/*", "!/assets/*"] },
         },
+        annotations: { "workers/tag": "abc123" },
       });
       expect(bare.compatibility_flags).toEqual([]);
       const modules = ["index.js", "instance.js", "app/index.js", "app/chunk.js", "app/cedar.wasm"];
@@ -624,8 +648,8 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("updates in the same three steps, setting the database's config again and uploading no asset Cloudflare has", async () => {
-      play("update-to-a-new-image");
-      await update({ desired: { ...desired, image: PINNED_NEXT, revision: "def456" } });
+      play("update");
+      await update({ desired: { ...desired, revision: "def456" } });
       expect(requests().filter((r) => !r.startsWith("GET /workers") && !r.includes(PREPARATIONS))).toEqual([
         "GET /containers/applications?name=sanoma-company",
         "GET /hyperdrive/configs?per_page=50",
@@ -637,12 +661,61 @@ describe.skipIf(live)("cloudflareDriver", () => {
         "GET /__sanoma/app-bundle?revision=def456",
         "POST /workers/scripts/sanoma-company/assets-upload-session",
         "PUT /workers/scripts/sanoma-company",
-        // At abc123 still, then at def456: the object drained it and started the new one.
+        // The upload live, then starting at def456, then there: the object drained abc123 and started it.
+        "GET /__sanoma/health",
         "GET /__sanoma/health?start=1",
         "GET /__sanoma/health?start=1",
       ]);
       const upload = await uploaded();
       expect(upload.assets.jwt).toBe("eyJhbGciOiJIUzI1NiJ9.completion.signature");
+      // Tagged with the app's revision, which a plan compares.
+      expect(upload.annotations).toEqual({ "workers/tag": "def456" });
+    });
+
+    it("has R's container build a new image's bundle, the Worker at R serving the app deployed meanwhile, and asks it once that version answers", async () => {
+      play("update-to-a-new-image");
+      await update({ desired: { ...desired, image: PINNED_NEXT, revision: "def456" } });
+      expect(
+        requests()
+          .filter((r) => !reads(r))
+          .slice(5),
+      ).toEqual([
+        // The deployed app read back, and the Worker at def456 uploaded with it.
+        "GET /workers/scripts/sanoma-company/content/v2",
+        "PUT /workers/scripts/sanoma-company",
+        // The version before still answers, then the upload does.
+        "GET /__sanoma/health",
+        "GET /__sanoma/health",
+        // The version before's 401 is not yet, not stale: def456's container builds it.
+        "GET /__sanoma/app-bundle?revision=def456",
+        "GET /__sanoma/app-bundle?revision=def456",
+        "GET /__sanoma/app-bundle?revision=def456",
+        "POST /workers/scripts/sanoma-company/assets-upload-session",
+        "PUT /workers/scripts/sanoma-company",
+        "GET /__sanoma/health",
+        "GET /__sanoma/health?start=1",
+      ]);
+      const puts = sent.filter((r) => r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"));
+      const first = await formOf(puts[0]!);
+      const serving = await metadataOf(first);
+      // The app deployed, beside this package's entry and object, its runtime and assets kept, untagged; R's bindings and image.
+      expect(await (first.get("app/index.js") as File).text()).toContain('new Response("abc123")');
+      expect(await (first.get("instance.js") as File).text()).toContain("DEPLOYMENT_HEADER");
+      expect(serving).toMatchObject({
+        compatibility_flags: ["nodejs_compat"],
+        keep_assets: true,
+        assets: { config: { run_worker_first: ["/*", "!/assets/*"] } },
+        containers: [{ images: { runtime: PINNED_NEXT } }],
+      });
+      expect(serving.assets.jwt).toBeUndefined();
+      expect(serving.annotations).toBeUndefined();
+      expect(serving.bindings).toContainEqual({ type: "plain_text", name: "SANOMA_REVISION", text: "def456" });
+      expect(serving.bindings).toContainEqual({
+        type: "hyperdrive",
+        name: "DATABASE",
+        id: "1e2d3c4b5a69788796a5b4c3d2e1f001",
+      });
+      expect((await metadataOf(await formOf(puts[1]!))).annotations).toEqual({ "workers/tag": "def456" });
     });
 
     it("refuses when the worker could not build the bundle, saying why", async () => {
@@ -659,16 +732,26 @@ describe.skipIf(live)("cloudflareDriver", () => {
       ["a runtime without the route", reply("/__sanoma/app-bundle?revision=def456", 404, "<!doctype html>Not found")],
       ["a worker that ends", reply("/__sanoma/app-bundle?revision=def456", 503, { error: "it ended", exit: "exit 1" })],
     ])(
-      "recovers a deployment that cannot build the bundle (%s) by running the Worker at the revision without its app first",
+      "recovers a deployment that cannot build the bundle (%s) with the Worker at the revision, still serving the app deployed",
       async (_, stale) => {
-        const updated = fixture("update-to-a-new-image");
-        const placeholder = updated[12]!;
-        play("bundle-stale", [...updated.slice(0, 9), stale, placeholder, ...updated.slice(9)]);
-        await update({ desired: { ...desired, image: PINNED_NEXT, revision: "def456" } });
+        const updated = fixture("update");
+        const content = fixture("update-to-a-new-image")[9]!;
+        play("bundle-stale", [
+          ...updated.slice(0, 9),
+          stale,
+          content,
+          servingAbc(updated[12]!),
+          servingAbc(updated[13]!),
+          servingAbc(updated[9]!),
+          servingAbc(updated[10]!),
+          ...updated.slice(11),
+        ]);
+        await update({ desired: { ...desired, revision: "def456" } });
         const puts = sent.filter((r) => r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"));
         expect(puts).toHaveLength(2);
         const first = await formOf(puts[0]!);
-        expect(await (first.get("app/index.js") as File).text()).toContain("being set up");
+        // Visitors keep the app deployed: never a page saying it is being set up.
+        expect(await (first.get("app/index.js") as File).text()).toContain('new Response("abc123")');
         expect((await metadataOf(first)).bindings).toContainEqual({
           type: "plain_text",
           name: "SANOMA_REVISION",
@@ -683,7 +766,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
         error: "the company's container did not start: the container exited",
         exit: "the container exited",
       });
-      play("bundle-exit", createWith(ended));
+      play("bundle-exit", createWith({ ...ended, headers: CREATED }));
       await expect(op("container.create", { desired })).rejects.toThrow("no app bundle at abc123");
     });
 
@@ -691,7 +774,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       ["an error of Cloudflare's", reply(BUNDLE, 502, "bad gateway"), "answered 502"],
       [
         "the object's 503 while the container restarts",
-        reply(BUNDLE, 503, { error: "did not answer" }),
+        { ...reply(BUNDLE, 503, { error: "did not answer" }), headers: CREATED },
         "did not answer",
       ],
       ["a bundle cut off", { ...reply(BUNDLE, 200, '{"version":"abc123","mainMod'), headers: ROUTE }, "answered 200"],
@@ -718,8 +801,8 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("confirms an update whose upload is made by the restart alone, though the update approved was a deploy", async () => {
       // The Worker runs def456 already: a deploy that died in its restart, or the worker that ran it restarted.
-      const [settings, app, subdomain] = only("update-to-a-new-image", (_, i) => i < 3).map((e) =>
-        JSON.parse(JSON.stringify(e).replaceAll('"text":"abc123"', '"text":"def456"')),
+      const [settings, app, subdomain] = only("update", (_, i) => i < 3).map((e) =>
+        JSON.parse(JSON.stringify(e).replaceAll('"abc123"', '"def456"')),
       );
       play("restart-alone", [
         settings!,
@@ -734,6 +817,19 @@ describe.skipIf(live)("cloudflareDriver", () => {
         state: { ...state, revision: "def456" },
       });
       expect(sent.some((r) => r.method === "PUT" || r.path.includes("app-bundle"))).toBe(false);
+    });
+
+    it("plans an update for a Worker at the revision whose version still serves the app deployed before", async () => {
+      // A deploy that ended between its two uploads: R's bindings, the version tagged with R-1's app.
+      play(
+        "serving-the-app-before",
+        only("update", (_, i) => i < 3).map((e) =>
+          JSON.parse(JSON.stringify(e).replaceAll('"text":"abc123"', '"text":"def456"')),
+        ),
+      );
+      expect(await op("container.plan", { id: "company", desired: { ...desired, revision: "def456" } })).toMatchObject({
+        action: "update",
+      });
     });
 
     it("refuses a host without its database's URL, or with one Hyperdrive cannot take, before any request", async () => {
@@ -756,7 +852,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("plans an update when a domain the Worker serves is not attached, so the next apply attaches it", async () => {
-      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      const [settings, ...rest] = only("update", (_, i) => i < 3);
       play("domain-unattached", [
         withText(settings!, "SANOMA_DOMAINS", "www=www.acme.example"),
         ...rest,
@@ -785,7 +881,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("plans an update when the declaration leaves out the domains the Worker serves", async () => {
-      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      const [settings, ...rest] = only("update", (_, i) => i < 3);
       play("domains-removed", [
         withText(settings!, "SANOMA_DOMAINS", "www=acme.example"),
         ...rest,
@@ -830,7 +926,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("reads the hostname detached by hand as drift, and plans the update that attaches it again at its url", async () => {
-      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      const [settings, ...rest] = only("update", (_, i) => i < 3);
       play("hostname-unattached", [
         withText(settings!, "SANOMA_HOSTNAME", "app.acme.example"),
         ...rest,
@@ -845,7 +941,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("detaches a renamed hostname before the upload and attaches the new one after it, the app at the new one", async () => {
-      const updated = fixture("update-to-a-new-image");
+      const updated = fixture("update");
       play("hostname-rename", [...renameUntilUpload(updated), updated[12]!, attachedNew, ...updated.slice(13)]);
       expect(await update({ desired: renamed })).toEqual({ id: "company", state: renamedState });
       // Detached while the bindings still name it; attached once they name the new one.
@@ -864,7 +960,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("converges on a retry after a rename fails past the detach: the old name gone, the new one attached and recorded", async () => {
-      const updated = fixture("update-to-a-new-image");
+      const updated = fixture("update");
       const uploadRefused = reply(
         apiPath("/workers/scripts/sanoma-company"),
         400,
@@ -884,7 +980,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
         zoneLookup(),
         ...updated.slice(4, 13),
         attachedNew,
-        updated[14]!,
+        ...updated.slice(13),
       ]);
       await expect(update({ desired: renamed })).rejects.toMatchObject({ name: "DriverError", status: 400 });
       // Nothing attached that the bindings do not name: the old hostname is gone, the new one not attached yet.
@@ -900,7 +996,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("attaches a site's new domain only after the upload names it, so it never reaches a Worker that would serve the app there", async () => {
-      const updated = fixture("update-to-a-new-image");
+      const updated = fixture("update");
       play("domain-added-fails", [
         ...updated.slice(0, 4),
         attachedDomains(),
@@ -917,7 +1013,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("plans an update when the declaration leaves out the hostname the Worker serves", async () => {
-      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      const [settings, ...rest] = only("update", (_, i) => i < 3);
       play("hostname-removed", [
         withText(settings!, "SANOMA_HOSTNAME", "app.acme.example"),
         ...rest,
@@ -962,9 +1058,11 @@ describe.skipIf(live)("cloudflareDriver", () => {
       const slow = cloudflareDriver({ timeoutMs: 200, startTimeoutMs: 30, pollMs: 5 });
       play(
         "stale",
-        only("create", (e) => !e.path.startsWith("/__sanoma/health")),
+        only("create", (e) => e.path !== "/__sanoma/health?start=1"),
       );
-      server.use(http.get("*/__sanoma/health", () => HttpResponse.json({ revision: "older" })));
+      server.use(
+        http.get("*/__sanoma/health", ({ request }) => restart(request, HttpResponse.json({ revision: "older" }))),
+      );
       await expect(
         slow.ops["container.create"]!({ desired }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, DB_URL: DATABASE_URL })),
       ).rejects.toMatchObject({
@@ -979,16 +1077,19 @@ describe.skipIf(live)("cloudflareDriver", () => {
       const patient = cloudflareDriver({ timeoutMs: 200, startTimeoutMs: 60_000, pollMs: 5 });
       play(
         "stale",
-        only("create", (e) => !e.path.startsWith("/__sanoma/health")),
+        only("create", (e) => e.path !== "/__sanoma/health?start=1"),
       );
       server.use(
-        http.get("*/__sanoma/health", () =>
-          HttpResponse.json(
-            {
-              error: "the company's container did not start: the container failed: exit code 1",
-              exit: "the container failed: exit code 1",
-            },
-            { status: 503 },
+        http.get("*/__sanoma/health", ({ request }) =>
+          restart(
+            request,
+            HttpResponse.json(
+              {
+                error: "the company's container did not start: the container failed: exit code 1",
+                exit: "the container failed: exit code 1",
+              },
+              { status: 503 },
+            ),
           ),
         ),
       );

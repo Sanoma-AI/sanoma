@@ -7,10 +7,14 @@ export declare const WAKE_PATH: "/__sanoma/wake";
 export declare const HEALTH_PATH: "/__sanoma/health";
 /** The worker port's route of the app bundle at `?revision=`, which the object passes on with the instance token. */
 export declare const APP_BUNDLE_PATH: "/__sanoma/app-bundle";
+/** The header on every answer of the object: the id of the Worker version that answered. */
+export declare const DEPLOYMENT_HEADER: "x-sanoma-deployment";
 /** The header the app reads the visitor's address from. */
 export declare const CLIENT_IP_HEADER: "x-sanoma-client-ip";
 /** How long the container keeps running after the object's last request: Cloudflare stops it then. */
 export declare const INACTIVITY_MS: number;
+/** The Worker version's metadata binding (`version_metadata`): its `id`, which each upload answers with. */
+export declare const VERSION_METADATA: "CF_VERSION_METADATA";
 /** The binding that names the object, in the Worker's env. */
 export declare const NAMESPACE: "SANOMA_INSTANCE";
 /** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
@@ -55,7 +59,7 @@ export interface ObjectState {
 /** One object of the Worker. */
 export declare class Instance {
   constructor(ctx: ObjectState, env: Record<string, unknown>);
-  /** Its routes: the wake, the health (with `?start=1`, a start), the app bundle. */
+  /** Its routes: the wake, the health (with `?start=1`, a start), the app bundle; each answer with `DEPLOYMENT_HEADER`. */
   fetch(request: Request): Promise<Response>;
   /** `info` as Cloudflare gives it: how many times this alarm was retried. */
   alarm(info?: { retryCount: number; isRetry: boolean }): Promise<void>;
