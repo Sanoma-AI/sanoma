@@ -11,8 +11,8 @@ import { alternatesOf } from "#/site-path.ts";
 import { ActorContext, useActorState } from "../actor.ts";
 import { actorQuery, chatModelQuery, configQuery, remoteQuery, waitingRunsQuery } from "../queries.ts";
 import { pageHost, siteOrigin } from "../site-url.ts";
-// Phosphor's regular shield-check, the app's icon.
-import favicon from "../favicon.svg?url";
+// Sanoma's mark at a small size (icon-small.svg), as the desktop app's icon draws it too.
+import favicon from "../icon-small.svg?url";
 import css from "../style.css?url";
 
 /** The app's chrome, in a chunk of its own that a public site's host never loads. */

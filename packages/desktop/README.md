@@ -20,7 +20,7 @@ pnpm --filter @sanoma-ai/desktop start ~/Companies/acme  # or open a company at 
 
 ## The icon
 
-`icons/` holds Sanoma's mark, as the website's touch icon draws it: a white "S" in Fraunces on a pine rounded square, the S an outline so no font is needed. (The website's favicon has the same design, with its S left to the browser's Georgia.) `icon.svg` is the drawing, and `icon-small.svg` the same at Fraunces's smallest optical size, for where the S is too small for the fine strokes. After changing either, run `node packages/desktop/scripts/icons.ts` on a Mac with Chrome and commit what it writes: `icon.icns`, the square on Apple's margin with a shadow, and `icon.ico`, the square filling the canvas, from 16 to 256 px.
+The icon is Sanoma's mark, as the website's touch icon draws it: a white "S" in Fraunces on a pine rounded square, the S an outline so no font is needed. (The website's favicon has the same design, with its S left to the browser's Georgia.) The app keeps the drawings, so its browser tab shows the same mark: [`icon.svg`](../app/src/icon.svg), and [`icon-small.svg`](../app/src/icon-small.svg) the same at Fraunces's smallest optical size, for where the S is too small for the fine strokes (the tab's icon). After changing either, run `node packages/desktop/scripts/icons.ts` on a Mac with Chrome and commit what it writes to `icons/`: `icon.icns`, the square on Apple's margin with a shadow, and `icon.ico`, the square filling the canvas, from 16 to 256 px.
 
 ## Signing and notarization
 
