@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { rootSnapshot } from "./bundled.ts";
 import { APP_NAME, APPS_DIR, appOfPath } from "./shared.ts";
 
 // Where an import may reach, as the lints and the data-file reader all decide it, the one walk up
-// the directories and the one walk down (`filesUnder`). Node's `path` and `fs` only, no parser:
-// the oxlint plugin loads it.
+// the directories and the one walk down (`filesUnder`). Node's `path` and `fs` only (and a
+// bundle's registered roots, plain data), no parser: the oxlint plugin loads it.
 
 /**
  * Where a data file imports `secret` from, and `sanoma`, the runtime's own resource constructors
@@ -70,8 +71,8 @@ export { APPS_DIR, appOfPath };
 /** Each directory's company root (the nearest one with a `sanoma.config.ts`, short of a `node_modules`), once found. */
 const roots = new Map<string, string>();
 
-/** Whether `dir` is a company's root: it holds a `sanoma.config.ts`. */
-const isCompany = (dir: string) => existsSync(join(dir, "sanoma.config.ts"));
+/** Whether `dir` is a company's root: it holds a `sanoma.config.ts`, or a bundle registered its snapshot (`useRootSnapshot`). */
+const isCompany = (dir: string) => rootSnapshot(dir) !== undefined || existsSync(join(dir, "sanoma.config.ts"));
 
 /**
  * The app a file is in: `<app>` for a file under `<root>/apps/<app>/`, where the root is the
@@ -112,6 +113,23 @@ export const kindDirs = (root: string, kind: string): string[] => [
   join(root, kind),
   ...appFolders(root).map((app) => join(app, kind)),
 ];
+
+/**
+ * The files whose declarations join the config's, as `sanoma` loads it and the Worker's bundle
+ * imports them: each workflow source under `workflows/` and each app's (a test or a declaration
+ * file aside), then each `resources/data.ts` there is.
+ */
+export function declarationFiles(root: string): { workflows: string[]; data: string[] } {
+  return {
+    workflows: kindDirs(root, "workflows").flatMap((dir) => filesUnder(dir, isWorkflowSource)),
+    data: kindDirs(root, "resources")
+      .map((dir) => join(dir, COLLECTIONS_FILE))
+      .filter((path) => existsSync(path)),
+  };
+}
+
+/** A workflow file's name: `.ts`, but a test (`.test.ts`, `.spec.ts`) or a declaration. */
+const isWorkflowSource = (name: string) => name.endsWith(".ts") && !/\.(test|spec|d)\.ts$/.test(name);
 
 /** Where a company's scenarios are, under its root and each app's folder. */
 export const SCENARIOS_DIR = "scenarios";

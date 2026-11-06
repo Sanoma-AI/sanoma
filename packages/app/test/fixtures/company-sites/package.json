@@ -1,5 +1,8 @@
 {
   "name": "company-sites",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "sanoma": {
+    "title": "Fixture login"
+  }
 }

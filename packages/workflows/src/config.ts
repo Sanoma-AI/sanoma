@@ -295,6 +295,47 @@ export function defineConfig(config: SanomaConfig): SanomaConfig {
   return { ...config, file: config.file ?? callerFile() };
 }
 
+/**
+ * Joins the declaration files' modules (`declarationFiles`, each by its path) to `config`, as
+ * `sanoma` loads it and the Worker's bundle composes it: a workflow file's default export is a
+ * workflow (`defineWorkflow`), a file without one a helper; each export of a data file is a
+ * collection. One the config lists already is kept, once. A `workflows` or `collections` that is
+ * no list is left for `resolveConfig` to explain. Throws naming the file for an export that is
+ * neither.
+ */
+export function joinDeclarations(
+  config: SanomaConfig,
+  modules: { workflows: [path: string, module: { default?: unknown }][]; data: [path: string, module: object][] },
+): void {
+  if (config.workflows === undefined || Array.isArray(config.workflows)) {
+    const workflows = new Set(config.workflows);
+    for (const [path, { default: wf }] of modules.workflows) {
+      if (wf === undefined) continue;
+      if ((wf as { kind?: unknown } | null)?.kind !== "workflow") {
+        throw new Error(
+          `${path}'s default export is not a workflow: a file of workflows/ exports one, \`export default defineWorkflow({ … })\`, or none (a helper the workflows import)`,
+        );
+      }
+      workflows.add(wf as WorkflowDefinition<any, any>);
+    }
+    if (workflows.size > 0) config.workflows = [...workflows];
+  }
+  if (config.collections === undefined || Array.isArray(config.collections)) {
+    const collections = new Set(config.collections);
+    for (const [path, module] of modules.data) {
+      for (const [name, value] of Object.entries(module)) {
+        if (!isCollection(value)) {
+          throw new Error(
+            `${path} exports ${name}, which is not a collection: resources/data.ts holds collections only, each \`export const ${name} = collection({ name, key, fields })\` with collection from "sanoma/data"`,
+          );
+        }
+        collections.add(value);
+      }
+    }
+    if (collections.size > 0) config.collections = [...collections];
+  }
+}
+
 export function resolveDatabaseUrl(config: { databaseUrl?: string }, env: NodeJS.ProcessEnv = process.env): string {
   return config.databaseUrl ?? env.SANOMA_DATABASE_URL ?? DEFAULT_DATABASE_URL;
 }

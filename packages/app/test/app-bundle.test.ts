@@ -48,12 +48,29 @@ const PEOPLE = `import { sanoma } from "sanoma/resources";
 export const ada = sanoma.person({ id: "ada", email: "ada@acme.test" });
 `;
 
-/** A copy of the fixture company, with the app installed as a company installs it, and one person declared. */
+/**
+ * A workflow file the config does not list, on a schedule: the Worker's config has it as `sanoma`
+ * loads the config, and checks its schedule with DBOS's cron parser.
+ */
+const NIGHTLY = `import { defineWorkflow, z } from "sanoma";
+
+export default defineWorkflow({
+  name: "nightly",
+  title: "Tidy up nightly",
+  trigger: { schedule: "0 3 * * *" },
+  input: z.object({}),
+  uses: [],
+  run: async () => ({ tidied: "nightly" }),
+});
+`;
+
+/** A copy of the fixture company, with the app installed as a company installs it, one person declared, and a workflow file. */
 function company(): { repo: string; config: ReturnType<typeof defineConfig> } {
   const repo = mkdtempSync(join(tmpdir(), "sanoma-bundle-"));
   temporary.push(repo);
   cpSync(fixtureDir, repo, { recursive: true });
   write(join(repo, "resources", "people.ts"), PEOPLE);
+  write(join(repo, "workflows", "nightly.ts"), NIGHTLY);
   mkdirSync(join(repo, "node_modules"));
   symlinkSync(join(appDir, "..", "sanoma"), join(repo, "node_modules", "sanoma"));
   return { repo, config: defineConfig({ ...fixture, root: repo, file: join(repo, "sanoma.config.ts"), databaseUrl }) };
@@ -199,6 +216,13 @@ describe("buildAppBundle", () => {
     }
   });
 
+  it("carries the workflow files' workflows and what a connector reads of its package, as Node loads them", () => {
+    const code = bundle.modules.map(({ content }) => Buffer.from(content, "base64").toString()).join("\n");
+    expect(code).toContain('tidied: "nightly"');
+    // Only package.json says it.
+    expect(code).toContain("Fixture login");
+  });
+
   it("answers /healthz", async () => {
     expect(await (await get(`https://${HOSTNAME}/healthz`)).text()).toBe("ok\n");
   });
@@ -317,5 +341,36 @@ export const Route = createFileRoute("/sites/hello/spawn")({ loader: () => run()
       symbol: "execFile",
       module: "node:child_process",
     });
+  }, 300_000);
+
+  it("refuses a company file that throws as the Worker evaluates it, naming the file and line", async () => {
+    const { repo, config } = company();
+    // Node has the file; the Worker, whose files are its modules, does not.
+    write(join(repo, "workflows", "notes.txt"), "remember\n");
+    write(
+      join(repo, "workflows", "notes.ts"),
+      `import { readFileSync } from "node:fs";
+import { defineWorkflow, z } from "sanoma";
+
+const notes = readFileSync(new URL("./notes.txt", import.meta.url), "utf8");
+
+export default defineWorkflow({
+  name: "notes",
+  title: "Notes",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [],
+  run: async () => ({ notes }),
+});
+`,
+    );
+    const refused = await buildAppBundle(repo, { config }).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+    expect(refused).toBeInstanceOf(Error);
+    expect((refused as Error).message.split("\n")[0]).toMatch(
+      /^workflows\/notes\.ts:4 throws as the Cloudflare Worker evaluates it: Error: no such file or directory/,
+    );
   }, 300_000);
 });
