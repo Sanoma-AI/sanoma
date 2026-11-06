@@ -380,7 +380,11 @@ export function useStagedChange({
     /** Stages `step`, answering whether it did: what the last Save said gives way to it, not to a step refused. */
     add(step: Step): boolean {
       if (reading) return (toast.info("Reading the records: try again once they show"), false);
-      if (busy() || !stage.add(step)) return false;
+      try {
+        if (busy() || !stage.add(step)) return false;
+      } catch (err) {
+        return (toast.error(errorMessage(err)), false);
+      }
       setHeld(undefined);
       setDenied(new Set());
       return true;

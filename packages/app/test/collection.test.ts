@@ -296,6 +296,25 @@ describe("a staged change of the Data page's records", () => {
     expect(collection.get("Globex")?.record).toEqual(GLOBEX.record);
   });
 
+  it("refuses a step that takes the change past what one saveMany saves, keeping the change as it was", () => {
+    const { stage } = staged();
+    stage.add(paste);
+    const adds = Array.from({ length: 999 }, () => newKey());
+    expect(() => stage.add({ what: "paste", said: "Pasted 999 rows", adds })).toThrow(/at most 1000 records/);
+    expect(stage.current()?.steps).toEqual([paste]);
+  });
+
+  it("lets a record gone since take its edits with it: a change over it alone closes", async () => {
+    const { collection, stage } = staged();
+    stage.add({ what: "edit", said: "Changed stage of Acme", cells: [cell("Acme", "stage", "won")] });
+    calls.saveMany.mockRejectedValueOnce(
+      new ApiError(409, { error: "Changed", code: "record_changed", conflicts: [{ key: "Acme", current: null }] }),
+    );
+    await expect(stage.save()).resolves.toEqual({ conflicts: [{ key: "Acme", current: null }] });
+    expect(stage.current()).toBeUndefined();
+    expect(collection.has("Acme")).toBe(false);
+  });
+
   it("rolls the whole change back when saveMany fails: nothing changed", async () => {
     const { collection, stage } = staged();
     stage.add(paste);

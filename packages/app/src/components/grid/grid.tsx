@@ -166,7 +166,9 @@ export function DataGrid({
   const [savedAt, setSavedAt] = useState<number>();
   // How many match, read once the rows reach the limit: a Save may change it.
   const counted = countQuery(name, where);
-  const matches = useQuery({ ...counted, enabled: listed.length >= limit }).data;
+  // The rows read, not the new ones staged.
+  const read = listed.filter((saved) => !isNew(saved.key)).length;
+  const matches = useQuery({ ...counted, enabled: read >= limit }).data;
   const queryClient = useQueryClient();
   const change = useStagedChange({
     view,
@@ -363,8 +365,8 @@ export function DataGrid({
     setEditing(null);
     if (then) table.moveCellSelection(then);
     // Left as it opened: never a save, even of a value the editor cannot hold (an enum's value
-    // its options no longer have), which it would drop.
-    if (!shown || cell.draft === cell.start) return;
+    // its options no longer have), which it would drop; typed into a selection, every cell takes it.
+    if (!shown || (cell.draft === cell.start && targets.length <= 1)) return;
     const next = recordWith(field, shown.record, cell.draft);
     if ("error" in next) return void toast.error(`${cell.field}: ${next.error}`);
     const value = next.record[cell.field];
@@ -710,11 +712,11 @@ export function DataGrid({
       )}
       <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-3 py-2 text-xs text-muted-foreground">
         <span>
-          {listed.length >= limit
+          {read >= limit
             ? `The first ${limit}${matches === undefined ? "" : ` of ${matches}`} records: filter them, or show more, to see the rest`
-            : listed.length === 1
+            : read === 1
               ? "1 record matches"
-              : `${listed.length} records match`}
+              : `${read} records match`}
         </span>
         {savedAt !== undefined && (
           <>

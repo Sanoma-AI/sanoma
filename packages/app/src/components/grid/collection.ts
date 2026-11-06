@@ -1,4 +1,4 @@
-import type { Saved } from "@sanoma-ai/workflows/shared";
+import { BATCH_LIMIT, type Saved } from "@sanoma-ai/workflows/shared";
 import {
   createCollection,
   createPacedMutations,
@@ -55,9 +55,6 @@ export function withValue(record: Record<string, unknown>, field: string, value:
 
 /** What `saveMany` answers for each entry, in the order sent: a record saved, or a key deleted. */
 export type ManyAnswer = Saved | { key: string; deleted: boolean };
-
-/** The most entries one `saveMany` takes. */
-export const SAVE_MANY_MAX = 1000;
 
 /**
  * A staged new record's key, until its own is saved: one no record has (a private-use character
@@ -334,10 +331,14 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
     },
     /**
      * Stages `step`, opening a change when none is: shown at once, saved by nothing until `save`.
-     * Answers whether it did: a step that changes nothing, or one under a Save, is refused.
+     * Answers whether it did: a step that changes nothing, or one under a Save, is refused, and
+     * one taking the change past what one `saveMany` saves throws.
      */
     add(step: Step): boolean {
       if (!idle() || (!step.adds?.length && !step.cells?.length && !step.deletes?.length)) return false;
+      const steps = [...(staged?.steps ?? []), step];
+      if (new Set([...keysOf(steps), ...steps.flatMap((s) => s.adds ?? [])]).size > BATCH_LIMIT)
+        throw new Error(`One change saves at most ${BATCH_LIMIT} records: save some first`);
       const tx = staged?.tx ?? opened();
       const rows = storedRows();
       for (const key of keysOf([step])) {
@@ -345,7 +346,7 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
         if (row && !base.has(key)) base.set(key, row);
       }
       tx.mutate(() => apply(tx, step));
-      show({ tx, steps: [...(staged?.steps ?? []), step] });
+      show({ tx, steps });
       return true;
     },
     /** Takes back the last step. */
@@ -391,8 +392,6 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
         });
         if (conflicts.length) return { conflicts };
         const count = open.tx.mutations.filter((m) => sent(m.key) && isChange(m)).length;
-        if (count > SAVE_MANY_MAX)
-          throw new Error(`One change saves at most ${SAVE_MANY_MAX} records: save some first`);
         // Rolled back during the read by another edit's refusal: `opened` has made the change
         // again from its steps, and a commit of this one would fail and discard it.
         if (open.tx.state !== "pending") throw new Error("An edit before it was not saved: save again");
@@ -406,7 +405,8 @@ function createRecordsView(queryClient: QueryClient, { query, key: keyField, cal
             const gone = body.conflicts.flatMap(({ key, current }) => (current || !collection.has(key) ? [] : [key]));
             await collection.utils.writeUpsert(body.conflicts.flatMap(({ current }) => (current ? [current] : [])));
             await collection.utils.writeDelete(gone);
-            reopen(open.steps);
+            // A record gone since takes its edits with it: nothing of the change is left over it.
+            reopen(without(open.steps, (key) => gone.includes(key)));
             // A new record's is its key taken (by a record the page did not show, written in now,
             // so the key cell says so): its key to change, not a conflict to settle.
             const typed = new Set(
