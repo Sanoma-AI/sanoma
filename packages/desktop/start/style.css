@@ -97,20 +97,11 @@ p {
   flex-direction: column;
   gap: 4px;
 }
+/* Sanoma's mark, the app's drawing (packages/app/src/icon-small.svg). */
 .mark {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 36px;
   height: 36px;
   margin-bottom: 16px;
-  border-radius: 8px;
-  background: #1f6f5f;
-  color: #fff;
-  font:
-    400 20px/1 "Fraunces Variable",
-    Georgia,
-    serif;
 }
 
 button {

@@ -8,6 +8,8 @@ const start = join(import.meta.dirname, "start");
 export default defineConfig({
   root: start,
   build: {
+    // As files, not data: URLs, which the pages' Content-Security-Policy refuses (the mark's drawing).
+    assetsInlineLimit: 0,
     outDir: join(import.meta.dirname, ".vite", "renderer", "start"),
     rollupOptions: { input: [join(start, "index.html"), join(start, "company.html")] },
   },

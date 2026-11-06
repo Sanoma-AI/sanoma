@@ -11,7 +11,7 @@ import { alternatesOf } from "#/site-path.ts";
 import { ActorContext, useActorState } from "../actor.ts";
 import { actorQuery, chatModelQuery, configQuery, remoteQuery, waitingRunsQuery } from "../queries.ts";
 import { pageHost, siteOrigin } from "../site-url.ts";
-// Sanoma's mark at a small size (icon-small.svg), as the desktop app's icon draws it too.
+// Sanoma's mark, the desktop icon's small drawing.
 import favicon from "../icon-small.svg?url";
 import css from "../style.css?url";
 

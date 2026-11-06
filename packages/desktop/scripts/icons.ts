@@ -1,7 +1,6 @@
-// Draws icons/icon.icns and icons/icon.ico (forge.config.mts) from Sanoma's mark, which the app
-// keeps (packages/app/src/icon.svg and, where the S is small, icon-small.svg, also its browser
-// tab's icon), in the computer's Chrome. Run it by hand on a Mac after changing a drawing, and
-// commit the results.
+// Draws icons/icon.icns and icons/icon.ico (forge.config.mts) from the app's icon.svg and, where
+// the S is small, icon-small.svg, in the computer's Chrome. Run it by hand on a Mac after changing
+// a drawing, and commit the results.
 //
 //   node packages/desktop/scripts/icons.ts
 import { execFileSync } from "node:child_process";
@@ -12,9 +11,8 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const icons = fileURLToPath(new URL("../icons/", import.meta.url));
-const mark = fileURLToPath(new URL("../../app/src/", import.meta.url));
-const large = readFileSync(join(mark, "icon.svg"), "utf8");
-const small = readFileSync(join(mark, "icon-small.svg"), "utf8");
+const large = readFileSync(new URL("../../app/src/icon.svg", import.meta.url), "utf8");
+const small = readFileSync(new URL("../../app/src/icon-small.svg", import.meta.url), "utf8");
 // In a square this size or under, icon.svg's fine strokes break up.
 const SMALL_SQUARE = 52;
 
