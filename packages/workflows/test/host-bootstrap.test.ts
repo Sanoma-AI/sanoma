@@ -1,10 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fakeCloudflare } from "@sanoma-ai/connector-cloudflare/fake";
+import { fakeCloudflare, type StartContainer, stubContainer } from "@sanoma-ai/connector-cloudflare/fake";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { postgresSecretStore } from "../src/credentials.ts";
@@ -38,22 +36,14 @@ const company: SecretConfiguration = {
   },
 };
 
-/** A container that answers `/healthz` and keeps the environment it was started with. */
+/** The fake's stub container, keeping the environment each start was given. */
 function capturing() {
   const delivered: Record<string, string>[] = [];
-  return {
-    delivered,
-    start: async ({ env }: { env: Record<string, string> }) => {
-      delivered.push({ ...env });
-      const server = createServer((req, res) => void res.writeHead(req.url === "/healthz" ? 200 : 404).end());
-      await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-      server.unref();
-      return {
-        url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-        stop: () => new Promise<void>((done) => server.close(() => done())),
-      };
-    },
+  const start: StartContainer = (input) => {
+    delivered.push({ ...input.env });
+    return stubContainer(input);
   };
+  return { delivered, start };
 }
 
 describe("bootstrap a Cloudflare host delivers to its container", () => {

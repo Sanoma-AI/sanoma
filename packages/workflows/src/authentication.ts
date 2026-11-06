@@ -157,16 +157,30 @@ export function authenticationCredentials<S extends z.ZodType>(
   }
 }
 
-/** Compatibility check before consent, including externally renewed (read-only) OAuth bundles. */
+/** Why a store cannot keep a method's credentials: `checkAuthenticationStore`'s refusal, as `StorageProblem` in `shared.ts`. */
+export type AuthenticationStoreProblem = "too_large" | "read_only" | "unsupported";
+
+/** Compatibility before consent, including externally renewed (read-only) OAuth bundles: the refusal, none when they fit. */
+export function authenticationStoreProblem(
+  auth: Authentication,
+  store: SecretStoreCapabilities,
+  management: "sanoma" | "external",
+): AuthenticationStoreProblem | undefined {
+  if (auth.kind === "workload-identity") return undefined;
+  if (auth.storage.maxBytes > store.maxBytes) return "too_large";
+  if (auth.storage.writable && (management === "external" || !store.writable)) return "read_only";
+  if (auth.storage.conditionalWrites && store.conditionalWrites === "none") return "unsupported";
+  return undefined;
+}
+
+/** `authenticationStoreProblem`'s refusal thrown, for the paths that must not go on. */
 export function checkAuthenticationStore(
   auth: Authentication,
   store: SecretStoreCapabilities,
   management: "sanoma" | "external",
 ): void {
-  if (auth.kind === "workload-identity") return;
-  if (auth.storage.maxBytes > store.maxBytes) throw new SecretStoreError("too_large");
-  if (auth.storage.writable && (management === "external" || !store.writable)) throw new SecretStoreError("read_only");
-  if (auth.storage.conditionalWrites && store.conditionalWrites === "none") throw new SecretStoreError("unsupported");
+  const problem = authenticationStoreProblem(auth, store, management);
+  if (problem) throw new SecretStoreError(problem);
 }
 
 /** Serialized only at the trusted store boundary, never returned by an operation to a workflow. */

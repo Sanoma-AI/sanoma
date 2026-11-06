@@ -150,7 +150,7 @@ const nothingHere = () =>
   });
 
 /** A runtime that answers `/healthz` and records each `/wake`: what a container runs unless the fake is given `start`. */
-const stubContainer: StartContainer = async () => {
+export const stubContainer: StartContainer = async () => {
   const wakes: FakeWake[] = [];
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://container");

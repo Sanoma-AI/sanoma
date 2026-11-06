@@ -363,6 +363,8 @@ export {
 } from "./secret-store.ts";
 export {
   defineAuthentication,
+  authenticationStoreProblem,
+  type AuthenticationStoreProblem,
   checkAuthenticationStore,
   encodeCredentials,
   decodeCredentials,

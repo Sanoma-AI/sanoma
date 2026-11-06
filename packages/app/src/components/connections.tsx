@@ -1,5 +1,5 @@
 import type { ConnectionCard, ConnectionReview, ConnectionTarget, SecretLocation } from "@sanoma-ai/workflows";
-import { CALL_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import { CALL_WORKFLOW, STORAGE_PROBLEMS } from "@sanoma-ai/workflows/shared";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -145,12 +145,6 @@ export function SecretStorage() {
 }
 
 type Method = ConnectionsResponse["methods"][string][string] | undefined;
-/** Why a method's credentials cannot be kept at their binding (`ConnectionCard.storageProblem`). */
-const STORAGE_PROBLEM: Partial<Record<string, string>> = {
-  read_only: "This method writes its credentials, such as a token refresh, and they are bound read-only.",
-  unsupported: "This method replaces its credentials with conditional writes, which this store does not offer.",
-  too_large: "This method's credentials may be larger than this store holds.",
-};
 const canWrite = (store: ConnectionsResponse["store"]) =>
   store.capabilities.writable && store.capabilities.conditionalWrites !== "none";
 
@@ -230,11 +224,11 @@ function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][numb
         )}
         {card.storageProblem && (
           <ItemDescription className="line-clamp-none">
-            {STORAGE_PROBLEM[card.storageProblem] ?? "Its credentials cannot be kept where they are bound."} Change the
-            binding in your company’s code before connecting.
+            This method {STORAGE_PROBLEMS[card.storageProblem]}. Change the binding in your company’s code before
+            connecting.
           </ItemDescription>
         )}
-        {unsupportedWrite && (
+        {unsupportedWrite && !card.storageProblem && (
           <ItemDescription className="line-clamp-none">
             This store lacks conditional writes. Use an external binding or select a store that supports safe credential
             replacement.

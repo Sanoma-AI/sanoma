@@ -1078,8 +1078,10 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
       }
       // Where `register` reaches the host, beside the token in the same store: this alarm's host, never an earlier one's.
       const stored = await secrets.get(HOST_URL);
-      if (stored !== undefined && stored !== host) await secrets.delete(HOST_URL);
-      await secrets.ensure(HOST_URL, () => host);
+      if (stored !== host) {
+        if (stored !== undefined) await secrets.delete(HOST_URL);
+        await secrets.ensure(HOST_URL, () => host);
+      }
       return { id: host, state };
     },
     update: async (

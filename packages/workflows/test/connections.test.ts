@@ -732,10 +732,12 @@ describe("storage a method needs, before consent", () => {
   });
   const catalog = connectionCatalog([calendar], [bound, managed], [visitors]);
   // A startup binding (a host's environment) and a store without conditional writes (an account-wide provider store).
-  const noConditional = { ...memorySecretStore(), id: "account-store" };
-  Object.defineProperty(noConditional, "capabilities", {
-    value: { ...memorySecretStore().capabilities, conditionalWrites: "none" },
-  });
+  const memory = memorySecretStore();
+  const noConditional = {
+    ...memory,
+    id: "account-store",
+    capabilities: { ...memory.capabilities, conditionalWrites: "none" as const },
+  };
 
   it("names a refreshing method bound read-only, and every one on a store without conditional writes", () => {
     expect(new ConnectionRegistry(catalog, () => pool.db(), secrets()).storageProblems()).toEqual([
