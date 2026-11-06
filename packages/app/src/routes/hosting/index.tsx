@@ -7,6 +7,7 @@ import type {
 } from "@sanoma-ai/workflows/describe";
 import {
   APPLY_WORKFLOW,
+  credentialReady,
   DRIFT_WORKFLOW,
   exportSpan,
   hostnameUrl,
@@ -28,7 +29,7 @@ import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { DRIFT_TONE } from "#/lib/tone.ts";
-import { errorBodyOf, INFRA, noWakeup } from "../../api.ts";
+import { type AppConfig, DECLARE_BOX, errorBodyOf, INFRA, noWakeup } from "../../api.ts";
 import {
   ButtonLink,
   CardHeading,
@@ -55,6 +56,8 @@ import { GoLive, loadGoLive } from "../../components/go-live.tsx";
 import { startRunFn } from "../../functions.ts";
 import {
   configQuery,
+  credentialsFor,
+  credentialsQuery,
   driftReportQuery,
   goLiveProgressQuery,
   hostDerivedQuery,
@@ -87,6 +90,7 @@ const SLOTS = [
   { capability: "database", title: "Database" },
   { capability: "host", title: "Host" },
   { capability: "wakeup", title: "Wakeup" },
+  { capability: "sandbox", title: "Agent box" },
 ] as const;
 type Slot = (typeof SLOTS)[number];
 
@@ -203,7 +207,7 @@ function HostingPage() {
   );
 }
 
-function WithDrift({ config, drift }: { config: ConfigDescription; drift: string }) {
+function WithDrift({ config, drift }: { config: AppConfig; drift: string }) {
   const { latest, finished, error } = useLastCheck(drift);
   const checking = latest !== undefined && !isEnded(latest.status);
   return (
@@ -231,7 +235,7 @@ function Hosting({
   action,
   children,
 }: {
-  config: ConfigDescription;
+  config: AppConfig;
   report?: DriftReport;
   adopt?: Adopt;
   action?: ReactNode;
@@ -258,6 +262,9 @@ function Hosting({
       <CrumbHeader action={action} />
       {children}
       {slots.goingLive && <GoLive />}
+      {config.place === "live" && !slots.filled.some((slot) => slot.capability === "sandbox") && (
+        <Notice>{DECLARE_BOX}.</Notice>
+      )}
       {slots.filled.length > 0 && (
         <div className="grid gap-(--gap-region) md:grid-cols-2 2xl:grid-cols-4">
           {slots.filled.map(({ title, capability, resource }) => (
@@ -410,6 +417,7 @@ function SlotCard({
             />
           )}
           {title === "Host" && <HostDerivedFacts id={resource.id} />}
+          {title === "Agent box" && <VendorKeys vendor={resource.vendor} />}
           {lifetime && (
             <Fact label="Lifetime">
               {lifetime === "long-lived"
@@ -431,6 +439,23 @@ function SlotCard({
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * Whether each key a vendor's connector takes is set (`credentialsQuery`, never a value), with its
+ * connector's page, where it is set: what an agent box opens its boxes with.
+ */
+function VendorKeys({ vendor }: { vendor: string }) {
+  const { data: keys = [] } = useQuery({ ...credentialsQuery(), select: credentialsFor(vendor) });
+  return keys.map((key) => (
+    <Fact key={key.name} label={key.name}>
+      <span className={credentialReady(key) ? undefined : "text-destructive"}>{key.status}</span>
+      {" on its "}
+      <Link to="/connectors/$vendor" params={{ vendor }} className="underline underline-offset-4">
+        connector page
+      </Link>
+    </Fact>
+  ));
 }
 
 /**

@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { gitIdentity } from "../../sanoma/test/git.ts";
 import { localGitSource } from "../../sanoma/src/source.ts";
 import { homeOf } from "../src/steps/agent/box-session.ts";
-import { BOX_BUSY, boxTurn, carryIn, carryOut } from "../src/steps/agent/carrier.ts";
+import { BOX_BUSY, boxTurn, carryIn, carryOut, OWN_PNPM } from "../src/steps/agent/carrier.ts";
 import { localBackend } from "../src/steps/agent/local-box.ts";
 
 // Git between the live instance and a person's box (`carrier.ts`), over the fake sandbox and the
@@ -310,8 +310,9 @@ touch "${join(root, "..", "ran")}"
 
 describe("the clone's install", () => {
   it("installs with the lockfile on the first open and again only when the lockfile changed or the install is gone, and goes on when it fails", async () => {
-    // A company with nothing to install but its lockfile, on the app's local backend.
-    writeFileSync(join(dir, "package.json"), '{ "name": "acme", "private": true }\n');
+    // A company with nothing to install but its lockfile, on the app's local backend, whose
+    // `packageManager` names another pnpm (an agent may write one): the box's own installs.
+    writeFileSync(join(dir, "package.json"), '{ "name": "acme", "private": true, "packageManager": "pnpm@10.0.0" }\n');
     const lockfile =
       "lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\n\nimporters:\n\n  .: {}\n";
     writeFileSync(join(dir, "pnpm-lock.yaml"), lockfile);
@@ -329,6 +330,14 @@ describe("the clone's install", () => {
     const root = await open();
     const installed = join(root, "node_modules");
     expect(existsSync(installed)).toBe(true);
+    // The box's own pnpm, in the clone as in its home.
+    const box = await boxes.open(opening);
+    const pnpm = async (cwd: string) => {
+      const ran = await box.run("pnpm --version", { cwd, env: OWN_PNPM });
+      return (await new Response(ran.stdout).text()).trim();
+    };
+    expect(await pnpm(root)).toBe(await pnpm("."));
+    expect(await pnpm(root)).not.toBe("10.0.0");
     // The same lockfile: no install (pnpm would write its state again).
     const state = join(installed, ".pnpm-workspace-state-v1.json");
     rmSync(state);

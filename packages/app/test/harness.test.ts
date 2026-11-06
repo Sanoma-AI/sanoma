@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { anthropic } from "@sanoma-ai/connector-anthropic";
 import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
+import { fakeSandbox } from "@sanoma-ai/testing/sandbox";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { copyFixture, ensureBuilt } from "../../sanoma/test/fixture.ts";
@@ -28,7 +29,8 @@ import { type ChatMessage, chatTransport, type EngineName } from "../src/lib/cha
 import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's second engine, end to end: an existing
-// coding agent through HarnessAgent in a session over the person's local box, on the Anthropic
+// coding agent through HarnessAgent in a session over the person's box in the sandbox the company
+// declares (the testing package's, whose boxes are directories on this machine), on the Anthropic
 // connector's key. No adapter takes an AI SDK model (each takes a model id and its key), so the model is a loopback
 // stand-in for Anthropic's Messages API, scripted like chat.test.ts's mock and reached through
 // `ANTHROPIC_BASE_URL`, with a key made up here. Pi runs every time; Claude Code only with
@@ -146,9 +148,9 @@ function standIn(): Server {
   });
 }
 
-// The config's root: its people.
+// The config's root: its people, and the sandbox its coding agents' boxes are in.
 const root = mkdtempSync(join(tmpdir(), "sanoma-harness-"));
-writeFileSync(join(root, "package.json"), '{ "name": "harness-test", "private": true }\n');
+writeFileSync(join(root, "package.json"), '{ "name": "harness-test", "private": true, "type": "module" }\n');
 mkdirSync(join(root, "resources"));
 writeFileSync(
   join(root, "resources/people.ts"),
@@ -157,11 +159,19 @@ writeFileSync(
 export const ada = sanoma.person({ id: "ada" });
 `,
 );
+writeFileSync(
+  join(root, "resources/infra.ts"),
+  `import { testsandbox } from "@sanoma-ai/testing-sandbox/resources";
+
+export const box = testsandbox.box({ name: "boxes", image: "local", size: 1 });
+`,
+);
+const sandbox = fakeSandbox(realpathSync(mkdtempSync(join(tmpdir(), "sanoma-harness-boxes-"))));
 
 const testApp = useTestApp(
   {
     workflows: [],
-    connectors: [anthropic],
+    connectors: [anthropic, sandbox.connector],
     root,
     secrets: { bindings: { ANTHROPIC_API_KEY: { env: "ANTHROPIC_API_KEY" } } },
   },
@@ -227,6 +237,7 @@ afterAll(async () => {
   server?.close();
   vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
+  sandbox.remove();
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -262,7 +273,8 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
     "edits the draft as the checkout rule allows, commits and checks it, and shows the draft card",
     async () => {
       const id = `${engine}-${RUN}`;
-      const box = join(dir, ".sanoma/agent-home/boxes/sanoma-harness%2Dtest-ada");
+      // In the declared sandbox, not this machine's local boxes.
+      const box = join(sandbox.root, "sanoma-harness%2Dtest-ada");
       draftRoot = join(box, "repo");
       sent.length = 0;
       const started = Date.now();
@@ -310,9 +322,9 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
       await waitFor(async () => (await testApp.client.chats.load(id)).length === 2);
       const runs = join(box, ".ai-sdk-harness/.agent-runs");
       expect(existsSync(runs) ? readdirSync(runs) : []).toEqual([]);
-      // The session's state is all in the person's box, beside people's own agents'.
-      expect(readdirSync(join(dir, ".sanoma/agent-home")).toSorted()).toEqual(["boxes", "people"]);
-      expect(readdirSync(join(dir, ".sanoma/agent-home/boxes"))).toEqual(["sanoma-harness%2Dtest-ada"]);
+      // The session's state is all in the person's box in the declared sandbox, and no local box was made.
+      expect(readdirSync(join(dir, ".sanoma/agent-home"))).toEqual(["people"]);
+      expect(readdirSync(sandbox.root)).toEqual(["sanoma-harness%2Dtest-ada"]);
       expect(existsSync(join(dir, ".sanoma/agent-home/people/ada/.credentials.json"))).toBe(true);
     },
     engine === "pi" ? 300_000 : 900_000,

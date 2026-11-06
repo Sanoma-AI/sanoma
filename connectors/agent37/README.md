@@ -26,6 +26,8 @@ export const box = agent37.instance({ size: 2 });
 | `region` | Optional: `us` (the default), `eu` or `ap-south`. Only `us` runs the `default` type.                                                                                                       |
 | `type`   | Optional: `default` (a gVisor container on shared CPU, the default), `vm` (a kernel of its own, 2.5 times the compute rate) or `performance` (cores held for it, 4 times).                 |
 
+The app opens its coding agents' boxes there once one is declared: one box per person per company, named `sanoma-<company>-<person>`, opened for each turn of Claude Code, Pi or a person's own agent and put to sleep at its end. A live instance that declares none refuses those agents rather than run them inside itself, and says so; going live writes `export const box = agent37.instance({})` into `resources/sanoma/infra.ts` once `AGENT37_API_KEY` is stored (on the app's Connect page or this connector's page). A company declares one instance at most.
+
 The declaration is a record: apply binds it without making anything at Agent37 (its read lists the workspace's instances, so it fails when the key does not work), and its state is that binding and `healthy`. A box is made from the shape declared when it is first opened; one that exists keeps its shape, and deleting the declaration leaves the boxes.
 
 The instance type meets the [`Sandbox` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#sandboxes) (`sandbox`): a box's files survive a stop (`snapshot`), a stopped box keeps its memory and processes (`pause`), and its ports are reachable from outside (`port`). It takes `image` and `size` from the declaration.

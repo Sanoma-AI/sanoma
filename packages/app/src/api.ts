@@ -359,6 +359,13 @@ export const SETUP_VENDORS: readonly {
       "An API token and the account, so the company runs on Cloudflare Containers and stops when nothing is due. Connect it before choosing where the company goes.",
   },
   {
+    vendor: "agent37",
+    title: "Agent37",
+    tokens: ["AGENT37_API_KEY"],
+    about:
+      "Optional: an API key, so that coding agents work for the live company in a box of their own at Agent37. Connect it before choosing where the company goes, which declares the box.",
+  },
+  {
     vendor: "sanoma",
     title: "Wakeup service",
     tokens: ["SANOMA_WAKEUP_URL", "SANOMA_WAKEUP_ACCOUNT_TOKEN"],
@@ -375,6 +382,12 @@ export const SEALED_SHOWN = 4;
 
 /** The data file going live writes, relative to the config's root. */
 export const INFRA = "resources/sanoma/infra.ts";
+
+/**
+ * What a live instance with no sandbox declared lacks, for the coding agents, which would otherwise
+ * run inside it: said by the chat's refusal (`NO_BOX`) and the Hosting page.
+ */
+export const DECLARE_BOX = `Coding agents work in a box of their own on a live instance, and this company declares none: declare one in ${INFRA} (\`export const box = agent37.instance({})\`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY`;
 
 /**
  * Why a host of type `hostType` that stops when quiet has no Wakeup, `wakes` being the connected

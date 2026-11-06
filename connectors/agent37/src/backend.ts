@@ -76,7 +76,7 @@ export function agent37Backend(
     },
   };
 
-  async function openBox(name: string, image: string, size: number): Promise<Box> {
+  async function openBox(name: string, image?: string, size?: number): Promise<Box> {
     const want = wanted(declared, { image, size });
     const key = await keyOf();
     const api = agent37Api(key);

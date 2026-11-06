@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { HarnessV1, HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
-import type { AppStepContext } from "@sanoma-ai/workflows";
+import type { AppStepContext, Box } from "@sanoma-ai/workflows";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
 import {
   createUIMessageStream,
@@ -13,9 +13,18 @@ import {
 import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
 import { modelRegistry } from "../../server/models.ts";
 import { secretValues } from "../../server/secrets.ts";
-import { boxSession, homeOf, openBox } from "./box-session.ts";
+import { boxSession, homeOf, personBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut } from "./carrier.ts";
-import { allowedPath, boxName, NO_SHELL, openDraft, outsideCheckout, showCommits, turnMessage } from "./checkout.ts";
+import {
+  allowedPaths,
+  NO_SHELL,
+  openDraft,
+  outsideCheckout,
+  type RealPaths,
+  realIn,
+  showCommits,
+  turnMessage,
+} from "./checkout.ts";
 import { freePort } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
@@ -87,7 +96,8 @@ export const harnessEngine =
 
 async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
   const { step, chat } = turn;
-  // The key first: a turn without it opens no draft.
+  // The box chosen and the key first: a turn without either opens no draft.
+  const person = await personBox(step);
   const auth = await authFor(step);
   // The agent works in the chat's draft from its first turn, in the person's box, opened last
   // so that nothing that fails before leaves it running.
@@ -95,39 +105,35 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
   /** Whether the box's commits reached the draft. */
   let carried = false;
   try {
-    await boxTurn(
-      boxName(step.resolved.appName, step.by.id),
-      () => openBox(step),
-      async (box) => {
-        // Kept across turns: a bridge installs its agent under it once, and the clone stays.
-        const home = await homeOf(box);
-        const cloned = await carryIn(box, step.source, chat.id, { home, signal: step.signal }).catch((err: unknown) => {
-          // A stopped turn says nothing.
-          if (step.signal.aborted) return undefined;
-          throw err;
-        });
-        if (!cloned) return;
-        const { root, head } = cloned;
-        const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root, home, ports: [port] });
-        // However the turn ended (an error too): the session destroyed, so nothing in the box writes
-        // again, then what it changed committed in the box and carried back to the draft. A failed
-        // carry is the turn's error (its edits are lost), the one before it logged.
-        const ended = await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id })
-          .finally(() => sandbox.destroy())
-          .then(
-            () => undefined,
-            (err: unknown) => ({ err }),
-          );
-        try {
-          const message = turnMessage(turn, ENGINE_NAMES[name]);
-          carried = await carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id });
-        } catch (err) {
-          if (ended) console.error(`sanoma app: the turn in the box ${box.id} failed:`, ended.err);
-          throw err;
-        }
-        if (ended) throw ended.err;
-      },
-    );
+    await boxTurn(person.name, person.open, async (box) => {
+      // Kept across turns: a bridge installs its agent under it once, and the clone stays.
+      const home = await homeOf(box);
+      const cloned = await carryIn(box, step.source, chat.id, { home, signal: step.signal }).catch((err: unknown) => {
+        // A stopped turn says nothing.
+        if (step.signal.aborted) return undefined;
+        throw err;
+      });
+      if (!cloned) return;
+      const { root, head } = cloned;
+      const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root, home, ports: [port] });
+      // However the turn ended (an error too): the session destroyed, so nothing in the box writes
+      // again, then what it changed committed in the box and carried back to the draft. A failed
+      // carry is the turn's error (its edits are lost), the one before it logged.
+      const ended = await converse(name, turn, writer, sandbox, { auth, model, home, box })
+        .finally(() => sandbox.destroy())
+        .then(
+          () => undefined,
+          (err: unknown) => ({ err }),
+        );
+      try {
+        const message = turnMessage(turn, ENGINE_NAMES[name]);
+        carried = await carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id });
+      } catch (err) {
+        if (ended) console.error(`sanoma app: the turn in the box ${box.id} failed:`, ended.err);
+        throw err;
+      }
+      if (ended) throw ended.err;
+    });
   } finally {
     // Checked once the box is free: the turn's error, if any, follows the card.
     if (carried) await showCommits(turn, draft, writer);
@@ -141,9 +147,10 @@ async function converse(
   { step, chat, messages }: EngineTurn,
   writer: UIMessageStreamWriter<ChatMessage>,
   sandbox: HarnessV1NetworkSandboxSession,
-  { auth, model, home, box }: { auth: Record<string, string>; model: string | undefined; home: string; box: string },
+  { auth, model, home, box }: { auth: Record<string, string>; model: string | undefined; home: string; box: Box },
 ) {
   const { by: principal, signal } = step;
+  const real = realIn(box);
   const runtime: Runtime = RUNTIMES[name];
   const harness = await runtime.harness(auth, home);
   const agent = new HarnessAgent({
@@ -157,7 +164,7 @@ async function converse(
   });
   const said = messages.at(-1)!;
   const create = () => agent.createSession({ sessionId: sandbox.id, sandboxSession: sandbox, abortSignal: signal });
-  const key = `${name} ${box}`;
+  const key = `${name} ${box.id}`;
   const installed = installing.get(key);
   const started = installed ? installed.then(create) : create();
   // Kept as whether it started (not the session); a failed first start is tried again by the next.
@@ -189,6 +196,7 @@ async function converse(
       const answers = await Promise.all(
         asked.map(({ approvalId, toolCall }) =>
           answer(
+            real,
             sandbox.defaultWorkingDirectory,
             approvalId,
             toolCall.toolName,
@@ -231,18 +239,26 @@ async function modelFor(step: AppStepContext, { qualified }: Runtime): Promise<s
 }
 
 /**
- * The checkout rule's answer to a built-in call: an edit of a file the rule allows in the draft
- * (`allowedPath`) is approved; a command, an edit outside it or under `.git` or `node_modules`, and
+ * The checkout rule's answer to a built-in call: an edit of a file the rule allows in the draft's
+ * clone (`allowedPaths`, on the box's files, `real`) is approved; a command, an edit outside it or under `.git` or `node_modules`, and
  * any other call that asks, are denied with the reason, which the agent reads. Never a policy call.
  */
-async function answer(root: string, approvalId: string, toolName: string, kind: string | undefined, input: unknown) {
+async function answer(
+  real: RealPaths,
+  root: string,
+  approvalId: string,
+  toolName: string,
+  kind: string | undefined,
+  input: unknown,
+) {
   const deny = (reason: string) => ({ type: "tool-approval-response" as const, approvalId, approved: false, reason });
   if (kind === "bash") return deny(`${toolName}: ${NO_SHELL}`);
   const path = pathOf(input);
   if (kind !== "edit" || path === undefined) {
     return deny(`${toolName} is not available in this chat: edit the files in your checkout`);
   }
-  if ((await allowedPath(root, path)) === undefined) {
+  const [allowed] = await allowedPaths(root, [path], real);
+  if (allowed === undefined) {
     return deny(outsideCheckout(path));
   }
   return { type: "tool-approval-response" as const, approvalId, approved: true };

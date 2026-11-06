@@ -53,6 +53,7 @@ export const KEYS = {
   host: `${INFRA}#host`,
   sourceKey: sourceKeyId(`${INFRA}#host`),
   wakeup: `${INFRA}#wakeup`,
+  box: `${INFRA}#box`,
 } as const;
 /** The host's type in `infra.ts`, as `renderInfra` writes it. */
 const HOST_LINE = /^export const host = (\w+)\.(\w+)\(/m;
@@ -193,13 +194,15 @@ export const toConnect = ({ stored, database, host }: Awaited<ReturnType<typeof 
 
 /**
  * What going live chooses now, from what is connected: the database (Neon's first), the host
- * (Cloudflare's first, then Docker's) and its wakeup.
+ * (Cloudflare's first, then Docker's), its wakeup, and the coding agents' box: the first sandbox
+ * type whose vendor is connected (`SETUP_VENDORS`), none otherwise.
  */
 export async function choose(app: Company, actor?: Principal) {
   const stored = await connections(app, actor);
   const database = pick(app, stored, (type) => type.database, [NEON]);
   const host = pick(app, stored, (type) => type.host, [CLOUDFLARE, DOCKER]);
-  return { stored, database, host, wakeup: host ? hostWakeup(app, host, stored) : {} };
+  const sandbox = offered(app).find((type) => type.sandbox && isConnected(stored, type.vendor, true));
+  return { stored, database, host, wakeup: host ? hostWakeup(app, host, stored) : {}, sandbox };
 }
 
 /** `url`'s answer as JSON, or an error saying who answered what. */

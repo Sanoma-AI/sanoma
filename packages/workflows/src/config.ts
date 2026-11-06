@@ -223,6 +223,8 @@ export interface ResolvedConfig {
   logins: ReadonlyMap<string, NonNullable<ConnectorSetup["login"]>>;
   /** The makers of the model halves the connectors attach, by vendor id in `connectors` order: the app makes each once for its model registry. */
   models: ReadonlyMap<string, NonNullable<ConnectorSetup["model"]>>;
+  /** The makers of the sandbox halves the connectors attach, by vendor id in `connectors` order: the app makes one for the declared sandbox's vendor (`sandboxes`) when a coding agent's turn opens a box. */
+  sandboxBackends: ReadonlyMap<string, NonNullable<ConnectorSetup["sandbox"]>>;
   /** The remote halves the connectors attach, made once for this resolution, by vendor id in `connectors` order: `remoteFor` finds a URL's. */
   remotes: ReadonlyMap<string, RemoteHalf>;
   /**
@@ -232,11 +234,12 @@ export interface ResolvedConfig {
    */
   hosts(): Promise<string[]>;
   /**
-   * The resources the data files under `root` declare whose type is a sandbox (`<file>#<export>`),
-   * read at each call: where a coding agent's boxes are opened. None when no connector declares a
-   * sandbox type.
+   * The resources the data files under `root` declare whose type is a sandbox, read at each call:
+   * where a coding agent's boxes are opened, its connector's backend (`sandboxBackends`) given its
+   * fields. At most one: several are each a problem of the data files, and left out. None when no
+   * connector declares a sandbox type.
    */
-  sandboxes(): Promise<string[]>;
+  sandboxes(): Promise<DeclaredResource[]>;
   /**
    * The objects the data files under `root` declare, read at each call: what a workflow's change
    * operation may not aim at, since only apply changes a declared object.
@@ -492,14 +495,14 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     names.set(APPLY_WORKFLOW, applyWorkflow(types, ops, drivers, applySteps(appName, root, read)));
   }
   // Built-in, in every config: the life of a change, which deploys to the declared hosts after its merge.
-  // The declared hosts' (and sandboxes') ids, as the files say them: nothing derived, nothing minted.
+  // The declared hosts (and sandboxes), as the files say them: nothing derived, nothing minted.
   const declaredOf = (contract: "host" | "sandbox") => async () => {
     const { loadDataFiles } = await import("./resources.ts");
-    return loadDataFiles(root, connectors, declarable)
-      .resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.[contract])
-      .map((r) => r.id);
+    return loadDataFiles(root, connectors, declarable).resources.filter(
+      (r) => types.get(`${r.vendor}.${r.type}`)?.[contract],
+    );
   };
-  const hosts = declaredOf("host");
+  const hosts = async () => (await declaredOf("host")()).map((r) => r.id);
   names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
   // Built-in, in every config: what a git host's webhook says happened, which the worker with the checkout follows.
   names.set(FOLLOW_WORKFLOW, followWorkflow(followSteps({ remotes, hosts })));
@@ -540,6 +543,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     preparations: makersOf(config.connectors, "prepare"),
     logins: makersOf(config.connectors, "login"),
     models: makersOf(config.connectors, "model"),
+    sandboxBackends: makersOf(config.connectors, "sandbox"),
     remotes,
     hosts,
     sandboxes: declaredOf("sandbox"),

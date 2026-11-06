@@ -499,6 +499,9 @@ importers:
       '@sanoma-ai/bridge':
         specifier: workspace:*
         version: link:../bridge
+      '@sanoma-ai/connector-agent37':
+        specifier: workspace:*
+        version: link:../../connectors/agent37
       '@sanoma-ai/connector-anthropic':
         specifier: workspace:*
         version: link:../../connectors/anthropic

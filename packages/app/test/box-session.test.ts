@@ -3,11 +3,21 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { waitFor } from "@sanoma-ai/testing";
-import { checkSandbox } from "@sanoma-ai/testing/sandbox";
-import { type Box, LOCAL_SANDBOX } from "@sanoma-ai/workflows";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { boxSession, homeOf } from "../src/steps/agent/box-session.ts";
+import { checkSandbox, fakeSandbox } from "@sanoma-ai/testing/sandbox";
+import {
+  type Box,
+  type Chat,
+  type ChatTurnContext,
+  LOCAL_SANDBOX,
+  resolveConfig,
+  type Source,
+  withSetup,
+} from "@sanoma-ai/workflows";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { acpEngine } from "../src/steps/agent/acp.ts";
+import { boxSession, homeOf, NO_BOX, personBox } from "../src/steps/agent/box-session.ts";
 import { boxName } from "../src/steps/agent/checkout.ts";
+import { harnessEngine } from "../src/steps/agent/harness.ts";
 import { freePort, localBackend } from "../src/steps/agent/local-box.ts";
 
 // The local backend's boxes, and the session `HarnessAgent` runs a coding agent in over one: their
@@ -32,7 +42,7 @@ execFileSync("ln", ["-s", tmpdir(), join(root, "out")]);
 
 let box: Box;
 beforeAll(async () => {
-  box = await boxes.open({ name, image: "", size: 0 });
+  box = await boxes.open({ name });
 });
 afterAll(() => rmSync(base, { recursive: true, force: true }));
 
@@ -68,7 +78,7 @@ describe("the local backend", () => {
     expect(boxName("acme-ada", "x")).not.toBe(boxName("acme", "ada-x"));
     expect(await homeOf(box)).toBe(home);
     for (const bad of ["../out", ".hidden", ""]) {
-      await expect(boxes.open({ name: bad, image: "", size: 0 }), bad).rejects.toThrow(/no box's name/);
+      await expect(boxes.open({ name: bad }), bad).rejects.toThrow(/no box's name/);
     }
   });
 });
@@ -188,5 +198,76 @@ describe("boxSession over a local box", () => {
     expect(await started.wait()).toEqual({ exitCode: 1 });
     expect(existsSync(join(runs, "s1"))).toBe(false);
     expect(existsSync(join(runs, "other"))).toBe(true);
+  });
+});
+
+/** A live instance's database: not this computer's (`placeOf`). */
+const LIVE = "postgresql://sanoma@db.example.com/acme";
+
+/** A company's root named acme, with `files` written. */
+function company(files: Record<string, string> = {}) {
+  const at = mkdtempSync(join(base, "company-"));
+  writeFileSync(join(at, "package.json"), '{ "name": "acme", "private": true, "type": "module" }\n');
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(at, file, ".."), { recursive: true });
+    writeFileSync(join(at, file), text);
+  }
+  return at;
+}
+
+describe("personBox", () => {
+  const by = { id: "ada" };
+
+  it("opens the declared sandbox's box through its connector's backend, given its fields, image and size, on a live instance too", async () => {
+    const fake = fakeSandbox(join(base, "declared"));
+    const opened: unknown[] = [];
+    const connector = withSetup(fake.connector, {
+      sandbox: ({ declared }) => ({
+        ...fake.backend,
+        open: (opts) => {
+          opened.push({ ...opts, declared });
+          return fake.backend.open(opts);
+        },
+      }),
+    });
+    const declaring = company({
+      "resources/infra.ts":
+        'import { testsandbox } from "@sanoma-ai/testing-sandbox/resources";\nexport const box = testsandbox.box({ name: "box", image: "node:26", size: 2 });\n',
+    });
+    const resolved = resolveConfig({ workflows: [], connectors: [connector], root: declaring, databaseUrl: LIVE });
+    const chosen = await personBox({ resolved, by, client: undefined as never });
+    expect(chosen.name).toBe(boxName("acme", "ada"));
+    const opening = await chosen.open();
+    expect(await homeOf(opening)).toBe(join(fake.root, chosen.name));
+    expect(opened).toEqual([
+      { name: chosen.name, image: "node:26", size: 2, declared: { name: "box", image: "node:26", size: 2 } },
+    ]);
+  });
+
+  it("opens the local backend's box under the repository's .sanoma when none is declared, on this computer", async () => {
+    const resolved = resolveConfig({ workflows: [], connectors: [], root: company() });
+    const draft = { root: base, draft: () => undefined, diff: () => undefined } as unknown as Source;
+    const chosen = await personBox({ resolved, by, client: undefined as never, source: draft });
+    expect(await homeOf(await chosen.open())).toBe(join(base, ".sanoma/agent-home/boxes", boxName("acme", "ada")));
+  });
+
+  it("refuses both engines' turns on a live instance that declares none, saying what to declare, before any draft", async () => {
+    const resolved = resolveConfig({ workflows: [], connectors: [], root: company(), databaseUrl: LIVE });
+    await expect(personBox({ resolved, by, client: undefined as never })).rejects.toThrow(NO_BOX);
+    expect(NO_BOX).toBe(
+      "Coding agents work in a box of their own on a live instance, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY [connector:agent37]",
+    );
+    const step = { resolved, by, signal: new AbortController().signal } as unknown as ChatTurnContext;
+    const turn = { step, chat: { id: "c" } as Chat, messages: [] };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      for (const stream of [harnessEngine("pi")(turn), acpEngine("copilot")(turn)]) {
+        const errors: string[] = [];
+        for await (const chunk of stream) if (chunk.type === "error") errors.push(chunk.errorText);
+        expect(errors).toEqual([NO_BOX]);
+      }
+    } finally {
+      error.mockRestore();
+    }
   });
 });

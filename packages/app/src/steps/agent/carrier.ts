@@ -54,8 +54,8 @@ function carrying(source: Source | undefined): Carrying {
  * Brings the draft `id` into `box` (whose home is `home`): its branch bundled since the head the
  * box last had (the whole of it the first time), fetched into the box's clone (made the first
  * time) and checked out there as the instance has it, whatever a turn that died left behind; then
- * `pnpm install --frozen-lockfile` when the lockfile differs from the one last installed, so the
- * install stays in the box. An install that fails is logged and tried again next turn: the turn
+ * `pnpm install --frozen-lockfile` with the box's own pnpm (`OWN_PNPM`) when the lockfile differs
+ * from the one last installed, so the install stays in the box. An install that fails is logged and tried again next turn: the turn
  * goes on, since its agent cannot run one. `signal` stops it. The clone's path, the agent's
  * working directory, and the head given.
  */
@@ -79,7 +79,7 @@ export async function carryIn(
   }
   try {
     // Never longer than this, whatever the registry does.
-    await inBox(box, INSTALL, {}, { signal, limit: INSTALL_TIMEOUT_MS });
+    await inBox(box, INSTALL, OWN_PNPM, { signal, limit: INSTALL_TIMEOUT_MS });
   } catch (err) {
     if (!signal?.aborted) console.error(`sanoma app: the install in the box ${box.id} failed:`, errorMessage(err));
   }
@@ -89,6 +89,13 @@ export async function carryIn(
 /** The head the clone was last given, when it still holds that commit (the agent's own git may have run there): none, and the whole branch is sent. */
 const KNOWN = `h=$(cat ${CLONE}/${HEAD_FILE} 2>/dev/null) || exit 0
 git -C ${CLONE} cat-file -e "$h^{commit}" 2>/dev/null && printf %s "$h" || true`;
+
+/**
+ * The box's own pnpm for the install, whatever version the clone's `packageManager` names (the
+ * agent may have written it): corepack's own default rather than the project's, and pnpm's switch
+ * to that version, which a pnpm on its own makes, turned off.
+ */
+export const OWN_PNPM = { COREPACK_ENABLE_PROJECT_SPEC: "0", pnpm_config_pm_on_fail: "ignore" };
 
 /** How long the clone's install may take. */
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
@@ -212,7 +219,7 @@ const CARRY_TIMEOUT_MS = 5 * 60_000;
  * Runs `script` in `box`'s home with `env`, stopped by `signal` or after `limit` ms: what it
  * printed, trimmed; an error with its exit code and the end of its output, unless it exits 0.
  */
-async function inBox(
+export async function inBox(
   box: Box,
   script: string,
   env: Record<string, string>,

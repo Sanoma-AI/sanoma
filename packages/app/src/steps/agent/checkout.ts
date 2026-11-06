@@ -1,7 +1,8 @@
-import { lstat, realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import nodeFs from "node:fs";
+import nodePath, { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   type AppStepContext,
+  type Box,
   type Chat,
   type CheckResult,
   type Draft,
@@ -12,46 +13,99 @@ import {
 } from "@sanoma-ai/workflows";
 import type { UIMessageStreamWriter } from "ai";
 import { type ChatMessage, textOf } from "../../lib/chat.ts";
+import { inBox } from "./carrier.ts";
 import type { EngineTurn } from "./transcript.ts";
 
 /** Where an agent may never write in a checkout: git's own files, and the install (`node_modules`, a link to the live one in a draft). */
 const OFF_LIMITS = new Set([".git", "node_modules"]);
 
 /**
- * The checkout rule: the absolute path `path` (relative to `worktree`, or absolute) names, when an
- * agent may read or write it there; undefined when it may not. Its real path must lie under the
- * worktree's (`realWithin`; the worktree itself is allowed, for a listing), and its first segment
- * there may not be `.git` or `node_modules` (a draft's `node_modules` is a link into the live
- * install). One rule for every engine: our loop's tools, `HarnessAgent`'s permission requests and
- * an ACP agent's.
+ * The real paths of the absolute `paths` where they are, each as far as it exists: its parent's
+ * real path (the nearest directory that exists, followed by the rest), and its own when it is a
+ * link, so a link never leads out; null for a broken link, which names nothing.
  */
-export async function allowedPath(worktree: string, path: string): Promise<string | undefined> {
-  const real = await realWithin(worktree, path);
-  // Lower-cased: on a case-insensitive file system (macOS's default) `.GIT` is `.git`.
-  return real && !OFF_LIMITS.has(real.inside.split(sep)[0]!.toLowerCase()) ? real.full : undefined;
-}
+export type RealPaths = (paths: readonly string[]) => Promise<(string | null)[]>;
 
 /**
- * The real path of `path` (relative to `dir`, or absolute), and that path relative to `dir`'s real
- * path, when it lies under it or is it; undefined otherwise. Real as far as it exists: its parent's
- * real path (the nearest directory that exists, followed by the rest), and the file's own when it
- * is a link, so a link never leads out.
+ * `RealPaths` over the file system `fs` and its paths, `path`. Self-contained, so that a box runs
+ * this very function on its own files (`realIn`, which sends its text to the box's Node).
  */
-export async function realWithin(dir: string, path: string): Promise<{ full: string; inside: string } | undefined> {
-  const root = await realpath(dir);
-  const wanted = resolve(root, path);
-  let full: string | undefined = join(await realParent(dirname(wanted)), basename(wanted));
-  // A link is followed to what it names, which must be inside too; a broken one names nothing.
-  if ((await lstat(full).catch(() => undefined))?.isSymbolicLink()) full = await realpath(full).catch(() => undefined);
-  return full !== undefined && within(root, full) ? { full, inside: relative(root, full) } : undefined;
+function realPaths(fs: typeof import("node:fs"), path: typeof import("node:path"), paths: readonly string[]) {
+  const real = (dir: string): string => {
+    try {
+      return fs.realpathSync(dir);
+    } catch {
+      const up = path.dirname(dir);
+      return up === dir ? dir : path.join(real(up), path.basename(dir));
+    }
+  };
+  return paths.map((wanted) => {
+    const full = path.join(real(path.dirname(wanted)), path.basename(wanted));
+    try {
+      if (!fs.lstatSync(full).isSymbolicLink()) return full;
+    } catch {
+      return full;
+    }
+    try {
+      return fs.realpathSync(full);
+    } catch {
+      return null;
+    }
+  });
+}
+
+/** `RealPaths` on this machine's files: the live instance's, where our loop drafts. */
+export const here: RealPaths = async (paths) => realPaths(nodeFs, nodePath, paths);
+
+/** How long a box may take to check paths: a box that hangs fails the check, never the turn's end. */
+const CHECK_TIMEOUT_MS = 30_000;
+
+/** `RealPaths` on `box`'s files, by its Node: a coding agent's paths are checked where its files are. */
+export const realIn =
+  (box: Box): RealPaths =>
+  async (paths) => {
+    const script = `process.stdout.write(JSON.stringify((${realPaths.toString()})(require("node:fs"), require("node:path"), JSON.parse(process.env.PATHS))))`;
+    const said = await inBox(
+      box,
+      'exec node -e "$SCRIPT"',
+      { SCRIPT: script, PATHS: JSON.stringify(paths) },
+      {
+        limit: CHECK_TIMEOUT_MS,
+      },
+    );
+    return JSON.parse(said) as (string | null)[];
+  };
+
+/**
+ * The checkout rule: the absolute paths `paths` (relative to `worktree`, or absolute) name, each
+ * when an agent may read or write it there; undefined when it may not. Their real paths (`real`:
+ * this machine's, or a box's, `realIn`, all in one go) must lie under the worktree's (the worktree
+ * itself is allowed, for a listing), and their first segment there may not be `.git` or
+ * `node_modules` (a draft's `node_modules` is a link into the live install). One rule for every
+ * engine: our loop's tools, `HarnessAgent`'s permission requests and an ACP agent's.
+ */
+export async function allowedPaths(
+  worktree: string,
+  paths: readonly string[],
+  real: RealPaths = here,
+): Promise<(string | undefined)[]> {
+  const [root, ...fulls] = await real([resolve(worktree), ...paths.map((path) => resolve(worktree, path))]);
+  return fulls.map((full) => inCheckout(root, full));
+}
+
+/** The checkout rule on real paths: `full` when it lies under the checkout's `root` but not under `.git` or `node_modules` there. */
+export function inCheckout(root: string | null | undefined, full: string | null | undefined): string | undefined {
+  if (!root || !full || !within(root, full)) return undefined;
+  // Lower-cased: on a case-insensitive file system (macOS's default) `.GIT` is `.git`.
+  return OFF_LIMITS.has(relative(root, full).split(sep)[0]!.toLowerCase()) ? undefined : full;
 }
 
 /** What an agent is told when the checkout rule refuses `path`. */
 export const outsideCheckout = (path: string) => `${path} is outside your checkout, or under .git or node_modules`;
 
-/** `path` under `root` as the checkout rule allows it, or the refusal the agent reads. */
-export async function mustAllow(root: string, path: string): Promise<string> {
-  const full = await allowedPath(root, path);
+/** `path` under `root` as the checkout rule allows it (`real`: where its files are), or the refusal the agent reads. */
+export async function mustAllow(root: string, path: string, real: RealPaths = here): Promise<string> {
+  const [full] = await allowedPaths(root, [path], real);
   if (full === undefined) throw new Error(outsideCheckout(path));
   return full;
 }
@@ -65,6 +119,10 @@ export function within(dir: string, full: string): boolean {
   const inside = relative(dir, full);
   return inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
 }
+
+/** `within` over real paths, which a broken link leaves null: never under anything, nor anything under it. */
+export const under = (dir: string | null | undefined, full: string | null | undefined) =>
+  !!dir && !!full && within(dir, full);
 
 /** A repository a chat can draft in. */
 export type Drafting = Source & Required<Pick<Source, "draft" | "diff">>;
@@ -161,14 +219,4 @@ export async function showCommits(
     id: "draft",
     data: { draft: chat.id, branch: draft.branch, ...diff, checks: checked },
   });
-}
-
-/** The real path of `dir`: of its nearest ancestor that exists, with the rest joined on. */
-async function realParent(dir: string): Promise<string> {
-  try {
-    return await realpath(dir);
-  } catch {
-    const up = dirname(dir);
-    return up === dir ? dir : join(await realParent(up), basename(dir));
-  }
 }

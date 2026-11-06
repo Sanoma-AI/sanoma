@@ -203,7 +203,7 @@ export function admit(
  * Each declaration is joined to its binding in the lockfile (`readLockfile`) by its key,
  * `<file>#<export>`; a binding no export declares is an orphan, unless its file failed to load.
  * Problems: the lockfile's, a binding of another type than its declaration's, two declarations
- * bound to one object, and several wakeups.
+ * bound to one object, and several wakeups or sandboxes.
  */
 export function loadDataFiles(
   root: string | undefined,
@@ -367,13 +367,15 @@ function declarationsOf(
     if (why === undefined) boundBy.set(object, id);
     else leaveOut(id, why);
   }
-  // An instance registers with one wakeup: several are each a problem, and left out, as is any that names one.
-  const wakeups = [...declarations.keys()].filter((id) => types.get(declarations.get(id)!.value[DECLARED])?.wakeup);
-  if (wakeups.length > 1) {
-    for (const id of wakeups) {
+  // An instance registers with one wakeup, and opens its coding agents' boxes in one sandbox: several
+  // of either are each a problem, and left out, as is any that names one.
+  for (const contract of ["wakeup", "sandbox"] as const) {
+    const ids = [...declarations.keys()].filter((id) => types.get(declarations.get(id)!.value[DECLARED])?.[contract]);
+    if (ids.length < 2) continue;
+    for (const id of ids) {
       leaveOut(
         id,
-        `an instance has one wakeup: leave out this one or ${wakeups.filter((other) => other !== id).join(", ")}`,
+        `an instance has one ${contract}: leave out this one or ${ids.filter((other) => other !== id).join(", ")}`,
       );
     }
   }

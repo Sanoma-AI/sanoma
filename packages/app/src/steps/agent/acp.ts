@@ -5,15 +5,16 @@ import type { Box, Principal, Process } from "@sanoma-ai/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "@sanoma-ai/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
-import { homeOf, openBox, OWN_AGENTS_DIR } from "./box-session.ts";
+import { homeOf, OWN_AGENTS_DIR, personBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut } from "./carrier.ts";
 import {
-  allowedPath,
-  boxName,
+  allowedPaths,
   mustAllow,
   NO_SHELL,
   openDraft,
   outsideCheckout,
+  type RealPaths,
+  realIn,
   showCommits,
   turnMessage,
 } from "./checkout.ts";
@@ -22,7 +23,7 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's third engine: a person's own coding agent, driven over the Agent Client Protocol by
 // this client of ours, in the box's clone of the chat's draft, on that person's own subscription.
-// The agent runs in the person's box (`openBox`, the harness engine's too) with `.acp` under the
+// The agent runs in the person's box (`personBox`, the harness engine's too) with `.acp` under the
 // box's home as its HOME (`OWN_AGENTS_DIR`, out of a company-key session's reach), installed on
 // first use there (`.acp/<agent>`), so a sign-in lives in the box and nowhere else, and nothing of
 // ours reads it (on the local backend a box is a directory of this machine and every person's
@@ -191,6 +192,8 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
   if (!isPerson(principal)) {
     throw new Error(`${agent.title} runs on a person's own plan, and ${principal.id} is not a person`);
   }
+  // Chosen before the draft opens: a live instance that declares no box refuses the turn.
+  const person = await personBox(step);
   const draft = await openDraft(step, chat);
   writer.write({ type: "start", messageId: generateId() });
   const relay = new Relay(writer);
@@ -199,55 +202,51 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
   let carried = false;
   try {
     // Opened last, so that nothing that fails before leaves it running; stopped however the turn ends.
-    carried = await boxTurn(
-      boxName(step.resolved.appName, principal.id),
-      () => openBox(step),
-      async (box) => {
-        opened = true;
-        let turn: AcpTurn | undefined;
-        /** The draft's head the box's clone was given, once it was. */
-        let since: string | undefined;
-        try {
-          const boxHome = await homeOf(box);
-          // The person's own agents' HOME, kept across turns in the box: their installs and sign-ins.
-          const home = join(boxHome, OWN_AGENTS_DIR);
-          const dir = join(home, name);
-          // A first install under way is waited for even by a new message (it has a time limit of its
-          // own): the box's stop would end it.
-          const [cloned, installed, shimmed] = await Promise.allSettled([
-            carryIn(box, step.source, chat.id, { home: boxHome, signal }),
-            install(box, agent, dir),
-            shims(box, home),
-          ]);
-          if (cloned.status === "rejected") throw cloned.reason;
-          if (installed.status === "rejected") throw installed.reason;
-          if (shimmed.status === "rejected") throw shimmed.reason;
-          since = cloned.value.head;
-          turn = new AcpTurn(agent, relay, signal, {
-            box,
-            chatId: chat.id,
-            onCode: step.onCode,
-            // The draft's clone in the box.
-            root: cloned.value.root,
-            home,
-            shimsDir: shimmed.value,
-            bins: join(dir, "node_modules", ".bin"),
-          });
-          const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
-          await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
-        } catch (err) {
-          // A dead or missing agent is said in the reply; a stopped turn says nothing.
-          if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
-        } finally {
-          await turn?.stop();
-        }
-        relay.finish();
-        // What it changed in the clone, committed there and carried back to the draft.
-        if (since === undefined) return false;
-        const message = turnMessage(engineTurn, agent.title);
-        return carryOut(box, step.source, chat.id, { since, message, author: principal.id });
-      },
-    );
+    carried = await boxTurn(person.name, person.open, async (box) => {
+      opened = true;
+      let turn: AcpTurn | undefined;
+      /** The draft's head the box's clone was given, once it was. */
+      let since: string | undefined;
+      try {
+        const boxHome = await homeOf(box);
+        // The person's own agents' HOME, kept across turns in the box: their installs and sign-ins.
+        const home = join(boxHome, OWN_AGENTS_DIR);
+        const dir = join(home, name);
+        // A first install under way is waited for even by a new message (it has a time limit of its
+        // own): the box's stop would end it.
+        const [cloned, installed, shimmed] = await Promise.allSettled([
+          carryIn(box, step.source, chat.id, { home: boxHome, signal }),
+          install(box, agent, dir),
+          shims(box, home),
+        ]);
+        if (cloned.status === "rejected") throw cloned.reason;
+        if (installed.status === "rejected") throw installed.reason;
+        if (shimmed.status === "rejected") throw shimmed.reason;
+        since = cloned.value.head;
+        turn = new AcpTurn(agent, relay, signal, {
+          box,
+          chatId: chat.id,
+          onCode: step.onCode,
+          // The draft's clone in the box.
+          root: cloned.value.root,
+          home,
+          shimsDir: shimmed.value,
+          bins: join(dir, "node_modules", ".bin"),
+        });
+        const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
+        await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
+      } catch (err) {
+        // A dead or missing agent is said in the reply; a stopped turn says nothing.
+        if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
+      } finally {
+        await turn?.stop();
+      }
+      relay.finish();
+      // What it changed in the clone, committed there and carried back to the draft.
+      if (since === undefined) return false;
+      const message = turnMessage(engineTurn, agent.title);
+      return carryOut(box, step.source, chat.id, { since, message, author: principal.id });
+    });
   } catch (err) {
     if (opened) throw err;
     // A box that would not open, or that runs another turn: said in the reply, as a dead agent is.
@@ -266,6 +265,8 @@ class AcpTurn {
   readonly relay: Relay;
   readonly signal: AbortSignal;
   readonly box: Box;
+  /** Real paths in the box, where the checkout rule checks the agent's. */
+  readonly real: RealPaths;
   readonly chatId: string;
   /** Takes the codes the person pastes for this turn (`ChatTurnContext.onCode`). */
   readonly onCode: (listener: (code: string) => void) => () => void;
@@ -308,6 +309,7 @@ class AcpTurn {
     this.relay = relay;
     this.signal = signal;
     this.box = box;
+    this.real = realIn(box);
     this.chatId = chatId;
     this.onCode = onCode;
     this.root = root;
@@ -486,23 +488,19 @@ class AcpTurn {
     const paths = [...(toolCall.locations ?? []).map((location) => location.path), pathOf(toolCall.rawInput)];
     const named = [...new Set(paths.filter((path): path is string => typeof path === "string"))];
     if (!named.length) return refuse("A read or an edit names its file: say which file in your checkout");
-    for (const path of named) {
-      if ((await allowedPath(this.root, path)) === undefined) {
-        return refuse(outsideCheckout(path));
-      }
-    }
+    // Checked in one go, in the box.
+    const allowed = await allowedPaths(this.root, named, this.real);
+    const outside = named.find((_, i) => allowed[i] === undefined);
+    if (outside !== undefined) return refuse(outsideCheckout(outside));
     const allow = offered("allow_once");
     return allow
       ? { outcome: { outcome: "selected", optionId: allow.optionId } }
       : refuse("Only an edit allowed once is accepted in this chat");
   }
 
-  /**
-   * `path` as the checkout rule allows it in the draft; a request error naming it otherwise. The
-   * rule reads this machine's file system, which on the local backend is the box's.
-   */
+  /** `path` as the checkout rule allows it in the draft, on the box's files; a request error naming it otherwise. */
   #allowed(path: string): Promise<string> {
-    return mustAllow(this.root, path).catch((err: Error) => {
+    return mustAllow(this.root, path, this.real).catch((err: Error) => {
       throw acp.RequestError.invalidParams(undefined, err.message);
     });
   }
