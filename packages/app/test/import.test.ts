@@ -117,6 +117,8 @@ describe("a CSV file as a sheet", () => {
       { text: "Bo", rows: 1, guess: "bo" },
       { text: "T. Nguyen", rows: 1 },
     ]);
+    // While nobody is declared, a person field takes any id: nothing to map.
+    expect(valuesToMap(collection, sheet, 3, "owner", [])).toEqual([]);
     expect(keyRange(["b", "a", "c"])).toEqual({ gte: "a", lte: "c" });
   });
 

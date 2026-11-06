@@ -165,12 +165,12 @@ function ValuesToMap({
   onColumn(column: ImportColumn): void;
 }) {
   if (values.length === 0) return null;
-  const chosen = (text: string) => column.values?.[text] ?? FIX_FIRST;
+  const chosen = (text: string) =>
+    column.values && Object.hasOwn(column.values, text) ? column.values[text]! : FIX_FIRST;
   const choose = (text: string, value: string) => {
-    const next = { ...column.values };
-    if (value === FIX_FIRST) delete next[text];
-    else next[text] = value;
-    onColumn({ ...column, values: next });
+    const next = Object.entries(column.values ?? {}).filter(([from]) => from !== text);
+    if (value !== FIX_FIRST) next.push([text, value]);
+    onColumn({ ...column, values: Object.fromEntries(next) });
   };
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3 text-sm">
@@ -196,7 +196,8 @@ function ValuesToMap({
               onChange={(event) => choose(text, event.target.value)}
             >
               <NativeSelectOption value={FIX_FIRST}>Fix first</NativeSelectOption>
-              <NativeSelectOption value="">Leave {column.field} empty</NativeSelectOption>
+              {/* An empty value fills nothing: a new record's field stays empty, a record's own stays. */}
+              <NativeSelectOption value="">Leave {column.field} out</NativeSelectOption>
               {choices.map(({ value, label }) => (
                 <NativeSelectOption key={value} value={value}>
                   {label}

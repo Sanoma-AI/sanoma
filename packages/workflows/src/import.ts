@@ -87,8 +87,8 @@ export function mappingProblems({ key, fields }: ImportTarget, mapping: ImportIn
  * The rows of a sheet as the collection's fields take them, each with the fields its cells fill
  * (an empty cell fills none), and the rows they refuse: a value its field does not take, no key,
  * or a key an earlier row has. A cell is trimmed, then given its column's `values`, then read as
- * its field's type: a number as JavaScript writes one, true or false as yes, no, true, false, 1
- * or 0, a date as ISO 8601 (a day, or a time with its offset), an enum's value as written, and a
+ * its field's type: a number as JavaScript writes one, true or false as yes, no, y, n, true, false,
+ * 1 or 0, a date as ISO 8601 (a day, or a time with its offset), an enum's value as written, and a
  * person as one of `people` when any are given. Throws on a mapping `mappingProblems` refuses.
  */
 export function importRows(
