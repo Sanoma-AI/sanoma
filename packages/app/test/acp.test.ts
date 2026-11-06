@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
+import { runEnded } from "@sanoma-ai/testing/host";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { copyFixture, ensureBuilt } from "../../sanoma/test/fixture.ts";
@@ -362,7 +363,8 @@ describe("the chat on a person's own agent", () => {
     expect(JSON.stringify(await testApp.client.chats.load(id))).not.toContain("FAKE-0001");
     // Signed in: the next message is answered.
     expect(textOfReply(await send(id, "acp-copilot", "Hi again"))).toBe("Hello.");
-    // A code with no sign-in waiting is refused.
+    // Once the turn's run has ended (a moment after its reply's stream), a code is refused.
+    await runEnded(testApp.client, (await testApp.client.turn(id))!.runId, 30_000);
     expect((await paste(id, CODE)).status).toBe(404);
   }, 120_000);
 

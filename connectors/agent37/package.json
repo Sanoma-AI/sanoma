@@ -1,0 +1,78 @@
+{
+  "name": "@sanoma-ai/connector-agent37",
+  "version": "0.1.0",
+  "description": "Agent37 Cloud for Sanoma: the boxes coding agents work in, one persistent Linux instance each, driven through Sanoma's runner",
+  "keywords": [
+    "agent37",
+    "coding-agent",
+    "connector",
+    "resources",
+    "sandbox",
+    "sanoma",
+    "sanoma-connector"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/agent37#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/agent37"
+  },
+  "files": [
+    "dist",
+    "logo.svg",
+    "logo-dark.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./resources": {
+      "types": "./dist/resources.d.ts",
+      "default": "./dist/resources.js"
+    },
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
+    },
+    "./fake": {
+      "types": "./dist/fake.d.ts",
+      "default": "./dist/fake.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "devDependencies": {
+    "@sanoma-ai/testing": "workspace:*",
+    "@sanoma-ai/workflows": "workspace:*",
+    "msw": "^3.0.3",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "@sanoma-ai/workflows": "workspace:^",
+    "zod": "^4"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "sanoma": {
+    "title": "Agent37",
+    "logo": "logo.svg",
+    "logoDark": "logo-dark.svg"
+  }
+}

@@ -93,6 +93,7 @@ After a run finishes, the graph shows the result of each step. The ledger keeps 
 | [`@sanoma-ai/connector-sanoma-cloud`](connectors/sanoma-cloud/README.md) | Sanoma Cloud: the company's database and host in Sanoma's accounts, over sanoma-ops's workflows                                       |
 | [`@sanoma-ai/connector-better-auth`](connectors/better-auth/README.md)   | Better Auth, the visitor login for public sites and the staff sign-in on a host, on the company's database                            |
 | [`@sanoma-ai/connector-anthropic`](connectors/anthropic/README.md)       | Anthropic's Claude models for the app's agent, through the AI SDK                                                                     |
+| [`@sanoma-ai/connector-agent37`](connectors/agent37/README.md)           | Agent37 instances, the boxes coding agents work in, driven through Sanoma's runner                                                    |
 | [`modules/`](modules/AGENTS.md)                                          | Placeholder for parts not written yet                                                                                                 |
 | [`types/`](types/AGENTS.md)                                              | Ambient type declarations shared by the packages                                                                                      |
 | [`.github/`](.github/AGENTS.md)                                          | GitHub Actions CI and the README's images                                                                                             |

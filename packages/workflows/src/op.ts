@@ -365,8 +365,9 @@ export interface ConnectorSetup {
   remote?: () => RemoteHalf;
   /**
    * Makes the connector's sandbox backend, which opens the boxes of the type that meets the
-   * `Sandbox` contract by name: by the app, when a coding agent's turn needs a box. It reads its
-   * credentials through `context.secrets`.
+   * `Sandbox` contract by name: by the app, once per declared resource of that type, when a coding
+   * agent's turn needs a box. It reads its credentials through `context.secrets` and the
+   * resource's fields from `context.declared`.
    */
   sandbox?: (context: SandboxContext) => SandboxBackend | Promise<SandboxBackend>;
 }
