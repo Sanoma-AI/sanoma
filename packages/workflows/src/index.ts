@@ -69,6 +69,7 @@ export {
   declaredWakeup,
   defineConfig,
   envWakeup,
+  joinDeclarations,
   type Login,
   readRootSnapshot,
   resolveConfig,
@@ -79,7 +80,7 @@ export {
 // An app's `app.ts` (`defineApp`), and where the launcher finds an app's workflows and data file.
 export { type AppEntry, appSourceOf, readApps } from "./apps.ts";
 export { type AppDefinition, defineApp } from "./definitions.ts";
-export { appFolders, APPS_DIR, filesUnder, kindDirs } from "./paths.ts";
+export { appFolders, APPS_DIR, declarationFiles, filesUnder, kindDirs } from "./paths.ts";
 // `sanoma` itself (the people types' constructors) is at `@sanoma-ai/workflows/resources`, for data files.
 // `collection()` itself is at `@sanoma-ai/workflows/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
 export { isCollection } from "./collection.ts";
@@ -193,7 +194,7 @@ export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export { superviseWorker, type Supervisor, type SupervisorOptions } from "./supervisor.ts";
 export type { DeadlineSource, Deadlines, SelfStop, Wait } from "./deadlines.ts";
-export { nextFire, nextScheduledFire } from "./schedules.ts";
+export { nextFire, nextScheduledFire, timeMatcherFile, type TimeMatcherClass, useTimeMatcher } from "./schedules.ts";
 // `secret` itself is at `@sanoma-ai/workflows/resources`, for data files; this is the drivers' side.
 export {
   generateSecret,

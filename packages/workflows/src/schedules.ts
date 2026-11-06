@@ -140,21 +140,36 @@ interface TimeMatcher {
   /** The first instant strictly after `date` that matches; one that does not at the end of its search horizon. */
   nextWakeupTime(date: Date | number): Date;
 }
-type TimeMatcherClass = new (pattern: string, timezone?: string) => TimeMatcher;
+export type TimeMatcherClass = new (pattern: string, timezone?: string) => TimeMatcher;
 
 let matcherClass: TimeMatcherClass | undefined;
 
 /**
- * DBOS's `TimeMatcher`, from `dist/src/scheduler/crontab.js` beside its main module: the package's
- * exports leave it out (dbos-sdk 5.2.11), so it is loaded by path, and a test holds it there.
+ * The file DBOS's `TimeMatcher` is in, `dist/src/scheduler/crontab.js` beside its main module, as
+ * `require` resolves the package: its exports leave it out (dbos-sdk 5.2.11), so it is loaded by
+ * path, and a test holds it there.
  */
+export const timeMatcherFile = (require: NodeJS.Require): string =>
+  join(dirname(require.resolve("@dbos-inc/dbos-sdk")), "scheduler", "crontab.js");
+
+/** DBOS's `TimeMatcher`, required from its file (`timeMatcherFile`), or the one `useTimeMatcher` gave. */
 export function timeMatcher(): TimeMatcherClass {
   if (matcherClass) return matcherClass;
   const require = createRequire(import.meta.url);
-  const file = join(dirname(require.resolve("@dbos-inc/dbos-sdk")), "scheduler", "crontab.js");
+  const file = timeMatcherFile(require);
   const loaded = (require(file) as { TimeMatcher?: unknown }).TimeMatcher;
   if (typeof loaded !== "function") throw new Error(`DBOS's cron parser is not in ${file} any more`);
   return (matcherClass = loaded as TimeMatcherClass);
+}
+
+/**
+ * From now on, DBOS's cron parser is `matcher`, where it cannot be required by path: workerd,
+ * which bundles the runtime, and imports it by its file.
+ */
+export function useTimeMatcher(matcher: TimeMatcherClass): void {
+  if (typeof matcher !== "function")
+    throw new Error("DBOS's cron parser (TimeMatcher) is not in its scheduler's crontab.js any more");
+  matcherClass = matcher;
 }
 
 /**

@@ -790,9 +790,12 @@ describe("scenarios that no longer load", () => {
     // Started, then the file breaks while it waits: the checks the worker runs as it ends say why there are none.
     const started = await postRun({ scenario: SCENARIO });
     const id = started.body.runId;
+    // The checks the worker ran as it waited: until it has, the page shows the Then steps, none answered.
     const held = await waitFor(
       () => detail(id),
-      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
+      (d) =>
+        d.approvals.some((a) => a.status === "pending") &&
+        d.checks?.some((check) => check.ok || check.detail !== undefined) === true,
     );
     const text = readFileSync(featureFile, "utf8");
     const was = ctx;

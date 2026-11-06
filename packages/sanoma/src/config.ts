@@ -1,8 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ResolvedConfig, SanomaConfig, WorkflowDefinition } from "@sanoma-ai/workflows";
-import type { Collection } from "@sanoma-ai/workflows/data";
+import type { ResolvedConfig, SanomaConfig } from "@sanoma-ai/workflows";
 
 /** A mistake in how the bin was called or in what it found: its message is printed alone, and the exit code is 2. */
 export class UsageError extends Error {}
@@ -54,50 +53,25 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
   config.file ??= file;
   const root = config.root ?? dirname(file);
   // Imported here, not at the top: `cli.ts` loads this module before any command needs the runtime.
-  const { filesUnder, isCollection, kindDirs } = await import("@sanoma-ai/workflows");
-  // A `workflows` or `collections` that is no list is resolveConfig's to explain.
-  if (config.workflows === undefined || Array.isArray(config.workflows)) {
-    const workflows = new Set(config.workflows);
-    const paths = kindDirs(root, "workflows").flatMap((dir) => filesUnder(dir, isSource));
-    // Imported at once, added in the files' order.
-    const modules = (await Promise.all(paths.map(importReal))) as { default?: unknown }[];
-    for (const [i, { default: wf }] of modules.entries()) {
-      const path = paths[i]!;
-      if (wf === undefined) continue;
-      if (!isWorkflow(wf)) {
-        throw new UsageError(
-          `${realpathSync(path)}'s default export is not a workflow: a file of workflows/ exports one, \`export default defineWorkflow({ … })\`, or none (a helper the workflows import)`,
-        );
-      }
-      workflows.add(wf);
-    }
-    if (workflows.size > 0) config.workflows = [...workflows];
-  }
-  if (config.collections === undefined || Array.isArray(config.collections)) {
-    const collections = new Set<Collection>(config.collections);
-    for (const path of kindDirs(root, "resources").map((dir) => join(dir, "data.ts"))) {
-      if (!existsSync(path)) continue;
-      for (const [name, value] of Object.entries((await importReal(path)) as Record<string, unknown>)) {
-        if (!isCollection(value)) {
-          throw new UsageError(
-            `${realpathSync(path)} exports ${name}, which is not a collection: resources/data.ts holds collections only, each \`export const ${name} = collection({ name, key, fields })\` with collection from "sanoma/data"`,
-          );
-        }
-        collections.add(value);
-      }
-    }
-    if (collections.size > 0) config.collections = [...collections];
+  const { declarationFiles, errorMessage, joinDeclarations } = await import("@sanoma-ai/workflows");
+  const files = declarationFiles(root);
+  // The workflows' first; joined in the files' order.
+  const modules = { workflows: await importReal(files.workflows), data: await importReal(files.data) };
+  try {
+    joinDeclarations(config, modules);
+  } catch (err) {
+    throw new UsageError(errorMessage(err));
   }
   return { config, root };
 }
 
-/** The module at `path`, imported by its real path: the module a relative import of it is. */
-const importReal = (path: string): Promise<unknown> => import(pathToFileURL(realpathSync(path)).href);
-
-/** A workflow file's name: `.ts`, but a test (`.test.ts`, `.spec.ts`) or a declaration. */
-const isSource = (name: string) => name.endsWith(".ts") && !/\.(test|spec|d)\.ts$/.test(name);
-
-const isWorkflow = (x: unknown): x is WorkflowDefinition =>
-  typeof x === "object" && x !== null && (x as { kind?: unknown }).kind === "workflow";
+/** The modules at `paths`, at once, each by its real path (the module a relative import of it is), beside it. */
+const importReal = (paths: string[]): Promise<[string, object][]> =>
+  Promise.all(
+    paths.map(async (path): Promise<[string, object]> => {
+      const real = realpathSync(path);
+      return [real, (await import(pathToFileURL(real).href)) as object];
+    }),
+  );
 
 const isConfig = (x: unknown): x is SanomaConfig => typeof x === "object" && x !== null && "connectors" in x;
