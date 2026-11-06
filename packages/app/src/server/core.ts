@@ -673,24 +673,22 @@ export async function recordHistory(app: AppContext, actor: Principal, { name, k
   const sandbox = new Set(
     (await Promise.all(runs.map((id) => app.client.run(id)))).flatMap((run) => (run?.sandbox ? [run.runId] : [])),
   );
-  let before: Record<string, unknown> | undefined;
-  const entries: HistoryEntry[] = [];
-  for (const [i, r] of writes
-    .filter((w) => !sandbox.has(w.runId))
-    .toReversed()
-    .entries()) {
-    const after = r.op === deleteOp ? undefined : (r.output as Saved).record;
-    if (!cut || i > 0)
-      entries.push({
-        at: r.at,
-        by: r.actor.id,
-        workflow: r.workflow,
-        runId: r.runId,
-        change: !after ? "deleted" : before ? fieldChanges(declared, before, after) : "created",
-      });
-    before = after;
-  }
-  return entries.toReversed();
+  // Newest first, as `history` reads them: each against the write after it in the list, the one before it in time.
+  const kept = writes.filter((w) => !sandbox.has(w.runId));
+  const recordOf = (r: (typeof kept)[number] | undefined) =>
+    r && r.op !== deleteOp ? (r.output as Saved).record : undefined;
+  const entries = kept.map((r, i): HistoryEntry => {
+    const after = recordOf(r);
+    const before = recordOf(kept[i + 1]);
+    return {
+      at: r.at,
+      by: r.actor.id,
+      workflow: r.workflow,
+      runId: r.runId,
+      change: !after ? "deleted" : before ? fieldChanges(declared, before, after) : "created",
+    };
+  });
+  return cut ? entries.slice(0, -1) : entries;
 }
 
 /** The fields whose values differ between two records, those `declared` first in its order. */

@@ -25,7 +25,7 @@ import { cn } from "#/lib/utils.ts";
 import { errorBodyOf } from "../../api.ts";
 import type { UntypedApi } from "../../api-client.ts";
 import { fieldsOf, type ScalarField, type ScalarValue } from "../../form/schema.ts";
-import { api, type DataSearch, heldQuery } from "../../queries.ts";
+import { api, heldQuery, openRecord } from "../../queries.ts";
 import { Nothing, StatusDot, When } from "../common.tsx";
 import { FROM, IssuesFlag, SortHead, Value } from "../data-grid.tsx";
 import { HistoryLink } from "../record-history.tsx";
@@ -513,7 +513,7 @@ export function DataGrid({
                             <Link
                               to={FROM}
                               params={{ name }}
-                              search={(prev: DataSearch) => ({ ...prev, record: saved.key, new: undefined })}
+                              search={openRecord(saved.key)}
                               resetScroll={false}
                               preload={false}
                               tabIndex={-1}

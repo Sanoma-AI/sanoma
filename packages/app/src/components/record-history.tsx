@@ -5,16 +5,13 @@ import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { GRID_CHANGE_TONE } from "#/lib/tone.ts";
 import { useActor } from "../actor.ts";
 import type { FieldChange, HistoryEntry } from "../api.ts";
-import { historyQuery, runLink } from "../queries.ts";
+import { historyQuery, openRecord, runLink } from "../queries.ts";
 import { None, Notice, ToneBadge, When } from "./common.tsx";
-import { Value } from "./data-grid.tsx";
+import { FROM, Value } from "./data-grid.tsx";
 
 // A record's history in its side panel, from the ledger (`getHistory`): one line per write,
 // newest first, "<when> · <who> · <what changed>", and its run. Read as the person asking, whom
 // the policy must let read the record.
-
-/** A value longer than this is said to be rewritten, not shown before and after. */
-const SHOWN = 40;
 
 /** The record `recordKey`'s history: its writes, "No changes yet" before any, or why it cannot be read. */
 export function RecordHistory({ name, recordKey }: { name: string; recordKey: string }) {
@@ -24,16 +21,14 @@ export function RecordHistory({ name, recordKey }: { name: string; recordKey: st
   return (
     <section aria-label="History" className="flex flex-col gap-2 border-t pt-4 text-sm">
       <h3 className="text-xs font-medium text-muted-foreground">History · from the ledger</h3>
-      {history.data ? (
-        history.data.length ? (
-          <ul className="flex flex-col gap-1.5">
-            {history.data.map((entry, i) => (
-              <HistoryLine key={i} entry={entry} you={actor} />
-            ))}
-          </ul>
-        ) : (
-          <None>No changes yet.</None>
-        )
+      {history.data?.length ? (
+        <ul className="flex flex-col gap-1.5">
+          {history.data.map((entry, i) => (
+            <HistoryLine key={i} entry={entry} you={actor} />
+          ))}
+        </ul>
+      ) : history.data ? (
+        <None>No changes yet.</None>
       ) : history.isError ? (
         <Notice variant="destructive">{errorMessage(history.error)}</Notice>
       ) : (
@@ -81,10 +76,9 @@ function Change({ change }: { change: HistoryEntry["change"] }) {
   ));
 }
 
-const long = (value: unknown) => typeof value === "string" && value.length > SHOWN;
-
+/** A field's change, "field before → after", or "field rewritten" when either value is longer than 40 characters. */
 function FieldLine({ change: { field, before, after } }: { change: FieldChange }) {
-  if (long(before) || long(after)) return <>{field} rewritten</>;
+  if ([before, after].some((value) => typeof value === "string" && value.length > 40)) return <>{field} rewritten</>;
   return (
     <>
       {field}{" "}
@@ -103,9 +97,9 @@ function FieldLine({ change: { field, before, after } }: { change: FieldChange }
 export function HistoryLink({ name, recordKey }: { name: string; recordKey: string }) {
   return (
     <Link
-      to="/data/$name"
+      to={FROM}
       params={{ name }}
-      search={(prev) => ({ ...prev, new: undefined, record: recordKey })}
+      search={openRecord(recordKey)}
       title="Its history, from the ledger"
       className="underline underline-offset-4"
     >

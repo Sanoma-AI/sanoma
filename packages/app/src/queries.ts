@@ -762,6 +762,11 @@ export const ConnectSearch = z.object({
 /** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */
 export const closeRecord = (prev: DataSearch): DataSearch => ({ ...prev, record: undefined, new: undefined });
 
+/** The grid's search with the record `key` open in the form: for a link's `search`. */
+export const openRecord =
+  (key: string) =>
+  (prev: DataSearch): DataSearch => ({ ...prev, record: key, new: undefined });
+
 /** The highest code point: after every string that starts with a prefix, under `list`'s byte order. */
 const LAST = "\u{10FFFF}";
 
