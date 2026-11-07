@@ -144,10 +144,10 @@ export interface OAuthFlow {
    */
   refresh?: "refresh_token";
   /**
-   * Seconds a refresh token stays usable unused, for a provider that publishes it: the runtime then
-   * renews a grant nobody uses before its refresh token lapses, a wakeup of a stopped instance
-   * (`due_at`). Left out, as for a provider that publishes none, a grant renews only on use, and
-   * an idle instance is never woken for it.
+   * Seconds a refresh token stays usable unused (from an hour to ten years), for a provider that
+   * publishes it: the runtime then renews a grant nobody uses before its refresh token lapses, a
+   * wakeup of a stopped instance (`due_at`), counted from the last renewal. Left out, as for a
+   * provider that publishes none, a grant renews only on use, and an idle instance is never woken for it.
    */
   refreshTokenLifetime?: number;
   /**
@@ -254,7 +254,8 @@ export function defineAuthentication(definition: Authentication | Omit<OAuthAuth
         (oauth.refreshTokenLifetime !== undefined &&
           (oauth.refresh === undefined ||
             !Number.isInteger(oauth.refreshTokenLifetime) ||
-            oauth.refreshTokenLifetime <= 0)) ||
+            oauth.refreshTokenLifetime < 3_600 ||
+            oauth.refreshTokenLifetime > 10 * 365 * 86_400)) ||
         (oauth.tokenRejected !== undefined &&
           (!Array.isArray(oauth.tokenRejected) ||
             oauth.tokenRejected.some((status) => !Number.isInteger(status) || status < 400 || status > 499)))

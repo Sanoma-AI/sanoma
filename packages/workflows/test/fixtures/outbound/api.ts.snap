@@ -224,7 +224,7 @@ interface CompanyApi {
         authorization: string;
       }, unknown>;
       /**
-       * Renew a connected account's OAuth grant with its refresh token, when it is due; the worker's renewal agent calls it
+       * Renew a connected account's OAuth grant with its refresh token now, unless another process just did; the worker's renewal agent calls it when a scheduled renewal comes
        *
        * `sanoma.connection.refresh`, a access.
        */

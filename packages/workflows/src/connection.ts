@@ -376,7 +376,7 @@ export class ConnectionRegistry {
     this.renewals = new ConnectionRenewals(own);
   }
 
-  /** True when a declared connection or rule connects by an `oauth2` method that renews its grants: the worker then renews them when due. */
+  /** True when a declared connection or rule connects by an `oauth2` method with a `refreshTokenLifetime`: the worker then renews its grants when due. */
   get renews(): boolean {
     return [...this.catalog.definitions.values(), ...this.catalog.rules.values()].some(
       (c) => this.oauthMethod(c.vendor, c.method)?.oauth.refreshTokenLifetime !== undefined,
@@ -1348,7 +1348,7 @@ export const connectionOps = defineConnector("sanoma", {
     refresh: {
       effect: "access",
       description:
-        "Renew a connected account's OAuth grant with its refresh token, when it is due; the worker's renewal agent calls it",
+        "Renew a connected account's OAuth grant with its refresh token now, unless another process just did; the worker's renewal agent calls it when a scheduled renewal comes",
       input: z.object({ connection: connectionRefSchema }),
       output: z.object({ id: z.string(), refreshed: z.boolean(), expiresAt: z.number().optional() }),
       target: (input: { connection: ConnectionRef }) => input.connection.$connection,

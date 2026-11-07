@@ -480,7 +480,7 @@ A code is never sent twice. If the provider issued a grant and the store did not
 
 #### Renewal, Reconnect, Disconnect and Revoke
 
-`refresh: "refresh_token"` on the flow declares that the provider renews grants with a refresh token (RFC 6749 section 6). `tokenRejected` names the HTTP statuses (400 to 499) by which the provider says it refused an access token, such as `[401]`. `refreshTokenLifetime` is how many seconds a refresh token stays usable unused, for a provider that publishes it. A method's `revoke(grant, client)` revokes a grant at the provider, for a provider with a revocation endpoint:
+`refresh: "refresh_token"` on the flow declares that the provider renews grants with a refresh token (RFC 6749 section 6). `tokenRejected` names the HTTP statuses (400 to 499) by which the provider says it refused an access token, such as `[401]`. `refreshTokenLifetime` is how many seconds a refresh token stays usable unused (an hour to ten years), counted from its last renewal, for a provider that publishes it; a provider whose refresh tokens lapse a fixed time after consent, renewed or not, still needs Reconnect then. A method's `revoke(grant, client)` revokes a grant at the provider, for a provider with a revocation endpoint:
 
 ```ts
 oauth: { /* ... */ refresh: "refresh_token", tokenRejected: [401], refreshTokenLifetime: 30 * 86_400 },
