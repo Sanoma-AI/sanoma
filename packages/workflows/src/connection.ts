@@ -226,7 +226,7 @@ export function defineConnection<C extends Connector<any, any>>(
     vendor,
     name: options.name,
     method: options.method,
-    ...(options.credentials && { credentials: Object.freeze({ $secret: options.credentials.$secret }) }),
+    credentials: Object.freeze({ $secret: options.credentials.$secret }),
     ...(options.client && { client: Object.freeze({ $secret: options.client.$secret }) }),
     scopes: Object.freeze([...(options.scopes ?? [])]),
     ...(options.account && { account: options.account }),
@@ -437,7 +437,7 @@ export class ConnectionRegistry {
       if (!declaration || (row?.rule && row.owner !== actor)) continue;
       const method = this.catalog.methods.get(declaration.vendor)?.[declaration.method];
       if (!method) continue;
-      const credential = "default" in declaration ? declaration.credentials?.$secret : row?.credential;
+      const credential = "default" in declaration ? declaration.credentials.$secret : row?.credential;
       const location = credential && this.secrets ? this.secrets.location(credential) : undefined;
       const storageProblem = this.storeProblem(method, location);
       cards.push({
@@ -503,7 +503,7 @@ export class ConnectionRegistry {
       if (!declaration || declaration.vendor !== target.connection.vendor) refuse("The connection is not declared");
       if (row?.rule && row.owner !== actor.id)
         throw new SanomaError("policy_denied", "The connection belongs to another principal");
-      credential = "credentials" in declaration ? declaration.credentials?.$secret : (row?.credential ?? undefined);
+      credential = "credentials" in declaration ? declaration.credentials.$secret : (row?.credential ?? undefined);
     }
     const method = this.catalog.methods.get(declaration.vendor)?.[declaration.method];
     if (!method?.verify) throw new AuthenticationError("unsupported");
@@ -720,8 +720,8 @@ export class ConnectionRegistry {
       refuse("The connection changed; review it again before activating");
     const method = this.catalog.methods.get(row.vendor)![row.method]!;
     const bundle = row.credential ? await this.secrets?.read(row.credential) : undefined;
-    if (row.credential && !bundle) throw new SecretStoreError("unavailable");
-    const identity = await verifyAuthentication(method, bundle && decodeCredentials(method, bundle.value));
+    if (!bundle) throw new SecretStoreError("unavailable");
+    const identity = await verifyAuthentication(method, decodeCredentials(method, bundle.value));
     if (identity.account !== row.account) throw new AuthenticationError("wrong_account");
     if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(row.scopes)].toSorted()))
       throw new AuthenticationError("scope_changed");
@@ -745,7 +745,7 @@ export class ConnectionRegistry {
     credential?: string | null,
     at?: { store: string; namespace: string },
   ): string {
-    const name = credential ?? ("credentials" in declaration ? declaration.credentials?.$secret : undefined);
+    const name = credential ?? ("credentials" in declaration ? declaration.credentials.$secret : undefined);
     const bound = name ? this.secrets?.location(name) : undefined;
     const location = bound && at && bound.namespace !== "" ? { ...bound, ...at } : bound;
     return createHash("sha256")
@@ -807,8 +807,7 @@ export class ConnectionRegistry {
     const problems: ConnectionStorageProblem[] = [];
     for (const d of this.catalog.definitions.values()) {
       const method = this.catalog.methods.get(d.vendor)![d.method]!;
-      const credential = d.credentials?.$secret;
-      const location = credential ? secrets.location(credential) : undefined;
+      const location = secrets.location(d.credentials.$secret);
       const problem = this.storeProblem(method, location);
       if (problem) problems.push({ id: d.$connection, method: d.method, problem, location });
     }
@@ -1178,7 +1177,7 @@ export class ConnectionRegistry {
       scopes,
       revision: randomUUID(),
       definition: this.bindingFingerprint(declaration, method),
-      credential: declaration.credentials?.$secret ?? null,
+      credential: declaration.credentials.$secret,
       status: "connected",
     };
     this.checkStore(method, row.credential);

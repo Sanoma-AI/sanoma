@@ -13,15 +13,13 @@ const stored = {
   schema: z.object({}),
   storage: { writable: true, maxBytes: 64, conditionalWrites: true },
 } as const;
-const method = (verify: () => Promise<AuthenticationIdentity>) => defineAuthentication({ ...stored, verify });
+const check = (verify: () => Promise<AuthenticationIdentity>) =>
+  verifyAuthentication(defineAuthentication({ ...stored, verify }), {});
 
 describe("authentication health", () => {
   it("preserves only verified identity facts and normalizes grants", async () => {
     const identity = { account: "organization", scopes: ["write", "read", "read"], token: "private-value" };
-    const actual = await verifyAuthentication(
-      method(async () => identity),
-      {},
-    );
+    const actual = await check(async () => identity);
     expect(actual).toEqual({ account: "organization", scopes: ["read", "write"] });
     expect(actual.scopes).not.toBe(identity.scopes);
     expect(identity.scopes).toEqual(["write", "read", "read"]);
@@ -29,21 +27,15 @@ describe("authentication health", () => {
 
   it("distinguishes verified expiry from an unavailable provider", async () => {
     await expect(
-      verifyAuthentication(
-        method(async () => ({
-          account: "organization",
-          scopes: [],
-          expiresAt: Date.now() - 1,
-        })),
-        {},
-      ),
+      check(async () => ({
+        account: "organization",
+        scopes: [],
+        expiresAt: Date.now() - 1,
+      })),
     ).rejects.toMatchObject({ problem: "expired", retryable: false });
-    const error = await verifyAuthentication(
-      method(async () => {
-        throw new Error("SDK header: private-value", { cause: "private-value" });
-      }),
-      {},
-    ).catch((failure: unknown) => failure);
+    const error = await check(async () => {
+      throw new Error("SDK header: private-value", { cause: "private-value" });
+    }).catch((failure: unknown) => failure);
     expect(error).toMatchObject({ problem: "unavailable", retryable: true });
     expect(error).not.toHaveProperty("cause");
     expect(String(error)).not.toContain("private-value");
@@ -57,12 +49,9 @@ describe("authentication health", () => {
         stack: "private-value",
         cause: "private-value",
       });
-      const actual = await verifyAuthentication(
-        method(async () => {
-          throw failure;
-        }),
-        {},
-      ).catch((e: unknown) => e);
+      const actual = await check(async () => {
+        throw failure;
+      }).catch((e: unknown) => e);
       expect(actual).toMatchObject({ problem, message: `Authentication: ${problem}`, retryable: false });
       expect(actual).not.toBe(failure);
       expect(actual).not.toHaveProperty("cause");
@@ -79,22 +68,14 @@ describe("authentication health", () => {
       { account: "org", scopes: [], expiresAt: Number.NaN },
     ];
     for (const identity of invalid) {
-      await expect(
-        verifyAuthentication(
-          method(async () => identity as AuthenticationIdentity),
-          {},
-        ),
-      ).rejects.toMatchObject({
+      await expect(check(async () => identity as AuthenticationIdentity)).rejects.toMatchObject({
         problem: "unavailable",
       });
     }
     await expect(
-      verifyAuthentication(
-        method(async () => {
-          throw { name: "AuthenticationError", problem: "private-value", message: "private-value" };
-        }),
-        {},
-      ),
+      check(async () => {
+        throw { name: "AuthenticationError", problem: "private-value", message: "private-value" };
+      }),
     ).rejects.toMatchObject({ problem: "unavailable", message: "Authentication: unavailable" });
     await expect(verifyAuthentication(defineAuthentication(stored), {})).rejects.toMatchObject({
       problem: "unsupported",
