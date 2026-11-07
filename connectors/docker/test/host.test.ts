@@ -85,20 +85,12 @@ describe.skipIf(!dockerAvailable() || !bin)("docker.container meets the Host con
     if (spawnSync("docker", ["image", "inspect", IMAGE], { stdio: "ignore" }).status !== 0) {
       execFileSync("docker", ["build", "-t", IMAGE, join(repoRoot, "packages/sanoma/runtime")], { stdio: "inherit" });
     }
-    // The company: the fixture with this checkout's packages, packed, and a lockfile.
+    // The company: the fixture with this checkout's sanoma, packed, and a lockfile.
     cpSync(fileURLToPath(new URL("./fixtures/company/", import.meta.url)), work, { recursive: true });
-    const vendor = join(work, "vendor");
-    for (const [pkg, file] of Object.entries({
-      workflows: "sanoma-ai-workflows",
-      app: "sanoma-ai-app",
-      bridge: "sanoma-ai-bridge",
-      sanoma: "sanoma",
-    })) {
-      execFileSync("pnpm", ["pack", "--out", join(vendor, `${file}.tgz`)], {
-        cwd: join(repoRoot, "packages", pkg),
-        stdio: "ignore",
-      });
-    }
+    execFileSync("pnpm", ["pack", "--out", join(work, "vendor/sanoma.tgz")], {
+      cwd: join(repoRoot, "packages/sanoma"),
+      stdio: "ignore",
+    });
     execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: work, stdio: "ignore" });
     repo.git("add", "-A");
     await repo.commit();

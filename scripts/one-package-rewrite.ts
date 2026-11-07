@@ -9,6 +9,8 @@
  *   or that a moved file used to reach something, points there from where the file is now.
  * - Each `package.json` that depended on a folded package depends on `sanoma` in its place, in the same
  *   field (`workspace:*` in this workspace).
+ * - pnpm's overrides of folded packages (`pnpm-workspace.yaml`'s `overrides`, a `package.json`'s
+ *   `pnpm.overrides` or `overrides`) become one of `sanoma`, with the first one's value.
  * - Every other mention of an old package's name or directory takes the new one: import specifiers
  *   (static, dynamic, `vi.mock`, strings, escaped in a regular expression), `pnpm --filter`, docs.
  *
@@ -135,8 +137,76 @@ function renamed(text: string): string {
   return out;
 }
 
-/** A `package.json`'s text with each folded package among its dependencies replaced by `sanoma`. */
-function dependencies(text: string): string {
+/**
+ * An override's selector (`name`, `name@range`, `parent>name`) with each folded package in it (or the
+ * `sanoma/<part>` an earlier run of this script made of one) as `sanoma`, its range dropped: a
+ * folded package's versions are not sanoma's.
+ */
+function overrideKey(key: string): string {
+  return key
+    .split(">")
+    .map((selector) => {
+      const at = selector.indexOf("@", 1);
+      const name = at < 0 ? selector : selector.slice(0, at);
+      return FOLDED.has(name) || name.startsWith("sanoma/") ? "sanoma" : selector;
+    })
+    .join(">");
+}
+
+/**
+ * Overrides (`[key, value]` in order) with each folded package's collapsed into one of `sanoma`, the
+ * first one's value; undefined when none names one. Says when that value needs a look.
+ */
+function collapseOverrides(entries: [string, string][], file: string): [string, string][] | undefined {
+  if (entries.every(([key]) => overrideKey(key) === key)) return undefined;
+  const out = new Map<string, string>();
+  for (const [key, value] of entries) {
+    const next = overrideKey(key);
+    if (out.has(next)) {
+      if (out.get(next) !== value) warnings.push(`${file}: dropped the override ${key}: ${value}, now ${next}'s`);
+      continue;
+    }
+    out.set(next, value);
+    if (next !== key && !/^(workspace|link):/.test(value)) {
+      warnings.push(`${file}: the override of ${next} is ${key}'s, ${value}: check it fits sanoma`);
+    }
+  }
+  return [...out];
+}
+
+/** A `pnpm-workspace.yaml`'s `overrides` with each folded package's collapsed (`collapseOverrides`). */
+function yamlOverrides(text: string, file: string): string {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => /^overrides:\s*(#.*)?$/.test(line));
+  if (start < 0) return text;
+  let end = start + 1;
+  while (end < lines.length && /^(\s|#|$)/.test(lines[end]!)) end++;
+  const ENTRY = /^(\s+)(["']?)(.+?)\2:\s*(.*)$/;
+  const block = lines.slice(start + 1, end);
+  const entries = block.flatMap((line) => {
+    const m = ENTRY.exec(line);
+    return m ? [[m[3]!, m[4]!] as [string, string]] : [];
+  });
+  const kept = collapseOverrides(entries, file);
+  if (!kept) return text;
+  const values = new Map(kept);
+  const rewritten = block.flatMap((line) => {
+    const m = ENTRY.exec(line);
+    if (!m) return [line];
+    const key = overrideKey(m[3]!);
+    if (!values.has(key)) return [];
+    const value = values.get(key)!;
+    values.delete(key);
+    return [`${m[1]}${key === m[3] ? m[2] + key + m[2] : key}: ${value}`];
+  });
+  return [...lines.slice(0, start + 1), ...rewritten, ...lines.slice(end)].join("\n");
+}
+
+/**
+ * A `package.json`'s text with each folded package among its dependencies replaced by `sanoma`, and
+ * its overrides of them collapsed (`collapseOverrides`).
+ */
+function dependencies(text: string, file: string): string {
   const manifest = JSON.parse(text) as Record<string, unknown> & { name?: string };
   let changed = false;
   for (const field of DEP_FIELDS) {
@@ -155,13 +225,21 @@ function dependencies(text: string): string {
     manifest[field] = Object.fromEntries(Object.entries(deps).toSorted(([a], [b]) => a.localeCompare(b)));
     changed = true;
   }
+  for (const holder of [manifest, manifest.pnpm as Record<string, unknown> | undefined]) {
+    const overrides = holder?.overrides as Record<string, string> | undefined;
+    const kept = overrides && collapseOverrides(Object.entries(overrides), file);
+    if (!kept) continue;
+    holder!.overrides = Object.fromEntries(kept);
+    changed = true;
+  }
   return changed ? `${JSON.stringify(manifest, null, 2)}\n` : text;
 }
 
 function rewrite(file: string): void {
   const before = readFileSync(file, "utf8");
   let text = before;
-  if (posix.basename(file) === "package.json") text = dependencies(text);
+  if (posix.basename(file) === "package.json") text = dependencies(text, file);
+  if (posix.basename(file) === "pnpm-workspace.yaml") text = yamlOverrides(text, file);
   // A relative path wherever one starts in code (a quoted string, a word of a script); in Markdown,
   // a link's target only, as a path in its prose may be relative to anything.
   const markdown = file.endsWith(".md");
