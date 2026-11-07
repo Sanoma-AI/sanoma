@@ -1,5 +1,5 @@
-import type { CallContext, PlanAction } from "@sanoma-ai/workflows";
-import { DriverError, retryableStatus, storeDatabaseUrl } from "@sanoma-ai/workflows";
+import type { CallContext, PlanAction } from "sanoma/workflows";
+import { DriverError, retryableStatus, storeDatabaseUrl } from "sanoma/workflows";
 import { canonicalSize, DEFAULT_SIZE, fields, limitsOf, project, sizeOf } from "./connector.ts";
 
 // The connector's operations over Neon's API (`NeonApi`): the driver's calls it through the SDK,

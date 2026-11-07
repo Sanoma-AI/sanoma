@@ -6,10 +6,10 @@ import {
   type Worker,
   type WorkerOptions,
   withSetup,
-} from "@sanoma-ai/workflows";
-import type { Fake } from "@sanoma-ai/workflows/fake";
+} from "sanoma/workflows";
+import type { Fake } from "sanoma/workflows/fake";
 
-export type { Fake, FakeCall, FakeOptions } from "@sanoma-ai/workflows/fake";
+export type { Fake, FakeCall, FakeOptions } from "sanoma/workflows/fake";
 export { ensureBuilt, waitFor } from "./build.ts";
 export { findSentinels, type SentinelHit } from "./sentinel.ts";
 

@@ -1,4 +1,4 @@
-import { BATCH_LIMIT, type Saved } from "@sanoma-ai/workflows/shared";
+import { BATCH_LIMIT, type Saved } from "sanoma/workflows/shared";
 import {
   createCollection,
   createPacedMutations,

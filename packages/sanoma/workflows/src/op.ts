@@ -549,7 +549,7 @@ export function checkConnector(value: unknown): asserts value is Connector<any, 
   throw new Error(
     record === undefined
       ? `\`connectors\` holds something that is not a connector: list what the connector packages export (or one from an older build: ${build})`
-      : `The "${String(record.id)}" connector was made by another build of @sanoma-ai/workflows: ${build}`,
+      : `The "${String(record.id)}" connector was made by another build of sanoma/workflows: ${build}`,
   );
 }
 

@@ -1,4 +1,4 @@
-import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import type { WorkflowEntry } from "sanoma/workflows/describe";
 import { useForm } from "@tanstack/react-form";
 import { useHydrated } from "@tanstack/react-router";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
@@ -21,7 +21,7 @@ import { Input } from "#/components/ui/input.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
-import { errorMessage } from "@sanoma-ai/workflows/shared";
+import { errorMessage } from "sanoma/workflows/shared";
 import { errorBodyOf, type ScenarioEntry, type StartRunRequest, type StartRunResponse } from "../api.ts";
 import { Notice, TipButton } from "../components/kit.tsx";
 import { useStartRun } from "../queries.ts";

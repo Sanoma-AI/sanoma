@@ -16,7 +16,7 @@
 export const WAKE_PATH = "/__sanoma/wake";
 /** The object's route that answers what the Worker runs; with `?start=1` and the instance token, it starts the container at it. */
 export const HEALTH_PATH = "/__sanoma/health";
-/** The worker port's route of the app bundle at `?revision=`, which the object passes on with the instance token (`APP_BUNDLE_PATH` in `@sanoma-ai/workflows/shared`). */
+/** The worker port's route of the app bundle at `?revision=`, which the object passes on with the instance token (`APP_BUNDLE_PATH` in `sanoma/workflows/shared`). */
 export const APP_BUNDLE_PATH = "/__sanoma/app-bundle";
 /** The Host contract's wake: the Worker has the worker started now (a wakeup's `GET {url}/wake`). */
 const HOST_WAKE_PATH = "/wake";
@@ -26,7 +26,7 @@ const HOST_WAKE_PATH = "/wake";
  * the object's answers from anyone else's.
  */
 export const DEPLOYMENT_HEADER = "x-sanoma-deployment";
-/** The header the app reads the visitor's address from (`CLIENT_IP_HEADER` in `@sanoma-ai/workflows`). */
+/** The header the app reads the visitor's address from (`CLIENT_IP_HEADER` in `sanoma/workflows`). */
 export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
 /** How long the container keeps running after the object's last request: Cloudflare stops it then. */
 export const INACTIVITY_MS = 10 * 60 * 1000;

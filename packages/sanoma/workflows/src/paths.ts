@@ -11,11 +11,11 @@ import { APP_NAME, APPS_DIR, appOfPath } from "./shared.ts";
  * Where a data file imports `secret` from, and `sanoma`, the runtime's own resource constructors
  * (its people: `sanoma.person`, `.agent`, `.group`): what the loader serves for them.
  */
-export const SECRET_ENTRIES: ReadonlySet<string> = new Set(["sanoma/resources", "@sanoma-ai/workflows/resources"]);
+export const SECRET_ENTRIES: ReadonlySet<string> = new Set(["sanoma/resources", "sanoma/workflows/resources"]);
 /** Where a site imports `api`, `RunForm` and `defineSite` from: `sanoma/site`, which re-exports the app's. The loader serves `defineSite`. */
-export const SITE_ENTRIES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
+export const SITE_ENTRIES: ReadonlySet<string> = new Set(["sanoma/site", "sanoma/site"]);
 /** Where `resources/data.ts` imports `collection` from: what the loader serves for it. */
-export const DATA_ENTRIES: ReadonlySet<string> = new Set(["sanoma/data", "@sanoma-ai/workflows/data"]);
+export const DATA_ENTRIES: ReadonlySet<string> = new Set(["sanoma/data", "sanoma/workflows/data"]);
 /**
  * The one data file that holds collections, relative to `resources/`. Workflows and the runtime
  * import it, so it holds collections only.

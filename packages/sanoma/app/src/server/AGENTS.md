@@ -1,4 +1,4 @@
-# packages/app/src/server
+# packages/sanoma/app/src/server
 
 Server-only code behind the app's server functions and its chat route.
 

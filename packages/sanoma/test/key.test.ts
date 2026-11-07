@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deploymentKey } from "@sanoma-ai/workflows";
+import { deploymentKey } from "sanoma/workflows";
 import { ensureDeploymentKeys, writeDeploymentKeys } from "../src/key.ts";
 
 const dirs: string[] = [];

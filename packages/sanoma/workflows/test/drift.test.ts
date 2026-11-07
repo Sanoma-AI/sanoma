@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { cloudflare } from "@sanoma-ai/connector-cloudflare";
-import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
+import { testDatabaseUrl, withFake } from "sanoma/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig, writeLockfile } from "../src/describe.ts";

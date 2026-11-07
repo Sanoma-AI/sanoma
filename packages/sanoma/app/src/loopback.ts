@@ -1,11 +1,11 @@
-import type { Principal } from "@sanoma-ai/workflows";
+import type { Principal } from "sanoma/workflows";
 import { parse } from "cookie-es";
-import { isLoopback } from "@sanoma-ai/workflows/shared";
+import { isLoopback } from "sanoma/workflows/shared";
 import { ACTOR_COOKIE, ACTOR_HEADER, type Place } from "./api.ts";
 import type { LoginProvider } from "./context.ts";
 
 // The loopback login, and the Host names a loopback-only app answers to. Which addresses count
-// as this machine is `isLoopback` in `@sanoma-ai/workflows/shared`, for what startApp listens on
+// as this machine is `isLoopback` in `sanoma/workflows/shared`, for what startApp listens on
 // and the Host names it then answers to alike, so the two can never disagree.
 
 /** The loopback login's name. */

@@ -3,8 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { defaultBridge, type ProviderClient } from "@sanoma-ai/bridge";
-import { DriverError } from "@sanoma-ai/workflows";
+import { defaultBridge, type ProviderClient } from "sanoma/internal/bridge";
+import { DriverError } from "sanoma/workflows";
 import { z } from "zod";
 import { CREATE_ONLY, dockerTf, LABELS } from "./connector.ts";
 

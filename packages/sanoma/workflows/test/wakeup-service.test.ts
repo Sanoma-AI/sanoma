@@ -1,4 +1,4 @@
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { eq, getTableName, sql } from "drizzle-orm";
 import { Client, escapeIdentifier, Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";

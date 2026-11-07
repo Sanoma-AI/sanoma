@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { allowAll, defineConnector, defineWorkflow, type Policy, resolveConfig } from "@sanoma-ai/workflows";
-import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
-import { defineFake } from "@sanoma-ai/workflows/fake";
-import { withFake } from "@sanoma-ai/testing";
+import { allowAll, defineConnector, defineWorkflow, type Policy, resolveConfig } from "sanoma/workflows";
+import { describeConfig, readPeople } from "sanoma/workflows/describe";
+import { defineFake } from "sanoma/workflows/fake";
+import { withFake } from "sanoma/testing";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ACTOR_HEADER } from "../src/api.ts";

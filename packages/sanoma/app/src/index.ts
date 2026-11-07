@@ -22,9 +22,9 @@ import {
   type SanomaConfig,
   type SocialClients,
   type Source,
-} from "@sanoma-ai/workflows";
-import type { SiteEntry } from "@sanoma-ai/workflows/describe";
-import { siteDir } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import type { SiteEntry } from "sanoma/workflows/describe";
+import { siteDir } from "sanoma/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { STYLESHEET_FILE } from "./content-files.ts";
 import type { AdmittingLogin, LoginProvider, ServerEntry } from "./context.ts";
@@ -300,7 +300,7 @@ function defaultDistDir(): string {
 
 /** What startApp says when the build it serves is missing, in part or whole. */
 const notBuilt = (path: string) =>
-  new Error(`The app is not built: ${path} is missing. Run \`pnpm --filter @sanoma-ai/app build\` first.`);
+  new Error(`The app is not built: ${path} is missing. Run \`pnpm --filter sanoma build\` first.`);
 
 /** True for the errors that mean a path is not there: missing, or under something that is not a directory. */
 const isMissing = (err: unknown) => {

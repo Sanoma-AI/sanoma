@@ -1,5 +1,5 @@
-import type { DriftField } from "@sanoma-ai/workflows";
-import { errorMessage } from "@sanoma-ai/workflows/shared";
+import type { DriftField } from "sanoma/workflows";
+import { errorMessage } from "sanoma/workflows/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { NotePencilIcon } from "@phosphor-icons/react/dist/csr/NotePencil";

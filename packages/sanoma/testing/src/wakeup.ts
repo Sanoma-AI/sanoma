@@ -13,7 +13,7 @@ import {
   type SanomaClient,
   type WakeupRegistration,
   withSetup,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { z } from "zod";
 import { waitFor } from "./build.ts";
 import { type HostCheck, hostCheckWorkflows, type Wake } from "./host.ts";

@@ -1,4 +1,4 @@
-// `pnpm bridge:download`: puts a provider-bridge binary in packages/bridge/bin/ and prints the
+// `pnpm bridge:download`: puts a provider-bridge binary in packages/sanoma/bridge/bin/ and prints the
 // path to export as SANOMA_BRIDGE_BIN. It downloads the release `RELEASE` pins, checked against
 // its sha256, or with `--source` builds one from a provider-bridge checkout (Go from the
 // checkout's .mise.toml). Each `@sanoma-ai/bridge-<platform>` package fills its `bin/` with it

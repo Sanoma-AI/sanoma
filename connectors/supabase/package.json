@@ -60,7 +60,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "generate": "node ../../packages/bridge/src/tfschema/cli.ts src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
+    "generate": "node ../../packages/sanoma/bridge/src/tfschema/cli.ts src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
     "prepack": "pnpm run clean && pnpm run build",
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
@@ -69,16 +69,13 @@
     "pg": "^8.23.1"
   },
   "devDependencies": {
-    "@sanoma-ai/bridge": "workspace:*",
-    "@sanoma-ai/testing": "workspace:*",
-    "@sanoma-ai/workflows": "workspace:*",
     "@types/pg": "^8.23.1",
     "msw": "^3.0.3",
+    "sanoma": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/bridge": "workspace:^",
-    "@sanoma-ai/workflows": "workspace:^",
+    "sanoma": "workspace:*",
     "zod": "^4"
   },
   "engines": {

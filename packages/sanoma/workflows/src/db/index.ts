@@ -1,4 +1,4 @@
-// `@sanoma-ai/workflows/db`, server-only: the runtime's tables and the database they are read
+// `sanoma/workflows/db`, server-only: the runtime's tables and the database they are read
 // with, for the packages that share them (the connectors' stores, the app's tests), and the
 // migrator a connector applies its own generated folder with, under the preparation's lock. Never
 // a workflow's import: the shipped `oxlint.json` refuses it, as it does `/wakeup-service`.

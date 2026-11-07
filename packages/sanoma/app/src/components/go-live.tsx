@@ -8,8 +8,8 @@ import {
 } from "@tanstack/react-query";
 import { CatchBoundary, type ErrorComponentProps, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import type { GoLiveInput } from "@sanoma-ai/workflows";
-import { APPLY_WORKFLOW, errorMessage, isEnded, siteDir } from "@sanoma-ai/workflows/shared";
+import type { GoLiveInput } from "sanoma/workflows";
+import { APPLY_WORKFLOW, errorMessage, isEnded, siteDir } from "sanoma/workflows/shared";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";

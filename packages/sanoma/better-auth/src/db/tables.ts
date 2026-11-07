@@ -5,7 +5,7 @@ import { bigint, boolean, index, integer, pgSchema, text, timestamp } from "driz
 // have it), plus the user's `github` (`TABLE_OPTIONS` in `instance.ts`). Each login has the set in
 // a schema of its own (`visitors.ts`, `staff.ts`), from which drizzle-kit generates its
 // migrations, so a change here is a new migration in both folders: `pnpm --filter
-// @sanoma-ai/connector-better-auth generate`.
+// sanoma/better-auth generate`.
 
 const when = () => timestamp({ withTimezone: true });
 

@@ -1,4 +1,4 @@
-import { requestOrigin, signingKeyFor } from "@sanoma-ai/workflows";
+import { requestOrigin, signingKeyFor } from "sanoma/workflows";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { parse, serialize } from "cookie-es";
 

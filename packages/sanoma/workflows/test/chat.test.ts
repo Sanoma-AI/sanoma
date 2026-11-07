@@ -1,4 +1,4 @@
-import { useTestApp } from "@sanoma-ai/testing/harness";
+import { useTestApp } from "sanoma/testing/harness";
 import { describe, expect, it } from "vitest";
 import {
   type AppSteps,
@@ -14,7 +14,7 @@ import { ALICE, failure, freshDatabase, rootWith, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The built-in `chat`: a turn of a person's chat, started with
 // `SanomaClient.startTurn` as the chat's person and run by the worker with the app's steps (a fake
-// `chat` here, the app's own in packages/app/test/chat.test.ts): its id names the chat and the
+// `chat` here, the app's own in packages/sanoma/app/test/chat.test.ts): its id names the chat and the
 // message, whose text is in the chat's transcript and never in the run; it waits for the turn
 // before it, which it tells to stop; a pasted code reaches the turn sealed, a restart under it
 // resumes it as begun, and a worker without the steps fails it at once.

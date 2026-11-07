@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { GoogleAuth } from "google-auth-library";
-import { startBridge, type Bridge } from "@sanoma-ai/bridge";
-import { memorySecrets, verifyAuthentication, type CallContext } from "@sanoma-ai/workflows";
+import { startBridge, type Bridge } from "sanoma/internal/bridge";
+import { memorySecrets, verifyAuthentication, type CallContext } from "sanoma/workflows";
 import { afterAll, describe, it } from "vitest";
 import {
   accountOf,

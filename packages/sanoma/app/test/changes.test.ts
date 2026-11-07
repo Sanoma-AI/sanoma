@@ -1,5 +1,5 @@
-import type { CheckResult } from "@sanoma-ai/workflows";
-import { changeIdOf } from "@sanoma-ai/workflows/shared";
+import type { CheckResult } from "sanoma/workflows";
+import { changeIdOf } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import type { DraftCard } from "../src/lib/chat.ts";

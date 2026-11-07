@@ -2,11 +2,11 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } fr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AppBundle } from "@sanoma-ai/app";
-import { buildAppBundle, NodeOnlyImport, prerenderedPages } from "@sanoma-ai/app/bundle";
-import { prepareBetterAuth, prepareBetterAuthStaff } from "@sanoma-ai/connector-better-auth";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { defineConfig, SanomaClient, sealInvite } from "@sanoma-ai/workflows";
+import type { AppBundle } from "sanoma/app";
+import { buildAppBundle, NodeOnlyImport, prerenderedPages } from "sanoma/app/bundle";
+import { prepareBetterAuth, prepareBetterAuthStaff } from "sanoma/better-auth";
+import { testDatabaseUrl } from "sanoma/testing";
+import { defineConfig, SanomaClient, sealInvite } from "sanoma/workflows";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unstable_startWorker } from "wrangler";

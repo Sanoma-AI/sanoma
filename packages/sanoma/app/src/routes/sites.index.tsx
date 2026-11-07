@@ -1,6 +1,6 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
-import type { ConfigDescription, SiteEntry } from "@sanoma-ai/workflows/describe";
-import { siteDir } from "@sanoma-ai/workflows/shared";
+import type { ConfigDescription, SiteEntry } from "sanoma/workflows/describe";
+import { siteDir } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge.tsx";

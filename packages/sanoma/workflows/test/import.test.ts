@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
+import { testDatabaseUrl } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
 import { beforeEach, describe, expect, it } from "vitest";
 import { describeConfig } from "../src/describe.ts";
 import { byCodePoint, importEntry, importRows, mappingProblems } from "../src/import.ts";

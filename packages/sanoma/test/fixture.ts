@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt as ensure, waitFor } from "@sanoma-ai/testing";
+import { ensureBuilt as ensure, waitFor } from "sanoma/testing";
 
 /** The repo's root. */
 export const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -17,12 +17,12 @@ export const cli = join(repo, "packages/sanoma/src/cli.ts");
  * builds each whose outputs are missing or older than its source, in dependency order.
  */
 const BUILT: [dir: string, outputs: string[]][] = [
-  ["packages/workflows", ["dist/index.js"]],
-  ["packages/bridge", ["dist/index.js"]],
+  ["packages/sanoma/workflows", ["dist/index.js"]],
+  ["packages/sanoma/bridge", ["dist/index.js"]],
   ["connectors/ghost", ["dist/index.js"]],
   ["connectors/anthropic", ["dist/index.js"]],
   ["connectors/docker", ["dist/index.js"]],
-  ["packages/app", ["dist/server/server.js"]],
+  ["packages/sanoma/app", ["dist/server/server.js"]],
   ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"]],
 ];
 

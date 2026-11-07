@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { checkSandbox } from "@sanoma-ai/testing/sandbox";
+import { checkSandbox } from "sanoma/testing/sandbox";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runnerBox, runnerHealth, runnerScript } from "../src/runner-box.ts";
 import { RUNNER_HEALTH, RUNNER_PROTOCOL } from "../src/runner-protocol.ts";

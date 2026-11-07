@@ -1,5 +1,5 @@
-import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
-import type { Saved } from "@sanoma-ai/workflows/shared";
+import type { CollectionEntry } from "sanoma/workflows/describe";
+import type { Saved } from "sanoma/workflows/shared";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { createElement, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";

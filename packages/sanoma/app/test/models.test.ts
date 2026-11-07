@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { anthropic } from "@sanoma-ai/connector-anthropic";
-import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
-import { defineConnector, resolveConfig, type SanomaClient, withSetup } from "@sanoma-ai/workflows";
+import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
+import { defineConnector, resolveConfig, type SanomaClient, withSetup } from "sanoma/workflows";
 import { customProvider, generateText, NoSuchProviderError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";

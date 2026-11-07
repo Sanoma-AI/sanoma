@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { expect, it, vi } from "vitest";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import {
   defineAuthentication,
   defineConnection,

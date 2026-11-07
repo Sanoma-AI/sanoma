@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
+import { testDatabaseUrl, withFake } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
 import {
   type ApplyReport,
   type PlanAction,
@@ -13,8 +13,8 @@ import {
   memoryLedger,
   type Source,
   withSetup,
-} from "@sanoma-ai/workflows";
-import { defineFake } from "@sanoma-ai/workflows/fake";
+} from "sanoma/workflows";
+import { defineFake } from "sanoma/workflows/fake";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fakeCloudflare } from "../src/fake.ts";

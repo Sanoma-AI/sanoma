@@ -1,16 +1,16 @@
-# @sanoma-ai/connector-better-auth
+# sanoma/better-auth
 
-[Better Auth](https://www.better-auth.com) as a visitor login for a [Sanoma](https://github.com/Sanoma-AI/sanoma) public site, and as the app's staff sign-in on a host: visitors sign up and sign in with an email and a password, an email code or GitHub, staff by an email code, an invite link or GitHub, and the accounts live on the company's own database. It has no operations and no credential; it attaches a login half (`withSetup({ login })`, see [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)), which the app calls once for each public site that names it.
+[Better Auth](https://www.better-auth.com) as a visitor login for a [Sanoma](https://github.com/Sanoma-AI/sanoma) public site, and as the app's staff sign-in on a host: visitors sign up and sign in with an email and a password, an email code or GitHub, staff by an email code, an invite link or GitHub, and the accounts live on the company's own database. It has no operations and no credential; it attaches a login half (`withSetup({ login })`, see [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#usage)), which the app calls once for each public site that names it.
 
 ## Usage
 
 ```sh
-npm install @sanoma-ai/connector-better-auth
+npm install sanoma/better-auth
 ```
 
 ```ts
 // sanoma.config.ts
-import { betterAuth } from "@sanoma-ai/connector-better-auth";
+import { betterAuth } from "sanoma/better-auth";
 
 export default defineConfig({ workflows, connectors: [betterAuth] });
 ```
@@ -100,7 +100,7 @@ Each `callbackURL` (and `errorCallbackURL`, where an error goes as `?error=<code
 
 ## The staff sign-in
 
-`betterAuthStaffLogin` is the app's sign-in for the company's own people on a host, which the `sanoma` bin uses off this machine (`staffLogin(betterAuthStaffLogin, { github })` from `@sanoma-ai/app`). Unlike the visitor login, nobody signs up: a code is sent, and an account made, only for an email the people file declares (anyone else gets the same answer, and nothing is stored or sent), or a GitHub login it declares. Its tables are in the schema `better_auth_staff`, which the worker makes beside `better_auth` ([the schema](#the-schema)); its cookie is `sanoma.session_token`, for seven days, on whatever host the app answers on. Its ways in, under `/auth/better-auth/`:
+`betterAuthStaffLogin` is the app's sign-in for the company's own people on a host, which the `sanoma` bin uses off this machine (`staffLogin(betterAuthStaffLogin, { github })` from `sanoma/app`). Unlike the visitor login, nobody signs up: a code is sent, and an account made, only for an email the people file declares (anyone else gets the same answer, and nothing is stored or sent), or a GitHub login it declares. Its tables are in the schema `better_auth_staff`, which the worker makes beside `better_auth` ([the schema](#the-schema)); its cookie is `sanoma.session_token`, for seven days, on whatever host the app answers on. Its ways in, under `/auth/better-auth/`:
 
 - an email code (`/email-otp/send-verification-otp`, `/sign-in/email-otp`), with a sender;
 - GitHub (`/sign-in/social`, back at `/callback/github`), with the company's GitHub App's client, matched by the verified email GitHub gives, else the login (GitHub's `/user` for the sign-in's own token, which is then dropped; the App needs the account permission "Email addresses: read", or a private email ends in Better Auth's `?error=email_not_found`); a GitHub account the files declare by neither is refused as `?error=not_declared` (or, when its unverified email is a row's, Better Auth's `account_not_linked`), with no row left, as is a new GitHub account under a login a row already carries, since GitHub frees a renamed login; declare people by email where you can;

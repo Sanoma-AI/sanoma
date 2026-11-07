@@ -1,13 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import {
   defineConnection,
   memorySecretStore,
   SanomaClient,
   type SanomaConfig,
   startWorker,
-} from "@sanoma-ai/workflows";
-import { secret } from "@sanoma-ai/workflows/resources";
+} from "sanoma/workflows";
+import { secret } from "sanoma/workflows/resources";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, beforeAll, expect, it } from "vitest";

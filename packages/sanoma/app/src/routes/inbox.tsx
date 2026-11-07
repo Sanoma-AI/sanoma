@@ -1,5 +1,5 @@
-import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
-import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
+import type { ConfigDescription, OpEntry } from "sanoma/workflows/describe";
+import { WORKFLOW_ACTION } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, createFileRoute, Link } from "@tanstack/react-router";
 import { memo, Suspense } from "react";

@@ -81,8 +81,8 @@ export {
 export { type AppEntry, appSourceOf, readApps } from "./apps.ts";
 export { type AppDefinition, defineApp } from "./definitions.ts";
 export { appFolders, APPS_DIR, declarationFiles, filesUnder, kindDirs } from "./paths.ts";
-// `sanoma` itself (the people types' constructors) is at `@sanoma-ai/workflows/resources`, for data files.
-// `collection()` itself is at `@sanoma-ai/workflows/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
+// `sanoma` itself (the people types' constructors) is at `sanoma/workflows/resources`, for data files.
+// `collection()` itself is at `sanoma/workflows/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
 export { isCollection } from "./collection.ts";
 export { type CredentialStatus, credentialsOf } from "./env.ts";
 export {
@@ -137,7 +137,7 @@ export {
   type DriftResult,
   type DriftStatus,
 } from "./drift.ts";
-// readResources, which parses data files, is at `@sanoma-ai/workflows/describe`.
+// readResources, which parses data files, is at `sanoma/workflows/describe`.
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export { peopleSources } from "./resources.ts";
 export {
@@ -195,7 +195,7 @@ export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export { superviseWorker, type Supervisor, type SupervisorOptions } from "./supervisor.ts";
 export type { DeadlineSource, Deadlines, SelfStop, Wait } from "./deadlines.ts";
 export { nextFire, nextScheduledFire, timeMatcherFile, type TimeMatcherClass, useTimeMatcher } from "./schedules.ts";
-// `secret` itself is at `@sanoma-ai/workflows/resources`, for data files; this is the drivers' side.
+// `secret` itself is at `sanoma/workflows/resources`, for data files; this is the drivers' side.
 export {
   generateSecret,
   isSecret,
@@ -300,7 +300,7 @@ export { type AppBehind, dbosClient } from "./db.ts";
 export { type RootSnapshot, useRootSnapshot } from "./bundled.ts";
 export { checkPreparedOnly } from "./db.ts";
 export { type CedarWasm, useCedarWasm } from "./schema.ts";
-// Also at `@sanoma-ai/workflows/shared`, which a browser bundle can import.
+// Also at `sanoma/workflows/shared`, which a browser bundle can import.
 export {
   AGENTS,
   ANONYMOUS,
@@ -340,12 +340,12 @@ export {
   warningLine,
 } from "./shared.ts";
 // describeConfig, with the outline and every problem lintWorkflow finds, lives at
-// `@sanoma-ai/workflows/describe`: what a UI renders from, apart from what runs. The worker reads
+// `sanoma/workflows/describe`: what a UI renders from, apart from what runs. The worker reads
 // each workflow's outline too, to hold its runs to it.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
-// Steps for Gherkin tests, as data; Cucumber runs them from `@sanoma-ai/workflows/scenario`.
+// Steps for Gherkin tests, as data; Cucumber runs them from `sanoma/workflows/scenario`.
 export { defineSteps, type Expect, type RunView, type Seed, type Steps } from "./steps.ts";
-// defineFake lives at `@sanoma-ai/workflows/fake`: test tooling, not runtime.
+// defineFake lives at `sanoma/workflows/fake`: test tooling, not runtime.
 export {
   SecretAccess,
   SecretStoreError,

@@ -97,7 +97,7 @@ export const madeOf = (value: unknown): Made | undefined =>
   typeof value === "object" && value !== null ? registry.made.get(value) : undefined;
 
 /** Where `defineApp` comes from, served only to an app's `app.ts`. */
-const APP_ENTRIES: ReadonlySet<string> = new Set(["sanoma", "@sanoma-ai/workflows"]);
+const APP_ENTRIES: ReadonlySet<string> = new Set(["sanoma", "sanoma/workflows"]);
 
 /**
  * Loads `paths` (absolute, under `root`) as the generation of `root` and the constructors of
@@ -108,11 +108,11 @@ const APP_ENTRIES: ReadonlySet<string> = new Set(["sanoma", "@sanoma-ai/workflow
  * never changes it). `only` loads only the files whose text it passes; the answer is kept by its
  * identity, so pass one function, not a new one per call.
  *
- * Served to the files, by specifier: `sanoma/resources` and `@sanoma-ai/workflows/resources`
+ * Served to the files, by specifier: `sanoma/resources` and `sanoma/workflows/resources`
  * (`sanoma`, the constructors of the vendor `sanoma`, and `secret`); each connector's
  * `<info.package>/resources` (its vendor's constructors, under its id); `sanoma/data` and
- * `@sanoma-ai/workflows/data` (`collection`); `sanoma/site` and `@sanoma-ai/app/site`
- * (`defineSite`); and to an app's `apps/<app>/app.ts` alone, `sanoma` and `@sanoma-ai/workflows`
+ * `sanoma/workflows/data` (`collection`); `sanoma/site` and `sanoma/site`
+ * (`defineSite`); and to an app's `apps/<app>/app.ts` alone, `sanoma` and `sanoma/workflows`
  * (`defineApp`). Anything else is resolved as Node does.
  */
 export function loadModules(

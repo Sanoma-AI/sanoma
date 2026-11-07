@@ -1,4 +1,4 @@
-import { withFake } from "@sanoma-ai/testing";
+import { withFake } from "sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { columnPrincipal, describeConfig, permissionsGrid, readPeople } from "../src/describe.ts";

@@ -1,4 +1,4 @@
-# packages/app/src/routes/runs
+# packages/sanoma/app/src/routes/runs
 
 Redirects from the old `/runs` URLs, kept so old links and bookmarks still work: each run now lives on its workflow's page, and the list of every run is the Workflows page's All runs.
 

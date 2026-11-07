@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { cloudflareOps } from "./connector.ts";
 import { cloudflareDriver } from "./driver.ts";
 import { fakeCloudflare } from "./fake.ts";

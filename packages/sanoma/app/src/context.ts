@@ -1,8 +1,8 @@
-import type { LoginIdentity, Principal, ResolvedConfig, SanomaClient } from "@sanoma-ai/workflows";
+import type { LoginIdentity, Principal, ResolvedConfig, SanomaClient } from "sanoma/workflows";
 import type { Place } from "./api.ts";
 import type { AppSnapshot } from "./snapshot.ts";
 
-export type { LoginIdentity } from "@sanoma-ai/workflows";
+export type { LoginIdentity } from "sanoma/workflows";
 
 /**
  * Says who is making a request, or undefined when nobody is named. The app refuses a change

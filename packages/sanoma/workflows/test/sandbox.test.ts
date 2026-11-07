@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { fakeHostType } from "@sanoma-ai/testing/host";
+import { fakeHostType } from "sanoma/testing/host";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { describe, expect, it, onTestFinished } from "vitest";

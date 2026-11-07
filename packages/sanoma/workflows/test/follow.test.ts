@@ -1,5 +1,5 @@
-import { useTestApp } from "@sanoma-ai/testing/harness";
-import { fakeHost, testRepository } from "@sanoma-ai/testing/host";
+import { useTestApp } from "sanoma/testing/harness";
+import { fakeHost, testRepository } from "sanoma/testing/host";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ChangeReport, type FollowOutput, memoryLedger, type RemoteEvent } from "../src/index.ts";
 import { fakeRemote, memorySource, sha } from "./fakes/remote.ts";

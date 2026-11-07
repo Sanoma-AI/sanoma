@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ghost } from "@sanoma-ai/connector-ghost";
-import { startTestWorker } from "@sanoma-ai/testing";
+import { startTestWorker } from "sanoma/testing";
 import {
   defineWorkflow,
   memoryLedger,
@@ -13,13 +13,13 @@ import {
   SanomaClient,
   type SanomaConfig,
   type Worker,
-} from "@sanoma-ai/workflows";
-import { PATCH_WORKFLOW } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import { PATCH_WORKFLOW } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { localGitSource } from "../../sanoma/src/source.ts";
-import { copyFixture, ensureBuilt } from "../../sanoma/test/fixture.ts";
-import { gitIdentity } from "../../sanoma/test/git.ts";
+import { localGitSource } from "../../src/source.ts";
+import { copyFixture, ensureBuilt } from "../../test/fixture.ts";
+import { gitIdentity } from "../../test/git.ts";
 import { type FakeRemote, fakeRemote } from "../../workflows/test/fakes/remote.ts";
 import { freshDatabase } from "../../workflows/test/harness.ts";
 import type { AppContext } from "../src/context.ts";

@@ -4,7 +4,7 @@ import { connectionHealth, connections, connectionSetups, ledger } from "../src/
 import { workflowStatus } from "../src/db/dbos.ts";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import {
   defineAuthentication,
   defineConnection,

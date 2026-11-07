@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { BridgeError, withProviderSession } from "@sanoma-ai/bridge";
-import { fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
+import { BridgeError, withProviderSession } from "sanoma/internal/bridge";
+import { fixturesDir, loadReplies, stateBridge } from "sanoma/internal/bridge/fake";
 
 const ref = { source: "integrations/github", version: "6.13.0" };
 const bridge = () => stateBridge(loadReplies(fixturesDir, ref));

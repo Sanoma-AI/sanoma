@@ -17,9 +17,9 @@ import {
   type Resource,
   VENDOR,
   vendorCodeOf,
-} from "@sanoma-ai/workflows";
-import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
-import { secret } from "@sanoma-ai/workflows/resources";
+} from "sanoma/workflows";
+import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "sanoma/workflows/describe";
+import { secret } from "sanoma/workflows/resources";
 import { INFRA } from "../api.ts";
 import { invalid } from "../server/core.ts";
 import {

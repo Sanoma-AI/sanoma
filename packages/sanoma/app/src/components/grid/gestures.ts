@@ -1,4 +1,4 @@
-import type { Saved } from "@sanoma-ai/workflows/shared";
+import type { Saved } from "sanoma/workflows/shared";
 import { useEffect, useState } from "react";
 import type { ScalarField } from "../../form/schema.ts";
 import { plural } from "../../lib/utils.ts";

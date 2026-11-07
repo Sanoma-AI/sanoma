@@ -10,8 +10,8 @@ import {
   type OpSpec,
   type ResourceFields,
   vendorInfo,
-} from "@sanoma-ai/workflows";
-import { DOMAIN_NAME, SITE_KEY } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import { DOMAIN_NAME, SITE_KEY } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 /*

@@ -4,7 +4,7 @@ import { credentials } from "../src/db/company.ts";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import {
   checkSecretStore,
   defineConnector,

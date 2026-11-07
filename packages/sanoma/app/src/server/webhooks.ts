@@ -1,4 +1,4 @@
-import { type RemoteEvent, vendorCodeOf } from "@sanoma-ai/workflows";
+import { type RemoteEvent, vendorCodeOf } from "sanoma/workflows";
 import type { AppContext } from "../context.ts";
 import { secretValues } from "./secrets.ts";
 

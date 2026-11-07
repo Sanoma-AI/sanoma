@@ -14,7 +14,7 @@ import {
   storeDatabaseUrl,
   withSetup,
   type Worker,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { Client, escapeIdentifier } from "pg";
 import { z } from "zod";
 import {

@@ -4,10 +4,10 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type App, startApp } from "@sanoma-ai/app";
-import { buildApp } from "@sanoma-ai/app/build";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { defineConfig, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
+import { type App, startApp } from "sanoma/app";
+import { buildApp } from "sanoma/app/build";
+import { testDatabaseUrl } from "sanoma/testing";
+import { defineConfig, SanomaClient, startWorker, type Worker } from "sanoma/workflows";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import fixture from "./fixtures/company/sanoma.config.ts";
 
@@ -66,7 +66,7 @@ beforeAll(async () => {
   cpSync(fixtureDir, repo, { recursive: true });
   mkdirSync(join(repo, "node_modules"));
   symlinkSync(
-    fileURLToPath(new URL("../../../packages/sanoma", import.meta.url)),
+    fileURLToPath(new URL("../..", import.meta.url)),
     join(repo, "node_modules", "sanoma"),
   );
   [{ distDir }, worker] = await Promise.all([buildApp(repo), startWorker(config)]);

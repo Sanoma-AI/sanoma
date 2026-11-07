@@ -13,7 +13,7 @@ import {
   type SandboxBackend,
   type SandboxCapabilities,
   withSetup,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { z } from "zod";
 import { waitFor } from "./build.ts";
 import type { HostCheck } from "./host.ts";

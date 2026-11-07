@@ -5,8 +5,8 @@ import {
   type LoginHalf,
   type LoginIdentity,
   type SignInMethod,
-} from "@sanoma-ai/workflows";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+} from "sanoma/workflows";
+import { testDatabaseUrl } from "sanoma/testing";
 import { Client, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareBetterAuthStaff } from "../src/instance.ts";

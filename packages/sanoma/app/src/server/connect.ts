@@ -1,8 +1,8 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { createHash } from "node:crypto";
-import { type CallbackError, errorCode, type Principal, requestOrigin } from "@sanoma-ai/workflows";
-import { connectionCallbackPath } from "@sanoma-ai/workflows/shared";
+import { type CallbackError, errorCode, type Principal, requestOrigin } from "sanoma/workflows";
+import { connectionCallbackPath } from "sanoma/workflows/shared";
 import type { AuthorizeConnectionRequest, CallbackErrorReason } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { actorCookie, cookie, cookies } from "../login/keys.ts";

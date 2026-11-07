@@ -1,4 +1,4 @@
-import { CALL_WORKFLOW, errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
+import { CALL_WORKFLOW, errorMessage, type Saved } from "sanoma/workflows/shared";
 import { deepEquals } from "@tanstack/react-db";
 import { Link } from "@tanstack/react-router";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";

@@ -1,7 +1,7 @@
 // The app's build, Node only: the package's own (`vite.config.ts`), and a company repo's with its
 // sites, the app's routes plus every `sites/<name>/routes` as one TanStack Start build under
 // `<repo>/.sanoma/app`. Nothing is written into the app package or under `node_modules`. Only
-// Node's modules (and `@sanoma-ai/workflows/shared`, plain values) load with this file; Vite and
+// Node's modules (and `sanoma/workflows/shared`, plain values) load with this file; Vite and
 // its plugins load when a config or build needs them.
 import { createHash } from "node:crypto";
 import {
@@ -19,7 +19,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { APP_NAME, problemLine, SITE_NAME, siteKey } from "@sanoma-ai/workflows/shared";
+import { APP_NAME, problemLine, SITE_NAME, siteKey } from "sanoma/workflows/shared";
 import type { InlineConfig, Logger, Plugin, PluginOption, ViteDevServer } from "vite";
 import { CONTENT_TYPES, type ContentProblem, contentTypes, readContent, STYLESHEET_FILE } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
@@ -33,18 +33,18 @@ export const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url))
 // consumer's install, so the app and the worker share one copy. (The app imports no connector; a
 // config's connectors reach it only through startApp.) `ai` too: the chat's stream and a connector's
 // model half (`ConnectorSetup.model`) then share one AI SDK.
-const RUNTIME = ["@sanoma-ai/workflows", "@sanoma-ai/bridge", "@dbos-inc/dbos-sdk", "pg", "zod", "ai"];
+const RUNTIME = ["sanoma/workflows", "sanoma/internal/bridge", "@dbos-inc/dbos-sdk", "pg", "zod", "ai"];
 const isIn = (names: string[], id: string) => names.some((name) => id === name || id.startsWith(`${name}/`));
 
 // The browser bundle may import only types from the runtime (DBOS, Postgres), and the values of
-// `@sanoma-ai/workflows/shared` and `/description` (zod alone). `import type` is erased before
+// `sanoma/workflows/shared` and `/description` (zod alone). `import type` is erased before
 // resolution, so anything else of these reaching the client is a mistake: fail, in dev as in the
 // build. (Start adds these to its own denials, and to the modules marked server-only, such as server/core.ts.)
 const CLIENT_DENIED =
   /^(@sanoma-ai\/(workflows(?!\/(shared|description)$)|bridge|connector-|testing)|@dbos-inc\/|pg$|drizzle-orm(\/|$))/;
 
 /** What a company file may import without the company depending on it: the app's own copy, so there is one. */
-const SHARED = /^(react|react-dom|@tanstack\/[^/]+|@sanoma-ai\/app)(\/.*)?$/;
+const SHARED = /^(react|react-dom|@tanstack\/[^/]+|sanoma\/app)(\/.*)?$/;
 
 /**
  * `sites/__virtual.ts`, committed and never edited by hand: the sites mount's listing, every
@@ -188,7 +188,7 @@ function siteTsconfig(root: string) {
         "react-dom": [reactDom],
         "react-dom/*": [`${reactDom}/*`],
         "@tanstack/*": [`${dirname(installed("@tanstack/react-router"))}/*`],
-        "@sanoma-ai/app/*": [`${src}/*.ts`],
+        "sanoma/app/*": [`${src}/*.ts`],
       },
     },
     include: [
@@ -214,7 +214,7 @@ function moduleDir(name: string, from: string): string | undefined {
 /** Where the app package finds `name`. */
 function installed(name: string): string {
   const found = moduleDir(name, pkgDir);
-  if (found === undefined) throw new Error(`${name} is not installed beside @sanoma-ai/app (${pkgDir})`);
+  if (found === undefined) throw new Error(`${name} is not installed beside sanoma/app (${pkgDir})`);
   return found;
 }
 
@@ -379,7 +379,7 @@ export function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom, bundl
           include: [`${src}/**`, `${srcDirectory}/**`, "sites/**", "apps/*/sites/**"],
           // The defaults exclude node_modules, where the app's own source is in a company's install.
           // A site reaches the runtime most easily through `sanoma`, and Node's startApp through the app's root.
-          client: { specifiers: [CLIENT_DENIED, /^(sanoma|@sanoma-ai\/app)$/], excludeFiles: [] },
+          client: { specifiers: [CLIENT_DENIED, /^(sanoma|sanoma\/app)$/], excludeFiles: [] },
           server: { excludeFiles: [] },
         },
       }),
@@ -480,7 +480,7 @@ const ICONS = "virtual:sanoma/icons";
  */
 async function localesModule(repo?: string): Promise<string> {
   if (repo === undefined) return "export default {};\nexport const contentPages = {};\nexport const sites = [];";
-  const { siteContentPages, siteLocales, sitesUnder } = await import("@sanoma-ai/workflows/describe");
+  const { siteContentPages, siteLocales, sitesUnder } = await import("sanoma/workflows/describe");
   const sites = sitesUnder(repo).map(({ name }) => name);
   return `export default ${JSON.stringify(siteLocales(repo))};\nexport const contentPages = ${JSON.stringify(siteContentPages(repo))};\nexport const sites = ${JSON.stringify(sites)};`;
 }
@@ -495,7 +495,7 @@ const ICON_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
  */
 async function iconsModule(repo?: string): Promise<string> {
   if (repo === undefined) return "export default new Map();";
-  const { siteIcons } = await import("@sanoma-ai/workflows/describe");
+  const { siteIcons } = await import("sanoma/workflows/describe");
   const lucide = dirname(createRequire(import.meta.url).resolve("lucide-react/package.json"));
   // Lucide's module per icon, `dist/esm/icons/<name>.mjs` (the package has no `exports` map, and
   // is pinned exactly): a release that moves them fails the build here rather than leaving every
@@ -587,7 +587,7 @@ function sharedDeps(repo: string, src: string): Plugin {
 
 /**
  * The server bundle holds everything but the runtime, which it imports by absolute URL from
- * `runtimeFrom`'s resolution (pg and DBOS through `@sanoma-ai/workflows`'), so it needs nothing
+ * `runtimeFrom`'s resolution (pg and DBOS through `sanoma/workflows`'), so it needs nothing
  * else from the company's install. Build only: dev's server
  * resolves as Node does. With `bundled` (the Worker's build, which has no install to import from),
  * the same resolution, bundled.
@@ -605,10 +605,10 @@ function runtimeExternal(runtimeFrom: string, bundled = false): Plugin {
       const opts = { ...options, skipSelf: true };
       let resolved = await this.resolve(source, runtimeFrom, opts);
       if (!resolved) {
-        const workflows = await this.resolve("@sanoma-ai/workflows", runtimeFrom, opts);
+        const workflows = await this.resolve("sanoma/workflows", runtimeFrom, opts);
         if (workflows) resolved = await this.resolve(source, workflows.id, opts);
       }
-      if (!resolved) return this.error(`${source} does not resolve from ${runtimeFrom} or its @sanoma-ai/workflows`);
+      if (!resolved) return this.error(`${source} does not resolve from ${runtimeFrom} or its sanoma/workflows`);
       return found(resolved.id);
     },
   };
@@ -663,7 +663,7 @@ export async function appDevServer(
     environments: { ssr: { resolve: { external: RUNTIME, noExternal: ["sanoma"] } } },
     optimizeDeps: {
       // Shipped as source, compiled with the pages.
-      exclude: ["sanoma", "@sanoma-ai/app"],
+      exclude: ["sanoma", "sanoma/app"],
       // Every page, so the first visit finds the dependencies optimized, not a reload to do it.
       entries: [`${src}/routes/**/*.tsx`, "sites/**/*.tsx", "apps/*/sites/**/*.tsx"],
     },
@@ -694,7 +694,7 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
   const proxy = `${join(src, "dev-imports.ts")}?sanoma-shared=`;
   // How Vite's nested include reaches the app from the repo: through sanoma, which a company
   // installs, or directly.
-  const viaApp = moduleDir("sanoma", repo) ? "sanoma > @sanoma-ai/app" : "@sanoma-ai/app";
+  const viaApp = moduleDir("sanoma", repo) ? "sanoma > sanoma/app" : "sanoma/app";
   return [
     {
       // Each file the watcher sees change, for the launcher (`onFileChange`).
@@ -798,7 +798,7 @@ function buildKey(repo: string, runtimeFrom: string): string {
   const hash = createHash("sha256");
   const { version } = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) as { version: string };
   hash.update(`${version}\0${src}\0`);
-  const workflows = moduleDir("@sanoma-ai/workflows", dirname(runtimeFrom));
+  const workflows = moduleDir("sanoma/workflows", dirname(runtimeFrom));
   for (const name of RUNTIME) {
     const dir = moduleDir(name, dirname(runtimeFrom)) ?? (workflows && moduleDir(name, realpathSync(workflows)));
     hash.update(`${name}=${dir === undefined ? "" : realpathSync(dir)}\0`);

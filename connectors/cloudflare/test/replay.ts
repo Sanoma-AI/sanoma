@@ -1,4 +1,4 @@
-import type { Exchange, ReplayOptions } from "@sanoma-ai/testing/replay";
+import type { Exchange, ReplayOptions } from "sanoma/testing/replay";
 
 // How Cloudflare's replies are replayed (and recorded): the driver's tests and the features share
 // it. The fixtures are written from Cloudflare's API reference, not recorded (README, "Testing the

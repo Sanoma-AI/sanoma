@@ -2,7 +2,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { memoryLedger, memorySecretStore, type SanomaConfig } from "../src/index.ts";
 import { runScenarios } from "../src/scenarios.ts";

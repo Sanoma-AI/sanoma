@@ -1,6 +1,6 @@
-import type { HostRootFacts, RootSnapshot } from "@sanoma-ai/workflows";
-import type { ConfigDescription, SiteEntry } from "@sanoma-ai/workflows/describe";
-import { siteDir } from "@sanoma-ai/workflows/shared";
+import type { HostRootFacts, RootSnapshot } from "sanoma/workflows";
+import type { ConfigDescription, SiteEntry } from "sanoma/workflows/describe";
+import { siteDir } from "sanoma/workflows/shared";
 import type { ScenariosResponse } from "./api.ts";
 import type { Published } from "./content-files.ts";
 

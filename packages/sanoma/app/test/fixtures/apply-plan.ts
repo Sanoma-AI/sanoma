@@ -1,4 +1,4 @@
-import type { ApplyPlan } from "@sanoma-ai/workflows/describe";
+import type { ApplyPlan } from "sanoma/workflows/describe";
 
 /** An apply plan with one of each kind of step, over the workflows' company fixture, plus a problem and a rebind. */
 export const PLAN: ApplyPlan = {

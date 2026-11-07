@@ -1,2 +1,2 @@
 /** Deployment configuration only; workflows use logical secret references. */
-export { managedKmsStore, type ManagedKmsOptions } from "@sanoma-ai/workflows/kms-secrets";
+export { managedKmsStore, type ManagedKmsOptions } from "sanoma/workflows/kms-secrets";

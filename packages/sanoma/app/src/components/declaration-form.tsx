@@ -1,5 +1,5 @@
-import type { PatchInput, PatchOutput } from "@sanoma-ai/workflows";
-import type { DeclaredResource, ResourceTypeEntry } from "@sanoma-ai/workflows/describe";
+import type { PatchInput, PatchOutput } from "sanoma/workflows";
+import type { DeclaredResource, ResourceTypeEntry } from "sanoma/workflows/describe";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";

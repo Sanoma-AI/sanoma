@@ -1,5 +1,5 @@
-import { checkSandbox } from "@sanoma-ai/testing/sandbox";
-import { RUNNER_PORT, runnerHealth } from "@sanoma-ai/workflows";
+import { checkSandbox } from "sanoma/testing/sandbox";
+import { RUNNER_PORT, runnerHealth } from "sanoma/workflows";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { agent37Api } from "../src/api.ts";
 import { agent37Backend, BOX, labelOf } from "../src/backend.ts";

@@ -1,4 +1,4 @@
-import type { AppEntry } from "@sanoma-ai/workflows/describe";
+import type { AppEntry } from "sanoma/workflows/describe";
 import type { ReactElement } from "react";
 import { TableHead, TableRow } from "#/components/ui/table.tsx";
 import { ROOT_APP } from "../queries.ts";

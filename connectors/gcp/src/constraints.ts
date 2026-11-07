@@ -1,5 +1,5 @@
-import { DriverError } from "@sanoma-ai/workflows";
-import type { ProviderClient } from "@sanoma-ai/bridge";
+import { DriverError } from "sanoma/workflows";
+import type { ProviderClient } from "sanoma/internal/bridge";
 
 /** The same retention and trust rules apply to live and simulated resources. */
 export function constrain(operation: string, input: { desired?: Record<string, unknown> }) {

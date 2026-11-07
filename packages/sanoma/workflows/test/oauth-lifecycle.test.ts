@@ -4,8 +4,8 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { findSentinels, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { runEnded } from "@sanoma-ai/testing/host";
+import { findSentinels, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { runEnded } from "sanoma/testing/host";
 import {
   connectionAttempts,
   connectionHealth,

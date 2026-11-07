@@ -14,7 +14,7 @@ import { anthropic } from "@sanoma-ai/connector-anthropic";
 export default defineConfig({ workflows, connectors: [anthropic], policy });
 ```
 
-The connector has no operations. It attaches a model half (`withSetup({ model })`, see the [workflows README](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)): the app makes one AI SDK registry over every connector with one, where Anthropic's models are `anthropic/<model-id>`, such as `anthropic/claude-sonnet-5-5`, and `anthropic/default` is `ANTHROPIC_DEFAULT_MODEL` (`claude-opus-5-5`), until a config can choose one.
+The connector has no operations. It attaches a model half (`withSetup({ model })`, see the [workflows README](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#usage)): the app makes one AI SDK registry over every connector with one, where Anthropic's models are `anthropic/<model-id>`, such as `anthropic/claude-sonnet-5-5`, and `anthropic/default` is `ANTHROPIC_DEFAULT_MODEL` (`claude-opus-5-5`), until a config can choose one.
 
 ## The key
 

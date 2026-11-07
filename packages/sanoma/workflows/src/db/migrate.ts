@@ -5,10 +5,10 @@ import type { Db } from "../db.ts";
 import companyJournal from "../../drizzle/company/meta/_journal.json" with { type: "json" };
 import wakeupJournal from "../../drizzle/wakeup/meta/_journal.json" with { type: "json" };
 
-// The generated migrations (`pnpm --filter @sanoma-ai/workflows generate`), one folder per
+// The generated migrations (`pnpm --filter sanoma generate`), one folder per
 // database the runtime makes tables in, each with its own journal table in the schema `drizzle`,
 // since the wakeup service's database may be a company's own. A connector's tables have folders
-// of their own, shaped the same (`@sanoma-ai/connector-better-auth`). The Worker, which never
+// of their own, shaped the same (`sanoma/better-auth`). The Worker, which never
 // migrates, checks a database against the journal shipped with the package
 // (`migrationsApplied`), with no file read: the journal is imported.
 

@@ -1,4 +1,4 @@
-import type { LoginHalf } from "@sanoma-ai/workflows";
+import type { LoginHalf } from "sanoma/workflows";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/api.ts";
 import { publicFront } from "../src/login/public.ts";

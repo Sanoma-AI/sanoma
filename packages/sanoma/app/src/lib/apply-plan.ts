@@ -1,4 +1,4 @@
-import type { ApplyPlan, PlanStep, Rebind } from "@sanoma-ai/workflows/describe";
+import type { ApplyPlan, PlanStep, Rebind } from "sanoma/workflows/describe";
 
 // The words and groups of the change view (components/apply-plan.tsx), without React.
 

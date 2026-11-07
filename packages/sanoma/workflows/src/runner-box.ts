@@ -27,7 +27,7 @@ export async function runnerScript(): Promise<Uint8Array> {
   // `../dist/` from `src/` (the tests) and from `dist/` alike.
   const at = new URL("../dist/sandbox-runner.cjs", import.meta.url);
   return readFile(at).catch(() => {
-    throw new Error(`${fileURLToPath(at)} is missing: build @sanoma-ai/workflows`);
+    throw new Error(`${fileURLToPath(at)} is missing: build sanoma/workflows`);
   });
 }
 

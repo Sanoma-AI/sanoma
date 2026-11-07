@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { findSentinels, testDatabaseUrl } from "@sanoma-ai/testing";
+import { findSentinels, testDatabaseUrl } from "sanoma/testing";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";

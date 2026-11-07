@@ -42,7 +42,7 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
 /**
  * The sites under `root` (`sitesUnder`): each folder of `sites/`, then of each app's
  * `apps/<app>/sites/`, with a `routes/` whose name is a URL segment, by key (as
- * `@sanoma-ai/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
+ * `sanoma/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
  * `components/**` (`.ts` and `.tsx`, less tests and declarations) of each with oxc, never running
  * them: each page (`SitePage`, from a route's id), each `<RunForm workflow="…" />` and each use of `api`, both imported from `sanoma/site`,
  * called or passed on (`queryFn: api.data.leads.list`):

@@ -83,9 +83,9 @@ describe("changedSince", () => {
 });
 
 describe("releaseCheck", () => {
-  const runtime = workspace("@sanoma-ai/workflows", "0.7.1");
+  const runtime = workspace("sanoma/workflows", "0.7.1");
   const launcher = workspace("sanoma", "0.7.1");
-  const published = { ...launcher, dependencies: { "@sanoma-ai/workflows": "0.7.1" } };
+  const published = { ...launcher, dependencies: { "sanoma/workflows": "0.7.1" } };
 
   it("names a package npm does not have, and lists every version to publish", () => {
     const neon = workspace("@sanoma-ai/connector-neon", "0.1.0");
@@ -97,7 +97,7 @@ describe("releaseCheck", () => {
       ]),
       () => [],
     );
-    expect(result.publish).toEqual(["@sanoma-ai/workflows@0.7.1", "@sanoma-ai/connector-neon@0.1.0"]);
+    expect(result.publish).toEqual(["sanoma/workflows@0.7.1", "@sanoma-ai/connector-neon@0.1.0"]);
     expect(result.problems).toEqual([
       '@sanoma-ai/connector-neon is not on npm: publish it once by hand and set its trusted publisher (README "Release")',
     ]);
@@ -114,8 +114,8 @@ describe("releaseCheck", () => {
     );
     expect(result.publish).toEqual([]);
     expect(result.problems).toEqual([
-      "@sanoma-ai/workflows@0.7.1 is on npm, but a1, b2, c3 and 2 more changed its source since: give it a new version",
-      "sanoma@0.7.1 takes @sanoma-ai/workflows 0.7.1, not 0.7.2: give it a new version too",
+      "sanoma/workflows@0.7.1 is on npm, but a1, b2, c3 and 2 more changed its source since: give it a new version",
+      "sanoma@0.7.1 takes sanoma/workflows 0.7.1, not 0.7.2: give it a new version too",
     ]);
   });
 

@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
+import { testDatabaseUrl, withFake } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { decideCall } from "../src/call.ts";
@@ -870,7 +870,7 @@ when { resource.strandedRuns > 0 };
   ];
   const template = {
     file: "policies/changes.cedar",
-    text: readFileSync(join(import.meta.dirname, "../../sanoma/template/policies/changes.cedar"), "utf8"),
+    text: readFileSync(join(import.meta.dirname, "../../template/policies/changes.cedar"), "utf8"),
   };
   const withAdmin = [...people, sanoma.group({ name: "admin", members: [cy!] })];
   const { policies, problems } = loadPolicies(files);

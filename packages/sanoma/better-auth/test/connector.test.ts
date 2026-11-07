@@ -1,5 +1,5 @@
-import { resolveConfig } from "@sanoma-ai/workflows";
-import { describeConfig, generateApi } from "@sanoma-ai/workflows/describe";
+import { resolveConfig } from "sanoma/workflows";
+import { describeConfig, generateApi } from "sanoma/workflows/describe";
 import { expect, it } from "vitest";
 import { betterAuthLogin } from "../src/login.ts";
 import company from "./fixtures/company/sanoma.config.ts";
@@ -8,7 +8,7 @@ it("is a connector with no operations, no driver and a login half, as the app an
   const description = describeConfig(company);
   expect(description.vendors["better-auth"]).toMatchObject({
     title: "Better Auth",
-    package: "@sanoma-ai/connector-better-auth",
+    package: "sanoma/better-auth",
     fake: false,
     logo: { src: expect.stringMatching(/^data:image\/svg\+xml/), dark: expect.any(String) },
   });

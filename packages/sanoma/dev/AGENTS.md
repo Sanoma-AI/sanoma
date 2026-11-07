@@ -7,4 +7,4 @@ This package owns `sanoma-dev`, the bin a contributor's own Sanoma repo runs to 
 - Node's modules only, no dependencies; it runs pnpm and never imports sanoma. The launcher's dev mode decides what to build once the repo is linked.
 - The template and a company's docs never mention this package.
 
-Run `pnpm vitest run packages/dev`: the commands run against a fake checkout with a `pnpm` on PATH that records its calls; nothing installs or reaches the network.
+Run `pnpm vitest run packages/sanoma/dev`: the commands run against a fake checkout with a `pnpm` on PATH that records its calls; nothing installs or reaches the network.

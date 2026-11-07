@@ -21,7 +21,7 @@ import {
   type RunSummary,
   SanomaError,
   vendorCodeOf,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import {
   apiNameOf,
   CALL_WORKFLOW,
@@ -30,8 +30,8 @@ import {
   LOGIN_CODE_WORKFLOW,
   notLoaded,
   type Saved,
-} from "@sanoma-ai/workflows/shared";
-import { type ConfigDescription, permissionsGrid } from "@sanoma-ai/workflows/describe";
+} from "sanoma/workflows/shared";
+import { type ConfigDescription, permissionsGrid } from "sanoma/workflows/describe";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import { z } from "zod";
 import {

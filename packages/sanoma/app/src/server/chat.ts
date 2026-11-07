@@ -1,5 +1,5 @@
-import { type Chat, ChatTurnInput, type Principal, type SanomaClient } from "@sanoma-ai/workflows";
-import { isEnded } from "@sanoma-ai/workflows/shared";
+import { type Chat, ChatTurnInput, type Principal, type SanomaClient } from "sanoma/workflows";
+import { isEnded } from "sanoma/workflows/shared";
 import {
   createUIMessageStreamResponse,
   getToolName,
@@ -24,7 +24,7 @@ import { type ActorContext, parse, requireActor, toApiError } from "./core.ts";
 import { chatModel } from "./models.ts";
 
 // The operator agent's chat, as the app answers it: a turn is a run of the built-in `chat`, which
-// the worker runs (`@sanoma-ai/app/steps`' `chat`, with the engines), writing the reply's chunks
+// the worker runs (`sanoma/app/steps`' `chat`, with the engines), writing the reply's chunks
 // and the transcript to the database. The app checks the message, opens the chat, writes the
 // message to its transcript, starts the turn (`SanomaClient.startTurn`, which tells a turn under
 // way to stop) and streams the chunks back as the worker writes them; a code pasted on a sign-in

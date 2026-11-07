@@ -1,6 +1,6 @@
-import type { ErrorInfo, LedgerRecord } from "@sanoma-ai/workflows";
-import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
-import { approverLabel, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import type { ErrorInfo, LedgerRecord } from "sanoma/workflows";
+import type { ConfigDescription, OpEntry } from "sanoma/workflows/describe";
+import { approverLabel, LOGIN_CODE_WORKFLOW } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { memo, type ReactNode } from "react";

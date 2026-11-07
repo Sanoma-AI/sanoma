@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Box } from "@sanoma-ai/workflows";
+import type { Box } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { install, OWN_AGENTS, shims } from "../src/steps/agent/acp.ts";
 import { boxSession, homeOf } from "../src/steps/agent/box-session.ts";

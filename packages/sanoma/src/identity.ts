@@ -1,4 +1,4 @@
-import { startIdentityService, type IdentityServiceOptions } from "@sanoma-ai/workflows/identity-service";
+import { startIdentityService, type IdentityServiceOptions } from "sanoma/workflows/identity-service";
 
 /** Deployment-only: no company config, .env loading, local database creation or fallback identity. */
 export function runIdentity(env: NodeJS.ProcessEnv = process.env) {

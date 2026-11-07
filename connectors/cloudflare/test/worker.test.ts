@@ -2,8 +2,8 @@ import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { CLIENT_IP_HEADER as RUNTIME_CLIENT_IP_HEADER, WAKE_PATH as RUNTIME_WAKE_PATH } from "@sanoma-ai/workflows";
-import { APP_BUNDLE_PATH as RUNTIME_APP_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
+import { CLIENT_IP_HEADER as RUNTIME_CLIENT_IP_HEADER, WAKE_PATH as RUNTIME_WAKE_PATH } from "sanoma/workflows";
+import { APP_BUNDLE_PATH as RUNTIME_APP_BUNDLE_PATH } from "sanoma/workflows/shared";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   APP_BUNDLE_PATH,

@@ -1,5 +1,5 @@
-import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
-import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
+import { type Exchange, live, replay } from "sanoma/testing/replay";
+import { type CallContext, memorySecrets } from "sanoma/workflows";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 import { delay, http } from "msw";
 import { afterAll, describe, expect, it, vi } from "vitest";

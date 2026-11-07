@@ -1,4 +1,4 @@
-import { describeFeatures } from "@sanoma-ai/testing/features";
+import { describeFeatures } from "sanoma/testing/features";
 import { sanomaWakeup } from "../src/config.ts";
 import { withSetup, setupOf, type CallContext } from "../src/op.ts";
 import { memorySecretStore, SecretAccess } from "../src/secret-store.ts";

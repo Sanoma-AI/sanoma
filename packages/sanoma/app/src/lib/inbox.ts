@@ -1,4 +1,4 @@
-import type { ApprovalState, RunSummary } from "@sanoma-ai/workflows";
+import type { ApprovalState, RunSummary } from "sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useActor } from "../actor.ts";
 import { decidableBy } from "./decidable.ts";

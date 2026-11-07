@@ -1,4 +1,4 @@
-// `@sanoma-ai/workflows/data`: what a company's `resources/data.ts` declares its collections with.
+// `sanoma/workflows/data`: what a company's `resources/data.ts` declares its collections with.
 export {
   collection,
   type Collection,

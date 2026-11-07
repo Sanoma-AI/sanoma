@@ -1,6 +1,6 @@
 import { Code, ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
 import { describe, expect, it, vi } from "vitest";
-import { BridgeError, startBridge, withProviderSession } from "@sanoma-ai/bridge";
+import { BridgeError, startBridge, withProviderSession } from "sanoma/internal/bridge";
 import { bridgeClient } from "../src/bridge.ts";
 import { BridgeService, Diagnostic_Severity, DiagnosticSchema } from "../src/gen/bridge/v1/bridge_pb.ts";
 

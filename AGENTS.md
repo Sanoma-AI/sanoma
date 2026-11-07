@@ -9,12 +9,12 @@ Describe Sanoma the way the [README's opening](README.md#sanoma) does, and claim
 | Working on                                                            | Read next                                                              |
 | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | The `sanoma` bin: run, check, export a company repo                   | [sanoma](packages/sanoma/AGENTS.md)                                    |
-| Runtime, people, Cedar policies, approvals, ledger, workflow analysis | [workflows](packages/workflows/AGENTS.md)                              |
-| Web app, server functions, forms, graphs                              | [app](packages/app/AGENTS.md)                                          |
-| Dogfooding a checkout from a company repo: `sanoma-dev`               | [dev](packages/dev/AGENTS.md)                                          |
+| Runtime, people, Cedar policies, approvals, ledger, workflow analysis | [workflows](packages/sanoma/workflows/AGENTS.md)                              |
+| Web app, server functions, forms, graphs                              | [app](packages/sanoma/app/AGENTS.md)                                          |
+| Dogfooding a checkout from a company repo: `sanoma-dev`               | [dev](packages/sanoma/dev/AGENTS.md)                                          |
 | The desktop shell (Electron) that runs a company folder in a window   | [desktop](packages/desktop/AGENTS.md)                                  |
-| Test workers, fakes, recorded HTTP replay, scenarios                  | [testing](packages/testing/AGENTS.md)                                  |
-| Provider bridge, schema generation, provider replay                   | [bridge](packages/bridge/AGENTS.md)                                    |
+| Test workers, fakes, recorded HTTP replay, scenarios                  | [testing](packages/sanoma/testing/AGENTS.md)                                  |
+| Provider bridge, schema generation, provider replay                   | [bridge](packages/sanoma/bridge/AGENTS.md)                                    |
 | Invoice models, calculations, industry adapters and PDF rendering     | [invoices](packages/invoices/AGENTS.md)                                |
 | Vendor connectors                                                     | [connector conventions](connectors/AGENTS.md), then the vendor package |
 

@@ -1,4 +1,4 @@
-import type { Saved } from "@sanoma-ai/workflows/shared";
+import type { Saved } from "sanoma/workflows/shared";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, errorBodyOf } from "../src/api.ts";

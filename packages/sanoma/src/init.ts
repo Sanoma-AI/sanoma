@@ -12,8 +12,8 @@ import {
 import { userInfo } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, RUNTIME_AGENTS, VISITORS } from "@sanoma-ai/workflows";
-import { isVisitor } from "@sanoma-ai/workflows/shared";
+import { AGENTS, RUNTIME_AGENTS, VISITORS } from "sanoma/workflows";
+import { isVisitor } from "sanoma/workflows/shared";
 import { writeDeploymentKeys } from "./key.ts";
 
 const run = promisify(execFile);

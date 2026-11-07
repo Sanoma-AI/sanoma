@@ -38,7 +38,7 @@ export function bridgeBin({
     bin = join(dirname(createRequire(from).resolve(`${name}/package.json`)), "bin", "provider-bridge");
   } catch {
     throw new Error(
-      `provider-bridge: no binary. ${name}, an optional dependency of @sanoma-ai/bridge, is not installed ` +
+      `provider-bridge: no binary. ${name}, an optional dependency of sanoma/internal/bridge, is not installed ` +
         `(installs that omit optional dependencies leave it out). ${howToGetOne}`,
     );
   }

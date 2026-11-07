@@ -5,8 +5,8 @@ import type {
   ConnectionTarget,
   RenewalOutcome,
   SecretLocation,
-} from "@sanoma-ai/workflows";
-import { CALL_WORKFLOW, CONNECT_WORKFLOW, STORAGE_ADVICE, STORAGE_PROBLEMS } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import { CALL_WORKFLOW, CONNECT_WORKFLOW, STORAGE_ADVICE, STORAGE_PROBLEMS } from "sanoma/workflows/shared";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";

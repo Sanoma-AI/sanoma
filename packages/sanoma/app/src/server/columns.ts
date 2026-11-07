@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import type { PatchOutput, Principal } from "@sanoma-ai/workflows";
-import { LIST_LIMIT, PATCH_WORKFLOW, type Saved } from "@sanoma-ai/workflows/shared";
+import type { PatchOutput, Principal } from "sanoma/workflows";
+import { LIST_LIMIT, PATCH_WORKFLOW, type Saved } from "sanoma/workflows/shared";
 import { createApi, type UntypedApi } from "../api-client.ts";
 import { ApiError, type ProposeColumnChange } from "../api.ts";
 import { declarationEdit, planOf, problemOf } from "../components/grid/plan.ts";

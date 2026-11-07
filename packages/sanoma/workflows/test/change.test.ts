@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { useTestApp } from "@sanoma-ai/testing/harness";
-import { fakeHost, testRepository } from "@sanoma-ai/testing/host";
+import { useTestApp } from "sanoma/testing/harness";
+import { fakeHost, testRepository } from "sanoma/testing/host";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { lintWorkflow } from "../src/lint.ts";

@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { KeyManagementServiceClient } from "@google-cloud/kms";
 import crc32c from "crc-32/crc32c.js";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { lazyDb } from "../src/db.ts";

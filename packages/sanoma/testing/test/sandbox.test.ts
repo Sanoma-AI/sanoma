@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { resolveConfig, type SandboxBackend } from "@sanoma-ai/workflows";
+import { resolveConfig, type SandboxBackend } from "sanoma/workflows";
 import { afterAll, describe, expect, it } from "vitest";
 import { checkSandbox, fakeSandbox } from "../src/sandbox.ts";
 

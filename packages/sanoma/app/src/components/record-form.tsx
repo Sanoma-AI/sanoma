@@ -1,5 +1,5 @@
-import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
-import { errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
+import type { CollectionEntry } from "sanoma/workflows/describe";
+import { errorMessage, type Saved } from "sanoma/workflows/shared";
 import { useMutation } from "@tanstack/react-query";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";

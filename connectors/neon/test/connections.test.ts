@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { expect, it } from "vitest";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import {
   defineConnection,
   defineWorkflow,
@@ -12,8 +12,8 @@ import {
   memorySecretStore,
   SanomaClient,
   startWorker,
-} from "@sanoma-ai/workflows";
-import { secret } from "@sanoma-ai/workflows/resources";
+} from "sanoma/workflows";
+import { secret } from "sanoma/workflows/resources";
 import { neon, neonApiKey } from "../src/index.ts";
 
 // Protocol doubles from Neon's pinned SDK schema; no real API key or vendor account is used.

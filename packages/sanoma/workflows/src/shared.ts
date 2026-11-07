@@ -26,7 +26,7 @@ export type { CredentialStatus } from "./env.ts";
 export type { ChangeDeploy, ChangeEvent, ChangeFacts, ChangeReport, ChangeState, ChangeVerified } from "./change.ts";
 export type { AvailableApp, AvailableApps } from "./apps-list.ts";
 
-// What a UI in the browser may use from the runtime, besides types: `@sanoma-ai/workflows/shared`.
+// What a UI in the browser may use from the runtime, besides types: `sanoma/workflows/shared`.
 // Nothing here imports DBOS, Node or zod, so a browser bundle can carry it; the runtime uses the
 // same functions, so a page answers these questions the way a run does.
 
@@ -159,7 +159,7 @@ export const domainsText = (domains: Readonly<Record<string, string>>): string =
 
 /**
  * Where a hosted worker's port answers, with its instance token (`SANOMA_WAKEUP_TOKEN`) and
- * `?revision=<commit>`, the app bundle (`AppBundle` in `@sanoma-ai/app`) a host's Worker script runs
+ * `?revision=<commit>`, the app bundle (`AppBundle` in `sanoma/app`) a host's Worker script runs
  * at that revision, built in a checkout of its own: the Cloudflare host asks for it at a deploy.
  */
 export const APP_BUNDLE_PATH = "/__sanoma/app-bundle";

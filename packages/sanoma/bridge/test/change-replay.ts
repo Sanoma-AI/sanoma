@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { PlanAction } from "@sanoma-ai/workflows";
+import type { PlanAction } from "sanoma/workflows";
 import type { PlanResult, ProviderRef, ResourceState } from "../src/bridge.ts";
 import type { ProviderClient } from "../src/configure.ts";
 import { type Fixture, releaseSlug, stateId, toPath } from "../src/fixtures.ts";

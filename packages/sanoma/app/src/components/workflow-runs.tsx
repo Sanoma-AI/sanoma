@@ -1,7 +1,7 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { isNotFound, Link, useNavigate } from "@tanstack/react-router";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { approverLabel, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import { approverLabel, LOGIN_CODE_WORKFLOW } from "sanoma/workflows/shared";
 import { useMemo } from "react";
 import { CardAction, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";

@@ -57,21 +57,21 @@ describe("declared and linkSet", () => {
         "@sanoma-ai/connector-acme": "^1.0.0",
         zod: "^4",
       },
-      devDependencies: { "@sanoma-ai/dev": "^0.4.2", "@sanoma-ai/testing": "^0.4.2" },
-      packages: ["@sanoma-ai/connector-ghost", "@sanoma-ai/testing", "@sanoma-ai/workflows"],
+      devDependencies: { "@sanoma-ai/dev": "^0.4.2", "sanoma/testing": "^0.4.2" },
+      packages: ["@sanoma-ai/connector-ghost", "sanoma/testing", "sanoma/workflows"],
     });
     expect(declared(repo)).toEqual([
       "sanoma",
       "@sanoma-ai/connector-ghost",
       "@sanoma-ai/connector-acme",
       "@sanoma-ai/dev",
-      "@sanoma-ai/testing",
+      "sanoma/testing",
     ]);
     expect(linkSet(repo, checkout)).toEqual({
       found: [
         { name: "sanoma", dir: join(checkout, "packages/sanoma") },
         { name: "@sanoma-ai/connector-ghost", dir: join(checkout, "connectors/ghost") },
-        { name: "@sanoma-ai/testing", dir: join(checkout, "packages/testing") },
+        { name: "sanoma/testing", dir: join(checkout, "packages/sanoma/testing") },
       ],
       missing: ["@sanoma-ai/connector-acme"],
     });
@@ -86,14 +86,14 @@ describe("leftoverLinks", () => {
 
     manifest(repo, {
       dependencies: { sanoma: "^0.4.2", mine: "link:./lib" },
-      devDependencies: { "@sanoma-ai/testing": "link:../sanoma/packages/testing" },
+      devDependencies: { "sanoma/testing": "link:../sanoma/packages/sanoma/testing" },
     });
     write(
       join(repo, "pnpm-workspace.yaml"),
       "overrides:\n  mine: link:./lib\n  sanoma: link:../sanoma/packages/sanoma\n  '@sanoma-ai/connector-ghost': link:../sanoma/connectors/ghost\n",
     );
     expect(leftoverLinks(repo)).toEqual([
-      'package.json: "@sanoma-ai/testing": "link:../sanoma/packages/testing"',
+      'package.json: "sanoma/testing": "link:../sanoma/packages/sanoma/testing"',
       "pnpm-workspace.yaml: sanoma: link:../sanoma/packages/sanoma",
       "pnpm-workspace.yaml: '@sanoma-ai/connector-ghost': link:../sanoma/connectors/ghost",
     ]);
@@ -205,7 +205,7 @@ describe("sanoma-dev", () => {
   it("link and unlink remove the repo's generated .sanoma/app before pnpm runs, saying so", () => {
     const { repo, checkout } = layout({ dependencies: { sanoma: "^0.4.2" } });
     const generated = () => {
-      write(join(repo, ".sanoma/app/routeTree.gen.ts"), `import "${checkout}/packages/app/src/routes/__root";\n`);
+      write(join(repo, ".sanoma/app/routeTree.gen.ts"), `import "${checkout}/packages/sanoma/app/src/routes/__root";\n`);
       write(join(repo, ".sanoma/api.ts"), "");
     };
 

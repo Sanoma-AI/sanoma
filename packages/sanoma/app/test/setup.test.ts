@@ -8,8 +8,8 @@ import { resend } from "@sanoma-ai/connector-resend";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { neon } from "@sanoma-ai/connector-neon";
 import { fakeResend } from "@sanoma-ai/connector-resend/fake";
-import { ensureBuilt, testDatabaseUrl, withFake } from "@sanoma-ai/testing";
-import { fakeHost } from "@sanoma-ai/testing/host";
+import { ensureBuilt, testDatabaseUrl, withFake } from "sanoma/testing";
+import { fakeHost } from "sanoma/testing/host";
 import {
   defineConfig,
   defineConnector,
@@ -20,11 +20,11 @@ import {
   SanomaClient,
   sealLoginCode,
   startWorker,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { credentials, databaseOn } from "@sanoma-ai/workflows/db";
-import { secret } from "@sanoma-ai/workflows/resources";
+import { credentials, databaseOn } from "sanoma/workflows/db";
+import { secret } from "sanoma/workflows/resources";
 import { eq, inArray } from "drizzle-orm";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";

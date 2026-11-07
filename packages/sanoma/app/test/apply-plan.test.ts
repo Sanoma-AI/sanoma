@@ -2,8 +2,8 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { defineConfig, memoryLedger, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
+import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { defineConfig, memoryLedger, SanomaClient, startWorker, type Worker } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { type App, startApp } from "../src/index.ts";

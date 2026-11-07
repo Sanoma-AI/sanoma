@@ -2,8 +2,8 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
-import { type TestApp, useTestApp } from "@sanoma-ai/testing/harness";
+import { ensureBuilt, testDatabaseUrl, waitFor, withFake } from "sanoma/testing";
+import { type TestApp, useTestApp } from "sanoma/testing/harness";
 import {
   type ApprovalState,
   defineConnector,
@@ -11,10 +11,10 @@ import {
   resolveConfig,
   type SanomaClient,
   type SanomaConfig,
-} from "@sanoma-ai/workflows";
-import { describeConfig, type PermissionsGrid, permissionsGrid } from "@sanoma-ai/workflows/describe";
-import { defineFake } from "@sanoma-ai/workflows/fake";
-import { CHANGE_MERGE } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import { describeConfig, type PermissionsGrid, permissionsGrid } from "sanoma/workflows/describe";
+import { defineFake } from "sanoma/workflows/fake";
+import { CHANGE_MERGE } from "sanoma/workflows/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { Pool } from "pg";

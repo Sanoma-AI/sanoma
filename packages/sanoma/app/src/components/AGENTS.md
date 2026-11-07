@@ -1,4 +1,4 @@
-# packages/app/src/components
+# packages/sanoma/app/src/components
 
 The app's React components: page chrome, shared display pieces, and a workflow page's view: the graph, the inspector and the source. They compose the shadcn components in `ui/` and are used by the routes.
 

@@ -1,7 +1,7 @@
-import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
+import type { ConfigDescription } from "sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { connectorTier, type CredentialStatus, credentialReady } from "@sanoma-ai/workflows/shared";
+import { connectorTier, type CredentialStatus, credentialReady } from "sanoma/workflows/shared";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
 import { Suspense } from "react";

@@ -1,4 +1,4 @@
-# packages/app/src/routes/workflows/$name/runs
+# packages/sanoma/app/src/routes/workflows/$name/runs
 
 The runs of one workflow, each its own page under the workflow's.
 

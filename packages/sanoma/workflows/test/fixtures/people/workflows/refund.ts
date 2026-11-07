@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineWorkflow } from "@sanoma-ai/workflows";
+import { defineWorkflow } from "sanoma/workflows";
 import { shop } from "../shop.ts";
 
 /** Refunds an amount, in minor units. */

@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { gcpTf } from "./connector.ts";
 import { checkIdentity, gcpAuthentication, type GcpIdentity } from "./authentication.ts";
 import { gcpDriver } from "./driver.ts";

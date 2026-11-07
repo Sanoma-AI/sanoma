@@ -1,4 +1,4 @@
-import type { CheckResult } from "@sanoma-ai/workflows";
+import type { CheckResult } from "sanoma/workflows";
 import { DefaultChatTransport, type InferUITools, isTextUIPart, isToolUIPart, type UIMessage } from "ai";
 import type { LoopTools } from "../steps/agent/tools.ts";
 

@@ -1,4 +1,4 @@
-# packages/app/src/routes/workflows/$name
+# packages/sanoma/app/src/routes/workflows/$name
 
 One workflow's page and its runs' pages, under a layout that loads the workflow, its source, its scenarios and its runs (`?runs=`) and has no component. The page's tabs are URLs (`?view=`: none for the Graph, `runs`, `code`, `scenarios`), keeping the rest of the search; `?run=` opens a run over the Runs tab, `?scenario=` a scenario over the Scenarios tab (marking the graph, and New run's Sandbox mode), `?new` New run in the inspector. A retired workflow, one the config no longer has, keeps its page while it has runs; its Graph says it is gone and points to Runs. See [components](../../../components/AGENTS.md#layout-conventions).
 

@@ -17,8 +17,8 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildApp, sitesOf, writeSiteFiles } from "@sanoma-ai/app/build";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { buildApp, sitesOf, writeSiteFiles } from "sanoma/app/build";
+import { testDatabaseUrl } from "sanoma/testing";
 import {
   defineConfig,
   defineConnector,
@@ -27,8 +27,8 @@ import {
   VISITOR_DENIED,
   type Worker,
   withSetup,
-} from "@sanoma-ai/workflows";
-import { describeConfig, writeApi } from "@sanoma-ai/workflows/describe";
+} from "sanoma/workflows";
+import { describeConfig, writeApi } from "sanoma/workflows/describe";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
@@ -995,9 +995,9 @@ describe("the sites' generated files", () => {
 
 describe("a build that fails, or leaves a site out", () => {
   it.each([
-    ["the runtime", '"@sanoma-ai/workflows"'],
+    ["the runtime", '"sanoma/workflows"'],
     ["the runtime through sanoma", '"sanoma"'],
-    ["the app's Node entry", '"@sanoma-ai/app"'],
+    ["the app's Node entry", '"sanoma/app"'],
   ])("refuses a site that imports %s", async (_, from) => {
     const repo = company({
       "sites/hello/routes/index.tsx": sitePage("/sites/hello/", `import * as runtime from ${from};`, "String(runtime)"),

@@ -1,4 +1,4 @@
-import { CHANGE_WORKFLOW, changeIdOf } from "@sanoma-ai/workflows/shared";
+import { CHANGE_WORKFLOW, changeIdOf } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";

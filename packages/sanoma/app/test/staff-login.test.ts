@@ -1,16 +1,16 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LoginContext, type LoginHalf, type LoginMethod, sealInvite } from "@sanoma-ai/workflows";
+import { type LoginContext, type LoginHalf, type LoginMethod, sealInvite } from "sanoma/workflows";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppContext, LoginProvider } from "../src/context.ts";
 import { admitting } from "../src/login/admission.ts";
 import { staffLogin } from "../src/login/staff.ts";
-import { readPeople } from "@sanoma-ai/workflows/describe";
+import { readPeople } from "sanoma/workflows/describe";
 
 // The app's side of the staff login, over a login half of its own: what it gives the half (who
 // is declared, the sender, the ledger), the sign-in page, an invite's landing page and
-// `POST /auth/invite`. Better Auth itself is `connectors/better-auth/test/staff.test.ts`'s.
+// `POST /auth/invite`. Better Auth itself is `packages/sanoma/better-auth/test/staff.test.ts`'s.
 
 const APP = "https://acme.example";
 const root = mkdtempSync(join(tmpdir(), "sanoma-staff-"));

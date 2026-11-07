@@ -1,5 +1,5 @@
-import type { Approver } from "@sanoma-ai/workflows";
-import type { ChangeFacts, ChangeState } from "@sanoma-ai/workflows/shared";
+import type { Approver } from "sanoma/workflows";
+import type { ChangeFacts, ChangeState } from "sanoma/workflows/shared";
 import { detailsObject } from "./apply-plan.ts";
 
 // A change's words and groups for its pages (`routes/changes/`), the Inbox's glance and the run

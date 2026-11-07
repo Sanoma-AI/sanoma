@@ -1,9 +1,9 @@
-// What a site imports that talks to the running app, as `sanoma/site` (`@sanoma-ai/app/site`); how
+// What a site imports that talks to the running app, as `sanoma/site` (`sanoma/site`); how
 // a page looks is `sanoma/ui`'s. The app's own router's APIs, so a site and the app share one
 // router. Source, loaded only by Vite in a company's build; browser code, nothing server-side. A
 // route file still imports `createFileRoute` from `@tanstack/react-router` itself: the route
 // generator rewrites its path there, and only there.
-import { defineSite as declareSite } from "@sanoma-ai/workflows/shared";
+import { defineSite as declareSite } from "sanoma/workflows/shared";
 import type { IconName } from "lucide-react/dynamic";
 import { usePageLanguages } from "./lib/locales.ts";
 
@@ -37,7 +37,7 @@ export type { Content, ContentEntry, ContentKind, ContentOptions, ContentSummary
 export { ApiError, errorBodyOf } from "./api.ts";
 export type { ErrorResponse } from "./api.ts";
 // What `.sanoma/api.ts` types the company's `api` with: a company resolves `sanoma/site`, not the runtime.
-export type { CollectionApi, ListQuery, OpFn, Saved, WorkflowFn } from "@sanoma-ai/workflows/shared";
+export type { CollectionApi, ListQuery, OpFn, Saved, WorkflowFn } from "sanoma/workflows/shared";
 // A workflow's start form (`<RunForm workflow="hello" />`), and who is on the page.
 export { RunForm } from "./form/run-form.tsx";
 export { type ActorState, useActor } from "./actor.ts";

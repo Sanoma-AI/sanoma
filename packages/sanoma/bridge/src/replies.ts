@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fromJson, type JsonValue } from "@bufbuild/protobuf";
-import type { ResourceFields } from "@sanoma-ai/workflows";
+import type { ResourceFields } from "sanoma/workflows";
 import {
   BridgeError,
   type BridgeErrorCode,

@@ -1,5 +1,5 @@
 import { useRender } from "@base-ui/react/use-render";
-import type { Effect } from "@sanoma-ai/workflows";
+import type { Effect } from "sanoma/workflows";
 import { cva, type VariantProps } from "class-variance-authority";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";

@@ -11,11 +11,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fakeSandbox } from "@sanoma-ai/testing/sandbox";
-import type { Box, Source } from "@sanoma-ai/workflows";
+import { fakeSandbox } from "sanoma/testing/sandbox";
+import type { Box, Source } from "sanoma/workflows";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { gitIdentity } from "../../sanoma/test/git.ts";
-import { localGitSource } from "../../sanoma/src/source.ts";
+import { gitIdentity } from "../../test/git.ts";
+import { localGitSource } from "../../src/source.ts";
 import { homeOf } from "../src/steps/agent/box-session.ts";
 import { BOX_BUSY, boxTurn, carryIn, carryOut, OWN_PNPM } from "../src/steps/agent/carrier.ts";
 import { localBackend } from "../src/steps/agent/local-box.ts";

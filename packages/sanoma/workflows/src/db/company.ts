@@ -23,7 +23,7 @@ import type { MoveItemAction, MoveItemKind, MoveItemState, MovePhase } from "../
 // The runtime's tables in a company's database, beside DBOS's: what `prepareDatabase` makes and
 // every store reads. Column names are the property names in snake_case (`casing` in `db.ts` and
 // in `drizzle/company.config.ts`). A change here is a new migration: `pnpm --filter
-// @sanoma-ai/workflows generate` writes it under `drizzle/company/`, and CI refuses a schema
+// sanoma/workflows generate` writes it under `drizzle/company/`, and CI refuses a schema
 // whose migration was not generated.
 
 const when = () => timestamp({ withTimezone: true });

@@ -1,4 +1,4 @@
-import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
+import type { CollectionEntry } from "sanoma/workflows/describe";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";

@@ -3,7 +3,7 @@ import type { OAuth2Client } from "google-auth-library";
 import crc32c from "crc-32/crc32c.js";
 import { eq, sql } from "drizzle-orm";
 import { Client, Pool } from "pg";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {

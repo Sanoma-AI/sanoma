@@ -46,7 +46,7 @@ import {
 import { readSites, type SiteEntry, siteDomains } from "./sites.ts";
 import { sourceKeyIds } from "./host.ts";
 
-// `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
+// `sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
 export * from "./description.ts";
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";

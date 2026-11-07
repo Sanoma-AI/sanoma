@@ -1,8 +1,8 @@
 import { createPublicKey, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
+import { testDatabaseUrl } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { lintWorkflow } from "../src/lint.ts";

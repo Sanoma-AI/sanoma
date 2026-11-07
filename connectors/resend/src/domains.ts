@@ -5,7 +5,7 @@ import {
   DriverError,
   errorMessage,
   type PlanAction,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import type { z } from "zod";
 import {
   DEFAULT_REGION,

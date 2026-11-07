@@ -1,5 +1,5 @@
-import type { MovePhase, StoreMove, StoreMovePlan } from "@sanoma-ai/workflows";
-import { ACTIVE_MOVE_PHASES, errorMessage, MIGRATE_STORE_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import type { MovePhase, StoreMove, StoreMovePlan } from "sanoma/workflows";
+import { ACTIVE_MOVE_PHASES, errorMessage, MIGRATE_STORE_WORKFLOW } from "sanoma/workflows/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";

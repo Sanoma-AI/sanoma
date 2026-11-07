@@ -22,22 +22,22 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import type { Browser } from "puppeteer-core";
-import { ensureBuilt, waitFor } from "../../packages/testing/src/build.ts";
-import type { SanomaConfig } from "../../packages/workflows/src/index.ts";
+import { ensureBuilt, waitFor } from "../../packages/sanoma/testing/src/build.ts";
+import type { SanomaConfig } from "../../packages/sanoma/workflows/src/index.ts";
 import { launchChrome, recordDemo, ServerFailure, steadyStills, still } from "./capture.ts";
 
-type Workflows = typeof import("../../packages/workflows/src/index.ts");
+type Workflows = typeof import("../../packages/sanoma/workflows/src/index.ts");
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const assets = join(repo, ".github/assets");
 
 // What the preview loads, each from its dist/ (as a company repo would), in dependency order.
 const BUILT: [dir: string, outputs: string[]][] = [
-  ["packages/workflows", ["dist/index.js"]],
+  ["packages/sanoma/workflows", ["dist/index.js"]],
   ["connectors/ghost", ["dist/index.js", "dist/fake.js"]],
-  ["connectors/better-auth", ["dist/index.js"]],
-  ["packages/testing", ["dist/index.js"]],
-  ["packages/app", ["dist/server/server.js"]],
+  ["packages/sanoma/better-auth", ["dist/index.js"]],
+  ["packages/sanoma/testing", ["dist/index.js"]],
+  ["packages/sanoma/app", ["dist/server/server.js"]],
   ["packages/sanoma", ["dist/cli.js", "dist/index.js"]],
 ];
 
@@ -45,14 +45,14 @@ const BUILT: [dir: string, outputs: string[]][] = [
 // live connector, so the form still shows Live vendors.
 const CONFIG = `import { ghost } from "@sanoma-ai/connector-ghost";
 import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
-import { withFake } from "@sanoma-ai/testing";
+import { withFake } from "sanoma/testing";
 import { defineConfig } from "sanoma";
 import announce from "./workflows/announce.ts";
 
 export default defineConfig({ workflows: [announce], connectors: [withFake(ghost, fakeGhost())] });
 `;
 
-// The site still's site: its site.ts here, its page the packages/app README's (`writeRepo`).
+// The site still's site: its site.ts here, its page the packages/sanoma/app README's (`writeRepo`).
 const SITE_TS = `import { defineSite } from "sanoma/site";
 
 export default defineSite({ title: "Launch desk" });
@@ -60,7 +60,7 @@ export default defineSite({ title: "Launch desk" });
 
 // The data still's collection: the outbound fixture's resources/data.ts (which the launcher
 // imports), importing from sanoma as a company's does; and its records, saved as their owners.
-const DATA_TS = join(repo, "packages/workflows/test/fixtures/outbound/resources/data.ts");
+const DATA_TS = join(repo, "packages/sanoma/workflows/test/fixtures/outbound/resources/data.ts");
 const LEADS = [
   ["Acme Corp", "ada@acme.test", "meeting", "dana", "2027-05-28", 40],
   ["Globex", "hank@globex.test", "contacted", "dana", "2027-05-20", 12],
@@ -81,7 +81,7 @@ const SEEDED = [
   ["Pricing update", "<p>New plans for teams, from next month.</p>", new Date(2027, 5, 15, 10)],
 ] as const;
 
-// The packages' own requires: `pg` and `@sanoma-ai/workflows` (its dist/, as the company repo loads it).
+// The packages' own requires: `pg` and `sanoma/workflows` (its dist/, as the company repo loads it).
 const fromSanoma = createRequire(join(repo, "packages/sanoma/package.json"));
 
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -115,8 +115,8 @@ try {
   if (!stillsDir && !hasFfmpeg()) fail("ffmpeg is not on PATH; it makes demo.gif (brew install ffmpeg)");
   say("building what is stale (pnpm run build in each package whose dist/ is older than its src/)");
   for (const [dir, outputs] of BUILT) ensureBuilt(join(repo, dir), outputs, ["pnpm", "run", "build"]);
-  // Loaded once built: @sanoma-ai/testing's index imports @sanoma-ai/workflows from its dist/.
-  const { testDatabaseUrl } = await import("../../packages/testing/src/index.ts");
+  // Loaded once built: sanoma/testing's index imports sanoma/workflows from its dist/.
+  const { testDatabaseUrl } = await import("../../packages/sanoma/testing/src/index.ts");
   // `SANOMA_TEST_DATABASE_URL`'s name plus `_readme_shots`: a worktree's own when that is set per worktree.
   databaseUrl = new URL(testDatabaseUrl("readme_shots"));
 
@@ -283,7 +283,7 @@ async function seed(acme: string): Promise<void> {
   // The launcher generated bootstrap keys in this disposable repo; the seed client needs the same keys.
   const envFile = join(acme, ".env");
   if (existsSync(envFile)) process.loadEnvFile(envFile);
-  const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("@sanoma-ai/workflows")).href)) as Workflows;
+  const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("sanoma/workflows")).href)) as Workflows;
   const { default: config } = (await import(pathToFileURL(join(acme, "sanoma.config.ts")).href)) as {
     default: SanomaConfig;
   };
@@ -319,7 +319,7 @@ async function seed(acme: string): Promise<void> {
   }
 }
 
-/** A company repo named acme: the README's workflow, the config above, the packages/app README's site page, the outbound collection, and `node_modules` reaching this checkout. */
+/** A company repo named acme: the README's workflow, the config above, the packages/sanoma/app README's site page, the outbound collection, and `node_modules` reaching this checkout. */
 function writeRepo(dir: string): void {
   const readme = readFileSync(join(repo, "README.md"), "utf8").replaceAll("\r\n", "\n");
   const block = /^```ts\n\/\/ workflows\/announce\.ts\n([\s\S]*?)^```$/m.exec(readme);
@@ -327,23 +327,23 @@ function writeRepo(dir: string): void {
   mkdirSync(join(dir, "workflows"), { recursive: true });
   writeFileSync(join(dir, "workflows/announce.ts"), block[1]);
   writeFileSync(join(dir, "sanoma.config.ts"), CONFIG);
-  const appReadme = readFileSync(join(repo, "packages/app/README.md"), "utf8").replaceAll("\r\n", "\n");
+  const appReadme = readFileSync(join(repo, "packages/sanoma/app/README.md"), "utf8").replaceAll("\r\n", "\n");
   const page = /^```tsx\n\/\/ sites\/launches\/routes\/index\.tsx\n([\s\S]*?)^```$/m.exec(appReadme);
   if (!page?.[1])
-    fail("packages/app/README.md has no ```tsx block that starts with `// sites/launches/routes/index.tsx`");
+    fail("packages/sanoma/app/README.md has no ```tsx block that starts with `// sites/launches/routes/index.tsx`");
   mkdirSync(join(dir, "sites/launches/routes"), { recursive: true });
   writeFileSync(join(dir, "sites/launches/site.ts"), SITE_TS);
   writeFileSync(join(dir, "sites/launches/routes/index.tsx"), page[1]);
   mkdirSync(join(dir, "resources"));
   writeFileSync(
     join(dir, "resources/data.ts"),
-    readFileSync(DATA_TS, "utf8").replace('"@sanoma-ai/workflows/data"', '"sanoma/data"'),
+    readFileSync(DATA_TS, "utf8").replace('"sanoma/workflows/data"', '"sanoma/data"'),
   );
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "acme", private: true, type: "module" }));
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],
     ["@sanoma-ai/connector-ghost", "connectors/ghost"],
-    ["@sanoma-ai/testing", "packages/testing"],
+    ["sanoma/testing", "packages/sanoma/testing"],
   ] as const) {
     const at = join(dir, "node_modules", name);
     mkdirSync(dirname(at), { recursive: true });

@@ -1,4 +1,4 @@
-import { defineDriver } from "@sanoma-ai/workflows";
+import { defineDriver } from "sanoma/workflows";
 import { z } from "zod";
 import { anthropicOps } from "./connector.ts";
 

@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, withFake } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
+import { ensureBuilt, testDatabaseUrl, withFake } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
 import {
   allowAll,
   defineConnector,
@@ -12,10 +12,10 @@ import {
   resolveConfig,
   type SanomaConfig,
   type Source,
-} from "@sanoma-ai/workflows";
-import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
-import { personsOf } from "@sanoma-ai/workflows/shared";
-import { defineFake } from "@sanoma-ai/workflows/fake";
+} from "sanoma/workflows";
+import { describeConfig, readPeople } from "sanoma/workflows/describe";
+import { personsOf } from "sanoma/workflows/shared";
+import { defineFake } from "sanoma/workflows/fake";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -121,7 +121,7 @@ const gridOf = (policy: Policy, described = description.policy) =>
   });
 
 describe("the Permissions grid", () => {
-  // The grid itself is `permissionsGrid`'s (`packages/workflows/test/grid.test.ts`): here what the app adds.
+  // The grid itself is `permissionsGrid`'s (`packages/sanoma/workflows/test/grid.test.ts`): here what the app adds.
   it("is the runtime's grid, with the policy as the description says it", () => {
     const grid = gridOf(cedar);
     expect(grid).toMatchObject({

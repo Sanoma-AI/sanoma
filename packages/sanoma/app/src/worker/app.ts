@@ -15,9 +15,9 @@ import {
   resolveConfig,
   SanomaClient,
   type SocialClients,
-} from "@sanoma-ai/workflows";
-import { domainsOf } from "@sanoma-ai/workflows/shared";
-import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
+} from "sanoma/workflows";
+import { domainsOf } from "sanoma/workflows/shared";
+import { betterAuthStaffLogin } from "sanoma/better-auth";
 import start from "@tanstack/react-start/server-entry";
 import { config } from "virtual:sanoma/app-bundle";
 import {

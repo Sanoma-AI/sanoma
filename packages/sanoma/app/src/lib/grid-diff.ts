@@ -1,6 +1,6 @@
-import type { PreviewAnswer } from "@sanoma-ai/workflows";
-import type { PermissionsGrid, PermissionsRow } from "@sanoma-ai/workflows/describe";
-import { ANONYMOUS, approverLabel } from "@sanoma-ai/workflows/shared";
+import type { PreviewAnswer } from "sanoma/workflows";
+import type { PermissionsGrid, PermissionsRow } from "sanoma/workflows/describe";
+import { ANONYMOUS, approverLabel } from "sanoma/workflows/shared";
 import { plural } from "./utils.ts";
 
 // The Permissions grid's words (a column, an answer), and one grid against another (a change's

@@ -1,6 +1,6 @@
-# packages/bridge/test
+# packages/sanoma/bridge/test
 
-Tests for `@sanoma-ai/bridge`, and the helpers that replay and record the bridge for them. All but `live.test.ts` run offline.
+Tests for `sanoma/internal/bridge`, and the helpers that replay and record the bridge for them. All but `live.test.ts` run offline.
 
 `change.test.ts` checks the static and runtime operation boundary for writable, explicit read-only and default read-only types, including mixed connectors. Keep the negative TypeScript assertions when changing these generics.
 

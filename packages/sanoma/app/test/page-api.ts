@@ -1,6 +1,6 @@
 // The app's `api` as a page has it, over the server core: what the tests of the app's built-in
 // workflows (Adopt, Save, going live, connecting) call them through.
-import type { Principal } from "@sanoma-ai/workflows";
+import type { Principal } from "sanoma/workflows";
 import { createApi, type UntypedApi } from "../src/api-client.ts";
 import type { AppContext } from "../src/context.ts";
 import { asApiError, callApi } from "../src/server/core.ts";

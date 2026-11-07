@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
+import { testDatabaseUrl } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";

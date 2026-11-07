@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import {
   defineAuthentication,
   encodeCredentials,

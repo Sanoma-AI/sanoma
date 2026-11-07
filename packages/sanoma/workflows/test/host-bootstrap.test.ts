@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeCloudflare, type StartContainer, stubContainer } from "@sanoma-ai/connector-cloudflare/fake";
-import { findSentinels, testDatabaseUrl } from "@sanoma-ai/testing";
+import { findSentinels, testDatabaseUrl } from "sanoma/testing";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { postgresSecretStore } from "../src/credentials.ts";

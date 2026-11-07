@@ -90,7 +90,7 @@ describe("a connector made by another copy of the package", () => {
       [VENDOR]: { ...ghost[VENDOR], format: ghost[VENDOR].format + 1 },
     } as unknown as Connector<any, any>;
     expect(() => resolveConfig(config({ connectors: [later] }))).toThrow(
-      `The "ghost" connector was made by another build of @sanoma-ai/workflows: ${build}`,
+      `The "ghost" connector was made by another build of sanoma/workflows: ${build}`,
     );
     // An older build's, its record under an unregistered symbol, is not a connector here at all.
     const older = { [Symbol("sanoma.vendor")]: { id: "ghost" } } as unknown as Connector<any, any>;

@@ -1,4 +1,4 @@
-import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { invoicesOps } from "./connector.ts";
 import { generate } from "./generate.ts";
 

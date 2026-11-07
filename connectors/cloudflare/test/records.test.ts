@@ -1,5 +1,5 @@
-import { live, replay } from "@sanoma-ai/testing/replay";
-import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
+import { live, replay } from "sanoma/testing/replay";
+import { type CallContext, memorySecrets } from "sanoma/workflows";
 import { beforeEach, describe, expect, it } from "vitest";
 import { cloudflareDriver } from "../src/driver.ts";
 import { fakeCloudflare } from "../src/fake.ts";

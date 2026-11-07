@@ -1,5 +1,5 @@
-import { CLIENT_IP_HEADER, errorMessage, requestOrigin } from "@sanoma-ai/workflows";
-import { applyMigrations, databaseOn, migrationsApplied, pgCode, underPreparationLock } from "@sanoma-ai/workflows/db";
+import { CLIENT_IP_HEADER, errorMessage, requestOrigin } from "sanoma/workflows";
+import { applyMigrations, databaseOn, migrationsApplied, pgCode, underPreparationLock } from "sanoma/workflows/db";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { emailOTP } from "better-auth/plugins/email-otp";

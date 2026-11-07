@@ -2,7 +2,7 @@
   // The Node entries only: startApp and its types, the build (`./build`), the Worker's (`./bundle`) and the worker's
   // steps (`./steps`). `vite build` builds
   // the app itself into dist/client and dist/server.
-  "extends": "../../tsconfig.json",
+  "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",

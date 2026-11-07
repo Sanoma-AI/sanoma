@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
-import { fakeHost, testRepository } from "@sanoma-ai/testing/host";
-import { type FollowOutput, memoryLedger, type RemoteEvent, resolveConfig } from "@sanoma-ai/workflows";
+import { ensureBuilt } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
+import { fakeHost, testRepository } from "sanoma/testing/host";
+import { type FollowOutput, memoryLedger, type RemoteEvent, resolveConfig } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { delivery, FAKE_WEBHOOK_SECRET, fakeRemote, memorySource, sha } from "../../workflows/test/fakes/remote.ts";
 import { ALICE, freshDatabase, pending, rootWith, testhostInfra, waitFor } from "../../workflows/test/harness.ts";

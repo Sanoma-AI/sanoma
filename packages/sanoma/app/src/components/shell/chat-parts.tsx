@@ -1,7 +1,7 @@
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { approverLabel } from "@sanoma-ai/workflows/shared";
+import { approverLabel } from "sanoma/workflows/shared";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { getToolName, isToolUIPart } from "ai";

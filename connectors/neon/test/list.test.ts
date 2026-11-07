@@ -1,4 +1,4 @@
-import { memorySecrets, type CallContext } from "@sanoma-ai/workflows";
+import { memorySecrets, type CallContext } from "sanoma/workflows";
 import { expect, it } from "vitest";
 import { fakeNeon } from "../src/fake.ts";
 

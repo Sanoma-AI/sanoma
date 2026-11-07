@@ -1,4 +1,4 @@
-import type { PermissionsGrid } from "@sanoma-ai/workflows/describe";
+import type { PermissionsGrid } from "sanoma/workflows/describe";
 import { useMemo, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card } from "#/components/ui/card.tsx";

@@ -2,8 +2,8 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
 import {
   ANONYMOUS_PRINCIPAL,
   defineConnector,
@@ -15,7 +15,7 @@ import {
   type SanomaConfig,
   visitorPrincipal,
   withSetup,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";

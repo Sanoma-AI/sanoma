@@ -1,9 +1,9 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { randomBytes } from "node:crypto";
-import { type CredentialStatus, GITHUB_APP, isLoopback, type Principal } from "@sanoma-ai/workflows";
-import { credentialReady } from "@sanoma-ai/workflows/shared";
-import { mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
+import { type CredentialStatus, GITHUB_APP, isLoopback, type Principal } from "sanoma/workflows";
+import { credentialReady } from "sanoma/workflows/shared";
+import { mintInstanceToken, WAKEUP_TOKEN } from "sanoma/workflows/wakeup-service";
 import { type SetCredentialRequest, SETUP_VENDORS, type SetupStatus } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { type ActorContext, invalid } from "./core.ts";
@@ -18,7 +18,7 @@ import { secretValues } from "./secrets.ts";
 // keys are stored as encrypted credentials; or, for a personal account, a token of the person's
 // own. The others through a pasted token. Nothing here sends a stored value to a page.
 
-/** Where the App's keys are stored, by what GitHub's conversion calls them: the one list, `@sanoma-ai/workflows`'. */
+/** Where the App's keys are stored, by what GitHub's conversion calls them: the one list, `sanoma/workflows`'. */
 export { GITHUB_APP };
 
 /** A wakeup service's account token, which "Connect a wakeup service" stores. */

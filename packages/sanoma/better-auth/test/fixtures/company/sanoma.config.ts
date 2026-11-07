@@ -1,4 +1,4 @@
-import { betterAuth } from "@sanoma-ai/connector-better-auth";
+import { betterAuth } from "sanoma/better-auth";
 import { defineConfig } from "sanoma";
 import hello from "./workflows/hello.ts";
 

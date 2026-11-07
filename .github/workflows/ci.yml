@@ -34,9 +34,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - name: Generated bridge client is up to date
-        run: pnpm --filter @sanoma-ai/bridge run generate && git diff --exit-code packages/bridge/src/gen && test -z "$(git status --porcelain packages/bridge/src/gen)"
+        run: pnpm --filter sanoma run generate && git diff --exit-code packages/sanoma/bridge/src/gen && test -z "$(git status --porcelain packages/sanoma/bridge/src/gen)"
       - name: Generated migrations are up to date
-        run: pnpm --filter @sanoma-ai/workflows --filter @sanoma-ai/connector-better-auth run generate && git diff --exit-code packages/workflows/drizzle connectors/better-auth/drizzle && test -z "$(git status --porcelain packages/workflows/drizzle connectors/better-auth/drizzle)"
+        run: pnpm --filter sanoma --filter sanoma run generate && git diff --exit-code packages/sanoma/workflows/drizzle packages/sanoma/better-auth/drizzle && test -z "$(git status --porcelain packages/sanoma/workflows/drizzle packages/sanoma/better-auth/drizzle)"
       # A migration generated before another merged to main would never reach a database past it.
       - name: Migrations are newer than main's
         if: github.event_name == 'pull_request'

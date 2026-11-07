@@ -1,5 +1,5 @@
-import { tfConnector } from "@sanoma-ai/bridge/connector";
-import { vendorInfo } from "@sanoma-ai/workflows";
+import { tfConnector } from "sanoma/internal/bridge/connector";
+import { vendorInfo } from "sanoma/workflows";
 import { provider, stripe_product, stripe_webhook_endpoint } from "./resources.gen.ts";
 
 /**

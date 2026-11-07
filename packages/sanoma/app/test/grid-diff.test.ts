@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { withFake } from "@sanoma-ai/testing";
+import { withFake } from "sanoma/testing";
 import {
   cedarPolicy,
   defineConnector,
@@ -10,15 +10,15 @@ import {
   type PreviewAnswer,
   resolveConfig,
   type SanomaConfig,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import {
   describeConfig,
   type PermissionsGrid,
   type PermissionsRow,
   permissionsGrid,
   readPeople,
-} from "@sanoma-ai/workflows/describe";
-import { defineFake } from "@sanoma-ai/workflows/fake";
+} from "sanoma/workflows/describe";
+import { defineFake } from "sanoma/workflows/fake";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { createElement, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";

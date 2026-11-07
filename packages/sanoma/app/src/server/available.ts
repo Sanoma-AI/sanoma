@@ -1,8 +1,8 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { errorMessage, isSvgElement, SanomaPackageField } from "@sanoma-ai/workflows";
-import { connectorTier } from "@sanoma-ai/workflows/shared";
-import { svgDataUrl } from "@sanoma-ai/workflows/describe";
+import { errorMessage, isSvgElement, SanomaPackageField } from "sanoma/workflows";
+import { connectorTier } from "sanoma/workflows/shared";
+import { svgDataUrl } from "sanoma/workflows/describe";
 import { z } from "zod";
 import type { AvailableConnector, AvailableConnectors } from "../api.ts";
 

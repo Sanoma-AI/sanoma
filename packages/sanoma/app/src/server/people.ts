@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { ADMIN, type Principal } from "@sanoma-ai/workflows";
-import { personsOf } from "@sanoma-ai/workflows/shared";
+import { ADMIN, type Principal } from "sanoma/workflows";
+import { personsOf } from "sanoma/workflows/shared";
 import { ApiError, type InviteLink, type PeopleSignIns } from "../api.ts";
 import type { AppContext } from "../context.ts";
 

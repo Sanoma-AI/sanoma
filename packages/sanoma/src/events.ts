@@ -3,7 +3,7 @@
  * line on stdout, `{"sanoma":1,"event":…}`, beside the lines a person reads; logs stay on stderr.
  */
 
-import type { CheckResult } from "@sanoma-ai/workflows";
+import type { CheckResult } from "sanoma/workflows";
 
 /** What the launcher tells a parent process. */
 export type SanomaEvent =

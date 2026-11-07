@@ -15,7 +15,7 @@ import {
   SanomaError,
   type Source,
   type Written,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import {
   type DataValue,
   describeConfig,
@@ -23,7 +23,7 @@ import {
   NotLiteral,
   renameFields,
   setFields,
-} from "@sanoma-ai/workflows/describe";
+} from "sanoma/workflows/describe";
 import { TableChangePlan } from "../components/grid/plan.ts";
 
 // A data file's change from the app's own pages, in the worker (the built-ins `adopt` and

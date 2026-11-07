@@ -1,4 +1,4 @@
-import type { Saved } from "@sanoma-ai/workflows/shared";
+import type { Saved } from "sanoma/workflows/shared";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import { Button } from "#/components/ui/button.tsx";
 import { TableCell, TableRow } from "#/components/ui/table.tsx";

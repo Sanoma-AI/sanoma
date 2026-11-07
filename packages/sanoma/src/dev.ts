@@ -16,7 +16,7 @@ import { system32 } from "./windows.ts";
 const installed = (path: string) => path.split(sep).includes("node_modules");
 
 export interface LinkedPackage {
-  /** The npm name, such as `@sanoma-ai/workflows`. */
+  /** The npm name, such as `sanoma/workflows`. */
   name: string;
   /** Where it really is: its directory in the checkout. */
   dir: string;
@@ -50,12 +50,12 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
 }
 
 /** The packages a `sanoma` process loads besides the connectors. */
-const CORE = ["sanoma", "@sanoma-ai/workflows", "@sanoma-ai/app", "@sanoma-ai/bridge"];
+const CORE = ["sanoma", "sanoma/workflows", "sanoma/app", "sanoma/internal/bridge"];
 
 /**
- * Where `sanoma`, `@sanoma-ai/workflows`, `@sanoma-ai/app` and `@sanoma-ai/bridge` really are, those
+ * Where `sanoma`, `sanoma/workflows`, `sanoma/app` and `sanoma/internal/bridge` really are, those
  * Node finds: each from the repo's root, else from where `sanoma` really is (where pnpm puts
- * sanoma's own dependencies, `@sanoma-ai/app` among them, or the checkout's workspace links).
+ * sanoma's own dependencies, `sanoma/app` among them, or the checkout's workspace links).
  */
 function corePackages(cwd: string): LinkedPackage[] {
   const sanoma = findPackage("sanoma", cwd);

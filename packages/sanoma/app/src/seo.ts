@@ -1,6 +1,6 @@
 // A public site's robots.txt and sitemap.xml, Node only: what `startApp` answers on the site's own
 // host for those two paths, ahead of its pages.
-import type { SiteEntry } from "@sanoma-ai/workflows/describe";
+import type { SiteEntry } from "sanoma/workflows/describe";
 import type { Published } from "./content-files.ts";
 import { escapeHtml } from "./login/page.ts";
 import { inLocale } from "./content-types.ts";

@@ -1,4 +1,4 @@
-import { type Driver, type DriverFn, DriverError } from "@sanoma-ai/workflows";
+import { type Driver, type DriverFn, DriverError } from "sanoma/workflows";
 import { githubTf, isKeyIdentity } from "./connector.ts";
 
 /**

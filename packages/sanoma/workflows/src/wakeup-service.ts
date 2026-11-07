@@ -8,7 +8,7 @@ import { generateSecret, tokenHash as hashOf } from "./secret.ts";
 import { errorMessage } from "./shared.ts";
 
 /*
- * `@sanoma-ai/workflows/wakeup-service`: the service that wakes stopped instances, server-side
+ * `sanoma/workflows/wakeup-service`: the service that wakes stopped instances, server-side
  * only. An account (minted by whoever runs the service) registers an instance by its URL and the
  * instance's own token, which the company mints (`mintInstanceToken`) and keeps; the instance,
  * before it stops, `PUT`s with that token when it wants waking, replacing what it asked before;
@@ -36,7 +36,7 @@ const ROUND_ROWS = CONCURRENCY * 2;
 /** The most a request's body may hold: a registration is a few hundred bytes. */
 const MAX_BODY = 64 * 1024;
 
-/** The shape of `@sanoma-ai/app`'s `IngressRoute`, which `startApp`'s `ingress` takes. */
+/** The shape of `sanoma/app`'s `IngressRoute`, which `startApp`'s `ingress` takes. */
 export interface WakeupRoute {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   /** `/wakeup`, with every path under it (`prefix`). */

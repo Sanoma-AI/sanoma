@@ -7,9 +7,9 @@ import { fakeBluesky } from "@sanoma-ai/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
 import { resend } from "@sanoma-ai/connector-resend";
 import { fakeResend } from "@sanoma-ai/connector-resend/fake";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { type TestApp, useTestApp } from "@sanoma-ai/testing/harness";
-import type { Fake, FakeCall, FakeOptions } from "@sanoma-ai/workflows/fake";
+import { testDatabaseUrl } from "sanoma/testing";
+import { type TestApp, useTestApp } from "sanoma/testing/harness";
+import type { Fake, FakeCall, FakeOptions } from "sanoma/workflows/fake";
 import { escapeIdentifier, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach } from "vitest";
 import {

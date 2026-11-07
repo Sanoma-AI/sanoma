@@ -1,4 +1,4 @@
-import { collection } from "@sanoma-ai/workflows/data";
+import { collection } from "sanoma/workflows/data";
 
 /** The outbound pipeline: which lead is at which stage, and who owns it. */
 export const outbound = collection({

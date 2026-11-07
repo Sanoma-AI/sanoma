@@ -1,4 +1,4 @@
-import type { PreviewAnswer } from "@sanoma-ai/workflows";
+import type { PreviewAnswer } from "sanoma/workflows";
 import { Link } from "@tanstack/react-router";
 import { Fragment, type ReactNode } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";

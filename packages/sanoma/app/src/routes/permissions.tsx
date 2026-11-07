@@ -1,8 +1,8 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { CatchBoundary, createFileRoute, type ErrorComponentProps, Link } from "@tanstack/react-router";
-import type { PreviewAnswer } from "@sanoma-ai/workflows";
-import type { ConfigDescription, Span } from "@sanoma-ai/workflows/describe";
-import { ANONYMOUS, appOfPath, approverLabel, errorMessage } from "@sanoma-ai/workflows/shared";
+import type { PreviewAnswer } from "sanoma/workflows";
+import type { ConfigDescription, Span } from "sanoma/workflows/describe";
+import { ANONYMOUS, appOfPath, approverLabel, errorMessage } from "sanoma/workflows/shared";
 import { Fragment, Suspense, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";

@@ -1,6 +1,6 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
-import type { AppEntry, ConfigDescription } from "@sanoma-ai/workflows/describe";
-import type { AvailableApp } from "@sanoma-ai/workflows/shared";
+import type { AppEntry, ConfigDescription } from "sanoma/workflows/describe";
+import type { AvailableApp } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, Suspense } from "react";

@@ -1,5 +1,5 @@
-import type { ApprovalState, DriftStatus, PreviewAnswer, RecordedDecision, RunStatus } from "@sanoma-ai/workflows";
-import type { ChangeState } from "@sanoma-ai/workflows/shared";
+import type { ApprovalState, DriftStatus, PreviewAnswer, RecordedDecision, RunStatus } from "sanoma/workflows";
+import type { ChangeState } from "sanoma/workflows/shared";
 import type { CellChange } from "./grid-diff.ts";
 
 // The tones live apart from the components, so code without React, such as the run graph's

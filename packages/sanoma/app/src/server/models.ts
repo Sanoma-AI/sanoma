@@ -1,6 +1,6 @@
 import type { ProviderV4 } from "@ai-sdk/provider";
-import type { ResolvedConfig, SanomaClient } from "@sanoma-ai/workflows";
-import { credentialReady } from "@sanoma-ai/workflows/shared";
+import type { ResolvedConfig, SanomaClient } from "sanoma/workflows";
+import { credentialReady } from "sanoma/workflows/shared";
 import { createProviderRegistry } from "ai";
 import type { ChatModel } from "../api.ts";
 import type { AppContext } from "../context.ts";

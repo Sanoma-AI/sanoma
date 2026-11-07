@@ -1,6 +1,6 @@
-import type { ApprovalState, RunSummary } from "@sanoma-ai/workflows";
-import { sanoma } from "@sanoma-ai/workflows/resources";
-import type { PeopleResource } from "@sanoma-ai/workflows/shared";
+import type { ApprovalState, RunSummary } from "sanoma/workflows";
+import { sanoma } from "sanoma/workflows/resources";
+import type { PeopleResource } from "sanoma/workflows/shared";
 import { describe, expect, it } from "vitest";
 import { decidableBy } from "../src/lib/decidable.ts";
 

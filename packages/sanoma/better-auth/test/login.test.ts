@@ -1,7 +1,7 @@
 import { hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "@sanoma-ai/workflows";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "sanoma/workflows";
+import { testDatabaseUrl } from "sanoma/testing";
 import { Client, Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prepareBetterAuth } from "../src/instance.ts";

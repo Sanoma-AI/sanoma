@@ -39,5 +39,5 @@ declare module "virtual:sanoma/app-runtime" {
 
 /** The app bundle's config as `sanoma` loads it (`bundleModule` in `bundle-build.ts`). */
 declare module "virtual:sanoma/app-bundle" {
-  export const config: import("@sanoma-ai/workflows").SanomaConfig;
+  export const config: import("sanoma/workflows").SanomaConfig;
 }

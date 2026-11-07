@@ -1,7 +1,7 @@
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { GitBranchIcon } from "@phosphor-icons/react/dist/csr/GitBranch";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { isEnded } from "@sanoma-ai/workflows/shared";
+import { isEnded } from "sanoma/workflows/shared";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Button } from "#/components/ui/button.tsx";

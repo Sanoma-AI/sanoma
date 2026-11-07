@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, parseEnv } from "node:util";
-import type { SanomaConfig } from "@sanoma-ai/workflows";
+import type { SanomaConfig } from "sanoma/workflows";
 import { type Loaded, type LoadedConfig, loadConfig, UsageError } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
 import { emit, eventsOn } from "./events.ts";
@@ -129,7 +129,7 @@ export async function main(argv: string[]): Promise<number> {
       if (!values.out || rest.length) throw new UsageError("usage: sanoma app-bundle --out <file>");
       const { config, root } = await loadConfig();
       const [{ buildAppBundle }, { parseDomains }, { runtimeFrom }] = await Promise.all([
-        import("@sanoma-ai/app/bundle"),
+        import("sanoma/app/bundle"),
         import("./serve.ts"),
         import("./sites.ts"),
       ]);
@@ -185,7 +185,7 @@ async function load({
     (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres !== "find", {
       adopt: postgres === "serve",
     }));
-  const { resolveConfig } = await import("@sanoma-ai/workflows");
+  const { resolveConfig } = await import("sanoma/workflows");
   try {
     const resolved = resolveConfig(loaded.config);
     if (policies && resolved.policyProblems.length) {
@@ -312,7 +312,7 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   }
   const watchers = startWatchers(packages, log);
   const cli = fileURLToPath(import.meta.url);
-  const app = packages.find((p) => p.name === "@sanoma-ai/app");
+  const app = packages.find((p) => p.name === "sanoma/app");
   const { siteBuild } = await import("./sites.ts");
   // A linked app with no build yet is not hot: every change restarts the child until it builds.
   const hot = app && (await siteBuild(cwd).catch(() => undefined))?.sitesOf(cwd).sites.length;
@@ -354,7 +354,7 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
 /** `sanoma api` (hidden): writes the generated files from the config, as `check` and `serve` do. */
 async function writeApiCommand(): Promise<number> {
   const { config, root, resolved } = await load({ policies: false });
-  const { describeConfig, readPeople, schemaOf, writeGenerated } = await import("@sanoma-ai/workflows/describe");
+  const { describeConfig, readPeople, schemaOf, writeGenerated } = await import("sanoma/workflows/describe");
   const { wrote } = await writeGenerated(root, describeConfig(config), schemaOf(resolved, readPeople(root).people));
   for (const file of wrote) log(`wrote ${file}`);
   return 0;
@@ -439,7 +439,7 @@ async function wakeupAccount(label: string): Promise<number> {
   const loaded = await loadConfig();
   const postgres = await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, false, { announce: false });
   try {
-    const { mintWakeupAccount } = await import("@sanoma-ai/workflows/wakeup-service");
+    const { mintWakeupAccount } = await import("sanoma/workflows/wakeup-service");
     console.log(JSON.stringify(await mintWakeupAccount(postgres.databaseUrl, label)));
     return 0;
   } finally {

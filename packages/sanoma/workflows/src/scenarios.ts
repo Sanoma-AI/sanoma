@@ -8,9 +8,9 @@ import { startWorker } from "./worker.ts";
 import { memorySecretStore } from "./secret-store.ts";
 
 /*
- * `@sanoma-ai/workflows/scenarios`: runs a config's scenarios as sandbox runs, with no test
+ * `sanoma/workflows/scenarios`: runs a config's scenarios as sandbox runs, with no test
  * framework. Server-side only, like `./scenario`: it loads Cucumber and starts a worker.
- * `sanoma check` runs every scenario through `runScenarios`; `@sanoma-ai/testing/scenarios` wraps
+ * `sanoma check` runs every scenario through `runScenarios`; `sanoma/testing/scenarios` wraps
  * `runScenario` in a vitest test per scenario.
  */
 

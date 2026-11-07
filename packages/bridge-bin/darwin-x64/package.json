@@ -1,7 +1,7 @@
 {
   "name": "@sanoma-ai/bridge-darwin-x64",
   "version": "0.5.0",
-  "description": "The provider-bridge binary for macOS on x64, installed by @sanoma-ai/bridge as an optional dependency",
+  "description": "The provider-bridge binary for macOS on x64, installed by sanoma/internal/bridge as an optional dependency",
   "keywords": [
     "opentofu",
     "provider",
@@ -33,7 +33,7 @@
     "access": "public"
   },
   "scripts": {
-    "prepack": "node ../../bridge/scripts/download-bridge.ts --platform darwin-x64 --out bin/provider-bridge --licenses licenses",
+    "prepack": "node ../../sanoma/bridge/scripts/download-bridge.ts --platform darwin-x64 --out bin/provider-bridge --licenses licenses",
     "postpack": "rm -rf bin licenses"
   }
 }

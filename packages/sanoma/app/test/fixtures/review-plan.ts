@@ -1,4 +1,4 @@
-import { defineWorkflow } from "@sanoma-ai/workflows";
+import { defineWorkflow } from "sanoma/workflows";
 import { z } from "zod";
 import { PLAN } from "./apply-plan.ts";
 

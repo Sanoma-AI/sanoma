@@ -1,6 +1,6 @@
 # GCP KMS-protected credential storage
 
-`@sanoma-ai/workflows/kms-secrets` implements the managed Cloud storage adapter from #470. Encrypted credentials live in **Postgres**, in `sanoma_kms.secrets` in the company database supplied by trusted bootstrap. Supabase can host that Postgres database; no separate key-value database is needed. GCP KMS protects encryption keys, not the credential records. BYOC Supabase Vault is a separate adapter. AWS Secrets Manager remains deferred.
+`sanoma/workflows/kms-secrets` implements the managed Cloud storage adapter from #470. Encrypted credentials live in **Postgres**, in `sanoma_kms.secrets` in the company database supplied by trusted bootstrap. Supabase can host that Postgres database; no separate key-value database is needed. GCP KMS protects encryption keys, not the credential records. BYOC Supabase Vault is a separate adapter. AWS Secrets Manager remains deferred.
 
 ## Runtime boundary
 
@@ -38,7 +38,7 @@ export default defineConfig({
 });
 ```
 
-The company ID, key reference, broker endpoint and credential reader come from trusted deployment bootstrap. `credential` reads the current bearer value from protected host configuration and is called again when the short-lived Google token needs renewal. It must not read that value from the store it unlocks. Optional `decryptKeyNames` allows retained company keys during replacement or backup recovery. The helper is also exported by `@sanoma-ai/workflows/kms-secrets`; `sanoma/secrets` makes it available to company repos that install only `sanoma` and their connectors.
+The company ID, key reference, broker endpoint and credential reader come from trusted deployment bootstrap. `credential` reads the current bearer value from protected host configuration and is called again when the short-lived Google token needs renewal. It must not read that value from the store it unlocks. Optional `decryptKeyNames` allows retained company keys during replacement or backup recovery. The helper is also exported by `sanoma/workflows/kms-secrets`; `sanoma/secrets` makes it available to company repos that install only `sanoma` and their connectors.
 
 `managedKmsStore` returns a `SecretStoreFactory`: non-secret `id` and capabilities plus `create({ database })`. The runtime binds a fresh adapter to its own database connection for each access context. Each bound managed adapter opens its SDK client lazily and owns its refreshed-token state; runtime shutdown closes that client. Reusing a configuration does not rebind an earlier instance to another database. Configuration descriptions inspect metadata without querying the broker, KMS or Postgres; startup validates the selected store.
 
@@ -48,8 +48,8 @@ For standalone use or an explicitly supplied KMS client, use the lower-level `km
 
 ```ts
 import { KeyManagementServiceClient } from "@google-cloud/kms";
-import { databaseOn } from "@sanoma-ai/workflows/db";
-import { kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";
+import { databaseOn } from "sanoma/workflows/db";
+import { kmsPostgresStore } from "sanoma/workflows/kms-secrets";
 
 const companyDatabase = databaseOn(companyPool);
 const kms = new KeyManagementServiceClient({ authClient: companyAuthClient });
@@ -160,7 +160,7 @@ These examples exclude operations, database costs, free-tier eligibility and rep
 
 Focused tests use real local Postgres and AES-GCM with a GCP transport/IAM model. They cover atomic store conformance, tampering, checksums, key revocation, key replacement, primary-version rotation and restoration of old rows. They explicitly show that AAD cannot substitute for IAM.
 
-The opt-in live suite requires two pre-provisioned test CryptoKeys and separate identities, each authorized only on its own key. Configure `SANOMA_GCP_KMS_LIVE=1`, `SANOMA_GCP_KMS_LIVE_KEY`, `SANOMA_GCP_KMS_LIVE_OTHER_KEY`, `SANOMA_GCP_KMS_LIVE_CREDENTIALS` and `SANOMA_GCP_KMS_LIVE_OTHER_CREDENTIALS`; the latter two name ignored SDK credential/federation configuration files. Use the isolated `SANOMA_TEST_DATABASE_URL` and run `pnpm vitest run packages/workflows/test/kms-secrets-live.test.ts`.
+The opt-in live suite requires two pre-provisioned test CryptoKeys and separate identities, each authorized only on its own key. Configure `SANOMA_GCP_KMS_LIVE=1`, `SANOMA_GCP_KMS_LIVE_KEY`, `SANOMA_GCP_KMS_LIVE_OTHER_KEY`, `SANOMA_GCP_KMS_LIVE_CREDENTIALS` and `SANOMA_GCP_KMS_LIVE_OTHER_CREDENTIALS`; the latter two name ignored SDK credential/federation configuration files. Use the isolated `SANOMA_TEST_DATABASE_URL` and run `pnpm vitest run packages/sanoma/workflows/test/kms-secrets-live.test.ts`.
 
 The suite creates no cloud resources and cleans only its own synthetic Postgres rows. Its positive checks prevent nonexistent/disabled keys from masquerading as an isolation proof. Local modeled tests do not establish real IAM isolation.
 

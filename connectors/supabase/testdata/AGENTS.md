@@ -1,6 +1,6 @@
 # connectors/supabase/testdata
 
-Replies in the recorder's format, written by hand to the provider's schema (`@sanoma-ai/bridge`'s `testdata/schemas/supabase_supabase_1.11.0.json`) and its source (`internal/provider/project_resource.go` at v1.11.0). Not formatted by oxfmt.
+Replies in the recorder's format, written by hand to the provider's schema (`sanoma/internal/bridge`'s `testdata/schemas/supabase_supabase_1.11.0.json`) and its source (`internal/provider/project_resource.go` at v1.11.0). Not formatted by oxfmt.
 
 ## Contents
 

@@ -1,4 +1,4 @@
-import { defineSteps } from "@sanoma-ai/workflows";
+import { defineSteps } from "sanoma/workflows";
 import { neonOps } from "./connector.ts";
 
 const { create } = neonOps.project;

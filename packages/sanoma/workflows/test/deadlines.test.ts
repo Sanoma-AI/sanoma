@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { DBOS, type DBOSClient, type WorkflowStatus } from "@dbos-inc/dbos-sdk";
-import { startTestWorker, testDatabaseUrl } from "@sanoma-ai/testing";
+import { startTestWorker, testDatabaseUrl } from "sanoma/testing";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";

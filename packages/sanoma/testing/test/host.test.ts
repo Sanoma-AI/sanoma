@@ -11,9 +11,9 @@ import {
   resolveRevision,
   SanomaClient,
   type SanomaConfig,
-} from "@sanoma-ai/workflows";
-import { writeLockfile } from "@sanoma-ai/workflows/describe";
-import { secret } from "@sanoma-ai/workflows/resources";
+} from "sanoma/workflows";
+import { writeLockfile } from "sanoma/workflows/describe";
+import { secret } from "sanoma/workflows/resources";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testDatabaseUrl } from "../src/index.ts";
 import {

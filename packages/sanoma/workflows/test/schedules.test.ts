@@ -1,5 +1,5 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { eq } from "drizzle-orm";
 import { Client } from "pg";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -287,7 +287,7 @@ describe("schedules on Postgres", () => {
     const root = rootWith({
       "package.json": JSON.stringify({ name: app }),
       "resources/people.ts": [
-        'import { sanoma } from "@sanoma-ai/workflows/resources";',
+        'import { sanoma } from "sanoma/workflows/resources";',
         'export const ada = sanoma.person({ id: "ada" });',
         "",
       ].join("\n"),

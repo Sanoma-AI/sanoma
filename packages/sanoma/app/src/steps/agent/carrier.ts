@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { type Box, draftBranch, type Source } from "@sanoma-ai/workflows";
-import { errorMessage } from "@sanoma-ai/workflows/shared";
+import { type Box, draftBranch, type Source } from "sanoma/workflows";
+import { errorMessage } from "sanoma/workflows/shared";
 
 // Git between the live instance and a person's box: before a turn, the draft's branch carried into
 // the box's clone as a git bundle (its commits since the head the box last had); after it, the

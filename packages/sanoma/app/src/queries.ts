@@ -1,11 +1,11 @@
-import type { AppApi, ApprovalState, ChangeView, RunStatus, RunSummary } from "@sanoma-ai/workflows";
+import type { AppApi, ApprovalState, ChangeView, RunStatus, RunSummary } from "sanoma/workflows";
 import type {
   CollectionEntry,
   ConfigDescription,
   OpEntry,
   SiteCall,
   WorkflowEntry,
-} from "@sanoma-ai/workflows/describe";
+} from "sanoma/workflows/describe";
 import {
   apiNameOf,
   type AvailableApps,
@@ -15,7 +15,7 @@ import {
   LIST_LIMIT,
   type ListQuery,
   type Saved,
-} from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows/shared";
 import { type QueryClient, queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";

@@ -17,7 +17,7 @@ import {
   resolveSecrets,
   type VendorInfo,
   withoutWriteOnly,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import type { z } from "zod";
 import {
   type ApplyInput,

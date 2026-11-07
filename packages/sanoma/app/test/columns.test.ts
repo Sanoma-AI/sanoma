@@ -2,11 +2,11 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
-import { resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
-import { readPeople } from "@sanoma-ai/workflows/describe";
-import { changeIdOf } from "@sanoma-ai/workflows/shared";
+import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
+import { resolveConfig, type SanomaConfig } from "sanoma/workflows";
+import { readPeople } from "sanoma/workflows/describe";
+import { changeIdOf } from "sanoma/workflows/shared";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeRemote, memorySource } from "../../workflows/test/fakes/remote.ts";

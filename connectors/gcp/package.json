@@ -53,7 +53,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "generate": "node ../../packages/bridge/src/tfschema/cli.ts src/resources.config.ts src/resources.gen.ts --fixtures testdata && oxfmt src/resources.gen.ts",
+    "generate": "node ../../packages/sanoma/bridge/src/tfschema/cli.ts src/resources.config.ts src/resources.gen.ts --fixtures testdata && oxfmt src/resources.gen.ts",
     "prepack": "pnpm run clean && pnpm run build",
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
@@ -61,14 +61,12 @@
     "google-auth-library": "^10.5.0"
   },
   "devDependencies": {
-    "@sanoma-ai/bridge": "workspace:*",
-    "@sanoma-ai/workflows": "workspace:*",
     "msw": "^3.0.3",
+    "sanoma": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/bridge": "workspace:^",
-    "@sanoma-ai/workflows": "workspace:^",
+    "sanoma": "workspace:*",
     "zod": "^4"
   },
   "engines": {

@@ -46,14 +46,14 @@ import { createIsomorphicFn } from "@tanstack/react-start";
 import { serverOnly } from "@tanstack/react-start/server";
 import { defineWorkflow } from "sanoma";
 import { main } from "sanoma/dist/cli.js";
-import { startApp } from "@sanoma-ai/app";
-import { startWorker } from "@sanoma-ai/workflows";
-import { fake } from "@sanoma-ai/testing";
+import { startApp } from "sanoma/app";
+import { startWorker } from "sanoma/workflows";
+import { fake } from "sanoma/testing";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { readFileSync } from "node:fs";
 import { hello } from "../../../workflows/hello";
-import { handler } from "@sanoma-ai/app/server";
-import { Badge } from "@sanoma-ai/app/ui";
+import { handler } from "sanoma/app/server";
+import { Badge } from "sanoma/ui";
 import kinds from "virtual:sanoma/content";
 export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, Badge, kinds, process.env.KEY];
 export const pg = require("pg");
@@ -102,13 +102,13 @@ describe("the shipped oxlint.json", () => {
     expect(new Set(config.overrides.flatMap((o) => o.jsPlugins ?? []))).toEqual(new Set(["./dist/oxlint-plugin.js"]));
   });
 
-  it("allows the same names from sanoma as from @sanoma-ai/workflows", () => {
+  it("allows the same names from sanoma as from sanoma/workflows", () => {
     const { overrides } = JSON.parse(readFileSync(shipped, "utf8")) as {
       overrides: { rules: Record<string, [string, { paths: { name: string; allowImportNames?: string[] }[] }]> }[];
     };
     const paths = overrides.flatMap((o) => o.rules["no-restricted-imports"]?.[1].paths ?? []);
     const names = (pkg: string) => paths.find((p) => p.name === pkg)?.allowImportNames;
-    expect(names("sanoma")).toEqual(names("@sanoma-ai/workflows"));
+    expect(names("sanoma")).toEqual(names("sanoma/workflows"));
     expect(names("sanoma")).toContain("z");
   });
 
@@ -189,14 +189,14 @@ describe("the shipped oxlint.json", () => {
         file: index,
         line: 19,
         rule: imports,
-        text: expect.stringMatching(/^'@sanoma-ai\/app\/server'.*`sanoma\/ui`/),
+        text: expect.stringMatching(/^'sanoma\/app\/server'.*`sanoma\/ui`/),
       },
       // The kit's one path is sanoma's.
       {
         file: index,
         line: 20,
         rule: imports,
-        text: expect.stringMatching(/^'@sanoma-ai\/app\/ui'.*looks from `sanoma\/ui`/),
+        text: expect.stringMatching(/^'sanoma\/ui'.*looks from `sanoma\/ui`/),
       },
       {
         file: index,

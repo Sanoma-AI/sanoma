@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { type CallContext, DriverError, memorySecrets } from "@sanoma-ai/workflows";
+import { type CallContext, DriverError, memorySecrets } from "sanoma/workflows";
 import { fakeBluesky } from "@sanoma-ai/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
 import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 import { fakeStripe } from "@sanoma-ai/connector-stripe/fake";
 import type { FakeCall } from "../src/index.ts";
-import { connectionFakes } from "@sanoma-ai/workflows/fake";
+import { connectionFakes } from "sanoma/workflows/fake";
 
 // No database: the fakes are called the way the runtime calls a driver.
 const call = (idempotencyKey: string, attempt = 1): CallContext => ({

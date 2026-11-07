@@ -1,4 +1,4 @@
-import type { CheckResult, Source } from "@sanoma-ai/workflows";
+import type { CheckResult, Source } from "sanoma/workflows";
 import { describe, expect, it } from "vitest";
 import { checks } from "../src/steps/agent/checkout.ts";
 

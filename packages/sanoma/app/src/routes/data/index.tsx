@@ -1,4 +1,4 @@
-import type { CollectionEntry, ConfigDescription, SiteEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import type { CollectionEntry, ConfigDescription, SiteEntry, WorkflowEntry } from "sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Fragment, type MouseEvent, type ReactElement } from "react";

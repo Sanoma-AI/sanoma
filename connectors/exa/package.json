@@ -57,12 +57,12 @@
     "exa-js": "^2.26.0"
   },
   "devDependencies": {
-    "@sanoma-ai/workflows": "workspace:*",
     "msw": "^3.0.3",
+    "sanoma": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/workflows": "workspace:^",
+    "sanoma": "workspace:*",
     "zod": "^4"
   },
   "engines": {

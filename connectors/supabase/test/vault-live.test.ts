@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { checkSecretStore, SecretAccess } from "@sanoma-ai/workflows";
+import { checkSecretStore, SecretAccess } from "sanoma/workflows";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { supabaseVault } from "../src/vault.ts";

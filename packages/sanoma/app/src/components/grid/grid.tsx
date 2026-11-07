@@ -1,5 +1,5 @@
-import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
-import { errorMessage, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
+import type { CollectionEntry } from "sanoma/workflows/describe";
+import { errorMessage, type ListQuery, type Saved } from "sanoma/workflows/shared";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useNavigate } from "@tanstack/react-router";

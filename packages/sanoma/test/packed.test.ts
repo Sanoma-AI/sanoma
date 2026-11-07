@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ensureBuilt, repo as checkout, serving } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";

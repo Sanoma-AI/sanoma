@@ -3,9 +3,9 @@
 // It keeps nothing across requests but what it was built with, reaches Postgres through its
 // client and nothing else of the company's, and reads no file: a static file and a prerendered
 // page are the host's (`files`).
-import { type ResolvedConfig, requestOrigin, type SanomaClient } from "@sanoma-ai/workflows";
-import type { ConfigDescription, SiteEntry } from "@sanoma-ai/workflows/describe";
-import { siteDir } from "@sanoma-ai/workflows/shared";
+import { type ResolvedConfig, requestOrigin, type SanomaClient } from "sanoma/workflows";
+import type { ConfigDescription, SiteEntry } from "sanoma/workflows/describe";
+import { siteDir } from "sanoma/workflows/shared";
 import type { AdmittingLogin, AppContext, RequestContext, ServerEntry } from "./context.ts";
 import { hostName, placeOf } from "./loopback.ts";
 import { seoFile } from "./seo.ts";

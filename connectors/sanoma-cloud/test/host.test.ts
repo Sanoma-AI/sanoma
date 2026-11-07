@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { checkHost, hostCheck, hostCheckWorkflows, inProcessHost, testRepository } from "@sanoma-ai/testing/host";
+import { testDatabaseUrl } from "sanoma/testing";
+import { checkHost, hostCheck, hostCheckWorkflows, inProcessHost, testRepository } from "sanoma/testing/host";
 import {
   type CallContext,
   memoryLedger,
@@ -11,8 +11,8 @@ import {
   SanomaClient,
   type SanomaConfig,
   withSetup,
-} from "@sanoma-ai/workflows";
-import { writeLockfile } from "@sanoma-ai/workflows/describe";
+} from "sanoma/workflows";
+import { writeLockfile } from "sanoma/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { host, cloudOps } from "../src/connector.ts";
 import { fakeCloud } from "../src/fake.ts";

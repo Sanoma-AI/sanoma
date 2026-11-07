@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { hostCheck, inProcessHost } from "@sanoma-ai/testing/host";
-import { checkWakeup, wakeupCheckWorkflows } from "@sanoma-ai/testing/wakeup";
+import { testDatabaseUrl } from "sanoma/testing";
+import { hostCheck, inProcessHost } from "sanoma/testing/host";
+import { checkWakeup, wakeupCheckWorkflows } from "sanoma/testing/wakeup";
 import {
   type CallContext,
   declaredWakeup,
@@ -12,10 +12,10 @@ import {
   SanomaClient,
   type SanomaConfig,
   type Secrets,
-} from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
-import { secret } from "@sanoma-ai/workflows/resources";
-import { mintInstanceToken } from "@sanoma-ai/workflows/wakeup-service";
+} from "sanoma/workflows";
+import { describeConfig } from "sanoma/workflows/describe";
+import { secret } from "sanoma/workflows/resources";
+import { mintInstanceToken } from "sanoma/workflows/wakeup-service";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { alarm } from "../src/connector.ts";
 import { fakeCloudflare } from "../src/fake.ts";
@@ -109,7 +109,7 @@ describe("cloudflare.alarm in a data file", () => {
       join(root, "resources", "infra.ts"),
       [
         'import { cloudflare } from "@sanoma-ai/connector-cloudflare/resources";',
-        'import { secret } from "@sanoma-ai/workflows/resources";',
+        'import { secret } from "sanoma/workflows/resources";',
         "",
         "export const host = cloudflare.container({",
         '  name: "company",',

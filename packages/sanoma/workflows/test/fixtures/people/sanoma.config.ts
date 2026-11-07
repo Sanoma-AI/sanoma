@@ -1,4 +1,4 @@
-import { withFake } from "@sanoma-ai/testing";
+import { withFake } from "sanoma/testing";
 import { defineConfig, memoryLedger } from "../../../src/index.ts";
 import { shop, shopFake } from "./shop.ts";
 import refund from "./workflows/refund.ts";

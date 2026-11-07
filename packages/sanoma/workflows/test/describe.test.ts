@@ -8,9 +8,9 @@ import { github } from "@sanoma-ai/connector-github";
 import { resend } from "@sanoma-ai/connector-resend";
 import { stripe } from "@sanoma-ai/connector-stripe";
 import { supabase } from "@sanoma-ai/connector-supabase";
-import { withFake } from "@sanoma-ai/testing";
-import { fakeHost } from "@sanoma-ai/testing/host";
-import { fakeSandbox } from "@sanoma-ai/testing/sandbox";
+import { withFake } from "sanoma/testing";
+import { fakeHost } from "sanoma/testing/host";
+import { fakeSandbox } from "sanoma/testing/sandbox";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineConfig, defineConnector, defineWorkflow, memoryLedger, vendorInfo } from "../src/index.ts";
@@ -327,7 +327,7 @@ describe("describeConfig's workflow problems", () => {
     const file = join(dir, "announce.ts");
     writeFileSync(
       file,
-      `import { defineWorkflow, SanomaClient } from "@sanoma-ai/workflows";
+      `import { defineWorkflow, SanomaClient } from "sanoma/workflows";
 import { readFileSync } from "node:fs";
 import { ghost } from "@sanoma-ai/connector-ghost";
 import { z } from "zod";

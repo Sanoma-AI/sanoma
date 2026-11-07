@@ -1,4 +1,4 @@
-import { type CallContext, diffDeclared, dnsRecord, memorySecrets } from "@sanoma-ai/workflows";
+import { type CallContext, diffDeclared, dnsRecord, memorySecrets } from "sanoma/workflows";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fakeResend } from "../src/fake.ts";

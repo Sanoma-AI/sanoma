@@ -1,5 +1,5 @@
-import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
-import { FIELD_NAME, FIELD_TYPES, isRecord, type Saved } from "@sanoma-ai/workflows/shared";
+import type { CollectionEntry } from "sanoma/workflows/describe";
+import { FIELD_NAME, FIELD_TYPES, isRecord, type Saved } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 // A change to a collection's columns, as a person proposes it from the grid (`ColumnChange`) and

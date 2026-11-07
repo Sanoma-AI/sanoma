@@ -1,4 +1,4 @@
-import { memorySecrets, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
+import { memorySecrets, resolveConfig, SanomaClient } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { checkDatabase, databaseCheckConfig, fakeDatabase } from "../src/database.ts";
 import { testDatabaseUrl } from "../src/index.ts";

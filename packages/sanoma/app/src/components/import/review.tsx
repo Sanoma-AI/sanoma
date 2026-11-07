@@ -1,4 +1,4 @@
-import { IMPORT_BATCH } from "@sanoma-ai/workflows/shared";
+import { IMPORT_BATCH } from "sanoma/workflows/shared";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";

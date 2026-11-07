@@ -12,7 +12,7 @@ import {
   errorCode,
   isDirect,
   isEnded,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { tool } from "ai";
 import { z } from "zod";
 import type { DraftCard, HeldOutput } from "../../lib/chat.ts";

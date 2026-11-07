@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
@@ -9,5 +9,5 @@
     "rewriteRelativeImportExtensions": true,
     "paths": {}
   },
-  "include": ["src", "../../types"]
+  "include": ["src", "../../../types"]
 }

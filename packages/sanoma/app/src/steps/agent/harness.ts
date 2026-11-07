@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import type { HarnessV1, HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
-import type { AppStepContext, Box } from "@sanoma-ai/workflows";
-import { errorMessage } from "@sanoma-ai/workflows/shared";
+import type { AppStepContext, Box } from "sanoma/workflows";
+import { errorMessage } from "sanoma/workflows/shared";
 import {
   createUIMessageStream,
   generateId,

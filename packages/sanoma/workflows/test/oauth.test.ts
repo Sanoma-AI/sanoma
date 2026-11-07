@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { findSentinels, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { findSentinels, testDatabaseUrl, waitFor } from "sanoma/testing";
 import { connectionAttempts, connectionHealth, connections, connectionSetups, ledger } from "../src/db/company.ts";
 import { workflowStatus } from "../src/db/dbos.ts";
 import {

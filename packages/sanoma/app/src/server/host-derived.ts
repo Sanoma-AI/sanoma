@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { deriveHosts, hostFacts, isSecret, type Secrets, valueAt } from "@sanoma-ai/workflows";
+import { deriveHosts, hostFacts, isSecret, type Secrets, valueAt } from "sanoma/workflows";
 import type { HostDerived } from "../api.ts";
 import type { AppContext } from "../context.ts";
 

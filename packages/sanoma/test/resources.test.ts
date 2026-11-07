@@ -1,4 +1,4 @@
-import { secret as fromWorkflows } from "@sanoma-ai/workflows/resources";
+import { secret as fromWorkflows } from "sanoma/workflows/resources";
 import { describe, expect, it } from "vitest";
 import { secret } from "../src/resources.ts";
 

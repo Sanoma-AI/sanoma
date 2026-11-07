@@ -486,7 +486,7 @@ describe("secret()", () => {
   it("reads a secret at a write-only field as its marker, imported from either entry", () => {
     dir = project({
       "a.ts": `${ACME}import { secret } from "sanoma/resources";\nexport const a = acme.widget({ name: "a", token: secret("A_TOKEN") });\n`,
-      "b.ts": `${ACME}import { secret as s } from "@sanoma-ai/workflows/resources";\nexport const b = acme.widget({ name: "b", token: s("B_TOKEN", { generate: true }) });\n`,
+      "b.ts": `${ACME}import { secret as s } from "sanoma/workflows/resources";\nexport const b = acme.widget({ name: "b", token: s("B_TOKEN", { generate: true }) });\n`,
     });
     const { resources, problems } = loadDataFiles(dir, base.connectors);
     expect(problems).toEqual([]);

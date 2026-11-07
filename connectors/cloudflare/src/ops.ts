@@ -11,9 +11,9 @@ import {
   retryableStatus,
   WAKE_PATH,
   type WakeupRegistration,
-} from "@sanoma-ai/workflows";
-import { domainsOf, domainsText, hostnameUrl, siteAtHostname } from "@sanoma-ai/workflows/shared";
-import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
+} from "sanoma/workflows";
+import { domainsOf, domainsText, hostnameUrl, siteAtHostname } from "sanoma/workflows/shared";
+import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "sanoma/workflows/wakeup-service";
 import { alarm, container, type host } from "./connector.ts";
 import { refused } from "./errors.ts";
 import { accountPinned } from "./registry.ts";

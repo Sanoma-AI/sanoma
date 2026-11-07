@@ -1,4 +1,4 @@
-import type { Chat, ChatTurnContext, SanomaClient } from "@sanoma-ai/workflows";
+import type { Chat, ChatTurnContext, SanomaClient } from "sanoma/workflows";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import type { ChatMessage } from "../../lib/chat.ts";
 

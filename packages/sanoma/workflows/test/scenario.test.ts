@@ -24,7 +24,7 @@ import announce from "./fixtures/announce.ts";
 import { companyConfig } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
 import peopleConfig from "./fixtures/people/sanoma.config.ts";
-import { withFake } from "@sanoma-ai/testing";
+import { withFake } from "sanoma/testing";
 
 // The packages' connectors carry their drivers: announce's operations have one.
 const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"]) => {
@@ -1587,7 +1587,7 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     mkdirSync(join(root, "resources"));
     writeFileSync(
       join(root, "resources", "people.ts"),
-      `import { sanoma } from "@sanoma-ai/workflows/resources";\n\nexport const ada = sanoma.person({ id: "ada" });\nexport const other = sanoma.person({ id: "ada" });\n`,
+      `import { sanoma } from "sanoma/workflows/resources";\n\nexport const ada = sanoma.person({ id: "ada" });\nexport const other = sanoma.person({ id: "ada" });\n`,
     );
     const broken = { ...people, root };
     await expect(

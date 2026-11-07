@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { RUNNER_HEALTH, RUNNER_PORT } from "@sanoma-ai/workflows";
+import { RUNNER_HEALTH, RUNNER_PORT } from "sanoma/workflows";
 
 // Agent37 on this machine, for the backend's tests: its Sandbox API as a `fetch` that answers
 // `https://api.agent37.com/v1` from memory (every other URL goes out), its exec `sh -c` here, each

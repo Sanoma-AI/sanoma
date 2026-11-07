@@ -1,4 +1,4 @@
-import { CHANGE_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import { CHANGE_WORKFLOW } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ChangeDecision } from "#/components/change-decision.tsx";

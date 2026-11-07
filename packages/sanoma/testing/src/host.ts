@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { hostnameUrl } from "@sanoma-ai/workflows/shared";
+import { hostnameUrl } from "sanoma/workflows/shared";
 import {
   defineConnector,
   defineDriver,
@@ -31,7 +31,7 @@ import {
   valueAt,
   wakeUrlOf,
   withSetup,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { z } from "zod";
 import { waitFor } from "./build.ts";
 import { testWorkerConfig } from "./index.ts";

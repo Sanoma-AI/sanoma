@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type AppStepContext, type Chat, isDirect, type Principal, VENDOR } from "@sanoma-ai/workflows";
+import { type AppStepContext, type Chat, isDirect, type Principal, VENDOR } from "sanoma/workflows";
 import { type ChatMessage, textOf } from "../../lib/chat.ts";
 
 // Our loop's system prompt: the rules, then what it is told of the company: its AGENTS.md, its

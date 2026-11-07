@@ -1,8 +1,8 @@
-import { type CallContext, type Driver, DriverError, memorySecrets, type Secrets } from "@sanoma-ai/workflows";
+import { type CallContext, type Driver, DriverError, memorySecrets, type Secrets } from "sanoma/workflows";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
-import { readPins } from "@sanoma-ai/bridge";
-import { fixturesDir } from "@sanoma-ai/bridge/fake";
+import { readPins } from "sanoma/internal/bridge";
+import { fixturesDir } from "sanoma/internal/bridge/fake";
 import { BridgeError } from "../src/bridge.ts";
 import { resourcePath, tfConnector } from "../src/connector.ts";
 import { tfFake } from "../src/tffake.ts";

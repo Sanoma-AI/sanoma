@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-docker
 
-The local Docker host for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): one container on this machine's Docker daemon that runs the company, through the [`kreuzwerker/docker`](https://github.com/kreuzwerker/terraform-provider-docker) OpenTofu provider (4.6.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge), which apply creates, replaces and deletes.
+The local Docker host for [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md): one container on this machine's Docker daemon that runs the company, through the [`kreuzwerker/docker`](https://github.com/kreuzwerker/terraform-provider-docker) OpenTofu provider (4.6.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge), which apply creates, replaces and deletes.
 
 ## Usage
 
@@ -8,7 +8,7 @@ The local Docker host for [`@sanoma-ai/workflows`](https://www.npmjs.com/package
 npm install @sanoma-ai/connector-docker
 ```
 
-The one resource type is writable and a host ([Hosts](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#hosts)): `read` and `import` (effect `read`), and the change operations only the apply workflow may call, `plan` (effect `read`), `create`, `update` and `delete` (effect `write`), with the container's id as the policy's `target` (`new:docker.container` for a create):
+The one resource type is writable and a host ([Hosts](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#hosts)): `read` and `import` (effect `read`), and the change operations only the apply workflow may call, `plan` (effect `read`), `create`, `update` and `delete` (effect `write`), with the container's id as the policy's `target` (`new:docker.container` for a create):
 
 | Type        | Operations                                                                   | Import id                      |
 | ----------- | ---------------------------------------------------------------------------- | ------------------------------ |
@@ -55,7 +55,7 @@ The logo is Docker's whale from [Simple Icons](https://simpleicons.org/?q=docker
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate` with `src/resources.config.ts`: the provider and `docker_container`, with the attributes the provider's source forces a new container for. It is checked in and never edited by hand. `src/connector.ts` maps the declared fields onto `docker_container` and back (`TfMapped` on [`tfConnector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers)): a container's fields are read from its labels and ports, never from its environment.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate` with `src/resources.config.ts`: the provider and `docker_container`, with the attributes the provider's source forces a new container for. It is checked in and never edited by hand. `src/connector.ts` maps the declared fields onto `docker_container` and back (`TfMapped` on [`tfConnector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/bridge/README.md#connectors-for-opentofu-providers)): a container's fields are read from its labels and ports, never from its environment.
 
 The provider keeps a container's environment in its state, unmarked: the type's `writeOnly: ["env"]` keeps it inside the driver, so no state, plan or output carries a secret.
 

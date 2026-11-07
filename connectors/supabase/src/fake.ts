@@ -1,5 +1,5 @@
-import { tfFake, type TfFakeOptions, type TfFakeState } from "@sanoma-ai/bridge/fake";
-import type { Driver } from "@sanoma-ai/workflows";
+import { tfFake, type TfFakeOptions, type TfFakeState } from "sanoma/internal/bridge/fake";
+import type { Driver } from "sanoma/workflows";
 import { supabaseOps, supabaseTf } from "./connector.ts";
 import { apiError, type ManagementApi, withManagement } from "./management.ts";
 

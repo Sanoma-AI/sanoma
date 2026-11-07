@@ -1,4 +1,4 @@
-import { type Exchange, live, type ReplayOptions } from "@sanoma-ai/testing/replay";
+import { type Exchange, live, type ReplayOptions } from "sanoma/testing/replay";
 
 // How the Management API's replies are replayed (and recorded) for the driver's tests. The
 // fixtures are written by hand in the recorder's format, not recorded: no access token was at

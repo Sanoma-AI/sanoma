@@ -1,7 +1,7 @@
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
-import { startTestWorker } from "@sanoma-ai/testing";
+import { startTestWorker } from "sanoma/testing";
 import { sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";

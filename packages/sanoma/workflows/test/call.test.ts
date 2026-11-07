@@ -1,7 +1,7 @@
 import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { ghost } from "@sanoma-ai/connector-ghost";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { withFake } from "@sanoma-ai/testing";
+import { withFake } from "sanoma/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {

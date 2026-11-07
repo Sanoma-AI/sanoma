@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { ensureBuilt as ensure } from "@sanoma-ai/testing";
+import { ensureBuilt as ensure } from "sanoma/testing";
 
 /** The package's directory. */
 export const pkg = fileURLToPath(new URL("..", import.meta.url));

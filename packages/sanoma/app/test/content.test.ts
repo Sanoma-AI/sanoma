@@ -275,8 +275,8 @@ export async function page() {
         compilerOptions: {
           paths: {
             "sanoma/site": ["./site.ts"],
-            "@sanoma-ai/workflows": [join(checkout, "packages/workflows/src/index.ts")],
-            "@sanoma-ai/workflows/*": [join(checkout, "packages/workflows/src/*.ts")],
+            "sanoma/workflows": [join(checkout, "packages/sanoma/workflows/src/index.ts")],
+            "sanoma/workflows/*": [join(checkout, "packages/sanoma/workflows/src/*.ts")],
           },
         },
         // As a company's sites tsconfig: the app's ambient types, which declare the virtual module.

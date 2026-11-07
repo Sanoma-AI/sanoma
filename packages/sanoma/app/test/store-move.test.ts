@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import { executablePath, launch } from "puppeteer-core";
 import { escapeIdentifier, Pool } from "pg";
 import { beforeAll, describe, expect, it } from "vitest";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { memorySecretStore, SanomaClient, type SanomaConfig, startWorker } from "@sanoma-ai/workflows";
+import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { memorySecretStore, SanomaClient, type SanomaConfig, startWorker } from "sanoma/workflows";
 import { startApp } from "../src/index.ts";
 
 // Needs Postgres and Chrome. The Secret storage panel's Move, in a browser: the plan, the start,

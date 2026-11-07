@@ -16,20 +16,20 @@ import type {
   PreviewRequest,
   Principal,
   RunSummary,
-} from "@sanoma-ai/workflows";
-import type { ConfigDescription, PermissionsGrid, Span } from "@sanoma-ai/workflows/describe";
-import { ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
-import type { RunCheck, Scenario } from "@sanoma-ai/workflows/scenario";
-import { EFFECTS, RUN_STATUSES, type Saved } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import type { ConfigDescription, PermissionsGrid, Span } from "sanoma/workflows/describe";
+import { ConfigDescriptionSchema } from "sanoma/workflows/description";
+import type { RunCheck, Scenario } from "sanoma/workflows/scenario";
+import { EFFECTS, RUN_STATUSES, type Saved } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { ColumnChange } from "./components/grid/plan.ts";
 
 /**
  * The shapes the app's server functions take and return. The page imports this file too, so
  * the server and the browser agree on them. Only types come from
- * `@sanoma-ai/workflows`, so the browser bundle never loads the runtime; values the page shares
- * with the runtime come from `@sanoma-ai/workflows/shared`, and the description's schema from
- * `@sanoma-ai/workflows/description`.
+ * `sanoma/workflows`, so the browser bundle never loads the runtime; values the page shares
+ * with the runtime come from `sanoma/workflows/shared`, and the description's schema from
+ * `sanoma/workflows/description`.
  */
 
 /**
@@ -600,8 +600,8 @@ export const PreviewQuery = z
   .max(200) satisfies z.ZodType<Omit<PreviewRequest, "principal">[]>;
 export type PreviewQuery = z.infer<typeof PreviewQuery>;
 
-export type { PermissionsRow } from "@sanoma-ai/workflows/describe";
-export type { RunCheck } from "@sanoma-ai/workflows/scenario";
+export type { PermissionsRow } from "sanoma/workflows/describe";
+export type { RunCheck } from "sanoma/workflows/scenario";
 
 /**
  * The Permissions page's grid (`getPermissions`): the policy, then the grid (`permissionsGrid`:

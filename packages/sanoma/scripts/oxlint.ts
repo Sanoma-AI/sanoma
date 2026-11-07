@@ -1,7 +1,7 @@
 // Writes this package's `oxlint.json`, the lint a company repo's `.oxlintrc.json` extends: run by
 // `build`, before tsc. It is self-contained, with no `extends` into `node_modules` (which the
 // installer lays out), made of:
-// - `@sanoma-ai/workflows`'s `oxlint.json` (its overrides for `workflows/**`), with an entry for `sanoma` derived from `@sanoma-ai/workflows`'s (the same
+// - `sanoma/workflows`'s `oxlint.json` (its overrides for `workflows/**`), with an entry for `sanoma` derived from `sanoma/workflows`'s (the same
 //   names), `sanoma/**` refused, and the plugin (`date`) loaded from this package's `dist/`;
 // - an override for `sites/**`: a site is client code, reaching the app through `sanoma/site` and
 //   `sanoma/ui` alone, with no server, runtime, connector or environment of its own (the plugin's
@@ -15,7 +15,7 @@ type Json = Record<string, any>;
 const read = (path: string): Json => JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
 
 const own = read("../package.json").name as string;
-const workflows = read("../node_modules/@sanoma-ai/workflows/oxlint.json");
+const workflows = read("../node_modules/sanoma/workflows/oxlint.json");
 const root = read("../../../.oxlintrc.json");
 
 const overrides = (workflows.overrides as Json[]).map((given) => {
@@ -23,7 +23,7 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
   const rule = override.rules["no-restricted-imports"] as [string, { paths: Json[]; patterns: Json[] }] | undefined;
   if (rule === undefined) return override;
   const [severity, { paths, patterns }] = rule;
-  const author = paths.find((p) => p.name === "@sanoma-ai/workflows")!;
+  const author = paths.find((p) => p.name === "sanoma/workflows")!;
   return {
     ...override,
     rules: {
@@ -66,11 +66,11 @@ const sites = {
       "error",
       {
         paths: [
-          ...[own, "@sanoma-ai/workflows", "@sanoma-ai/bridge", "pg", "drizzle-orm"].map((name) => ({
+          ...[own, "sanoma/workflows", "sanoma/internal/bridge", "pg", "drizzle-orm"].map((name) => ({
             name,
             message: SERVER,
           })),
-          { name: "@sanoma-ai/app", message: APP },
+          { name: "sanoma/app", message: APP },
           {
             name: "@tanstack/react-start",
             message: `${SERVER} Its route APIs (\`Link\`, \`useNavigate\`, …) come from \`sanoma/site\`, and \`createFileRoute\` from \`@tanstack/react-router\`.`,
@@ -83,8 +83,8 @@ const sites = {
               `!${own}/site`,
               `!${own}/ui`,
               `!${own}/claims`,
-              "@sanoma-ai/workflows/**",
-              "@sanoma-ai/bridge/**",
+              "sanoma/workflows/**",
+              "sanoma/internal/bridge/**",
               "@dbos-inc/**",
               "pg/**",
               "drizzle-orm/**",
@@ -92,9 +92,9 @@ const sites = {
             ],
             message: SERVER,
           },
-          { group: ["@sanoma-ai/app/**"], message: APP },
+          { group: ["sanoma/app/**"], message: APP },
           {
-            group: ["@sanoma-ai/testing", "@sanoma-ai/testing/**"],
+            group: ["sanoma/testing", "sanoma/testing/**"],
             message: `Fakes and test helpers belong in tests. ${SERVER}`,
           },
           {

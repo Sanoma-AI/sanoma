@@ -4,8 +4,8 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Bridge, startBridge } from "@sanoma-ai/bridge";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { type Bridge, startBridge } from "sanoma/internal/bridge";
+import { testDatabaseUrl } from "sanoma/testing";
 import {
   checkHost,
   dockerAvailable,
@@ -13,7 +13,7 @@ import {
   hostCheckWorkflows,
   testRepository,
   throughWorkflows,
-} from "@sanoma-ai/testing/host";
+} from "sanoma/testing/host";
 import {
   type CallContext,
   memoryLedger,
@@ -23,8 +23,8 @@ import {
   type SanomaConfig,
   withSetup,
   type Worker,
-} from "@sanoma-ai/workflows";
-import { startTestWorker } from "@sanoma-ai/testing";
+} from "sanoma/workflows";
+import { startTestWorker } from "sanoma/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { dockerOps, dockerTf } from "../src/connector.ts";
 import { dockerDriver } from "../src/driver.ts";

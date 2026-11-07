@@ -9,9 +9,9 @@
     "**/cn-tables.ts",
     ".agents/skills",
     "skills-lock.json",
-    "packages/bridge/src/gen",
-    "packages/bridge/testdata",
-    "packages/workflows/drizzle/*/meta",
-    "connectors/better-auth/drizzle/*/meta"
+    "packages/sanoma/bridge/src/gen",
+    "packages/sanoma/bridge/testdata",
+    "packages/sanoma/workflows/drizzle/*/meta",
+    "packages/sanoma/better-auth/drizzle/*/meta"
   ]
 }

@@ -6,7 +6,7 @@ import {
   SanomaClient,
   type SanomaConfig,
   type Worker,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { afterAll, beforeAll } from "vitest";
 import { startTestWorker, type TestWorkerOptions } from "./index.ts";
 

@@ -13,10 +13,10 @@ import {
   type Resource,
   wakeupHostTypes,
   wakeUrlOf,
-} from "@sanoma-ai/workflows";
-import type { DataValue } from "@sanoma-ai/workflows/describe";
-import { secret } from "@sanoma-ai/workflows/resources";
-import { WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
+} from "sanoma/workflows";
+import type { DataValue } from "sanoma/workflows/describe";
+import { secret } from "sanoma/workflows/resources";
+import { WAKEUP_TOKEN } from "sanoma/workflows/wakeup-service";
 import {
   ApiError,
   INFRA,

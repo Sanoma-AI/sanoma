@@ -8,8 +8,8 @@ import {
   memorySecrets,
   SanomaClient,
   type SanomaConfig,
-} from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
+} from "sanoma/workflows";
+import { describeConfig } from "sanoma/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testDatabaseUrl, waitFor } from "../src/index.ts";
 import { fakeHost, hostCheck, inProcessHost } from "../src/host.ts";

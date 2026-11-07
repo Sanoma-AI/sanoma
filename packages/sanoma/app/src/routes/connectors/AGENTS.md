@@ -1,4 +1,4 @@
-# packages/app/src/routes/connectors
+# packages/sanoma/app/src/routes/connectors
 
 The pages under `/connectors`: the list of the config's connectors and the page for one connector.
 

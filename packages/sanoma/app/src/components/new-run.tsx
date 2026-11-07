@@ -1,4 +1,4 @@
-import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import type { WorkflowEntry } from "sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { FlaskIcon } from "@phosphor-icons/react/dist/csr/Flask";

@@ -6,9 +6,9 @@ import {
   type SanomaClient,
   type SocialClients,
   type Tokens,
-} from "@sanoma-ai/workflows";
-import type { SiteEntry } from "@sanoma-ai/workflows/describe";
-import { ANONYMOUS_PRINCIPAL, siteDir, visitorPrincipal } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import type { SiteEntry } from "sanoma/workflows/describe";
+import { ANONYMOUS_PRINCIPAL, siteDir, visitorPrincipal } from "sanoma/workflows/shared";
 import type { AdmittingLogin } from "../context.ts";
 import { secretValues } from "../server/secrets.ts";
 import { loginKey } from "./keys.ts";

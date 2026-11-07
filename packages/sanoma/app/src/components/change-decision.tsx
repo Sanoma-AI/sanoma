@@ -1,5 +1,5 @@
-import type { ChangeView } from "@sanoma-ai/workflows";
-import { APPLY_WORKFLOW, CHANGE_MERGE, CHANGE_WORKFLOW, DRIFT_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import type { ChangeView } from "sanoma/workflows";
+import { APPLY_WORKFLOW, CHANGE_MERGE, CHANGE_WORKFLOW, DRIFT_WORKFLOW } from "sanoma/workflows/shared";
 import { Link } from "@tanstack/react-router";
 import { CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { approverName, isSettled, ruleOf } from "#/lib/changes.ts";

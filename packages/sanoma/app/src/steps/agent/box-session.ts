@@ -4,7 +4,7 @@ import {
   harnessStateDirectoryPath,
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
-import { type AppStepContext, type Box, type Process, valueAt } from "@sanoma-ai/workflows";
+import { type AppStepContext, type Box, type Process, valueAt } from "sanoma/workflows";
 import { DECLARE_BOX } from "../../api.ts";
 import { noKeyText } from "../../lib/chat.ts";
 import { placeOf } from "../../loopback.ts";

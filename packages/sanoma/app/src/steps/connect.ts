@@ -10,9 +10,9 @@ import {
   errorMessage,
   memorySecrets,
   type ResolvedConfig,
-} from "@sanoma-ai/workflows";
-import { type DataValue, formatOptions, renderDataFile } from "@sanoma-ai/workflows/describe";
-import { secret as secretOf } from "@sanoma-ai/workflows/resources";
+} from "sanoma/workflows";
+import { type DataValue, formatOptions, renderDataFile } from "sanoma/workflows/describe";
+import { secret as secretOf } from "sanoma/workflows/resources";
 import { INFRA, PASSWORD_NOTE } from "../api.ts";
 import { rootOf } from "./writes.ts";
 

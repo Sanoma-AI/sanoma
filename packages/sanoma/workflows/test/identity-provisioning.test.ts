@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
+import { testDatabaseUrl } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
 import { databaseOn, lazyDb } from "../src/db.ts";
 import { identityCredentials, identityDeployments } from "../src/db/identity.ts";
 import { CLOUD_IDENTITY_SQL, createDeploymentCredential, postgresIdentityEnrollments } from "../src/cloud-identity.ts";

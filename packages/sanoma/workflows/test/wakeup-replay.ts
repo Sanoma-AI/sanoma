@@ -1,4 +1,4 @@
-import type { Exchange, ReplayOptions } from "@sanoma-ai/testing/replay";
+import type { Exchange, ReplayOptions } from "sanoma/testing/replay";
 
 // How the wakeup service's recorded replies (test/fixtures/wakeup) are replayed, and recorded:
 // `sanoma.wakeup`'s driver tests and its features share it.

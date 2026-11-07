@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BridgeError, readPins } from "@sanoma-ai/bridge";
+import { BridgeError, readPins } from "sanoma/internal/bridge";
 import { fakeBridge } from "./fake-bridge.ts";
 
 const testdata = fileURLToPath(new URL("../testdata/", import.meta.url));

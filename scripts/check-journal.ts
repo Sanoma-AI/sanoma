@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { MigrationsJournal } from "../packages/workflows/src/db/migrate.ts";
+import type { MigrationsJournal } from "../packages/sanoma/workflows/src/db/migrate.ts";
 
 // Drizzle's migrator applies a migration only when it is newer than the newest one a database has
 // had, so a migration generated on a branch before another merged to `main` is skipped, silently,

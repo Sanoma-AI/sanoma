@@ -1,4 +1,4 @@
-import type { LoginContext, LoginHalf, LoginMethod } from "@sanoma-ai/workflows";
+import type { LoginContext, LoginHalf, LoginMethod } from "sanoma/workflows";
 import { getHostFromSource, matchesHostPattern } from "better-auth";
 import {
   emailCode,

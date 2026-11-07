@@ -7,7 +7,7 @@ import { executablePath, launch } from "puppeteer-core";
 import { Client } from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { z } from "zod";
-import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
+import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
 import {
   AuthenticationError,
   defineAuthentication,
@@ -18,8 +18,8 @@ import {
   type SanomaConfig,
   startWorker,
   withSetup,
-} from "@sanoma-ai/workflows";
-import { secret } from "@sanoma-ai/workflows/resources";
+} from "sanoma/workflows";
+import { secret } from "sanoma/workflows/resources";
 import { CALLBACK_ERRORS } from "../src/api.ts";
 import { startApp } from "../src/index.ts";
 

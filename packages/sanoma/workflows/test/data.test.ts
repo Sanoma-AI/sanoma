@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { eq, getTableName, inArray } from "drizzle-orm";
 import { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";

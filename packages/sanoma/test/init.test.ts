@@ -13,10 +13,10 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { AGENTS, VISITORS } from "@sanoma-ai/workflows";
-import { readPeople } from "@sanoma-ai/workflows/describe";
-import { groupNamesOf, principalIdsOf } from "@sanoma-ai/workflows/shared";
+import { testDatabaseUrl } from "sanoma/testing";
+import { AGENTS, VISITORS } from "sanoma/workflows";
+import { readPeople } from "sanoma/workflows/describe";
+import { groupNamesOf, principalIdsOf } from "sanoma/workflows/shared";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   declareFounder,
@@ -153,7 +153,7 @@ describe("pinDependencies", () => {
         devDependencies: {
           "@sanoma-ai/connector-anthropic": "0.1.5",
           "@sanoma-ai/connector-ghost": "0.4.9",
-          "@sanoma-ai/testing": "0.1.1",
+          "sanoma/testing": "0.1.1",
         },
       }),
     ).toEqual({

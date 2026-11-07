@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { mintInstanceToken } from "@sanoma-ai/workflows/wakeup-service";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
+import { mintInstanceToken } from "sanoma/workflows/wakeup-service";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { copyFixture, FIXTURE_GRID, ensureBuilt, runCli, serving, startCli } from "./fixture.ts";
 

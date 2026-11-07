@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
-import { memoryLedger, type SanomaConfig } from "@sanoma-ai/workflows";
-import { APPS_LIST, type AvailableApps } from "@sanoma-ai/workflows/shared";
+import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
+import { memoryLedger, type SanomaConfig } from "sanoma/workflows";
+import { APPS_LIST, type AvailableApps } from "sanoma/workflows/shared";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { executablePath, launch } from "puppeteer-core";

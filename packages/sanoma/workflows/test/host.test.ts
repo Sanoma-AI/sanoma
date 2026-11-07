@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { fakeHost, fakeHostType, testRepository } from "@sanoma-ai/testing/host";
+import { fakeHost, fakeHostType, testRepository } from "sanoma/testing/host";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";

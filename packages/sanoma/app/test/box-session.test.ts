@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { waitFor } from "@sanoma-ai/testing";
-import { checkSandbox, fakeSandbox } from "@sanoma-ai/testing/sandbox";
+import { waitFor } from "sanoma/testing";
+import { checkSandbox, fakeSandbox } from "sanoma/testing/sandbox";
 import {
   type Box,
   type Chat,
@@ -12,7 +12,7 @@ import {
   resolveConfig,
   type Source,
   withSetup,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { acpEngine } from "../src/steps/agent/acp.ts";
 import { boxSession, homeOf, NO_BOX, personBox } from "../src/steps/agent/box-session.ts";

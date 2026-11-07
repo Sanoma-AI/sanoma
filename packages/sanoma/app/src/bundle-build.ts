@@ -2,16 +2,16 @@
 // for Cloudflare's workerd, by `@cloudflare/vite-plugin`, over the same route tree as the Node
 // build (`buildApp`). The bundle carries the company's config, the snapshot of its files and the
 // runtime, and the pages no call is made from are prerendered into its assets. What needs the
-// checkout is the worker's (`steps/`), which no module of the app imports. `@sanoma-ai/app/bundle`.
+// checkout is the worker's (`steps/`), which no module of the app imports. `sanoma/app/bundle`.
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire, SourceMap, type SourceMapPayload } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { declarationFiles, filesUnder, type SanomaConfig, timeMatcherFile, vendorInfo } from "@sanoma-ai/workflows";
-import { domainsText } from "@sanoma-ai/workflows/shared";
-import type { SiteEntry } from "@sanoma-ai/workflows/describe";
+import { declarationFiles, filesUnder, type SanomaConfig, timeMatcherFile, vendorInfo } from "sanoma/workflows";
+import { domainsText } from "sanoma/workflows/shared";
+import type { SiteEntry } from "sanoma/workflows/describe";
 import MagicString from "magic-string";
 import type { InlineConfig, Plugin, PluginOption } from "vite";
 import { type AppBundle, prerenderedAsset } from "./app-bundle.ts";
@@ -80,7 +80,7 @@ const NODE_ONLY = new Set([
 
 /** A site's file, or the app's own, that imports what the Worker does not have (`NODE_ONLY`): the first the build met. */
 export class NodeOnlyImport extends Error {
-  /** The importing file, from the repo (or the app's own, as `@sanoma-ai/app/src/…`). */
+  /** The importing file, from the repo (or the app's own, as `sanoma/app/src/…`). */
   readonly file: string;
   /** What it imports: a name, `default`, `*`, or `the module` for an import of it alone. */
   readonly symbol: string;
@@ -141,7 +141,7 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): 
   const id = `\0${BUNDLE}`;
   const runtimeId = `\0${RUNTIME}`;
   // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
-  const fromRuntime = createRequire(createRequire(defaultRuntimeFrom).resolve("@sanoma-ai/workflows"));
+  const fromRuntime = createRequire(createRequire(defaultRuntimeFrom).resolve("sanoma/workflows"));
   const cedar = join(dirname(fromRuntime.resolve("@cedar-policy/cedar-wasm/nodejs")), "..", "web");
   return {
     name: "sanoma:app-bundle",
@@ -150,7 +150,7 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): 
     load(loaded) {
       if (loaded === runtimeId) {
         return [
-          'import { useCedarWasm, useRootSnapshot, useTimeMatcher } from "@sanoma-ai/workflows";\n',
+          'import { useCedarWasm, useRootSnapshot, useTimeMatcher } from "sanoma/workflows";\n',
           `import * as cedarWeb from ${specifier(join(cedar, "cedar_wasm.js"))};\n`,
           `import cedarModule from ${specifier(join(cedar, "cedar_wasm_bg.wasm"))};\n`,
           `import { TimeMatcher } from ${specifier(timeMatcherFile(fromRuntime))};\n`,
@@ -166,7 +166,7 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): 
       return [
         // First, so the runtime's registrations are made before the config's files are evaluated.
         `import ${JSON.stringify(RUNTIME)};\n`,
-        'import { joinDeclarations } from "@sanoma-ai/workflows";\n',
+        'import { joinDeclarations } from "sanoma/workflows";\n',
         `import config from ${specifier(configFile)};\n`,
         ...files.workflows.map((path, i) => `import * as workflow${i} from ${specifier(path)};\n`),
         ...files.data.map((path, i) => `import * as data${i} from ${specifier(path)};\n`),
@@ -275,7 +275,7 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
                   ? "*"
                   : (used.imported?.name ?? used.imported?.value ?? "?");
           // Said from the repo, or for the app's own from its package.
-          const named = companyFile(file, root) ? relative(root, file) : `@sanoma-ai/app/${relative(pkgDir, file)}`;
+          const named = companyFile(file, root) ? relative(root, file) : `sanoma/app/${relative(pkgDir, file)}`;
           throw new NodeOnlyImport(named, symbol, module);
         }
       },

@@ -1,5 +1,5 @@
-import type { PreviewAnswer } from "@sanoma-ai/workflows";
-import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
+import type { PreviewAnswer } from "sanoma/workflows";
+import { WORKFLOW_ACTION } from "sanoma/workflows/shared";
 import type { PreviewQuery } from "../api.ts";
 import { approverName } from "./changes.ts";
 
@@ -7,7 +7,7 @@ import { approverName } from "./changes.ts";
 // and every operation it may call, before the run starts (`previewFn`), asked as `previewRequests`
 // says (the runtime's, which the Permissions grid asks for each group).
 
-export { previewRequests } from "@sanoma-ai/workflows/shared";
+export { previewRequests } from "sanoma/workflows/shared";
 
 const AND = new Intl.ListFormat("en", { type: "conjunction" });
 

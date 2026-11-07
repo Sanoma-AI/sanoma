@@ -1,6 +1,6 @@
 # Managed Cloud identity
 
-`@sanoma-ai/workflows/cloud-identity` supplies the identity-broker handler and refreshable Google SDK authentication for [D1, #492](https://github.com/Sanoma-AI/sanoma/issues/492). It is a reusable implementation boundary. Isolated live checks on a temporary Cloud Run service in `sanoma-513217` have verified attached-identity issuance, scoped KMS use and separate database permissions; production deployment remains open.
+`sanoma/workflows/cloud-identity` supplies the identity-broker handler and refreshable Google SDK authentication for [D1, #492](https://github.com/Sanoma-AI/sanoma/issues/492). It is a reusable implementation boundary. Isolated live checks on a temporary Cloud Run service in `sanoma-513217` have verified attached-identity issuance, scoped KMS use and separate database permissions; production deployment remains open.
 
 Runtime and provisioning identity are separate trust boundaries. `identityBroker` issues ten-minute OAuth access tokens for company runtimes. `provisioningIdentityBroker` supplies Google-issued OIDC tokens for the control plane’s Workload Identity Federation (WIF) flow. Deploy them with separate attached accounts, enrollment databases/readers and bootstrap credentials. Sharing handler code does not establish that separation. Neither handler reads company credential rows or unwraps data keys.
 
@@ -75,8 +75,8 @@ The one-day limit is illustrative; choose a validity and renewal policy for the 
 Trusted composition that already owns a writer pool may instead supply the low-level `IdentityProvisioning` adapter:
 
 ```ts
-import { postgresIdentityProvisioning } from "@sanoma-ai/workflows/cloud-identity";
-import { databaseOn } from "@sanoma-ai/workflows/db";
+import { postgresIdentityProvisioning } from "sanoma/workflows/cloud-identity";
+import { databaseOn } from "sanoma/workflows/db";
 
 const enrollmentWriter = databaseOn(enrollmentWriterPool);
 const identityProvisioning = postgresIdentityProvisioning(async () => enrollmentWriter, {
@@ -113,8 +113,8 @@ import {
   identityBroker,
   postgresIdentityEnrollments,
   attachedGoogleTokenIssuer,
-} from "@sanoma-ai/workflows/cloud-identity";
-import { databaseOn } from "@sanoma-ai/workflows/db";
+} from "sanoma/workflows/cloud-identity";
+import { databaseOn } from "sanoma/workflows/db";
 
 const brokerReader = databaseOn(brokerReadOnlyPool);
 const handle = identityBroker({
@@ -135,9 +135,9 @@ The following composition joins D1 to the separate [#470 KMS adapter](https://gi
 ```ts
 import { readFile } from "node:fs/promises";
 import { KeyManagementServiceClient } from "@google-cloud/kms";
-import { cloudIdentityAuth } from "@sanoma-ai/workflows/cloud-identity";
-import { databaseOn } from "@sanoma-ai/workflows/db";
-import { kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";
+import { cloudIdentityAuth } from "sanoma/workflows/cloud-identity";
+import { databaseOn } from "sanoma/workflows/db";
+import { kmsPostgresStore } from "sanoma/workflows/kms-secrets";
 
 const companyDatabase = databaseOn(companyScopedPool);
 const authClient = cloudIdentityAuth({
@@ -163,7 +163,7 @@ The verification used D1 source `244fb3e78c66c5d3d6bb22cacad73acbb1726cb3` and K
 
 The actual Google SDK and KMS store passed own-key encrypted writes/reads, company A/B and production/preview encrypt/decrypt denial, separate company-database access checks, enrollment-write refusal, invalid bearer and caller-target override refusal. Revoking the broker's enrollment-read or audit-insert permission caused a sanitized 503 without a delivered token; restoring the permission restored service. These are permission-failure checks, not a measurement of provider-wide outages.
 
-A manual primary-version rotation kept old ciphertext readable and new writes adopted the new primary after propagation. Revoking a deployment credential rejected new issuance while the SDK's already issued token continued working until renewal. The ten-minute runtime renewal result is tracked in [#492](https://github.com/Sanoma-AI/sanoma/issues/492), separately from [provisioning OIDC verification](../../connectors/gcp/README.md#testing-and-current-evidence).
+A manual primary-version rotation kept old ciphertext readable and new writes adopted the new primary after propagation. Revoking a deployment credential rejected new issuance while the SDK's already issued token continued working until renewal. The ten-minute runtime renewal result is tracked in [#492](https://github.com/Sanoma-AI/sanoma/issues/492), separately from [provisioning OIDC verification](../../../connectors/gcp/README.md#testing-and-current-evidence).
 
 This proof uses test infrastructure and compiled source, not published-package consumption in sanoma-ops. Cloudflare cold start/resume, bootstrap delivery, production monitoring/quotas, IAM/KMS audit reconciliation and backup recovery remain rollout gates.
 
@@ -214,8 +214,8 @@ import {
   provisioningIdentityBroker,
   attachedGoogleIdTokenIssuer,
   postgresIdentityEnrollments,
-} from "@sanoma-ai/workflows/cloud-identity";
-import { databaseOn } from "@sanoma-ai/workflows/db";
+} from "sanoma/workflows/cloud-identity";
+import { databaseOn } from "sanoma/workflows/db";
 
 const provisioningReader = databaseOn(provisioningReadOnlyPool);
 const identity = {
@@ -232,7 +232,7 @@ const handle = provisioningIdentityBroker({
 });
 ```
 
-The pool and audit sink belong to this separate service. The control plane reaches it through the GCP connector's [`gcpWithIdentity`](../../connectors/gcp/README.md#deployment-identity): the issuer URL, audience and target account are declared in code, and the provisioning bearer is the `gcp/provisioning` connection's stored credential, entered on the Google Cloud connector page. Each call builds the external-account URL source from those in memory for the Node verifier and the Google provider; the configuration never enters source control, workflow inputs/results or logs.
+The pool and audit sink belong to this separate service. The control plane reaches it through the GCP connector's [`gcpWithIdentity`](../../../connectors/gcp/README.md#deployment-identity): the issuer URL, audience and target account are declared in code, and the provisioning bearer is the `gcp/provisioning` connection's stored credential, entered on the Google Cloud connector page. Each call builds the external-account URL source from those in memory for the Node verifier and the Google provider; the configuration never enters source control, workflow inputs/results or logs.
 
 Google-issued OIDC tokens last up to **one hour**. A ten-minute final impersonated access token does not shorten that lifetime. Revoking enrollment stops new issuance, but an issued OIDC or federated credential may still obtain access tokens. Incident revocation must also remove federation and/or target impersonation trust, accounting for IAM propagation and access tokens already issued. These helpers do not implement that IAM revocation workflow. The runtime route remains POST `/token` with ten-minute OAuth access tokens.
 
@@ -260,7 +260,7 @@ This establishes the Google trust path, not a deployed provisioning broker or pr
 
 Supply connection strings through the host's protected deployment mechanism. Never put them in source, resource plans, workflow inputs/results or logs. Runtime mode serves POST `/token`; provisioning mode serves GET `/identity`. Both require the corresponding enrollment bearer, use an attached Google identity and expose no enrollment endpoint. Put the HTTP listener behind HTTPS ingress, such as Cloud Run's TLS endpoint.
 
-An administrator installs `CLOUD_IDENTITY_SQL` from `@sanoma-ai/workflows/cloud-identity` in the enrollment database and `CLOUD_IDENTITY_AUDIT_SQL` from `@sanoma-ai/workflows/identity-service` in the audit database. The service performs no DDL. The enrollment login needs schema USAGE and SELECT on the two enrollment tables, with no table mutation or schema CREATE privileges. The audit login needs schema USAGE and INSERT on `sanoma_identity.audit_events`, with no SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER or schema CREATE privileges. For example, in the audit database:
+An administrator installs `CLOUD_IDENTITY_SQL` from `sanoma/workflows/cloud-identity` in the enrollment database and `CLOUD_IDENTITY_AUDIT_SQL` from `sanoma/workflows/identity-service` in the audit database. The service performs no DDL. The enrollment login needs schema USAGE and SELECT on the two enrollment tables, with no table mutation or schema CREATE privileges. The audit login needs schema USAGE and INSERT on `sanoma_identity.audit_events`, with no SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER or schema CREATE privileges. For example, in the audit database:
 
 ```sql
 CREATE ROLE identity_audit_writer NOLOGIN;
@@ -275,11 +275,11 @@ Audit rows contain fixed issuance metadata: result, deployment, company, environ
 
 The liveness route uses `/health`: [Cloud Run reserves some paths ending in `z`](https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths), so `/healthz` may be intercepted before it reaches the service; the service answers it too, for the runtime image's Docker health check. GET or HEAD `/health` and the launcher's `ready` event mean the process is listening. They do **not** prove current Google issuance, continuing database/audit availability, provider renewal or managed-store readiness. Before declaring a company ready, verify its deployed runtime can write and read a credential under its own key/database identity. The two-company, preview/production, renewal, cold-start, outage and recovery checks remain #532 gates.
 
-Trusted programmatic composition may call `startIdentityService(options)` from `@sanoma-ai/workflows/identity-service`, returning `{ url, stop }`. Its default host is loopback; the caller owns shutdown. The serving package does not load company code.
+Trusted programmatic composition may call `startIdentityService(options)` from `sanoma/workflows/identity-service`, returning `{ url, stop }`. Its default host is loopback; the caller owns shutdown. The serving package does not load company code.
 
 ### Deploying the issuers
 
-The published [runtime image](../sanoma/README.md#hosting-it-yourself), `ghcr.io/sanoma-ai/runtime:<sanoma version>`, runs the service with the command `identity` (from `sanoma` 0.11.21): it checks out no company and runs that release's `sanoma identity` as the non-root `node` user. Cloud Run deploys public GitHub Container Registry images as they are ([Cloud Run: supported container registries](https://docs.cloud.google.com/run/docs/deploying#images), page updated 2026-10-30), so a Cloud Run v2 service names that image directly, with no Artifact Registry copy; the release never replaces a version's tag, and Cloud Run records the digest it resolved in each revision. Google recommends an Artifact Registry remote repository in front of GitHub Container Registry for higher availability; later, if pulls prove unreliable.
+The published [runtime image](../README.md#hosting-it-yourself), `ghcr.io/sanoma-ai/runtime:<sanoma version>`, runs the service with the command `identity` (from `sanoma` 0.11.21): it checks out no company and runs that release's `sanoma identity` as the non-root `node` user. Cloud Run deploys public GitHub Container Registry images as they are ([Cloud Run: supported container registries](https://docs.cloud.google.com/run/docs/deploying#images), page updated 2026-10-30), so a Cloud Run v2 service names that image directly, with no Artifact Registry copy; the release never replaces a version's tag, and Cloud Run records the digest it resolved in each revision. Google recommends an Artifact Registry remote repository in front of GitHub Container Registry for higher availability; later, if pulls prove unreliable.
 
 A `gcp.cloudRunService` declaration for the provisioning mode:
 

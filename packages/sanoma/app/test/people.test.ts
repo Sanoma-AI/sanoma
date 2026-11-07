@@ -2,10 +2,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
-import { type Principal, resolveConfig, type SanomaConfig, type Source } from "@sanoma-ai/workflows";
-import { readPeople } from "@sanoma-ai/workflows/describe";
+import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
+import { type Principal, resolveConfig, type SanomaConfig, type Source } from "sanoma/workflows";
+import { readPeople } from "sanoma/workflows/describe";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ACTOR_COOKIE } from "../src/api.ts";

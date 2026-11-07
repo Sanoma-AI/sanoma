@@ -5,7 +5,7 @@ import {
   type LoginMethod,
   sameOrigin,
   type SignInMethod,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { createAuthMiddleware } from "better-auth/api";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createHash } from "node:crypto";

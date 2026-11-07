@@ -3,7 +3,7 @@ import { request } from "node:http";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { eq, sql } from "drizzle-orm";
 import { escapeLiteral } from "pg";
 import { lazyDb } from "../src/db.ts";

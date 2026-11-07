@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { BridgeError } from "@sanoma-ai/bridge";
-import { fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
+import { BridgeError } from "sanoma/internal/bridge";
+import { fixturesDir, loadReplies, stateBridge } from "sanoma/internal/bridge/fake";
 
 const github = { source: "integrations/github", version: "6.13.0" };
 const config = "{}";

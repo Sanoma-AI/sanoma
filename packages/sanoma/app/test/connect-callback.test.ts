@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, it, vi } from "vitest";
-import type { SanomaClient } from "@sanoma-ai/workflows";
+import type { SanomaClient } from "sanoma/workflows";
 import type { AppContext } from "../src/context.ts";
 import { authorizeConnection, connectionCallback } from "../src/server/connect.ts";
 

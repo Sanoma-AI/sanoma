@@ -1,4 +1,4 @@
-import { defineSteps } from "@sanoma-ai/workflows";
+import { defineSteps } from "sanoma/workflows";
 import { invoicesOps } from "./connector.ts";
 
 export const invoicesSteps = defineSteps("invoices", ({ then }) => {

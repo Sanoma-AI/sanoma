@@ -14,4 +14,4 @@ export {
   type SolutionClaim,
   type Tier,
   TIERS,
-} from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows/shared";

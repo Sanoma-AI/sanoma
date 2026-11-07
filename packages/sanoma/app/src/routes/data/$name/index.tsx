@@ -1,5 +1,5 @@
-import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
-import { errorMessage, personsOf } from "@sanoma-ai/workflows/shared";
+import type { ConfigDescription } from "sanoma/workflows/describe";
+import { errorMessage, personsOf } from "sanoma/workflows/shared";
 import { hashKey, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, type ShouldBlockFn, useBlocker } from "@tanstack/react-router";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";

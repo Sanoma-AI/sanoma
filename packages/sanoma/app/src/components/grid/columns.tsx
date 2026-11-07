@@ -1,5 +1,5 @@
-import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
-import { changeIdOf, errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
+import type { CollectionEntry } from "sanoma/workflows/describe";
+import { changeIdOf, errorMessage, type Saved } from "sanoma/workflows/shared";
 import { deepEquals } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";

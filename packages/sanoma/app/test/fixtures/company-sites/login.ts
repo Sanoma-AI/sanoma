@@ -1,4 +1,4 @@
-import { defineConnector, type LoginContext, vendorInfo, withSetup } from "@sanoma-ai/workflows";
+import { defineConnector, type LoginContext, vendorInfo, withSetup } from "sanoma/workflows";
 
 /** What the app gave each login half it made, for the tests to read. */
 export const loginContexts: LoginContext[] = [];

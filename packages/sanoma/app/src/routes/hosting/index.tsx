@@ -1,10 +1,10 @@
-import type { DriftReport, DriftResult, HostLifetime, RunSummary } from "@sanoma-ai/workflows";
+import type { DriftReport, DriftResult, HostLifetime, RunSummary } from "sanoma/workflows";
 import type {
   ConfigDescription,
   DeclaredResource,
   ResourceProblem,
   ResourceTypeEntry,
-} from "@sanoma-ai/workflows/describe";
+} from "sanoma/workflows/describe";
 import {
   APPLY_WORKFLOW,
   credentialReady,
@@ -13,7 +13,7 @@ import {
   hostnameUrl,
   isEnded,
   problemAt,
-} from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";

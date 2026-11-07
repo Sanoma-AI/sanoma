@@ -1,4 +1,4 @@
-import { defineConnector, vendorInfo } from "@sanoma-ai/workflows";
+import { defineConnector, vendorInfo } from "sanoma/workflows";
 
 /**
  * Anthropic: no operations. Its models are its model half (`model.ts`), which the app's registry

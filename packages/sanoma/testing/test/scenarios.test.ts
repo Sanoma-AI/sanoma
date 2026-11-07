@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
-import { loadScenarios } from "@sanoma-ai/workflows/scenario";
+import { resolveConfig, SanomaClient } from "sanoma/workflows";
+import { loadScenarios } from "sanoma/workflows/scenario";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testDatabaseUrl } from "../src/index.ts";
 import { describeScenarios, runScenario } from "../src/scenarios.ts";
@@ -65,7 +65,7 @@ describe("describeScenarios", () => {
 
   it("registers a failing test for a file that does not load, naming its file and line", async ({ signal }) => {
     // fixtures/broken.scenarios.ts, in a vitest of its own: its one test fails.
-    const vitest = fileURLToPath(new URL("../../../node_modules/vitest/vitest.mjs", import.meta.url));
+    const vitest = fileURLToPath(new URL("../../../../node_modules/vitest/vitest.mjs", import.meta.url));
     const vitestConfig = fileURLToPath(new URL("./fixtures/vitest.config.ts", import.meta.url));
     const args = [vitest, "run", "--config", vitestConfig];
     const child = await promisify(execFile)(process.execPath, args, { signal }).then(

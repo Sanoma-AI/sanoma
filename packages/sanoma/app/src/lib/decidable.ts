@@ -1,5 +1,5 @@
-import type { ApprovalState, RunSummary } from "@sanoma-ai/workflows";
-import { mayDecide, type PeopleResource } from "@sanoma-ai/workflows/shared";
+import type { ApprovalState, RunSummary } from "sanoma/workflows";
+import { mayDecide, type PeopleResource } from "sanoma/workflows/shared";
 
 /**
  * Of these approvals, the pending ones `actor` may decide; none while the page knows no name.

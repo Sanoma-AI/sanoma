@@ -347,7 +347,7 @@ export const isRules = (path: string) =>
  * text, so a draft's file is told without running it.
  */
 export const mayDeclarePeople = (text: string): boolean =>
-  /(?:\{[^}]*\bsanoma\b[^}]*\}|\*(?:\s*as\s+[\w$]+)?)\s*from\s*["'](?:sanoma|@sanoma-ai\/workflows)\/resources["']/.test(
+  /(?:\{[^}]*\bsanoma\b[^}]*\}|\*(?:\s*as\s+[\w$]+)?)\s*from\s*["'](?:sanoma|sanoma\/workflows)\/resources["']/.test(
     text,
   );
 /** The runtime rule's id, as a hold's `reasons` name it. */

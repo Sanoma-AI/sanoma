@@ -1,4 +1,4 @@
-import { tfFake, type TfFakeOptions } from "@sanoma-ai/bridge/fake";
+import { tfFake, type TfFakeOptions } from "sanoma/internal/bridge/fake";
 import { gcpTf } from "./connector.ts";
 import { constrain, retainKeys } from "./constraints.ts";
 

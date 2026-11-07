@@ -1,4 +1,4 @@
-// `@sanoma-ai/workflows/description`: what `describeConfig` answers, as zod schemas, and its
+// `sanoma/workflows/description`: what `describeConfig` answers, as zod schemas, and its
 // types inferred from them. zod only, no Node: a page can parse a description it is sent, and the
 // app extends `ConfigDescriptionSchema` with what it adds (`AppConfigSchema`).
 import { z } from "zod";

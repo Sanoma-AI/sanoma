@@ -14,9 +14,9 @@ import {
   sameOrigin,
   sealLoginCode,
   type SocialClients,
-} from "@sanoma-ai/workflows";
-import { admit } from "@sanoma-ai/workflows/describe";
-import { personsOf } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import { admit } from "sanoma/workflows/describe";
+import { personsOf } from "sanoma/workflows/shared";
 import { z } from "zod";
 import type { AppContext, LoginProvider } from "../context.ts";
 import { secretValues } from "../server/secrets.ts";

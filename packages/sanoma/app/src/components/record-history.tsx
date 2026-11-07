@@ -1,4 +1,4 @@
-import { CALL_WORKFLOW, errorMessage } from "@sanoma-ai/workflows/shared";
+import { CALL_WORKFLOW, errorMessage } from "sanoma/workflows/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Skeleton } from "#/components/ui/skeleton.tsx";

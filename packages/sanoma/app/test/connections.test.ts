@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
+import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
 import {
   defineAuthentication,
   defineConnection,
@@ -19,9 +19,9 @@ import {
   type SanomaConfig,
   SecretStoreError,
   withSetup,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { secret } from "../../workflows/src/secret.ts";
-import { connectionHealth, connections as connectionRows, connectionSetups, ledger } from "@sanoma-ai/workflows/db";
+import { connectionHealth, connections as connectionRows, connectionSetups, ledger } from "sanoma/workflows/db";
 import { eq, sql } from "drizzle-orm";
 import { lazyDb } from "../../workflows/src/db.ts";
 import { tree } from "../../workflows/test/tree.ts";

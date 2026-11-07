@@ -3,8 +3,8 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { fakeSandbox } from "@sanoma-ai/testing/sandbox";
+import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { fakeSandbox } from "sanoma/testing/sandbox";
 import {
   defineConfig,
   defineConnector,
@@ -21,8 +21,8 @@ import {
   startWorker,
   type Worker,
   withSetup,
-} from "@sanoma-ai/workflows";
-import { outlineWorkflow, svgDataUrl } from "@sanoma-ai/workflows/describe";
+} from "sanoma/workflows";
+import { outlineWorkflow, svgDataUrl } from "sanoma/workflows/describe";
 import { isNotFound } from "@tanstack/react-router";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -2645,7 +2645,7 @@ describe("startApp", () => {
   it("says to build the app when it is not built", async () => {
     const empty = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));
     try {
-      await expect(startApp(config, { distDir: empty })).rejects.toThrow(/pnpm --filter @sanoma-ai\/app build/);
+      await expect(startApp(config, { distDir: empty })).rejects.toThrow(/pnpm --filter sanoma\/app build/);
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }

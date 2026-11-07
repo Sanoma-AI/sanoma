@@ -1,4 +1,4 @@
-import type { ChatTurnContext, ChatTurnInput, ChatTurnOutput } from "@sanoma-ai/workflows";
+import type { ChatTurnContext, ChatTurnInput, ChatTurnOutput } from "sanoma/workflows";
 import type { ChatMessage, EngineName } from "../../lib/chat.ts";
 import { settle } from "../../server/chat.ts";
 import { acpEngine } from "./acp.ts";

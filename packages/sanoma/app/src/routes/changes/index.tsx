@@ -1,4 +1,4 @@
-import type { ChangeView } from "@sanoma-ai/workflows";
+import type { ChangeView } from "sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";

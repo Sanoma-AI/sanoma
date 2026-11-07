@@ -12,14 +12,14 @@ import {
   memoryLedger,
   memorySecrets,
   resolveConfig,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import {
   FEATURE_STEP_MS,
   featureScenarios,
   type FeatureTarget,
   type Scope,
   testFeature,
-} from "@sanoma-ai/workflows/scenario";
+} from "sanoma/workflows/scenario";
 import { describe, it } from "vitest";
 import { live, replay, type ReplayOptions } from "./replay.ts";
 

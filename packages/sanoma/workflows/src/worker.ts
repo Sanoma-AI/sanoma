@@ -105,7 +105,7 @@ export interface WorkerOptions {
   /** The company's repository, which apply commits the lockfile to; the launcher passes its checkout. */
   source?: Source;
   /**
-   * The app's own actions (`@sanoma-ai/app/steps`), which its built-in workflows run (Adopt, a
+   * The app's own actions (`sanoma/app/steps`), which its built-in workflows run (Adopt, a
    * form's Save, going live, connecting an existing repository, a chat's turn): the launcher passes
    * them. Without them, a run of one fails, saying this worker runs none of them (`NO_APP_STEPS`,
    * or for a chat `NO_CHAT_STEPS`).

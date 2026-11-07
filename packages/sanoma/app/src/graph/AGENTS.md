@@ -1,4 +1,4 @@
-# packages/app/src/graph
+# packages/sanoma/app/src/graph
 
 Builds the workflow and run graphs and lays them out. No React here; `components/graph.tsx` draws the result.
 

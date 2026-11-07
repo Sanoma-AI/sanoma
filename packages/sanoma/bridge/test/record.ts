@@ -53,7 +53,7 @@ export function changeKey({ priorStateJson = "", configJson = "" }: { priorState
 
 /** How to (re-)record a missing fixture, for error messages. */
 export const recordHint =
-  "record it with SANOMA_LIVE=1 SANOMA_RECORD=1 (packages/bridge/README.md, \"Replaying and recording the bridge in this package's tests\"); the copied GitHub and Stripe fixtures come from provider-bridge's bridge-record";
+  "record it with SANOMA_LIVE=1 SANOMA_RECORD=1 (packages/sanoma/bridge/README.md, \"Replaying and recording the bridge in this package's tests\"); the copied GitHub and Stripe fixtures come from provider-bridge's bridge-record";
 
 /** What replaces a secret string in a recorded state. */
 export const SCRUBBED = "<scrubbed>";

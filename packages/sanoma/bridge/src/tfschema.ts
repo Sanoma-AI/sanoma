@@ -1,4 +1,4 @@
-// `@sanoma-ai/bridge/tfschema`: OpenTofu provider schemas as Sanoma resources. The generator that
+// `sanoma/internal/bridge/tfschema`: OpenTofu provider schemas as Sanoma resources. The generator that
 // writes a connector's `resources.gen.ts`, and the state conversions its driver uses at run time.
 // No Node built-ins here: the CLI that reads and writes files is `tfschema/cli.ts`, the
 // package's `sanoma-tfschema` bin.

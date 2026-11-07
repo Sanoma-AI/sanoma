@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
-import { resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
-import { IMPORT_WORKFLOW, type ImportInput, type Saved } from "@sanoma-ai/workflows/shared";
+import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
+import { resolveConfig, type SanomaConfig } from "sanoma/workflows";
+import { IMPORT_WORKFLOW, type ImportInput, type Saved } from "sanoma/workflows/shared";
 import { type ComponentType, createElement } from "react";
 import { executablePath, launch } from "puppeteer-core";
 import { renderToStaticMarkup } from "react-dom/server";

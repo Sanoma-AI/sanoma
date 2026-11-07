@@ -1,4 +1,4 @@
-# packages/app/src/routes
+# packages/sanoma/app/src/routes
 
 The TanStack Router file routes of the app: its pages. Each file is served at the URL its path implies; any other path gets the not-found page. In a company's build with sites, these routes are mounted at the root and the repo's `sites/` at `/sites` ([Sites](../../README.md#sites)): `__root.tsx` is the root of both, so a site's pages render inside the app's shell, and no route here may claim a path under `/sites`. The one exception is `/sites` itself (`sites.index.tsx`), the Sites page: a site's pages are always `/sites/<name>/…` (`sites/__virtual.ts` mounts each folder at `/<name>` under the mount), so no site can take it, and the generator places it beside the sites' layouts under the root.
 

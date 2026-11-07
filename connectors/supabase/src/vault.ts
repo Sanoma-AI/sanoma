@@ -1,5 +1,5 @@
-import { SecretStoreError, type SecretAddress, type SecretStore, type SecretValue } from "@sanoma-ai/workflows";
-import { type Db, databaseOn, pgCode } from "@sanoma-ai/workflows/db";
+import { SecretStoreError, type SecretAddress, type SecretStore, type SecretValue } from "sanoma/workflows";
+import { type Db, databaseOn, pgCode } from "sanoma/workflows/db";
 import { sql } from "drizzle-orm";
 import { Pool } from "pg";
 

@@ -10,7 +10,7 @@ import {
   type Principal,
   type SanomaClient,
   type Source,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import type { UIMessageStreamWriter } from "ai";
 import { type ChatMessage, textOf } from "../../lib/chat.ts";
 import { inBox } from "./carrier.ts";

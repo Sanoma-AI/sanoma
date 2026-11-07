@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { type Bridge, BridgeError, type BridgeLog, type PlanInput, readPins, startBridge } from "@sanoma-ai/bridge";
+import { type Bridge, BridgeError, type BridgeLog, type PlanInput, readPins, startBridge } from "sanoma/internal/bridge";
 import { fakeBridge } from "./fake-bridge.ts";
 import { buildBridge } from "../scripts/download-bridge.ts";
 

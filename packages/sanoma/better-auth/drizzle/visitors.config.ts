@@ -1,6 +1,6 @@
 import { defineConfig } from "drizzle-kit";
 
-// `pnpm --filter @sanoma-ai/connector-better-auth generate`: the visitor login's migrations, from
+// `pnpm --filter sanoma generate`: the visitor login's migrations, from
 // `src/db/visitors.ts`. Column names are the properties in snake_case, as the runtime's
 // `databaseOn` reads them.
 export default defineConfig({

@@ -4,7 +4,7 @@
 // reaches the browser: the build hands it the files as data.
 import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { LOCALE, SITE_NAME } from "@sanoma-ai/workflows/shared";
+import { LOCALE, SITE_NAME } from "sanoma/workflows/shared";
 import { marked } from "marked";
 import { LineCounter, parseDocument } from "yaml";
 import type { ContentEntry } from "./content-types.ts";

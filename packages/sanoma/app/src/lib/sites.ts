@@ -1,4 +1,4 @@
-import { isLoopback } from "@sanoma-ai/workflows/shared";
+import { isLoopback } from "sanoma/workflows/shared";
 import { useRouter } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";

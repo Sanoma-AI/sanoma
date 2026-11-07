@@ -12,9 +12,9 @@ import { github } from "@sanoma-ai/connector-github";
 import { resend } from "@sanoma-ai/connector-resend";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
-import { testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
-import { fakeHost } from "@sanoma-ai/testing/host";
+import { testDatabaseUrl, waitFor, withFake } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
+import { fakeHost } from "sanoma/testing/host";
 import {
   defineConnection,
   isEnded,
@@ -24,18 +24,18 @@ import {
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
-} from "@sanoma-ai/workflows";
-import { loadDataFiles, readLockfile, readResources } from "@sanoma-ai/workflows/describe";
-import { secret } from "@sanoma-ai/workflows/resources";
-import { startWakeupService, type WakeupService } from "@sanoma-ai/workflows/wakeup-service";
+} from "sanoma/workflows";
+import { loadDataFiles, readLockfile, readResources } from "sanoma/workflows/describe";
+import { secret } from "sanoma/workflows/resources";
+import { startWakeupService, type WakeupService } from "sanoma/workflows/wakeup-service";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { credentials, databaseOn } from "@sanoma-ai/workflows/db";
+import { credentials, databaseOn } from "sanoma/workflows/db";
 import { eq } from "drizzle-orm";
 import { Client } from "pg";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { localGitSource } from "../../sanoma/src/source.ts";
+import { localGitSource } from "../../src/source.ts";
 import { type GoLiveProgress, INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";

@@ -8,7 +8,7 @@ import {
   SanomaClient,
   type SanomaConfig,
   type SelfStop,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testDatabaseUrl, waitFor } from "../src/index.ts";
 import { fakeHost, hostCheck, inProcessHost } from "../src/host.ts";

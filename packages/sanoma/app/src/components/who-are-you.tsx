@@ -1,5 +1,5 @@
-import { personsOf, principalOf } from "@sanoma-ai/workflows/shared";
-import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
+import { personsOf, principalOf } from "sanoma/workflows/shared";
+import type { ConfigDescription } from "sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Avatar, AvatarFallback } from "#/components/ui/avatar.tsx";

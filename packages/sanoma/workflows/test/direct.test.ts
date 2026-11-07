@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { useTestApp } from "@sanoma-ai/testing/harness";
-import { fakeHost } from "@sanoma-ai/testing/host";
+import { testDatabaseUrl } from "sanoma/testing";
+import { useTestApp } from "sanoma/testing/harness";
+import { fakeHost } from "sanoma/testing/host";
 import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";

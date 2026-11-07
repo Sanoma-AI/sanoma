@@ -19,7 +19,7 @@ import { errorMessage, notLoaded } from "./shared.ts";
  * `scenario.ts`, which the app reads too, because it needs DBOS and the ledger.
  */
 
-/** True for a fake that holds resources (`ResourceFake`, as `@sanoma-ai/bridge`'s `tfFake` is). */
+/** True for a fake that holds resources (`ResourceFake`, as `sanoma/internal/bridge`'s `tfFake` is). */
 const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & ResourceFake =>
   "override" in fake && "put" in fake && "remove" in fake;
 

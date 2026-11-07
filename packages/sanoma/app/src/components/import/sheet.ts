@@ -1,4 +1,4 @@
-import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
+import type { CollectionEntry } from "sanoma/workflows/describe";
 import {
   byCodePoint,
   type ImportColumn,
@@ -7,7 +7,7 @@ import {
   type ImportInput,
   importRows,
   type Saved,
-} from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows/shared";
 import { cellsOf } from "../grid/clipboard.ts";
 
 // A sheet on its way into a collection, pure: the file read into a header and rows, each column

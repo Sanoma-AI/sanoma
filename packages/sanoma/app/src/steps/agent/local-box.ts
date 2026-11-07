@@ -1,7 +1,7 @@
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { localBackend as localSandbox, type SandboxBackend } from "@sanoma-ai/workflows";
+import { localBackend as localSandbox, type SandboxBackend } from "sanoma/workflows";
 
 // The coding agents' boxes on this machine: the local backend of the `Sandbox` contract with their
 // environment, and the ports a bridge in one listens on.

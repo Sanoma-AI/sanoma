@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { betterAuthOps } from "./connector.ts";
 import { prepareBetterAuth } from "./instance.ts";
 import { betterAuthLogin } from "./login.ts";

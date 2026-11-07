@@ -1,4 +1,4 @@
-# packages/app/src/routes/workflows
+# packages/sanoma/app/src/routes/workflows
 
 The pages under `/workflows`: the overview, a table of the config's workflows or every run, and the page for one workflow.
 

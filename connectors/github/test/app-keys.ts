@@ -1,5 +1,5 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
-import type { Exchange } from "@sanoma-ai/testing/replay";
+import type { Exchange } from "sanoma/testing/replay";
 import { GITHUB_APP_SECRETS } from "../src/rest.ts";
 
 // What the tests signing as the App share: its keys, the check of a JWT's signer, and the scrub

@@ -1,5 +1,5 @@
-import { errorCode, errorMessage, type PeopleResource, type Principal } from "@sanoma-ai/workflows";
-import { admit, type DeclaredPeople } from "@sanoma-ai/workflows/describe";
+import { errorCode, errorMessage, type PeopleResource, type Principal } from "sanoma/workflows";
+import { admit, type DeclaredPeople } from "sanoma/workflows/describe";
 import { ACTOR_COOKIE, ACTOR_KEY } from "../api.ts";
 import type { AdmittingLogin, LoginProvider } from "../context.ts";
 import { escapeHtml, smallPage, wantsJson } from "./page.ts";

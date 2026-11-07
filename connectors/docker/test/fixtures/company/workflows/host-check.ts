@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { defineConnector, defineDriver, defineWorkflow, withSetup } from "@sanoma-ai/workflows";
+import { defineConnector, defineDriver, defineWorkflow, withSetup } from "sanoma/workflows";
 import { z } from "sanoma";
 
-// A copy of `@sanoma-ai/testing/host`'s `hostCheck` and `hostCheckWorkflows`: same names, ops and digest.
+// A copy of `sanoma/testing/host`'s `hostCheck` and `hostCheckWorkflows`: same names, ops and digest.
 
 const CREDENTIAL = "HOST_CHECK_TOKEN";
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);

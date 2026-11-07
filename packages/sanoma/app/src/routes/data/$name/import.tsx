@@ -1,4 +1,4 @@
-import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
+import type { ConfigDescription } from "sanoma/workflows/describe";
 import {
   errorMessage,
   IMPORT_WORKFLOW,
@@ -8,7 +8,7 @@ import {
   mappingProblems,
   personsOf,
   type Saved,
-} from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows/shared";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useMemo, useState } from "react";

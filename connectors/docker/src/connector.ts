@@ -1,6 +1,6 @@
-import { tfConnector, type TfMapped } from "@sanoma-ai/bridge/connector";
-import { DriverError, vendorInfo } from "@sanoma-ai/workflows";
-import { DOMAIN_NAME, domainsOf, domainsText, SITE_KEY } from "@sanoma-ai/workflows/shared";
+import { tfConnector, type TfMapped } from "sanoma/internal/bridge/connector";
+import { DriverError, vendorInfo } from "sanoma/workflows";
+import { DOMAIN_NAME, domainsOf, domainsText, SITE_KEY } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { docker_container, provider } from "./resources.gen.ts";
 

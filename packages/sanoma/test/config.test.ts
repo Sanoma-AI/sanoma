@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { resolveConfig } from "@sanoma-ai/workflows";
+import { resolveConfig } from "sanoma/workflows";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig, UsageError } from "../src/config.ts";
 

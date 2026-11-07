@@ -1,4 +1,4 @@
-import { type CallContext, diffDeclared, DriverError, type PlanAction } from "@sanoma-ai/workflows";
+import { type CallContext, diffDeclared, DriverError, type PlanAction } from "sanoma/workflows";
 import type { z } from "zod";
 import { database, host, hostSlug, PORT, REGIONS, repositoryOf, SLUG, SLUG_RULE } from "./connector.ts";
 

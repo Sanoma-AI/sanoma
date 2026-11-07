@@ -24,8 +24,8 @@ import {
   errorMessage,
   readApps,
   type Source,
-} from "@sanoma-ai/workflows";
-import { APP_NAME } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import { APP_NAME } from "sanoma/workflows/shared";
 import type { SanomaEvent } from "./events.ts";
 
 const run = promisify(execFile);

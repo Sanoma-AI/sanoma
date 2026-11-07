@@ -1,5 +1,5 @@
-import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
-import { type ImportColumn, type ImportInput, importRows, mappingProblems } from "@sanoma-ai/workflows/shared";
+import type { CollectionEntry } from "sanoma/workflows/describe";
+import { type ImportColumn, type ImportInput, importRows, mappingProblems } from "sanoma/workflows/shared";
 import { Fragment } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "#/components/ui/card.tsx";

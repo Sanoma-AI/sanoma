@@ -19,7 +19,7 @@ import type { Source } from "./source.ts";
 // The app's own actions on the company's repository, as built-in workflows: the app starts each
 // (its pages through `api.<name>`, polling `.result`) and the worker runs it, since only the
 // worker has the checkout. What each does is the app's, given to the worker as `AppSteps`
-// (`WorkerOptions.app`, `@sanoma-ai/app/steps`), and each is called in a step of its own run
+// (`WorkerOptions.app`, `sanoma/app/steps`), and each is called in a step of its own run
 // (`app-steps.ts`), its writes to the checkout one at a time per worker. Workflows like any other, held to
 // the same lint: no DBOS here, and no operation, so nothing goes through `ctx`.
 

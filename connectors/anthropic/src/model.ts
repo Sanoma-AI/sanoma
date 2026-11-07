@@ -1,6 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { LoadAPIKeyError, type ProviderV4 } from "@ai-sdk/provider";
-import type { ModelContext } from "@sanoma-ai/workflows";
+import type { ModelContext } from "sanoma/workflows";
 import { customProvider } from "ai";
 import { anthropicEnv } from "./driver.ts";
 

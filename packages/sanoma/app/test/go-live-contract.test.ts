@@ -15,10 +15,10 @@ import {
   resolveConfig,
   type SanomaConfig,
   sourceKeyPair,
-} from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
+} from "sanoma/workflows";
+import { describeConfig } from "sanoma/workflows/describe";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { secret } from "@sanoma-ai/workflows/resources";
+import { secret } from "sanoma/workflows/resources";
 import { z } from "zod";
 import type { AppContext } from "../src/context.ts";
 import { choose, goLiveChoices } from "../src/server/go-live.ts";

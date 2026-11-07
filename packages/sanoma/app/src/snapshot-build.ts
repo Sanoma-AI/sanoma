@@ -17,9 +17,9 @@ import {
   type Source,
   sourceRepository,
   valueAt,
-} from "@sanoma-ai/workflows";
-import { type ConfigDescription, describeConfig, liveDescription, readLockfile } from "@sanoma-ai/workflows/describe";
-import { loadScenarios } from "@sanoma-ai/workflows/scenario";
+} from "sanoma/workflows";
+import { type ConfigDescription, describeConfig, liveDescription, readLockfile } from "sanoma/workflows/describe";
+import { loadScenarios } from "sanoma/workflows/scenario";
 import { INFRA, type ScenariosResponse } from "./api.ts";
 import { contentFields, publishedOf } from "./content-files.ts";
 import { type AppSnapshot, withoutSources } from "./snapshot.ts";

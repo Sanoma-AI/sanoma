@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import type { ConnectExistingInput } from "@sanoma-ai/workflows";
+import type { ConnectExistingInput } from "sanoma/workflows";
 import { useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "#/components/ui/field.tsx";

@@ -1,5 +1,5 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { sql } from "drizzle-orm";
 import { getTableName } from "drizzle-orm";
 import { Pool } from "pg";

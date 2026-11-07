@@ -1,4 +1,4 @@
-import { sanoma } from "@sanoma-ai/workflows/resources";
+import { sanoma } from "sanoma/workflows/resources";
 
 export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace" });
 export const bo = sanoma.person({ id: "bo" });

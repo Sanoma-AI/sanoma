@@ -1,4 +1,4 @@
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { checkPreparedOnly, prepareDatabase } from "../src/db.ts";

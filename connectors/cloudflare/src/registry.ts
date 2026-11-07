@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { DriverError, errorMessage, retryableStatus } from "@sanoma-ai/workflows";
+import { DriverError, errorMessage, retryableStatus } from "sanoma/workflows";
 
 /*
  * The runtime image copied into the account's registry, registry to registry over the OCI

@@ -1,11 +1,11 @@
-import type { ConfigDescription, DeclaredResource } from "@sanoma-ai/workflows/describe";
+import type { ConfigDescription, DeclaredResource } from "sanoma/workflows/describe";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useServerFn } from "@tanstack/react-start";
-import { ADMIN, AGENTS } from "@sanoma-ai/workflows/shared";
+import { ADMIN, AGENTS } from "sanoma/workflows/shared";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Badge } from "#/components/ui/badge.tsx";
