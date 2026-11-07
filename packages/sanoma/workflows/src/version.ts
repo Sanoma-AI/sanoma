@@ -4,11 +4,13 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
 import { upFrom } from "./paths.ts";
+import manifest from "../../package.json" with { type: "json" };
 
-/** `sanoma`'s version, from its package.json: two levels above `workflows/src/` and `workflows/dist/` alike. */
-export const RUNTIME_VERSION = (
-  JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }
-).version;
+/**
+ * `sanoma`'s version, from its package.json: two levels above `workflows/src/` and `workflows/dist/`
+ * alike. Imported, so the Worker's bundle inlines it.
+ */
+export const RUNTIME_VERSION: string = manifest.version;
 
 /**
  * The sequence of DBOS calls the runtime makes around each `ctx` call: policy step, approval

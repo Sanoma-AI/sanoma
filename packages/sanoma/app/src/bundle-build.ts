@@ -183,21 +183,14 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
   return [
     bundleModule(root, configFile, snapshot),
     {
-      // The runtime reads its version from `sanoma`'s package.json, two directories above it: inlined from the build's.
+      // The runtime imports `sanoma`'s package.json for its version: only that, not its dependencies' names.
       name: "sanoma:runtime-version",
       enforce: "pre",
       applyToEnvironment: ssr,
-      transform(code, id) {
-        const file = id.split("?")[0]!;
-        if (!/[/\\]workflows[/\\](dist[/\\]version\.js|src[/\\]version\.ts)$/.test(file)) return;
-        const read =
-          /JSON\.parse\(\s*readFileSync\(new URL\("\.\.\/\.\.\/package\.json", import\.meta\.url\), "utf8"\)\s*\)/;
-        if (!read.test(code)) return this.error(`the Worker's build no longer finds how ${file} reads its version`);
-        const { version } = JSON.parse(readFileSync(join(dirname(file), "..", "..", "package.json"), "utf8")) as {
-          version: string;
-        };
-        return { code: code.replace(read, JSON.stringify({ version })), map: null };
-      },
+      load: (id) =>
+        id === manifestFile
+          ? JSON.stringify({ version: (JSON.parse(readFileSync(id, "utf8")) as { version: string }).version })
+          : undefined,
     },
     {
       // workerd gives a module no `import.meta.url`: each is given its file's, as Node gives it,
