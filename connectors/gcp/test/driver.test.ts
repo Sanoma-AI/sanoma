@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
-import { BridgeError } from "@sanoma-ai/bridge";
-import { stateBridge } from "@sanoma-ai/bridge/fake";
-import { memorySecrets, type CallContext, type Driver } from "@sanoma-ai/workflows";
+import { BridgeError } from "sanoma/internal/bridge";
+import { stateBridge } from "sanoma/internal/bridge/fake";
+import { memorySecrets, type CallContext, type Driver } from "sanoma/workflows";
 import { gcpDriver } from "../src/driver.ts";
 import { gcpTf } from "../src/connector.ts";
 import { fakeGcp } from "../src/fake.ts";

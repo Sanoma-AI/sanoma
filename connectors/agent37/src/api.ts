@@ -1,4 +1,4 @@
-import { DriverError, retryableStatus } from "@sanoma-ai/workflows";
+import { DriverError, retryableStatus } from "sanoma/workflows";
 import { z } from "zod";
 
 // Agent37's Sandbox API (https://www.agent37.com/docs/agents-api/instances), cut to the calls the

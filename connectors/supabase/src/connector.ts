@@ -1,5 +1,5 @@
-import { tfConnector } from "@sanoma-ai/bridge/connector";
-import { databaseUrlSecret, defineConnector, vendorInfo } from "@sanoma-ai/workflows";
+import { tfConnector } from "sanoma/internal/bridge/connector";
+import { databaseUrlSecret, defineConnector, vendorInfo } from "sanoma/workflows";
 import { z } from "zod";
 import { provider, supabase_project } from "./resources.gen.ts";
 

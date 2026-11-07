@@ -1,5 +1,5 @@
-import { live, replay } from "@sanoma-ai/testing/replay";
-import { type CallContext, DriverError, memorySecrets, type Secrets } from "@sanoma-ai/workflows";
+import { live, replay } from "sanoma/testing/replay";
+import { type CallContext, DriverError, memorySecrets, type Secrets } from "sanoma/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 import { project } from "../src/connector.ts";

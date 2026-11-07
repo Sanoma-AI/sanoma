@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { neonOps } from "./connector.ts";
 import { neonDriver } from "./driver.ts";
 import { fakeNeon } from "./fake.ts";

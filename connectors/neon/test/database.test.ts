@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { checkDatabase, databaseCheckConfig, fakeDatabase } from "@sanoma-ai/testing/database";
-import { type CallContext, memorySecrets, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { testDatabaseUrl } from "sanoma/testing";
+import { checkDatabase, databaseCheckConfig, fakeDatabase } from "sanoma/testing/database";
+import { type CallContext, memorySecrets, resolveConfig, SanomaClient } from "sanoma/workflows";
+import { describeConfig } from "sanoma/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { project } from "../src/connector.ts";
 import { fakeNeon } from "../src/fake.ts";

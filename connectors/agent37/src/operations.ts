@@ -1,4 +1,4 @@
-import type { PlanAction } from "@sanoma-ai/workflows";
+import type { PlanAction } from "sanoma/workflows";
 import { wanted } from "./connector.ts";
 
 // The instance type's operations, a declaration's record: apply makes nothing at Agent37, since a

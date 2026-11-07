@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-agent37
 
-[Agent37 Cloud](https://www.agent37.com) for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): the boxes a coding agent works in, one persistent Linux computer (an Agent37 instance) per box, which sleeps with its memory kept between turns. Agent37 has no SDK, so the connector calls its API with `fetch`, and drives a box through Sanoma's runner, which it starts in the box.
+[Agent37 Cloud](https://www.agent37.com) for [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md): the boxes a coding agent works in, one persistent Linux computer (an Agent37 instance) per box, which sleeps with its memory kept between turns. Agent37 has no SDK, so the connector calls its API with `fetch`, and drives a box through Sanoma's runner, which it starts in the box.
 
 ## Usage
 
@@ -30,7 +30,7 @@ The app opens its coding agents' boxes there once one is declared: one box per p
 
 The declaration is a record: apply binds it without making anything at Agent37 (its read lists the workspace's instances, so it fails when the key does not work), and its state is that binding and `healthy`. A box is made from the shape declared when it is first opened; one that exists keeps its shape, and deleting the declaration leaves the boxes.
 
-The instance type meets the [`Sandbox` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#sandboxes) (`sandbox`): a box's files survive a stop (`snapshot`), a stopped box keeps its memory and processes (`pause`), and its ports are reachable from outside (`port`). It takes `image` and `size` from the declaration.
+The instance type meets the [`Sandbox` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#sandboxes) (`sandbox`): a box's files survive a stop (`snapshot`), a stopped box keeps its memory and processes (`pause`), and its ports are reachable from outside (`port`). It takes `image` and `size` from the declaration.
 
 | Operation                                       | Effect  | What it does                                                                        |
 | ----------------------------------------------- | ------- | ----------------------------------------------------------------------------------- |
@@ -49,7 +49,7 @@ The connector's sandbox half (`withSetup(…, { sandbox })`, `agent37Backend`) o
 - `expose(port)` is `https://<id>-<port>.agent37.app`, with the key as the `X-Agent37-Key` header, which Agent37's edge asks for.
 - `stop()` kills the commands still running, closes the connection and puts the instance to sleep, the runner kept running in it, its memory checkpointed, or stops it (its disk kept) when the sleep is refused. `discard({ name })` deletes it.
 
-The runner is [`@sanoma-ai/workflows`'s](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#sandboxes), one file, which `open` writes into a box with Agent37's exec when it does not answer (`~/.sanoma/runner.cjs`, gzipped through exec's body of 128 KB) and starts with the box's `node` (22 or later), as the image's user. It listens on port 7700, which `open` reaches over one WebSocket at `https://<id>-7700.agent37.app` with the key in `X-Agent37-Key`: Agent37's edge checks the key on every request to the port, the upgrade too, and the port is never made public, so the runner asks no credential of its own. Agent37's own exec is buffered and takes no stdin, which an agent's process needs; the runner streams both ways. A box that slept keeps the runner running; one that was stopped boots without it, and the next `open` starts it again (its log is `~/.sanoma/runner.log`). A runner that answers another release's protocol is replaced (ended by the pid its health answers, at `/runner/health`: Agent37's edge answers `/health` itself on every port), and what it started ends with it; one that does not answer is never killed. A custom template needs `node`, `bash`, `base64` and `gunzip`, as Agent37's templates have.
+The runner is [`sanoma/workflows`'s](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#sandboxes), one file, which `open` writes into a box with Agent37's exec when it does not answer (`~/.sanoma/runner.cjs`, gzipped through exec's body of 128 KB) and starts with the box's `node` (22 or later), as the image's user. It listens on port 7700, which `open` reaches over one WebSocket at `https://<id>-7700.agent37.app` with the key in `X-Agent37-Key`: Agent37's edge checks the key on every request to the port, the upgrade too, and the port is never made public, so the runner asks no credential of its own. Agent37's own exec is buffered and takes no stdin, which an agent's process needs; the runner streams both ways. A box that slept keeps the runner running; one that was stopped boots without it, and the next `open` starts it again (its log is `~/.sanoma/runner.log`). A runner that answers another release's protocol is replaced (ended by the pid its health answers, at `/runner/health`: Agent37's edge answers `/health` itself on every port), and what it started ends with it; one that does not answer is never killed. A custom template needs `node`, `bash`, `base64` and `gunzip`, as Agent37's templates have.
 
 ### What it costs
 
@@ -80,9 +80,9 @@ A failure is a `DriverError` with Agent37's status and its error's `code` as `ve
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Agent37's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api). The fixtures were written from Agent37's documentation, not recorded; `SANOMA_LIVE=1 SANOMA_RECORD=1 AGENT37_API_KEY=... pnpm vitest run connectors/agent37/test/driver.test.ts` records them.
+`test/driver.test.ts` replays Agent37's replies (`test/fixtures`) with [`sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md#replaying-a-vendors-api). The fixtures were written from Agent37's documentation, not recorded; `SANOMA_LIVE=1 SANOMA_RECORD=1 AGENT37_API_KEY=... pnpm vitest run connectors/agent37/test/driver.test.ts` records them.
 
-`test/backend.test.ts` runs the [sandbox conformance kit](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-sandboxs-conformance) and the backend's own cases against Agent37 on this machine (`test/vendor.ts`): its API from memory and its exec run here, so the runner the backend writes in and starts, its connection and the commands are the real ones.
+`test/backend.test.ts` runs the [sandbox conformance kit](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md#a-sandboxs-conformance) and the backend's own cases against Agent37 on this machine (`test/vendor.ts`): its API from memory and its exec run here, so the runner the backend writes in and starts, its connection and the commands are the real ones.
 
 ### Running it live
 

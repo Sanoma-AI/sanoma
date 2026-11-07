@@ -8,6 +8,7 @@
     "sourceMap": true,
     "rewriteRelativeImportExtensions": true,
     "types": ["node", "react"],
+    "customConditions": [],
     "paths": {}
   },
   "include": ["src"],

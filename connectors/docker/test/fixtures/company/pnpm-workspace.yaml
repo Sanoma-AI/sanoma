@@ -1,5 +1,3 @@
-# The workspace's own builds, packed into vendor/ by the test, in place of the published releases.
+# The workspace's own build, packed into vendor/ by the test, in place of the published release.
 overrides:
-  "@sanoma-ai/app": file:vendor/sanoma-ai-app.tgz
-  "@sanoma-ai/bridge": file:vendor/sanoma-ai-bridge.tgz
-  "@sanoma-ai/workflows": file:vendor/sanoma-ai-workflows.tgz
+  sanoma: file:vendor/sanoma.tgz

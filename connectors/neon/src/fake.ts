@@ -1,5 +1,5 @@
-import { DriverError } from "@sanoma-ai/workflows";
-import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { DriverError } from "sanoma/workflows";
+import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { limitsOf, neonOps, REGIONS } from "./connector.ts";
 import {
   type ApiBranch,

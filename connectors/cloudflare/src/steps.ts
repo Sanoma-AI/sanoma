@@ -1,4 +1,4 @@
-import { defineSteps } from "@sanoma-ai/workflows";
+import { defineSteps } from "sanoma/workflows";
 import { cloudflareOps } from "./connector.ts";
 
 const { create } = cloudflareOps.container;

@@ -1,4 +1,4 @@
-import { defineConnector, vendorInfo } from "@sanoma-ai/workflows";
+import { defineConnector, vendorInfo } from "sanoma/workflows";
 import { z } from "zod";
 
 /** Bluesky via the AT Protocol: https://docs.bsky.app/docs/advanced-guides/posts */

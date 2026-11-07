@@ -1,5 +1,5 @@
-import { resolveConfig } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { resolveConfig } from "sanoma/workflows";
+import { describeConfig } from "sanoma/workflows/describe";
 import { expect, it } from "vitest";
 import { anthropic } from "../src/index.ts";
 import { anthropicModel } from "../src/model.ts";

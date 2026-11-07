@@ -1,4 +1,4 @@
-import { type Exchange, type ReplayOptions } from "@sanoma-ai/testing/replay";
+import { type Exchange, type ReplayOptions } from "sanoma/testing/replay";
 
 // How Agent37's replies are replayed (and recorded) for the driver's tests.
 

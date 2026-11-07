@@ -1,4 +1,4 @@
-import { type DnsRecord, DriverError, errorMessage, type PlanAction } from "@sanoma-ai/workflows";
+import { type DnsRecord, DriverError, errorMessage, type PlanAction } from "sanoma/workflows";
 import { z } from "zod";
 import { caaData, canonicalRecord, keyOf, records as recordsType } from "./connector.ts";
 import { refused } from "./errors.ts";

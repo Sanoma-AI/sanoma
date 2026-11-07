@@ -1,4 +1,4 @@
-import { defineAuthentication, SecretStoreError } from "@sanoma-ai/workflows";
+import { defineAuthentication, SecretStoreError } from "sanoma/workflows";
 import { z } from "zod";
 import { loadSdk, neonClient } from "./sdk.ts";
 

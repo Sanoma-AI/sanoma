@@ -10,10 +10,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { userInfo } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { AGENTS, RUNTIME_AGENTS, VISITORS } from "@sanoma-ai/workflows";
-import { isVisitor } from "@sanoma-ai/workflows/shared";
+import { AGENTS, RUNTIME_AGENTS, VISITORS } from "sanoma/workflows";
+import { isVisitor } from "sanoma/workflows/shared";
 import { writeDeploymentKeys } from "./key.ts";
 
 const run = promisify(execFile);
@@ -82,7 +83,7 @@ export async function startCompany(
   const name = packageName(basename(cwd));
   // npm refuses to install a package into one of the same name (`sanoma` in `sanoma/`).
   pkg.name = name in pkg.dependencies ? `${name}-company` : name;
-  pkg.dependencies = pinDependencies(pkg.dependencies, own);
+  if (INSTALLED) pkg.dependencies = pinDependencies(pkg.dependencies, own);
   writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
 
   const people = join(cwd, "resources", "people.ts");
@@ -110,28 +111,33 @@ export async function startCompany(
   return true;
 }
 
+/**
+ * Whether this launcher is an installed release (its real path under `node_modules`), not a checkout's,
+ * whose version npm may not have yet: from a checkout, the template's ranges stand.
+ */
+const INSTALLED = fileURLToPath(import.meta.url)
+  .split(sep)
+  .includes("node_modules");
+
 /** What `pinDependencies` reads of this package's own manifest. */
 export interface Manifest {
   version: string;
-  devDependencies?: Record<string, string>;
 }
 
 /**
  * The template's dependencies at the versions released with it, as a company starts from them:
- * `sanoma` at this launcher's own version (it pins the runtime exactly), each connector at this
- * package's devDependency on it, which publishing writes as an exact version. The template's
+ * `sanoma` and each `@sanoma-ai/connector-*` at this launcher's own version, as every published
+ * package carries sanoma's version (`scripts/release-check.ts`). The template's
  * `pnpm-workspace.yaml` lets its install past pnpm's minimum release age, so a range or `latest`
- * here would meet a release newer than this template and what it allows. From a checkout, whose
- * manifest says `workspace:*`, or a manifest without devDependencies, a connector stays as the
- * template names it.
+ * here would meet a release newer than this template and what it allows. Any other dependency
+ * stays as the template names it. Applied only by an installed launcher (`INSTALLED`).
  */
 export function pinDependencies(dependencies: Record<string, string>, own: Manifest): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(dependencies).map(([name, range]) => {
-      if (name === "sanoma") return [name, own.version];
-      const released = own.devDependencies?.[name] ?? range;
-      return [name, released.startsWith("workspace:") ? range : released];
-    }),
+    Object.entries(dependencies).map(([name, range]) => [
+      name,
+      name === "sanoma" || name.startsWith("@sanoma-ai/connector-") ? own.version : range,
+    ]),
   );
 }
 

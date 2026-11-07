@@ -1,6 +1,6 @@
 import { cleaningSchema, currencySchema, invoiceSchema, petSittingSchema } from "@sanoma-ai/invoices";
 import { pdfOptionsSchema } from "@sanoma-ai/invoices/pdf-contract";
-import { defineConnector, vendorInfo } from "@sanoma-ai/workflows";
+import { defineConnector, vendorInfo } from "sanoma/workflows";
 import { z } from "zod";
 
 /** A smaller limit than the renderer's, because checkpoints store base64 in JSON. */

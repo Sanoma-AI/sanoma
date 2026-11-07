@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
-import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
-import { remoteFor, resolveConfig } from "@sanoma-ai/workflows";
+import { type Exchange, live, replay } from "sanoma/testing/replay";
+import { remoteFor, resolveConfig } from "sanoma/workflows";
 import { describe, expect, it } from "vitest";
 import { github } from "../src/index.ts";
 import { appJwt, GITHUB_APP_SECRETS, githubRemote, githubToken } from "../src/remote.ts";

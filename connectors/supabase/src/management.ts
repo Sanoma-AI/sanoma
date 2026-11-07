@@ -1,4 +1,4 @@
-import { type CallContext, type Driver, DriverError, type DriverFn, storeDatabaseUrl } from "@sanoma-ai/workflows";
+import { type CallContext, type Driver, DriverError, type DriverFn, storeDatabaseUrl } from "sanoma/workflows";
 import { PASSWORD_SECRET } from "./connector.ts";
 
 // The operations the provider's project does not carry, over Supabase's Management API

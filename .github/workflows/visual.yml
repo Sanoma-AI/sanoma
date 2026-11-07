@@ -5,10 +5,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
     paths:
-      - packages/app/**
+      - packages/sanoma/app/**
       - packages/sanoma/src/**
-      - packages/workflows/src/**
-      - packages/testing/src/**
+      - packages/sanoma/workflows/src/**
+      - packages/sanoma/testing/src/**
       - connectors/ghost/src/**
       - README.md
       - pnpm-lock.yaml

@@ -4,8 +4,8 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Bridge, startBridge } from "@sanoma-ai/bridge";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { type Bridge, startBridge } from "sanoma/internal/bridge";
+import { testDatabaseUrl } from "sanoma/testing";
 import {
   checkHost,
   dockerAvailable,
@@ -13,7 +13,7 @@ import {
   hostCheckWorkflows,
   testRepository,
   throughWorkflows,
-} from "@sanoma-ai/testing/host";
+} from "sanoma/testing/host";
 import {
   type CallContext,
   memoryLedger,
@@ -23,8 +23,8 @@ import {
   type SanomaConfig,
   withSetup,
   type Worker,
-} from "@sanoma-ai/workflows";
-import { startTestWorker } from "@sanoma-ai/testing";
+} from "sanoma/workflows";
+import { startTestWorker } from "sanoma/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { dockerOps, dockerTf } from "../src/connector.ts";
 import { dockerDriver } from "../src/driver.ts";
@@ -85,20 +85,12 @@ describe.skipIf(!dockerAvailable() || !bin)("docker.container meets the Host con
     if (spawnSync("docker", ["image", "inspect", IMAGE], { stdio: "ignore" }).status !== 0) {
       execFileSync("docker", ["build", "-t", IMAGE, join(repoRoot, "packages/sanoma/runtime")], { stdio: "inherit" });
     }
-    // The company: the fixture with this checkout's packages, packed, and a lockfile.
+    // The company: the fixture with this checkout's sanoma, packed, and a lockfile.
     cpSync(fileURLToPath(new URL("./fixtures/company/", import.meta.url)), work, { recursive: true });
-    const vendor = join(work, "vendor");
-    for (const [pkg, file] of Object.entries({
-      workflows: "sanoma-ai-workflows",
-      app: "sanoma-ai-app",
-      bridge: "sanoma-ai-bridge",
-      sanoma: "sanoma",
-    })) {
-      execFileSync("pnpm", ["pack", "--out", join(vendor, `${file}.tgz`)], {
-        cwd: join(repoRoot, "packages", pkg),
-        stdio: "ignore",
-      });
-    }
+    execFileSync("pnpm", ["pack", "--out", join(work, "vendor/sanoma.tgz")], {
+      cwd: join(repoRoot, "packages/sanoma"),
+      stdio: "ignore",
+    });
     execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: work, stdio: "ignore" });
     repo.git("add", "-A");
     await repo.commit();

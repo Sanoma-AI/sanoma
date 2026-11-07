@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
-import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
+import { type Exchange, live, replay } from "sanoma/testing/replay";
+import { type CallContext, memorySecrets } from "sanoma/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { container } from "../src/connector.ts";

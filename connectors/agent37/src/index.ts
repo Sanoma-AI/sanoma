@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { agent37Backend } from "./backend.ts";
 import { agent37Ops } from "./connector.ts";
 import { agent37Driver } from "./driver.ts";

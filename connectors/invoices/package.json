@@ -55,11 +55,11 @@
     "@sanoma-ai/invoices": "workspace:^"
   },
   "devDependencies": {
-    "@sanoma-ai/workflows": "workspace:*",
+    "sanoma": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/workflows": "workspace:^",
+    "sanoma": "workspace:*",
     "zod": "^4"
   },
   "engines": {

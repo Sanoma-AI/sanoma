@@ -13,15 +13,14 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { AGENTS, VISITORS } from "@sanoma-ai/workflows";
-import { readPeople } from "@sanoma-ai/workflows/describe";
-import { groupNamesOf, principalIdsOf } from "@sanoma-ai/workflows/shared";
+import { testDatabaseUrl } from "sanoma/testing";
+import { AGENTS, VISITORS } from "sanoma/workflows";
+import { readPeople } from "sanoma/workflows/describe";
+import { groupNamesOf, principalIdsOf } from "sanoma/workflows/shared";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   declareFounder,
   FIRST_COMMIT,
-  type Manifest,
   packageManagerOf,
   packageName,
   pinDependencies,
@@ -33,7 +32,14 @@ import {
 import { copyFixture, ensureBuilt, linkConnector, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
-const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as Manifest;
+/** The template's manifest, as a company starts from it. */
+const template = JSON.parse(readFileSync(new URL("package.json", TEMPLATE), "utf8")) as {
+  dependencies: Record<string, string>;
+};
+/** The workspace root's manifest, whose devDependencies are the connectors the tests run. */
+const root = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")) as {
+  devDependencies: Record<string, string>;
+};
 
 let dir = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
@@ -79,11 +85,8 @@ describe("startCompany", () => {
     }
     const pkg = JSON.parse(read("package.json")) as { name: string; dependencies: Record<string, string> };
     expect(pkg.name).toBe("acme-ops");
-    expect(pkg.dependencies).toEqual({
-      "@sanoma-ai/connector-anthropic": "latest",
-      "@sanoma-ai/connector-ghost": "latest",
-      sanoma: own.version,
-    });
+    // From a checkout, whose version npm may not have, the template's ranges (packed.test.ts pins them).
+    expect(pkg.dependencies).toEqual(template.dependencies);
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
     // pnpm's alone.
     expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);
@@ -142,30 +145,18 @@ describe("startCompany", () => {
 });
 
 describe("pinDependencies", () => {
-  const template = JSON.parse(readFileSync(new URL("package.json", TEMPLATE), "utf8")) as {
-    dependencies: Record<string, string>;
-  };
-
-  it("pins sanoma and the connectors to the versions a published manifest names", () => {
-    expect(
-      pinDependencies(template.dependencies, {
-        version: "1.2.3",
-        devDependencies: {
-          "@sanoma-ai/connector-anthropic": "0.1.5",
-          "@sanoma-ai/connector-ghost": "0.4.9",
-          "@sanoma-ai/testing": "0.1.1",
-        },
-      }),
-    ).toEqual({
-      "@sanoma-ai/connector-anthropic": "0.1.5",
-      "@sanoma-ai/connector-ghost": "0.4.9",
+  it("pins sanoma and the connectors to the launcher's own version", () => {
+    expect(pinDependencies({ ...template.dependencies, "left-alone": "^1" }, { version: "1.2.3" })).toEqual({
+      "@sanoma-ai/connector-anthropic": "1.2.3",
+      "@sanoma-ai/connector-ghost": "1.2.3",
+      "left-alone": "^1",
       sanoma: "1.2.3",
     });
   });
 
-  it("names every template connector as a workspace devDependency, which publishing makes a version", () => {
+  it("names every template connector as a devDependency of the workspace, so the tests run against the checkout", () => {
     for (const name of Object.keys(template.dependencies).filter((dep) => dep !== "sanoma")) {
-      expect(own.devDependencies?.[name], name).toBe("workspace:*");
+      expect(root.devDependencies[name], name).toBe("workspace:*");
     }
   });
 });

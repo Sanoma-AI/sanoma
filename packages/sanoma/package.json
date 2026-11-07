@@ -1,11 +1,13 @@
 {
   "name": "sanoma",
   "version": "0.11.21",
-  "description": "One command over a Sanoma repo: run the worker and the app, check it, write its .env.example, export a run's ledger",
+  "description": "Sanoma's core in one package: the bin a company repo runs, checks and exports itself with, the durable workflow runtime, the web app and the test helpers",
   "keywords": [
     "approvals",
     "business-as-code",
     "cli",
+    "dbos",
+    "durable-execution",
     "sanoma",
     "workflows"
   ],
@@ -27,76 +29,361 @@
     "oxlint.json",
     "README.md",
     "LICENSE",
-    "site.js",
-    "site.d.ts",
-    "ui.js",
-    "ui.d.ts",
-    "ui.css"
+    "workflows/dist",
+    "workflows/src",
+    "workflows/drizzle",
+    "!workflows/drizzle/*.config.ts",
+    "workflows/oxlint.json",
+    "workflows/README.md",
+    "workflows/SECRET-SUPPORT.md",
+    "workflows/CLOUD-IDENTITY.md",
+    "workflows/KMS-SECRETS.md",
+    "app/dist",
+    "app/src",
+    "!app/src/routeTree.gen.ts",
+    "app/tsconfig.site.json",
+    "app/README.md",
+    "bridge/dist",
+    "bridge/testdata/pins.json",
+    "bridge/testdata/replies",
+    "bridge/testdata/schemas",
+    "!bridge/testdata/schemas/hashicorp_null_*",
+    "!bridge/testdata/replies/hashicorp_null_*",
+    "!bridge/testdata/schemas/sanoma_testprov_*",
+    "bridge/README.md",
+    "testing/dist",
+    "testing/README.md",
+    "dev/dist",
+    "dev/README.md",
+    "better-auth/dist",
+    "better-auth/drizzle",
+    "!better-auth/drizzle/*.config.ts",
+    "better-auth/README.md",
+    "!**/*.tsbuildinfo",
+    "!**/AGENTS.md",
+    "template/AGENTS.md"
   ],
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "imports": {
+    "#/*": "./app/src/*"
+  },
   "exports": {
     ".": {
+      "sanoma-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./resources": {
-      "types": "./dist/resources.d.ts",
-      "default": "./dist/resources.js"
+      "sanoma-source": "./workflows/src/constructors.ts",
+      "types": "./workflows/dist/constructors.d.ts",
+      "default": "./workflows/dist/constructors.js"
     },
     "./site": {
-      "types": "./site.d.ts",
-      "default": "./site.js"
+      "types": "./app/src/site.ts",
+      "default": "./app/src/site.ts"
     },
     "./ui": {
-      "types": "./ui.d.ts",
-      "default": "./ui.js"
+      "types": "./app/src/ui.ts",
+      "default": "./app/src/ui.ts"
     },
-    "./ui.css": "./ui.css",
+    "./ui.css": "./app/src/ui.css",
     "./data": {
-      "types": "./dist/data.d.ts",
-      "default": "./dist/data.js"
+      "sanoma-source": "./workflows/src/data.ts",
+      "types": "./workflows/dist/data.d.ts",
+      "default": "./workflows/dist/data.js"
     },
     "./secrets": {
-      "types": "./dist/secrets.d.ts",
-      "default": "./dist/secrets.js"
+      "sanoma-source": "./workflows/src/kms-secrets.ts",
+      "types": "./workflows/dist/kms-secrets.d.ts",
+      "default": "./workflows/dist/kms-secrets.js"
     },
     "./claims": {
-      "types": "./dist/claims.d.ts",
-      "default": "./dist/claims.js"
+      "sanoma-source": "./workflows/src/claims.ts",
+      "types": "./workflows/dist/claims.d.ts",
+      "default": "./workflows/dist/claims.js"
     },
-    "./tsconfig.json": "./tsconfig.base.json"
+    "./tsconfig.json": "./tsconfig.base.json",
+    "./workflows": {
+      "sanoma-source": "./workflows/src/index.ts",
+      "types": "./workflows/dist/index.d.ts",
+      "default": "./workflows/dist/index.js"
+    },
+    "./workflows/describe": {
+      "sanoma-source": "./workflows/src/describe.ts",
+      "types": "./workflows/dist/describe.d.ts",
+      "default": "./workflows/dist/describe.js"
+    },
+    "./workflows/description": {
+      "sanoma-source": "./workflows/src/description.ts",
+      "types": "./workflows/dist/description.d.ts",
+      "default": "./workflows/dist/description.js"
+    },
+    "./workflows/fake": {
+      "sanoma-source": "./workflows/src/fake.ts",
+      "types": "./workflows/dist/fake.d.ts",
+      "default": "./workflows/dist/fake.js"
+    },
+    "./workflows/plugin": {
+      "sanoma-source": "./workflows/src/plugin.ts",
+      "types": "./workflows/dist/plugin.d.ts",
+      "default": "./workflows/dist/plugin.js"
+    },
+    "./workflows/scenario": {
+      "sanoma-source": "./workflows/src/scenario.ts",
+      "types": "./workflows/dist/scenario.d.ts",
+      "default": "./workflows/dist/scenario.js"
+    },
+    "./workflows/scenarios": {
+      "sanoma-source": "./workflows/src/scenarios.ts",
+      "types": "./workflows/dist/scenarios.d.ts",
+      "default": "./workflows/dist/scenarios.js"
+    },
+    "./workflows/shared": {
+      "sanoma-source": "./workflows/src/shared.ts",
+      "types": "./workflows/dist/shared.d.ts",
+      "default": "./workflows/dist/shared.js"
+    },
+    "./workflows/wakeup-service": {
+      "sanoma-source": "./workflows/src/wakeup-service.ts",
+      "types": "./workflows/dist/wakeup-service.d.ts",
+      "default": "./workflows/dist/wakeup-service.js"
+    },
+    "./workflows/cloud-identity": {
+      "sanoma-source": "./workflows/src/cloud-identity.ts",
+      "types": "./workflows/dist/cloud-identity.d.ts",
+      "default": "./workflows/dist/cloud-identity.js"
+    },
+    "./workflows/db": {
+      "sanoma-source": "./workflows/src/db/index.ts",
+      "types": "./workflows/dist/db/index.d.ts",
+      "default": "./workflows/dist/db/index.js"
+    },
+    "./workflows/identity-service": {
+      "sanoma-source": "./workflows/src/identity-service.ts",
+      "types": "./workflows/dist/identity-service.d.ts",
+      "default": "./workflows/dist/identity-service.js"
+    },
+    "./app": {
+      "sanoma-source": "./app/src/index.ts",
+      "types": "./app/dist/index.d.ts",
+      "default": "./app/dist/index.js"
+    },
+    "./app/build": {
+      "sanoma-source": "./app/src/build.ts",
+      "types": "./app/dist/build.d.ts",
+      "default": "./app/dist/build.js"
+    },
+    "./app/bundle": {
+      "sanoma-source": "./app/src/bundle-build.ts",
+      "types": "./app/dist/bundle-build.d.ts",
+      "default": "./app/dist/bundle-build.js"
+    },
+    "./app/steps": {
+      "sanoma-source": "./app/src/steps/index.ts",
+      "types": "./app/dist/steps/index.d.ts",
+      "default": "./app/dist/steps/index.js"
+    },
+    "./testing": {
+      "sanoma-source": "./testing/src/index.ts",
+      "types": "./testing/dist/index.d.ts",
+      "default": "./testing/dist/index.js"
+    },
+    "./testing/database": {
+      "sanoma-source": "./testing/src/database.ts",
+      "types": "./testing/dist/database.d.ts",
+      "default": "./testing/dist/database.js"
+    },
+    "./testing/features": {
+      "sanoma-source": "./testing/src/features.ts",
+      "types": "./testing/dist/features.d.ts",
+      "default": "./testing/dist/features.js"
+    },
+    "./testing/host": {
+      "sanoma-source": "./testing/src/host.ts",
+      "types": "./testing/dist/host.d.ts",
+      "default": "./testing/dist/host.js"
+    },
+    "./testing/harness": {
+      "sanoma-source": "./testing/src/harness.ts",
+      "types": "./testing/dist/harness.d.ts",
+      "default": "./testing/dist/harness.js"
+    },
+    "./testing/replay": {
+      "sanoma-source": "./testing/src/replay.ts",
+      "types": "./testing/dist/replay.d.ts",
+      "default": "./testing/dist/replay.js"
+    },
+    "./testing/scenarios": {
+      "sanoma-source": "./testing/src/scenarios.ts",
+      "types": "./testing/dist/scenarios.d.ts",
+      "default": "./testing/dist/scenarios.js"
+    },
+    "./testing/sandbox": {
+      "sanoma-source": "./testing/src/sandbox.ts",
+      "types": "./testing/dist/sandbox.d.ts",
+      "default": "./testing/dist/sandbox.js"
+    },
+    "./testing/wakeup": {
+      "sanoma-source": "./testing/src/wakeup.ts",
+      "types": "./testing/dist/wakeup.d.ts",
+      "default": "./testing/dist/wakeup.js"
+    },
+    "./better-auth": {
+      "sanoma-source": "./better-auth/src/index.ts",
+      "types": "./better-auth/dist/index.d.ts",
+      "default": "./better-auth/dist/index.js"
+    },
+    "./internal/bridge": {
+      "sanoma-source": "./bridge/src/index.ts",
+      "types": "./bridge/dist/index.d.ts",
+      "default": "./bridge/dist/index.js"
+    },
+    "./internal/bridge/fake": {
+      "sanoma-source": "./bridge/src/fake.ts",
+      "types": "./bridge/dist/fake.d.ts",
+      "default": "./bridge/dist/fake.js"
+    },
+    "./internal/bridge/tfschema": {
+      "sanoma-source": "./bridge/src/tfschema.ts",
+      "types": "./bridge/dist/tfschema.d.ts",
+      "default": "./bridge/dist/tfschema.js"
+    },
+    "./internal/bridge/connector": {
+      "sanoma-source": "./bridge/src/connector.ts",
+      "types": "./bridge/dist/connector.d.ts",
+      "default": "./bridge/dist/connector.js"
+    },
+    "./internal/bridge/tfschema/cli": {
+      "sanoma-source": "./bridge/src/tfschema/cli.ts",
+      "types": "./bridge/dist/tfschema/cli.d.ts",
+      "default": "./bridge/dist/tfschema/cli.js"
+    },
+    "./internal/dev": {
+      "sanoma-source": "./dev/src/cli.ts",
+      "types": "./dev/dist/cli.d.ts",
+      "default": "./dev/dist/cli.js"
+    }
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "node scripts/oxlint.ts && tsc -p tsconfig.build.json",
-    "clean": "rm -rf dist",
+    "build": "tsc -b workflows/tsconfig.build.json better-auth/tsconfig.build.json && cd app && vite build && tsc -p tsconfig.build.json && cd .. && tsc -b tsconfig.build.json testing/tsconfig.build.json && esbuild workflows/src/sandbox-runner.ts --bundle --platform=node --target=node22 --format=cjs --minify --external:bufferutil --external:utf-8-validate --outfile=workflows/dist/sandbox-runner.cjs --log-level=warning && node scripts/oxlint.ts",
+    "clean": "rm -rf dist workflows/dist better-auth/dist bridge/dist testing/dist app/dist dev/dist",
     "prepack": "pnpm run clean && pnpm run build",
-    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+    "watch": "tsc -b -w --preserveWatchOutput tsconfig.build.json & cd app && (tsc -w --preserveWatchOutput -p tsconfig.build.json & vite build --watch)",
+    "typecheck:ui": "tsc -p app/tsconfig.json",
+    "generate": "cd workflows && drizzle-kit generate --config drizzle/company.config.ts && drizzle-kit generate --config drizzle/wakeup.config.ts && cd ../better-auth && drizzle-kit generate --config drizzle/visitors.config.ts && drizzle-kit generate --config drizzle/staff.config.ts",
+    "generate:bridge": "cd bridge && pnpm --package=@bufbuild/buf@1.73.0 --package=@bufbuild/protoc-gen-es@2.16.0 dlx buf generate",
+    "bridge:download": "node bridge/scripts/download-bridge.ts"
   },
   "dependencies": {
-    "@sanoma-ai/app": "workspace:*",
-    "@sanoma-ai/bridge": "workspace:*",
-    "@sanoma-ai/connector-better-auth": "workspace:*",
-    "@sanoma-ai/workflows": "workspace:*",
+    "@agentclientprotocol/sdk": "2.0.2",
+    "@ai-sdk/harness": "1.0.158",
+    "@ai-sdk/harness-claude-code": "1.0.162",
+    "@ai-sdk/harness-pi": "1.0.160",
+    "@ai-sdk/provider": "4.0.34",
+    "@ai-sdk/provider-utils": "5.0.68",
+    "@ai-sdk/react": "4.0.157",
+    "@base-ui/react": "^1.9.0",
+    "@bufbuild/protobuf": "2.16.0",
+    "@cedar-policy/cedar-wasm": "4.14.0",
+    "@cloudflare/vite-plugin": "1.66.0",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
+    "@connectrpc/connect": "^2.2.0",
+    "@connectrpc/connect-node": "^2.2.0",
+    "@cucumber/cucumber": "13.3.0",
+    "@cucumber/cucumber-expressions": "^20.1.0",
+    "@cucumber/messages": "^34.2.1",
+    "@cucumber/query": "16.1.1",
+    "@dagrejs/dagre": "^3.1.1",
+    "@dbos-inc/dbos-sdk": "^5.2.11",
+    "@faker-js/faker": "^10.6.0",
+    "@fontsource-variable/fraunces": "^5.3.0",
+    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@google-cloud/kms": "^6.3.0",
+    "@lezer/highlight": "^1.2.5",
+    "@phosphor-icons/react": "^2.1.10",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/query-db-collection": "1.5.1",
+    "@tanstack/react-db": "1.0.0-rc.1.3",
+    "@tanstack/react-form": "^1.33.5",
+    "@tanstack/react-hotkeys": "0.22.0",
+    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-router": "^1.170.41",
+    "@tanstack/react-router-ssr-query": "^1.167.3",
+    "@tanstack/react-start": "^1.168.60",
+    "@tanstack/react-table": "^9.3.1",
+    "@tanstack/react-virtual": "^3.14.26",
     "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "@xyflow/react": "^12.12.0",
+    "ai": "7.0.153",
+    "better-auth": "1.7.12",
+    "class-variance-authority": "^0.7.1",
+    "cn": "^0.4.0",
+    "cookie-es": "^3.1.1",
+    "crc-32": "^1.2.2",
+    "drizzle-orm": "0.45.4",
+    "google-auth-library": "^11.3.2",
+    "lucide-react": "1.55.0",
+    "magic-string": "^0.30.21",
+    "marked": "^18.1.1",
+    "next-themes": "^0.4.6",
+    "oauth4webapi": "3.8.8",
+    "oxc-parser": "^0.153.0",
+    "oxfmt": "^0.72.0",
     "oxlint": "^1.87.0",
     "pg": "^8.23.1",
+    "randexp": "^0.5.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "shadcn": "^4.21.3",
+    "sonner": "^2.0.8",
     "srvx": "^0.11.22",
+    "tailwindcss": "^4.3.3",
+    "tw-animate-css": "^1.4.0",
     "typescript": "^7.0.2",
-    "zod": "^4.6.5"
+    "vite": "^8.3.3",
+    "wrangler": "4.154.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5",
+    "zod-schema-faker": "^2.1.2"
   },
   "devDependencies": {
-    "@sanoma-ai/connector-anthropic": "workspace:*",
-    "@sanoma-ai/connector-ghost": "workspace:*",
-    "@sanoma-ai/testing": "workspace:*",
-    "@types/pg": "^8.23.1"
+    "@types/pg": "^8.23.1",
+    "@types/ws": "8.18.2",
+    "drizzle-kit": "0.31.11",
+    "esbuild": "0.28.2",
+    "msw": "^3.0.3",
+    "ws": "8.22.0"
+  },
+  "peerDependencies": {
+    "msw": "^3",
+    "vitest": "^5"
+  },
+  "peerDependenciesMeta": {
+    "msw": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
   },
   "optionalDependencies": {
+    "@sanoma-ai/bridge-darwin-arm64": "workspace:*",
+    "@sanoma-ai/bridge-darwin-x64": "workspace:*",
+    "@sanoma-ai/bridge-linux-arm64": "workspace:*",
+    "@sanoma-ai/bridge-linux-x64": "workspace:*",
     "@sanoma-ai/postgres-darwin-arm64": "workspace:*",
     "@sanoma-ai/postgres-darwin-x64": "workspace:*",
     "@sanoma-ai/postgres-linux-arm64": "workspace:*",
@@ -105,5 +392,6 @@
   },
   "engines": {
     "node": ">=26"
-  }
+  },
+  "//": "randexp is a dependency only because zod-schema-faker, which makes up scenario inputs, needs it as a peer."
 }

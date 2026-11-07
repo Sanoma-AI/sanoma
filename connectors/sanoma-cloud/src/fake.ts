@@ -1,7 +1,7 @@
 import { createServer, request as forward, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { DriverError, errorMessage } from "@sanoma-ai/workflows";
-import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { DriverError, errorMessage } from "sanoma/workflows";
+import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { REGIONS, cloudOps, SLUG } from "./connector.ts";
 import { type CloudApi, cloudOperations, type Company } from "./operations.ts";
 

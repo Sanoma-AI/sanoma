@@ -13,11 +13,11 @@ import {
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { resolveDatabaseUrl } from "@sanoma-ai/workflows";
+import { testDatabaseUrl } from "sanoma/testing";
+import { resolveDatabaseUrl } from "sanoma/workflows";
 import * as pg from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { UsageError } from "../src/config.ts";
+import { UsageError } from "sanoma/workflows/shared";
 import { cacheDir } from "../src/postgres-bin.ts";
 import { clusterDir, ensurePostgres, masked, mayBePostgres, OLD_DEFAULT_URL } from "../src/postgres.ts";
 import { gitIdentity } from "./git.ts";

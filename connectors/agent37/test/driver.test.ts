@@ -1,5 +1,5 @@
-import { replay } from "@sanoma-ai/testing/replay";
-import { type CallContext, DriverError, memorySecrets, resolveConfig } from "@sanoma-ai/workflows";
+import { replay } from "sanoma/testing/replay";
+import { type CallContext, DriverError, memorySecrets, resolveConfig } from "sanoma/workflows";
 import { describe, expect, it, vi } from "vitest";
 import { agent37 } from "../src/index.ts";
 import { agent37Driver } from "../src/driver.ts";

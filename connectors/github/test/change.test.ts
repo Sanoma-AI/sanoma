@@ -1,7 +1,7 @@
-import { fixturesDir, loadReplies } from "@sanoma-ai/bridge/fake";
-import { type Driver, memorySecrets } from "@sanoma-ai/workflows";
+import { fixturesDir, loadReplies } from "sanoma/internal/bridge/fake";
+import { type Driver, memorySecrets } from "sanoma/workflows";
 import { beforeEach, describe, expect, it } from "vitest";
-import { changeReplay } from "../../../packages/bridge/test/change-replay.ts";
+import { changeReplay } from "../../../packages/sanoma/bridge/test/change-replay.ts";
 import { githubTf } from "../src/connector.ts";
 import { owned } from "../src/owner.ts";
 import { provider } from "../src/resources.gen.ts";
@@ -16,7 +16,7 @@ const call = (driver: Driver, op: string, input: unknown): Promise<any> =>
     secrets: memorySecrets(),
   });
 
-// Synthetic until recorded in the test org, `sanoma-test` (`bridge-record --change`): `@sanoma-ai/bridge`'s
+// Synthetic until recorded in the test org, `sanoma-test` (`bridge-record --change`): `sanoma/internal/bridge`'s
 // testdata/replies/integrations_github_6.13.0/github_repository/sanoma-apply-test*.
 describe("github.repository's change operations", () => {
   let bridge: ReturnType<typeof changeReplay>;
@@ -65,7 +65,7 @@ describe("github.repository's change operations", () => {
 
 // Synthetic until recorded in the test org, in the provider's shape (its `id` is
 // `<repository>:<key id>`, which the driver gives as `<owner>/<repository>:<key id>`, GitHub reads a key back without its comment, every attribute is
-// ForceNew): `@sanoma-ai/bridge`'s testdata/replies/integrations_github_6.13.0/github_repository_deploy_key/.
+// ForceNew): `sanoma/internal/bridge`'s testdata/replies/integrations_github_6.13.0/github_repository_deploy_key/.
 describe("github.repository_deploy_key's change operations", () => {
   let bridge: ReturnType<typeof changeReplay>;
   let driver: Driver;
@@ -102,7 +102,7 @@ describe("github.repository_deploy_key's change operations", () => {
 });
 
 // Synthetic until recorded in the test org (an invitation goes to a real account), in the provider's
-// shape: `@sanoma-ai/bridge`'s testdata/replies/integrations_github_6.13.0/github_repository_collaborator/sanoma-apply-test*.
+// shape: `sanoma/internal/bridge`'s testdata/replies/integrations_github_6.13.0/github_repository_collaborator/sanoma-apply-test*.
 describe("github.repository_collaborator's change operations", () => {
   let bridge: ReturnType<typeof changeReplay>;
   let driver: Driver;

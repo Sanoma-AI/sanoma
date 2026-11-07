@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
-import { resolveConfig } from "@sanoma-ai/workflows";
-import { featureScenarios, testFeature } from "@sanoma-ai/workflows/scenario";
+import { resolveConfig } from "sanoma/workflows";
+import { featureScenarios, testFeature } from "sanoma/workflows/scenario";
 import { describe, expect, it } from "vitest";
 import { invoicesDriver } from "../src/driver.ts";
 import { fakeInvoices } from "../src/fake.ts";

@@ -20,7 +20,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { Client } from "pg";
-import { UsageError } from "./config.ts";
+import { UsageError } from "sanoma/workflows/shared";
 import { postgresBin } from "./postgres-bin.ts";
 import { system32 } from "./windows.ts";
 

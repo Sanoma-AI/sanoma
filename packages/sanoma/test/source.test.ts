@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localGitSource } from "../src/source.ts";
 import { copyFixture, FIXTURE_GRID, ensureBuilt } from "./fixture.ts";
@@ -731,15 +731,11 @@ describe("localGitSource's check", () => {
     const crm = sourceRepo({ ...starter, "apps/crm/app.ts": APP_TS });
     try {
       cpSync(new URL("./fixtures/project/", import.meta.url), crm.at, { recursive: true });
-      cpSync(
-        new URL("../../workflows/test/fixtures/company-apps/apps/crm/", import.meta.url),
-        join(crm.at, "apps/crm"),
-        {
-          recursive: true,
-          // The crm's own sites folder, not a checkout whose path has "/sites" in it.
-          filter: (path) => !/\/crm\/sites(\/|$)/.test(path) && !path.endsWith("app.ts"),
-        },
-      );
+      cpSync(new URL("../workflows/test/fixtures/company-apps/apps/crm/", import.meta.url), join(crm.at, "apps/crm"), {
+        recursive: true,
+        // The crm's own sites folder, not a checkout whose path has "/sites" in it.
+        filter: (path) => !/\/crm\/sites(\/|$)/.test(path) && !path.endsWith("app.ts"),
+      });
       crm.commit({}, "The CRM");
 
       const source = localGitSource(dir, { databaseUrl: testDatabaseUrl("apps") });

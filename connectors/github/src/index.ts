@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { githubOps } from "./connector.ts";
 import { githubDriver } from "./driver.ts";
 import { fakeGithub } from "./fake.ts";

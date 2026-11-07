@@ -1,5 +1,5 @@
-import { defaultBridge, type ProviderClient } from "@sanoma-ai/bridge";
-import { authenticationCredentials, type CallContext, DriverError, retryableStatus } from "@sanoma-ai/workflows";
+import { defaultBridge, type ProviderClient } from "sanoma/internal/bridge";
+import { authenticationCredentials, type CallContext, DriverError, retryableStatus } from "sanoma/workflows";
 import { API, supabaseAccessToken, supabaseOAuth } from "./authentication.ts";
 import { supabaseTf } from "./connector.ts";
 import { apiError, type ManagementApi, withManagement } from "./management.ts";

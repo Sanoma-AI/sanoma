@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import { live, replay } from "@sanoma-ai/testing/replay";
-import { type Driver, memorySecrets, type Secrets } from "@sanoma-ai/workflows";
+import { live, replay } from "sanoma/testing/replay";
+import { type Driver, memorySecrets, type Secrets } from "sanoma/workflows";
 import { beforeEach, describe, expect, it } from "vitest";
-import { changeReplay } from "../../../packages/bridge/test/change-replay.ts";
+import { changeReplay } from "../../../packages/sanoma/bridge/test/change-replay.ts";
 import { supabaseDriver } from "../src/driver.ts";
 import { provider } from "../src/resources.gen.ts";
 import { REF, replayOptions } from "./replay.ts";

@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-stripe
 
-Stripe resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): products and webhook endpoints, read through the [`stripe/stripe`](https://github.com/stripe/terraform-provider-stripe) OpenTofu provider (0.3.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge). It reads only: there is no create, update or delete yet.
+Stripe resources for [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md): products and webhook endpoints, read through the [`stripe/stripe`](https://github.com/stripe/terraform-provider-stripe) OpenTofu provider (0.3.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge). It reads only: there is no create, update or delete yet.
 
 ## Usage
 
@@ -15,9 +15,9 @@ Each resource type has two operations, both effect `read` and idempotent, with S
 | `product`          | `stripe.product.read`, `stripe.product.import`                   | `id` (`prod_…`) |
 | `webhook_endpoint` | `stripe.webhook_endpoint.read`, `stripe.webhook_endpoint.import` | `id` (`we_…`)   |
 
-`import` takes `{ id }` and returns the object's `state`; `read` takes a state an earlier call returned, or just `{ id }`, and returns its fresh `state`, or `gone: true`. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
+`import` takes `{ id }` and returns the object's `state`; `read` takes a state an earlier call returned, or just `{ id }`, and returns its fresh `state`, or `gone: true`. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#resources).
 
-A data file declares resources with the constructors in `@sanoma-ai/connector-stripe/resources`, without Stripe's id, which Stripe sets: which object a declaration means is its binding, in the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#bindings), by Stripe's id. A declaration with no binding is `absent` to a drift check.
+A data file declares resources with the constructors in `@sanoma-ai/connector-stripe/resources`, without Stripe's id, which Stripe sets: which object a declaration means is its binding, in the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#bindings), by Stripe's id. A declaration with no binding is `absent` to a drift check.
 
 ```ts
 import { stripe } from "@sanoma-ai/connector-stripe/resources";
@@ -31,13 +31,13 @@ The logo is Stripe's glyph from [Simple Icons](https://simpleicons.org/?q=stripe
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma-ai/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma-ai/bridge`'s pin and fixture), the types, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma-ai/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title (no identity: an object is found by its binding, Stripe's `id`), and Stripe's title and logo. What Stripe sets (`id`, `created`, `livemode`) is vendor-owned and a data file may not declare it.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`sanoma/internal/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `sanoma/internal/bridge`'s pin and fixture), the types, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`sanoma/internal/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/bridge/README.md#connectors-for-opentofu-providers): each type's title (no identity: an object is found by its binding, Stripe's `id`), and Stripe's title and logo. What Stripe sets (`id`, `created`, `livemode`) is vendor-owned and a data file may not declare it.
 
 A webhook endpoint's `secret` is sensitive (Stripe returns it only when the endpoint is created): it is write-only, never compared, and `null` in every state the driver returns.
 
 ## Driver
 
-`@sanoma-ai/connector-stripe/driver` reads through a provider bridge. The `stripe` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma-ai/connector-stripe/driver` reads through a provider bridge. The `stripe` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
 import { stripe } from "@sanoma-ai/connector-stripe";
@@ -47,7 +47,7 @@ export default defineConfig({ workflows, connectors: [stripe], policy });
 
 `./driver` (`stripeDriver`; `stripeDriver({ bridge })` reads through a bridge of your own) and `./fake` (`fakeStripe`) are internal entries, for tests.
 
-Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call with the binary `startBridge` finds. It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
+Without `bridge`, it reads through the process's `defaultBridge()` from `sanoma/internal/bridge`, started on the first call with the binary `startBridge` finds. It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
 
 ### Environment
 
@@ -57,7 +57,7 @@ Read on every call, never when the config loads:
 | ---------------- | ------------------------------------------------------------ |
 | `STRIPE_API_KEY` | A Stripe secret or restricted key; a test-mode one in tests. |
 
-When the key is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the key to the provider through its config only. The default bridge's binary comes with `@sanoma-ai/bridge` or from `SANOMA_BRIDGE_BIN` (see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#the-binary)), not a credential of the connector.
+When the key is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the key to the provider through its config only. The default bridge's binary comes with `sanoma/internal/bridge` or from `SANOMA_BRIDGE_BIN` (see [the bridge](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/bridge/README.md#the-binary)), not a credential of the connector.
 
 ### Errors and retries
 

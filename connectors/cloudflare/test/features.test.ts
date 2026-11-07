@@ -1,6 +1,6 @@
-import { withSetup } from "@sanoma-ai/workflows";
-import { describeFeatures } from "@sanoma-ai/testing/features";
-import { live } from "@sanoma-ai/testing/replay";
+import { withSetup } from "sanoma/workflows";
+import { describeFeatures } from "sanoma/testing/features";
+import { live } from "sanoma/testing/replay";
 import { cloudflareDriver } from "../src/driver.ts";
 import { cloudflare } from "../src/index.ts";
 import { replayOptions } from "./replay.ts";

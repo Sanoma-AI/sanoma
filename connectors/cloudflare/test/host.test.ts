@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { checkHost, hostCheck, hostCheckWorkflows, inProcessHost, testRepository } from "@sanoma-ai/testing/host";
+import { testDatabaseUrl } from "sanoma/testing";
+import { checkHost, hostCheck, hostCheckWorkflows, inProcessHost, testRepository } from "sanoma/testing/host";
 import {
   type CallContext,
   memoryLedger,
@@ -12,9 +12,9 @@ import {
   SanomaClient,
   type SanomaConfig,
   withSetup,
-} from "@sanoma-ai/workflows";
-import { writeLockfile } from "@sanoma-ai/workflows/describe";
-import { secret } from "@sanoma-ai/workflows/resources";
+} from "sanoma/workflows";
+import { writeLockfile } from "sanoma/workflows/describe";
+import { secret } from "sanoma/resources";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cloudflareOps, container } from "../src/connector.ts";
 import { fakeCloudflare, stubAppBundle, stubContainer } from "../src/fake.ts";

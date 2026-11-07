@@ -1,12 +1,12 @@
 import { createSign } from "node:crypto";
-import { DriverError, retryableStatus } from "@sanoma-ai/workflows";
+import { DriverError, retryableStatus } from "sanoma/workflows";
 import { z } from "zod";
 
 // GitHub's REST API over plain `fetch`, as the remote half and the operations through the App call
 // it: GitHub's media type and `X-GitHub-Api-Version: 2022-11-28`, its failures as `DriverError`s.
 
 /** The secrets of the company's GitHub App the remote half and the operations through the App read, as the app's manifest flow stores them: the runtime's one list. */
-export { GITHUB_APP as GITHUB_APP_SECRETS } from "@sanoma-ai/workflows";
+export { GITHUB_APP as GITHUB_APP_SECRETS } from "sanoma/workflows";
 
 const API = "https://api.github.com";
 

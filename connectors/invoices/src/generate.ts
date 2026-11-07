@@ -1,5 +1,5 @@
 import { cleaningInvoice, InvoiceValidationError, petSittingInvoice } from "@sanoma-ai/invoices";
-import { DriverError } from "@sanoma-ai/workflows";
+import { DriverError } from "sanoma/workflows";
 import { InvoiceRenderError } from "@sanoma-ai/invoices/pdf-contract";
 import { fileSchema, generateInput, workflowPdfLimits, type GenerateInput, type PdfFile } from "./connector.ts";
 

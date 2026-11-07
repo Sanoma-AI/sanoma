@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AppBundle } from "@sanoma-ai/app";
+import type { AppBundle } from "sanoma/app";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { Listening } from "../src/listen.ts";
 import { listenWorkerPort, type Run, type WorkerPortOptions } from "../src/worker-port.ts";
@@ -11,7 +11,7 @@ import { copyFixture, ensureBuilt, runCli } from "./fixture.ts";
 // The worker's port over a fake `Run`: the checkout (with its install) and the revision's own
 // `sanoma app-bundle` are the commands it is given, the second writing what a build would, or, for
 // a copy of `fixtures/sites`, running this checkout's bin there. `buildAppBundle` itself is tested
-// in `packages/app/test/app-bundle.test.ts`, the runtime image in CI's runtime-image job.
+// in `packages/sanoma/app/test/app-bundle.test.ts`, the runtime image in CI's runtime-image job.
 
 const TOKEN = "swi_the-company-token";
 const R1 = "0123456789abcdef0123456789abcdef01234567";

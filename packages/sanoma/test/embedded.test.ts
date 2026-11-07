@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import { prepareDatabase } from "../../workflows/src/db.ts";
+import { prepareDatabase } from "../workflows/src/db.ts";
 import { type EnsuredPostgres, ensurePostgres } from "../src/postgres.ts";
 import { postgresBin } from "../src/postgres-bin.ts";
 

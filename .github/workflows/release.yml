@@ -58,9 +58,11 @@ jobs:
               echo "Nothing: every version is already public."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-      # Packages already public are skipped without running prepack, so their dependents need this
-      # build; the packages being published rebuild in their prepack, which keeps the hand path safe.
-      - run: pnpm build
+      # Each package published below builds in its prepack (sanoma first: the order is the dependencies').
+      # One already public is skipped without it, and its dependents' prepack then lacks its dist/: after a
+      # partial run, with sanoma public already, build it all here first. One build either way.
+      - name: Build after a partial run
+        run: grep -q '^sanoma@' "$RUNNER_TEMP/to-publish.txt" || pnpm build
       # --no-git-checks: the first step checks the commit instead. The prepack of each
       # @sanoma-ai/bridge-<platform> downloads the provider-bridge release RELEASE pins, and of each
       # @sanoma-ai/postgres-<platform> zonky's jar from Maven Central (unzip and xz on the runner).

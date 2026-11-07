@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-docker",
-  "version": "0.5.9",
+  "version": "0.11.21",
   "description": "The local Docker host for Sanoma: a container that runs the company, through the OpenTofu provider",
   "keywords": [
     "connector",
@@ -54,19 +54,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "generate": "node ../../packages/bridge/src/tfschema/cli.ts src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
+    "generate": "node --conditions=sanoma-source ../../packages/sanoma/src/cli.ts tfschema src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
     "prepack": "pnpm run clean && pnpm run build",
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "devDependencies": {
-    "@sanoma-ai/bridge": "workspace:*",
-    "@sanoma-ai/testing": "workspace:*",
-    "@sanoma-ai/workflows": "workspace:*",
+    "sanoma": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/bridge": "workspace:^",
-    "@sanoma-ai/workflows": "workspace:^",
+    "sanoma": "workspace:*",
     "zod": "^4"
   },
   "engines": {

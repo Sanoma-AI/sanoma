@@ -1,4 +1,4 @@
-import { checkDerivedHost } from "@sanoma-ai/testing/host";
+import { checkDerivedHost } from "sanoma/testing/host";
 import { describe, expect, it } from "vitest";
 import { host, hostSlug } from "../src/connector.ts";
 

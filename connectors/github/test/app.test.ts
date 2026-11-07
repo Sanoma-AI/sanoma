@@ -1,5 +1,5 @@
-import { live, replay } from "@sanoma-ai/testing/replay";
-import { type Driver, memorySecrets } from "@sanoma-ai/workflows";
+import { live, replay } from "sanoma/testing/replay";
+import { type Driver, memorySecrets } from "sanoma/workflows";
 import { describe, expect, it } from "vitest";
 import { githubDriver } from "../src/driver.ts";
 import { FAKE_TEMPLATE, fakeGithub } from "../src/fake.ts";

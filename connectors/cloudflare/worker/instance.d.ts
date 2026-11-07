@@ -1,5 +1,5 @@
 // The types of `instance.js`, for the package's TypeScript: the fake runs it, and `src/` names its routes.
-import type { AppBundleModule } from "@sanoma-ai/app";
+import type { AppBundleModule } from "sanoma/app";
 
 /** The object's route that holds the company's wake, with the instance token. */
 export declare const WAKE_PATH: "/__sanoma/wake";

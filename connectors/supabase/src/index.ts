@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { supabaseAccessToken, supabaseOAuth } from "./authentication.ts";
 import { supabaseOps } from "./connector.ts";
 import { supabaseDriver } from "./driver.ts";

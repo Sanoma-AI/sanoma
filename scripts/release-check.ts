@@ -9,14 +9,18 @@
  * - A package left at a public version that must take every new version it depends on, as npm has its
  *   ranges. An exact pin (`workspace:*`, as `sanoma` pins the runtime) never does, nor a `^` peer range
  *   after a 0.x minor bump. Counts the ones that will pin those in turn.
+ * - A package at a version other than `sanoma`'s: every published package but the binaries
+ *   (a package published with `os`, which follows the binary it downloads) is released with sanoma, at
+ *   its version, so one of them changed is a new version for them all.
  *
  * Prints each `name@version` the release will publish, one per line. `release.yml` runs it before
  * publishing; `node scripts/release-check.ts` by hand.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join, posix, relative, sep } from "node:path";
 import semver from "semver";
+import { workspacePackages } from "./runtime-packages.ts";
 
 export interface Manifest {
   name: string;
@@ -24,6 +28,8 @@ export interface Manifest {
   /** The package's directory, absolute, as `pnpm ls --json` gives it. */
   path: string;
   private?: boolean;
+  /** A binary package names the platforms it installs on. */
+  publishConfig?: { os?: string[] };
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
@@ -51,33 +57,99 @@ function onNpm({ name, version }: Manifest): OnNpm {
   return view([name, "name"]) ? "new version" : "new package";
 }
 
-/** A package.json as an install sees it: its devDependencies never reach one. */
-const shipped = (text: string) => JSON.stringify({ ...JSON.parse(text), devDependencies: undefined });
+/** A package.json as an install sees it: neither its devDependencies nor the scripts packing runs reach one. */
+function shipped(text: string): string {
+  const {
+    devDependencies: _,
+    scripts = {},
+    ...manifest
+  } = JSON.parse(text) as {
+    devDependencies?: unknown;
+    scripts?: Record<string, string>;
+  };
+  const { prepack: _pre, postpack: _post, ...rest } = scripts;
+  return JSON.stringify({ ...manifest, scripts: rest });
+}
+
+/**
+ * The files outside the package at `dir` that a package.json's `prepack` names (the download script of a
+ * binary package), relative to `root`.
+ */
+const packedFrom = (text: string, dir: string, root: string): string[] =>
+  String((JSON.parse(text) as { scripts?: { prepack?: string } }).scripts?.prepack ?? "")
+    .split(/\s+/)
+    .map((word) => join(dir, word))
+    .filter((path) => !path.startsWith(dir + sep))
+    .map((path) => relative(root, path));
+
+/**
+ * What a package is built from, as git pathspecs under its directory: each entry of its `files` git
+ * tracks, shipped as it is, and for one it does not, a build's output (`dist`, `workflows/dist`,
+ * `oxlint.json`), the `src/` beside it and the files beside it (its build's configuration), and the
+ * files its `build` script names (`scripts/oxlint.ts`). Never its tests, nor anything else it does not
+ * ship. A negated entry only leaves out what is shipped, never what a build reads, so none is followed.
+ * Without `files`, npm ships the whole directory.
+ */
+function sourcesOf(text: string, dir: string, root: string): string[] {
+  const { files, scripts } = JSON.parse(text) as { files?: string[]; scripts?: { build?: string } };
+  if (!files) return [dir];
+  const tracked = (spec: string) => run("git", ["ls-files", "--", spec], root).trim() !== "";
+  const at = (path: string) => (path.includes("*") ? `:(glob)${join(dir, path)}` : join(dir, path));
+  const built = String(scripts?.build ?? "")
+    .split(/\s+/)
+    .filter((word) => existsSync(join(dir, word)) && statSync(join(dir, word)).isFile())
+    .map((word) => join(dir, word));
+  return [
+    ...files
+      .filter((entry) => !entry.startsWith("!"))
+      .flatMap((entry) => {
+        if (tracked(at(entry))) return [at(entry)];
+        const beside = posix.dirname(entry) === "." ? dir : join(dir, posix.dirname(entry));
+        return [join(beside, "src"), `:(glob)${beside}/*`];
+      }),
+    ...built,
+  ];
+}
+
+/** Scripts' code, one after another: a comment's edit (a moved path in it) changes nothing they do. */
+const codeOf = (files: { text: string }[]) => files.map(({ text }) => text.replace(/^\s*\/\/.*\n/gm, "")).join("\0");
 
 /**
  * The commits since the one that last set this package's version, or removed its `private`, that touch
- * what it is built from: its directory (not `test/` or an `AGENTS.md`), a file outside it that its
- * `prepack` names (the download script of a binary package), and its `package.json` when more than its
- * `devDependencies` differs. Historical commits alone do not require a bump when the effective
- * inputs match the version-setting commit (for example, after integrating a squash release).
+ * what it is built from: what it ships and what builds that (`sourcesOf`; never an `AGENTS.md`), its `package.json` when more than
+ * its `devDependencies` and pack-time scripts differ, and the files outside it that its `prepack` names
+ * when their code differs from then (wherever they were: a moved file is no change). Historical commits
+ * alone do not require a bump when the effective inputs match the version-setting commit (for example,
+ * after integrating a squash release).
  */
 export function changedSince(pkg: Manifest, root = process.cwd()): string[] {
   const git = (...args: string[]) => run("git", args, root).trim();
   const manifest = join(pkg.path, "package.json");
   const set = git("log", "-1", "--format=%H", '-G"(version|private)":', "--", manifest);
   if (!set) return [];
+  /** A file's text at the version-setting commit, or undefined when there was none. */
+  const then = (path: string) => {
+    try {
+      return run("git", ["show", `${set}:./${path}`], root);
+    } catch {
+      return undefined;
+    }
+  };
   const now = readFileSync(manifest, "utf8");
-  const same = shipped(now) === shipped(git("show", `${set}:./${relative(root, manifest)}`));
-  const prepack = String((JSON.parse(now) as { scripts?: { prepack?: string } }).scripts?.prepack ?? "")
-    .split(/\s+/)
-    .map((word) => join(pkg.path, word))
-    .filter((path) => !path.startsWith(pkg.path + sep) && existsSync(path));
+  const before = then(relative(root, manifest))!;
+  // Each file its prepack names, then and now, with its text.
+  const was = packedFrom(before, pkg.path, root).flatMap((path) => {
+    const text = then(path);
+    return text === undefined ? [] : [{ path, text }];
+  });
+  const is = packedFrom(now, pkg.path, root)
+    .filter((path) => existsSync(join(root, path)))
+    .map((path) => ({ path, text: readFileSync(join(root, path), "utf8") }));
   const specs = [
-    pkg.path,
-    `:(exclude)${join(pkg.path, "test")}`,
+    ...sourcesOf(now, pkg.path, root),
     `:(exclude,glob)${pkg.path}/**/AGENTS.md`,
-    ...(same ? [`:(exclude)${manifest}`] : []),
-    ...prepack,
+    ...(shipped(now) === shipped(before) ? [`:(exclude)${manifest}`] : []),
+    ...(codeOf(was) === codeOf(is) ? [] : [...was, ...is].map(({ path }) => path)),
   ];
   if (!git("diff", "--name-only", set, "HEAD", "--", ...specs)) return [];
   return git("log", "--format=%h", `${set}..`, "--", ...specs)
@@ -95,7 +167,17 @@ export function releaseCheck(
   const publish: string[] = [];
   /** The version each package will be released at: its own when new; a patch above when it needs one. */
   const next = new Map<string, string>();
+  const bump = (pkg: Manifest) => next.set(pkg.name, semver.inc(pkg.version, "patch")!);
+  const sanoma = packages.find((pkg) => pkg.name === "sanoma");
+  /** Released together, at sanoma's version: one of them changed is a new version for them all. */
+  // Not the platform binaries (published with `os`), which follow the binary they download.
+  const lockstep = packages.filter((pkg) => !pkg.publishConfig?.os);
+  const bumpLockstep = () => lockstep.filter((pkg) => !next.has(pkg.name)).forEach(bump);
+  const changes: string[] = [];
   for (const pkg of packages) {
+    if (sanoma && lockstep.includes(pkg) && pkg.version !== sanoma.version) {
+      problems.push(`${pkg.name}@${pkg.version} is not at sanoma's version, ${sanoma.version}: give it that one`);
+    }
     const has = npm.get(pkg.name)!;
     if (has === "new package") {
       problems.push(
@@ -110,10 +192,18 @@ export function releaseCheck(
     const commits = changed(pkg);
     if (!commits.length) continue;
     const more = commits.length > 3 ? ` and ${commits.length - 3} more` : "";
+    const change = `${pkg.name}@${pkg.version} is on npm, but ${commits.slice(0, 3).join(", ")}${more} changed its source since`;
+    if (lockstep.includes(pkg)) changes.push(change);
+    else {
+      problems.push(`${change}: give it a new version`);
+      bump(pkg);
+    }
+  }
+  if (changes.length) {
     problems.push(
-      `${pkg.name}@${pkg.version} is on npm, but ${commits.slice(0, 3).join(", ")}${more} changed its source since: give it a new version`,
+      ...changes.map((change) => `${change}: give it and every package released with sanoma a new version`),
     );
-    next.set(pkg.name, semver.inc(pkg.version, "patch")!);
+    bumpLockstep();
   }
   for (let more = true; more;) {
     more = false;
@@ -129,7 +219,8 @@ export function releaseCheck(
       problems.push(
         `${pkg.name}@${pkg.version} takes ${dep} ${range}, not ${next.get(dep)}: give it a new version too`,
       );
-      next.set(pkg.name, semver.inc(pkg.version, "patch")!);
+      if (lockstep.includes(pkg)) bumpLockstep();
+      else bump(pkg);
       more = true;
     }
   }
@@ -137,9 +228,7 @@ export function releaseCheck(
 }
 
 if (import.meta.main) {
-  const packages = (JSON.parse(run("pnpm", ["-r", "ls", "--depth", "-1", "--json"])) as Manifest[]).filter(
-    (pkg) => !pkg.private,
-  );
+  const packages = workspacePackages();
   const npm = new Map(packages.map((pkg) => [pkg.name, onNpm(pkg)]));
   const { problems, publish } = releaseCheck(packages, npm, changedSince);
   for (const line of publish) console.log(line);

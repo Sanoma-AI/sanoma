@@ -1,6 +1,6 @@
 import { GoogleAuth } from "google-auth-library";
 import { z } from "zod";
-import { AuthenticationError, defineAuthentication, type StoredAuthentication } from "@sanoma-ai/workflows";
+import { AuthenticationError, defineAuthentication, type StoredAuthentication } from "sanoma/workflows";
 
 /**
  * The provisioning identity, declared in code: who the connection provisions as and where its

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { SanomaClient, type SanomaConfig, startWorker } from "@sanoma-ai/workflows";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
+import { SanomaClient, type SanomaConfig, startWorker } from "sanoma/workflows";
 import { escapeIdentifier, Pool as RealPool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 

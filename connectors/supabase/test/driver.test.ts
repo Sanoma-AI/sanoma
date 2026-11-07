@@ -1,5 +1,5 @@
-import { loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
-import { type CallAuthentication, type Driver, memorySecrets } from "@sanoma-ai/workflows";
+import { loadReplies, stateBridge } from "sanoma/internal/bridge/fake";
+import { type CallAuthentication, type Driver, memorySecrets } from "sanoma/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { supabaseDriver } from "../src/driver.ts";
 import { fakeSupabase } from "../src/fake.ts";

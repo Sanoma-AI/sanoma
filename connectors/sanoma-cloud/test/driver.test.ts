@@ -1,6 +1,6 @@
 import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
+import { type CallContext, memorySecrets } from "sanoma/workflows";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cloudDriver } from "../src/driver.ts";
 

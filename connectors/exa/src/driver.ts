@@ -1,4 +1,4 @@
-import { defineDriver, DriverError, retryableStatus } from "@sanoma-ai/workflows";
+import { defineDriver, DriverError, retryableStatus } from "sanoma/workflows";
 import type { Exa } from "exa-js";
 import { z } from "zod";
 import { exaOps } from "./connector.ts";

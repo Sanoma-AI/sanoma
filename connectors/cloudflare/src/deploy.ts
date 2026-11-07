@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import type { AppBundle } from "@sanoma-ai/app";
-import { DriverError, errorMessage } from "@sanoma-ai/workflows";
-import { APP_BUNDLE_HEADER, APP_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
+import type { AppBundle } from "sanoma/app";
+import { DriverError, errorMessage } from "sanoma/workflows";
+import { APP_BUNDLE_HEADER, APP_BUNDLE_PATH } from "sanoma/workflows/shared";
 import mime from "mime";
 import { refused } from "./errors.ts";
 import { DEPLOYMENT_HEADER } from "../worker/instance.js";

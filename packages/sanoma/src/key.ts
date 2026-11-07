@@ -29,7 +29,7 @@ export async function ensureDeploymentKeys(
 ): Promise<void> {
   // Keep init's key generation independent of loading the runtime. Startup uses its one
   // decoder so direct and mounted values have identical validation everywhere.
-  const { deploymentKey } = await import("@sanoma-ai/workflows");
+  const { deploymentKey } = await import("sanoma/workflows");
   const file = join(dir, ".env");
   const names: (typeof SIGNING_KEY | typeof KEY)[] = [SIGNING_KEY];
   if (!options.externalStore) names.push(KEY);

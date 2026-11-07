@@ -4,16 +4,18 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, parseEnv } from "node:util";
-import type { SanomaConfig } from "@sanoma-ai/workflows";
-import { type Loaded, type LoadedConfig, loadConfig, UsageError } from "./config.ts";
+import type { SanomaConfig } from "sanoma/workflows";
+import { errorMessage, UsageError } from "sanoma/workflows/shared";
+import { type Loaded, type LoadedConfig, loadConfig } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
 import { emit, eventsOn } from "./events.ts";
 import type { EnsuredPostgres } from "./postgres.ts";
 import type { Listening } from "./listen.ts";
 
-// Only Node's modules, ./config.ts and ./events.ts are imported here: each command imports what it runs, so
-// `--help`, `env`, `ledger export` and the dev-mode parent load neither the worker nor the app (the
-// parent loads the app's Node-only build module to see whether there are sites).
+// Only Node's modules, sanoma/workflows/shared, ./config.ts and ./events.ts are imported here: each
+// command imports what it runs, so `--help`, `env`, `ledger export` and the dev-mode parent load
+// neither the worker nor the app (the parent loads the app's Node-only build module to see whether
+// there are sites).
 
 const USAGE = `usage: sanoma [command]
 
@@ -35,6 +37,10 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
   sanoma env [--check]                write .env.example from the drivers' variables; --check exits 1 when it is out of date
   sanoma ledger export <runId> [--out <file>]
                                       a run's ledger records as JSON lines
+  sanoma dev <link|unlink|update>     from a contributor's own Sanoma repo: link it to a sanoma checkout, unlink it,
+                                      or update it to the latest release (sanoma dev --help)
+  sanoma tfschema <resources.config.ts> <resources.gen.ts> [--fixtures <dir>]
+                                      a connector's resource types, from an OpenTofu provider's recorded schema
 
 SANOMA_DATABASE_URL names Postgres, used as it is. Without it, sanoma, check and ledger export start the company's
 own PostgreSQL 18 in .sanoma/postgres (its records: deleting it deletes them), or use the one another sanoma runs
@@ -56,22 +62,23 @@ const USAGE_EXIT = 2;
 
 const log = (line: string) => console.error(line);
 
-const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
 /** A failure to start or stop: its message on stderr, and as an `error` event. */
 function fail(err: unknown): void {
-  const message = messageOf(err);
+  const message = errorMessage(err);
   log(message);
   emit({ event: "error", message });
 }
 
 /** Runs the command line; returns the exit code, or never, for a command that serves until a signal. */
 export async function main(argv: string[]): Promise<number> {
+  // Commands that read their own arguments.
+  if (argv[0] === "dev") return (await import("sanoma/internal/dev")).dev(argv.slice(1));
+  if (argv[0] === "tfschema") return (await import("sanoma/internal/bridge/tfschema/cli")).tfschema(argv.slice(1));
   let args: ReturnType<typeof parse>;
   try {
     args = parse(argv);
   } catch (err) {
-    throw new UsageError(`${messageOf(err)}\n\n${USAGE.trimEnd()}`);
+    throw new UsageError(`${errorMessage(err)}\n\n${USAGE.trimEnd()}`);
   }
   const { positionals, values } = args;
   if (values.help) {
@@ -128,13 +135,12 @@ export async function main(argv: string[]): Promise<number> {
       // Hidden: the worker's port runs it in a revision's checkout (`appBundleRoute`).
       if (!values.out || rest.length) throw new UsageError("usage: sanoma app-bundle --out <file>");
       const { config, root } = await loadConfig();
-      const [{ buildAppBundle }, { parseDomains }, { runtimeFrom }] = await Promise.all([
-        import("@sanoma-ai/app/bundle"),
+      const [{ buildAppBundle }, { parseDomains }] = await Promise.all([
+        import("sanoma/app/bundle"),
         import("./serve.ts"),
-        import("./sites.ts"),
       ]);
       const domains = parseDomains(process.env.SANOMA_DOMAINS) ?? {};
-      const bundle = await buildAppBundle(root, { config, domains, runtimeFrom: runtimeFrom(), log });
+      const bundle = await buildAppBundle(root, { config, domains, log });
       writeFileSync(values.out, JSON.stringify(bundle));
       return 0;
     }
@@ -185,7 +191,7 @@ async function load({
     (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres !== "find", {
       adopt: postgres === "serve",
     }));
-  const { resolveConfig } = await import("@sanoma-ai/workflows");
+  const { resolveConfig } = await import("sanoma/workflows");
   try {
     const resolved = resolveConfig(loaded.config);
     if (policies && resolved.policyProblems.length) {
@@ -295,7 +301,7 @@ async function serveStarted(cwd: string): Promise<number> {
  * the config names is the child's), so a restart keeps it; the child inherits its URL.
  */
 async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<never> {
-  const { partialLink, startWatchers, supervise, whenUnlinked } = await import("./dev.ts");
+  const { buildDirs, startWatchers, supervise, whenUnlinked } = await import("./dev.ts");
   const cwd = process.cwd();
   log(`dev mode: ${repo}; building ${packages.map((p) => p.name).join(", ") || "nothing"} as it changes`);
   const dotenv = join(cwd, ".env");
@@ -303,19 +309,12 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
     process.env.SANOMA_DATABASE_URL ||
     (existsSync(dotenv) && parseEnv(readFileSync(dotenv, "utf8")).SANOMA_DATABASE_URL);
   const postgres = named ? undefined : await withPostgres(undefined, cwd, true, { adopt: true });
-  const fromTarballs = partialLink(cwd);
-  if (fromTarballs.length) {
-    log(
-      `dev mode: ${fromTarballs.join(", ")} still come from their tarballs, ` +
-        "so edits to them in the checkout will not show",
-    );
-  }
   const watchers = startWatchers(packages, log);
   const cli = fileURLToPath(import.meta.url);
-  const app = packages.find((p) => p.name === "@sanoma-ai/app");
+  const sanoma = packages.find((p) => p.name === "sanoma");
   const { siteBuild } = await import("./sites.ts");
   // A linked app with no build yet is not hot: every change restarts the child until it builds.
-  const hot = app && (await siteBuild(cwd).catch(() => undefined))?.sitesOf(cwd).sites.length;
+  const hot = sanoma && (await siteBuild(cwd).catch(() => undefined))?.sitesOf(cwd).sites.length;
   const child = supervise({
     spawn: () =>
       // With SANOMA_EVENTS=1, a stdin of its own that nothing writes: the end of this process's
@@ -328,8 +327,8 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
         detached: process.platform !== "win32",
         windowsHide: true,
       }),
-    watch: packages.map((p) => join(p.dir, "dist")),
-    ignore: hot ? [join(app.dir, "dist", "client"), join(app.dir, "dist", "server")] : [],
+    watch: packages.flatMap(buildDirs),
+    ignore: hot ? ["client", "server"].map((dir) => join(sanoma.dir, "app", "dist", dir)) : [],
     log,
   });
   const shutdown = onSignal(async () => {
@@ -341,7 +340,7 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
       await postgres?.stop();
     }
   });
-  // Once the repo is unlinked (`sanoma-dev unlink`, an install), the checkout's server must not
+  // Once the repo is unlinked (`sanoma dev unlink`, an install), the checkout's server must not
   // keep running in it, nor start again on the checkout's next build: it would write its own
   // route tree and tsconfig into `.sanoma/app` beside the installed sanoma's.
   const unwatch = whenUnlinked(cwd, packages, () => {
@@ -354,7 +353,7 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
 /** `sanoma api` (hidden): writes the generated files from the config, as `check` and `serve` do. */
 async function writeApiCommand(): Promise<number> {
   const { config, root, resolved } = await load({ policies: false });
-  const { describeConfig, readPeople, schemaOf, writeGenerated } = await import("@sanoma-ai/workflows/describe");
+  const { describeConfig, readPeople, schemaOf, writeGenerated } = await import("sanoma/workflows/describe");
   const { wrote } = await writeGenerated(root, describeConfig(config), schemaOf(resolved, readPeople(root).people));
   for (const file of wrote) log(`wrote ${file}`);
   return 0;
@@ -439,7 +438,7 @@ async function wakeupAccount(label: string): Promise<number> {
   const loaded = await loadConfig();
   const postgres = await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, false, { announce: false });
   try {
-    const { mintWakeupAccount } = await import("@sanoma-ai/workflows/wakeup-service");
+    const { mintWakeupAccount } = await import("sanoma/workflows/wakeup-service");
     console.log(JSON.stringify(await mintWakeupAccount(postgres.databaseUrl, label)));
     return 0;
   } finally {

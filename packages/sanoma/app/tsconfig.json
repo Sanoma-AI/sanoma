@@ -1,0 +1,10 @@
+{
+  // The app, checked on its own. The root tsconfig covers src/index.ts and the tests, for Node.
+  "extends": "./tsconfig.site.json",
+  "compilerOptions": {
+    // `sanoma/*` from source, as in the root tsconfig. (`#/*` is package.json's `imports`, which
+    // TypeScript, Vite and the shadcn CLI all read.)
+    "customConditions": ["sanoma-source"]
+  },
+  "include": ["src", "vite.config.ts"]
+}

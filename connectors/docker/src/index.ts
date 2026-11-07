@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { dockerOps } from "./connector.ts";
 import { dockerDriver } from "./driver.ts";
 import { fakeDocker } from "./fake.ts";

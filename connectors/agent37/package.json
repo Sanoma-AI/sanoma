@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-agent37",
-  "version": "0.1.1",
+  "version": "0.11.21",
   "description": "Agent37 Cloud for Sanoma: the boxes coding agents work in, one persistent Linux instance each, driven through Sanoma's runner",
   "keywords": [
     "agent37",
@@ -58,13 +58,12 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "devDependencies": {
-    "@sanoma-ai/testing": "workspace:*",
-    "@sanoma-ai/workflows": "workspace:*",
     "msw": "^3.0.3",
+    "sanoma": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/workflows": "workspace:^",
+    "sanoma": "workspace:*",
     "zod": "^4"
   },
   "engines": {

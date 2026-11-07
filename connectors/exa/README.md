@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-exa
 
-[Exa](https://exa.ai) web search operations for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): a search, pages read by URL, the pages like one, and an answer with its sources.
+[Exa](https://exa.ai) web search operations for [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md): a search, pages read by URL, the pages like one, and an answer with its sources.
 
 ## Usage
 
@@ -17,7 +17,7 @@ npm install @sanoma-ai/connector-exa
 
 ```ts
 import { exa } from "@sanoma-ai/connector-exa";
-import { defineWorkflow } from "@sanoma-ai/workflows";
+import { defineWorkflow } from "sanoma/workflows";
 
 defineWorkflow({
   // ...
@@ -48,7 +48,7 @@ The logo the app shows beside these operations is Exa's mark from its [brand pag
 
 ## Driver
 
-`@sanoma-ai/connector-exa/driver` calls Exa. The `exa` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma-ai/connector-exa/driver` calls Exa. The `exa` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
 import { exa } from "@sanoma-ai/connector-exa";
@@ -68,7 +68,7 @@ It reads this on every call, never when the config loads:
 | ------------- | -------------------------------------------------------------------------------------- |
 | `EXA_API_KEY` | An Exa API key, from the API Keys page of [Exa's dashboard](https://dashboard.exa.ai). |
 
-When it is unset, a call fails, not retryable, naming it. The driver declares it in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma-ai/workflows#credentials)): the worker starts without it, warning, and the app's connector page shows its status and lets you set it.
+When it is unset, a call fails, not retryable, naming it. The driver declares it in its `env` ([Credentials](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#credentials)): the worker starts without it, warning, and the app's connector page shows its status and lets you set it.
 
 ### Errors and retries
 
@@ -76,7 +76,7 @@ Every operation only reads, so a retried call changes nothing, though each call 
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Exa's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/exa` needs no account. The fixtures were written from Exa's API reference and error docs, not recorded from its API; live, the tests search Exa and spend a few cents of credits, and recording replaces them with Exa's own replies:
+`test/driver.test.ts` replays Exa's replies (`test/fixtures`) with [`sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/exa` needs no account. The fixtures were written from Exa's API reference and error docs, not recorded from its API; live, the tests search Exa and spend a few cents of credits, and recording replaces them with Exa's own replies:
 
 ```sh
 SANOMA_LIVE=1 SANOMA_RECORD=1 EXA_API_KEY=... pnpm vitest run connectors/exa
@@ -86,7 +86,7 @@ A recording loses request ids. The error cases only replay.
 
 ## Steps and features
 
-The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#steps-a-connector-ships) (`exaSteps`, attached with `withSetup`), which a company's scenario can use beside the generic steps and other connectors' ones:
+The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#steps-a-connector-ships) (`exaSteps`, attached with `withSetup`), which a company's scenario can use beside the generic steps and other connectors' ones:
 
 | Keyword | Step                            | What it does                                                   |
 | ------- | ------------------------------- | -------------------------------------------------------------- |
@@ -94,14 +94,14 @@ The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/
 | Then    | `Exa was searched for {string}` | The run searched Exa with a query that holds that text         |
 | Then    | `Exa was asked {string}`        | The run asked `exa.web.answer` a question that holds that text |
 
-`features/search.feature`, `features/contents.feature` and `features/answer.feature` test each operation with these steps and the generic ones for an operation's own test, on the fake and on Exa's replies: `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-connectors-own-features). A scenario tagged `@fake-only` has no recording. The package ships `features/`.
+`features/search.feature`, `features/contents.feature` and `features/answer.feature` test each operation with these steps and the generic ones for an operation's own test, on the fake and on Exa's replies: `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md#a-connectors-own-features). A scenario tagged `@fake-only` has no recording. The package ships `features/`.
 
 ## Testing
 
 `@sanoma-ai/connector-exa/fake` is an in-memory Exa that searches nothing, the fake the connector carries: each sandbox run makes one of its own. It makes up to three pages for a query or a URL, from them alone, so one call always finds the same pages (on the first of `includeDomains`, else `example.com`, or for `findSimilar` the URL's own host, and never on a domain excluded), with the `text`, `highlights` and `summary` asked for. The pages it served stay in `state.pages`, by URL, which `getContents` reads; put a page there to give it a text of your own. `getContents` returns each page's text when the call asks for none of text, highlights or summary, as Exa does. A URL on a `.invalid` host cannot be read: `getContents` returns it in `statuses` as `CRAWL_NOT_FOUND`.
 
 ```ts
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { exa } from "@sanoma-ai/connector-exa";
 import { fakeExa } from "@sanoma-ai/connector-exa/fake";
 
@@ -124,6 +124,6 @@ fake.calls.map((c) => c.op); // ["exa.web.search", "exa.web.getContents"]
 
 To test what a workflow does when Exa misbehaves, set up the next call to an operation before the run makes it: `fake.failNext("exa.web.search", err?)`, `fake.rateLimit("exa.web.search")` (a `DriverError` with status 429), `fake.loseReply(…)` and `fake.hold(…)`. `fake.reset()` empties it between tests.
 
-[`@sanoma-ai/testing`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md) (in the sanoma repository, not published) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
+[`sanoma/testing`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md) (in the sanoma repository, not published) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
 
 License: FSL-1.1-ALv2.

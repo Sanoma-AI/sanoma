@@ -3,11 +3,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { dockerAvailable } from "@sanoma-ai/testing/host";
-import { type Driver, memorySecrets } from "@sanoma-ai/workflows";
-import { secret } from "@sanoma-ai/workflows/resources";
+import { dockerAvailable } from "sanoma/testing/host";
+import { type Driver, memorySecrets } from "sanoma/workflows";
+import { secret } from "sanoma/resources";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fakeBridge } from "../../../packages/bridge/test/fake-bridge.ts";
+import { fakeBridge } from "../../../packages/sanoma/bridge/test/fake-bridge.ts";
 import { containerType, dockerTf } from "../src/connector.ts";
 import { dockerDriver, dockerHost, type Inspected, inspectContainer, observed } from "../src/driver.ts";
 import { fakeDocker } from "../src/fake.ts";
@@ -139,7 +139,7 @@ describe("docker.container", () => {
 });
 
 // Recorded against local Docker with SANOMA_LIVE=1 SANOMA_RECORD=1 (and SANOMA_BRIDGE_BIN): the
-// bridge's replies in `@sanoma-ai/bridge`'s testdata/replies/kreuzwerker_docker_4.6.0/, Docker's
+// bridge's replies in `sanoma/internal/bridge`'s testdata/replies/kreuzwerker_docker_4.6.0/, Docker's
 // inspect answers in fixtures/inspect.json. Live, the test builds its image first.
 const live = process.env.SANOMA_LIVE === "1";
 const answers = new URL("./fixtures/inspect.json", import.meta.url);

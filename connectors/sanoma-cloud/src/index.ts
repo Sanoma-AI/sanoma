@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { cloudOps } from "./connector.ts";
 import { cloudDriver } from "./driver.ts";
 import { fakeCloud } from "./fake.ts";

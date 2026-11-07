@@ -1,4 +1,4 @@
-import { defineConnector, defineResource, vendorInfo } from "@sanoma-ai/workflows";
+import { defineConnector, defineResource, vendorInfo } from "sanoma/workflows";
 import { z } from "zod";
 
 /*

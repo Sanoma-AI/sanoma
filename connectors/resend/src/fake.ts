@@ -1,5 +1,5 @@
-import { DriverError } from "@sanoma-ai/workflows";
-import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { DriverError } from "sanoma/workflows";
+import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { DEFAULT_REGION, DEFAULT_RETURN_PATH, type DomainStatus, resendOps, senderOf } from "./connector.ts";
 import { type ApiDomain, type ApiRecord, type DomainApi, domainOperations } from "./domains.ts";
 

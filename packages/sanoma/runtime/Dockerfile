@@ -15,7 +15,7 @@
 # checkout under a second, the install 7-10 s for a lockfile the store matches and 14-30 s for one
 # a `pnpm update --latest` behind, the worker's /healthz 6-16 s after.
 #
-# The bridge release matches @sanoma-ai/bridge's isolated-session protocol. Source builds
+# The bridge release matches sanoma/internal/bridge's isolated-session protocol. Source builds
 # remain available with --build-arg BRIDGE_FROM=source at the same release's commit.
 
 ARG BRIDGE_FROM=release

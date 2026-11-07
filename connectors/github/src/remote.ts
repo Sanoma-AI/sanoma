@@ -8,7 +8,7 @@ import {
   type RemoteHalf,
   type RepoRef,
   type SourceHost,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { z } from "zod";
 import {
   appJwtOf,

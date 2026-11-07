@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-neon
 
-[Neon](https://neon.com) serverless Postgres for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): a project as the company's database, which pauses when idle and branches for previews, through Neon's own SDK, [`@neon/sdk`](https://www.npmjs.com/package/@neon/sdk).
+[Neon](https://neon.com) serverless Postgres for [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md): a project as the company's database, which pauses when idle and branches for previews, through Neon's own SDK, [`@neon/sdk`](https://www.npmjs.com/package/@neon/sdk).
 
 ## Usage
 
@@ -29,7 +29,7 @@ export const store = neon.project(
 
 Its state adds what Neon sets: `id`, `host` (the default compute's), `default_branch_id`, `default_endpoint_id` and `healthy` (the default compute has started: `active`, or `idle` while paused).
 
-The project type meets the [`Database` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#databases) (`database`): it pauses (its compute suspends after five minutes without queries and wakes on the next connection) and branches (a copy-on-write branch carries the data), takes `region` from `REGIONS` and `size`, and stores its URL with `project.storeUrl`. Going live chooses it before any other database type.
+The project type meets the [`Database` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#databases) (`database`): it pauses (its compute suspends after five minutes without queries and wakes on the next connection) and branches (a copy-on-write branch carries the data), takes `region` from `REGIONS` and `size`, and stores its URL with `project.storeUrl`. Going live chooses it before any other database type.
 
 | Operation                                      | Effect  | What it does                                                                                                                                                   |
 | ---------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -73,7 +73,7 @@ export default defineConfig({ workflows, connectors: [neon], connections: [infra
 
 ### Authentication
 
-The `apiKey` method uses one versioned bundle shaped `{ apiKey: string }`. Create an organization key in **Neon → Organization settings → API keys**. `NEON_INFRASTRUCTURE_AUTH` names the bundle in the deployment's selected store; no key value belongs in company code. Trusted setup code validates and serializes it with the exported `neonApiKey` definition and `encodeCredentials`, stores it through `SanomaClient.setSecret`, and binds the verified organization through `sanoma.connection.bind`. The app’s [connection-management forms](../../packages/app/README.md#connection-management) provide secure verification, review and save for these accounts.
+The `apiKey` method uses one versioned bundle shaped `{ apiKey: string }`. Create an organization key in **Neon → Organization settings → API keys**. `NEON_INFRASTRUCTURE_AUTH` names the bundle in the deployment's selected store; no key value belongs in company code. Trusted setup code validates and serializes it with the exported `neonApiKey` definition and `encodeCredentials`, stores it through `SanomaClient.setSecret`, and binds the verified organization through `sanoma.connection.bind`. The app’s [connection-management forms](../../packages/sanoma/app/README.md#connection-management) provide secure verification, review and save for these accounts.
 
 After policy allows a call, the runtime reads that connection's bundle and verifies its organization with [Neon's authenticated organizations endpoint](https://api-docs.neon.tech/reference/getcurrentuserorganizations). A response naming zero or multiple organizations is refused. The returned organization ID must match the bound account. This endpoint does not attest individual key permissions or expiry, so the connector reports no scopes; Neon still enforces the key's permissions on every operation.
 
@@ -85,7 +85,7 @@ The driver maps failures to `DriverError` internally. The named runtime boundary
 
 ### Testing the driver
 
-`test/driver.test.ts` and the features replay Neon's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/neon` needs no account. The features' fixtures are recorded from a real organization (2026-10-27); the driver tests' own are written by hand from Neon's API reference (its published OpenAPI spec, [`v2.json`](https://neon.com/api_spec/release/v2.json)) and checked against those recordings. Record the features again with an organization's key, which creates projects there and deletes them after each scenario:
+`test/driver.test.ts` and the features replay Neon's replies (`test/fixtures`) with [`sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/neon` needs no account. The features' fixtures are recorded from a real organization (2026-10-27); the driver tests' own are written by hand from Neon's API reference (its published OpenAPI spec, [`v2.json`](https://neon.com/api_spec/release/v2.json)) and checked against those recordings. Record the features again with an organization's key, which creates projects there and deletes them after each scenario:
 
 ```sh
 SANOMA_LIVE=1 SANOMA_RECORD=1 NEON_API_KEY=napi_... pnpm vitest run connectors/neon/test/features.test.ts
@@ -108,17 +108,17 @@ Measured 2026-10-27 on a Free organization, `aws-us-east-1`, Postgres 18, a 0.25
 
 ## Steps and features
 
-The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#steps-a-connector-ships) (`neonSteps`, attached with `withSetup`):
+The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#steps-a-connector-ships) (`neonSteps`, attached with `withSetup`):
 
 | Keyword | Step                                  | What it does                                                                   |
 | ------- | ------------------------------------- | ------------------------------------------------------------------------------ |
 | Given   | `a Neon project {string} in {string}` | Creates a project of that name in that region, named `project` (`$project.id`) |
 | Then    | `a Neon branch {string} was created`  | The run created a branch of that name                                          |
 
-`features/project.feature` creates, reads, waits for, plans and deletes a project, and `features/branch.feature` branches one and suspends its compute, on the fake and on the replies named after each scenario: `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-connectors-own-features). The package ships `features/`.
+`features/project.feature` creates, reads, waits for, plans and deletes a project, and `features/branch.feature` branches one and suspends its compute, on the fake and on the replies named after each scenario: `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md#a-connectors-own-features). The package ships `features/`.
 
 ## Testing
 
-`@sanoma-ai/connector-neon/fake` is an in-memory Neon, the fake the connector carries: projects in `state.projects`, each with a default branch `main` and its read-write compute, active at once, ids made in order (`fake-project-1`, `br-fake-2`, `ep-fake-3`). A suspend makes a compute `idle` and a start `active`. It refuses what Neon refuses: a region not in `REGIONS` (404, as Neon answers), an object it does not have (404), a project's default branch deleted. `test/database.test.ts` runs the `Database` contract's kit (`@sanoma-ai/testing/database`) over it, with a database of the test Postgres standing in for the project's.
+`@sanoma-ai/connector-neon/fake` is an in-memory Neon, the fake the connector carries: projects in `state.projects`, each with a default branch `main` and its read-write compute, active at once, ids made in order (`fake-project-1`, `br-fake-2`, `ep-fake-3`). A suspend makes a compute `idle` and a start `active`. It refuses what Neon refuses: a region not in `REGIONS` (404, as Neon answers), an object it does not have (404), a project's default branch deleted. `test/database.test.ts` runs the `Database` contract's kit (`sanoma/testing/database`) over it, with a database of the test Postgres standing in for the project's.
 
 License: FSL-1.1-ALv2.

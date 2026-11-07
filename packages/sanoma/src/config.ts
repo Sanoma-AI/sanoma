@@ -1,10 +1,8 @@
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ResolvedConfig, SanomaConfig } from "@sanoma-ai/workflows";
-
-/** A mistake in how the bin was called or in what it found: its message is printed alone, and the exit code is 2. */
-export class UsageError extends Error {}
+import type { ResolvedConfig, SanomaConfig } from "sanoma/workflows";
+import { UsageError } from "sanoma/workflows/shared";
 
 export interface LoadedConfig {
   config: SanomaConfig;
@@ -53,7 +51,7 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
   config.file ??= file;
   const root = config.root ?? dirname(file);
   // Imported here, not at the top: `cli.ts` loads this module before any command needs the runtime.
-  const { declarationFiles, errorMessage, joinDeclarations } = await import("@sanoma-ai/workflows");
+  const { declarationFiles, errorMessage, joinDeclarations } = await import("sanoma/workflows");
   const files = declarationFiles(root);
   // The workflows' first; joined in the files' order.
   const modules = { workflows: await importReal(files.workflows), data: await importReal(files.data) };

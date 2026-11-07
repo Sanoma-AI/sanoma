@@ -4,7 +4,7 @@
 // its own page (company.js), then its app.
 // `window.sanoma` is the preload's bridge (src/preload.ts).
 // Imported, not named in the HTML: the dev server serves a file outside start/ only to an import.
-import mark from "../../app/src/icon-small.svg?url";
+import mark from "../../sanoma/app/src/icon-small.svg?url";
 import { folderNameOf } from "../src/pages.ts";
 
 const bridge = window.sanoma;

@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { devRepo, end, linkedPackages, partialLink, supervise, whenUnlinked } from "../src/dev.ts";
-import { waitFor } from "@sanoma-ai/testing";
+import { buildDirs, devRepo, end, linkedPackages, supervise, whenUnlinked } from "../src/dev.ts";
+import { waitFor } from "sanoma/testing";
 
 let dir = "";
 const temp = () => (dir = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-dev-"))));
@@ -34,50 +34,35 @@ function repoWith(links: Record<string, "linked" | "installed">): { repo: string
 
 describe("devRepo", () => {
   it("is the checkout a linked package is in: sanoma itself, or any @sanoma-ai package", () => {
-    const linkedWorkflows = repoWith({ workflows: "linked" });
-    expect(devRepo(linkedWorkflows.repo)).toBe(linkedWorkflows.checkout);
-    const linkedSanoma = repoWith({ sanoma: "linked", workflows: "installed" });
+    const linkedConnector = repoWith({ "connector-ghost": "linked" });
+    expect(devRepo(linkedConnector.repo)).toBe(linkedConnector.checkout);
+    const linkedSanoma = repoWith({ sanoma: "linked", "connector-ghost": "installed" });
     expect(devRepo(linkedSanoma.repo)).toBe(linkedSanoma.checkout);
   });
 
   it("is nothing for installed packages, or none", () => {
-    expect(devRepo(repoWith({ workflows: "installed", sanoma: "installed" }).repo)).toBeUndefined();
+    expect(devRepo(repoWith({ "connector-ghost": "installed", sanoma: "installed" }).repo)).toBeUndefined();
     expect(devRepo(repoWith({}).repo)).toBeUndefined();
   });
 
   it("is SANOMA_DEV_REPO when set", () => {
     vi.stubEnv("SANOMA_DEV_REPO", "/elsewhere/sanoma");
-    expect(devRepo(repoWith({ workflows: "installed" }).repo)).toBe("/elsewhere/sanoma");
+    expect(devRepo(repoWith({ "connector-ghost": "installed" }).repo)).toBe("/elsewhere/sanoma");
   });
 });
 
 describe("linkedPackages", () => {
   it("lists the linked packages under @sanoma-ai/ and sanoma, with where they are", () => {
-    const { repo, checkout } = repoWith({ workflows: "linked", app: "linked", testing: "installed", sanoma: "linked" });
-    expect(linkedPackages(repo)).toEqual([
-      { name: "@sanoma-ai/app", dir: join(checkout, "packages/app") },
-      { name: "@sanoma-ai/workflows", dir: join(checkout, "packages/workflows") },
-      { name: "sanoma", dir: join(checkout, "packages/sanoma") },
-    ]);
-    expect(linkedPackages(repoWith({}).repo)).toEqual([]);
-  });
-
-  it("adds the core packages sanoma reaches in the checkout when sanoma alone is linked, after a linked connector", () => {
-    // The checkout's workspace links: packages/sanoma/node_modules/@sanoma-ai/<name> -> packages/<name>.
-    const { repo, checkout } = repoWith({ sanoma: "linked", "connector-ghost": "linked" });
-    mkdirSync(join(checkout, "packages/sanoma/node_modules/@sanoma-ai"), { recursive: true });
-    for (const name of ["workflows", "app", "bridge"]) {
-      mkdirSync(join(checkout, "packages", name));
-      symlinkSync(join(checkout, "packages", name), join(checkout, "packages/sanoma/node_modules/@sanoma-ai", name));
-    }
+    const { repo, checkout } = repoWith({
+      "connector-ghost": "linked",
+      "connector-stripe": "installed",
+      sanoma: "linked",
+    });
     expect(linkedPackages(repo)).toEqual([
       { name: "@sanoma-ai/connector-ghost", dir: join(checkout, "packages/connector-ghost") },
       { name: "sanoma", dir: join(checkout, "packages/sanoma") },
-      { name: "@sanoma-ai/workflows", dir: join(checkout, "packages/workflows") },
-      { name: "@sanoma-ai/app", dir: join(checkout, "packages/app") },
-      { name: "@sanoma-ai/bridge", dir: join(checkout, "packages/bridge") },
     ]);
-    expect(partialLink(repo)).toEqual([]);
+    expect(linkedPackages(repoWith({}).repo)).toEqual([]);
   });
 
   it("is nothing when nothing is linked, though an installed sanoma's dependencies resolve into a checkout", () => {
@@ -85,35 +70,23 @@ describe("linkedPackages", () => {
     const store = join(repo, "node_modules/.pnpm/sanoma@0.1.0/node_modules");
     mkdirSync(join(store, "sanoma"), { recursive: true });
     mkdirSync(join(store, "@sanoma-ai"));
-    mkdirSync(join(checkout, "packages/app"), { recursive: true });
-    symlinkSync(join(checkout, "packages/app"), join(store, "@sanoma-ai/app"));
+    mkdirSync(join(checkout, "connectors/ghost"), { recursive: true });
+    symlinkSync(join(checkout, "connectors/ghost"), join(store, "@sanoma-ai/connector-ghost"));
     symlinkSync(join(store, "sanoma"), join(repo, "node_modules/sanoma"));
     expect(linkedPackages(repo)).toEqual([]);
   });
-
-  it("leaves out a core package the repo has installed, which partialLink names", () => {
-    const { repo, checkout } = repoWith({ sanoma: "linked", app: "installed" });
-    expect(linkedPackages(repo)).toEqual([{ name: "sanoma", dir: join(checkout, "packages/sanoma") }]);
-    expect(partialLink(repo)).toEqual(["@sanoma-ai/app"]);
-  });
 });
 
-describe("partialLink", () => {
-  it("names the core packages still installed when another is linked, each found as Node finds it", () => {
-    // pnpm's layout: sanoma from its tarball, with @sanoma-ai/app and @sanoma-ai/workflows beside it in
-    // .pnpm, not at the top; @sanoma-ai/workflows linked at the top; @sanoma-ai/bridge installed there.
-    const { repo } = repoWith({ workflows: "linked", bridge: "installed" });
-    const store = join(repo, "node_modules/.pnpm/sanoma@0.1.0/node_modules");
-    for (const name of ["sanoma", "@sanoma-ai/app", "@sanoma-ai/workflows"])
-      mkdirSync(join(store, name), { recursive: true });
-    symlinkSync(join(store, "sanoma"), join(repo, "node_modules/sanoma"));
-    expect(partialLink(repo)).toEqual(["sanoma", "@sanoma-ai/app", "@sanoma-ai/bridge"]);
-
-    // All four linked (the umbrella's own dependencies then resolve inside the checkout): nothing.
-    const all = repoWith({ sanoma: "linked", workflows: "linked", app: "linked", bridge: "linked" });
-    expect(partialLink(all.repo)).toEqual([]);
-    // None linked: nothing either.
-    expect(partialLink(repoWith({ sanoma: "installed", workflows: "installed" }).repo)).toEqual([]);
+describe("buildDirs", () => {
+  it("is each dist a package ships but the test helpers' and sanoma dev's, else its dist", () => {
+    const pkg = temp();
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({ files: ["dist", "app/dist", "app/src", "testing/dist", "dev/dist", "README.md"] }),
+    );
+    expect(buildDirs({ name: "sanoma", dir: pkg })).toEqual([join(pkg, "dist"), join(pkg, "app/dist")]);
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@sanoma-ai/connector-ghost" }));
+    expect(buildDirs({ name: "@sanoma-ai/connector-ghost", dir: pkg })).toEqual([join(pkg, "dist")]);
   });
 });
 

@@ -4,7 +4,7 @@ import {
   defineAuthentication,
   type OAuthAuthentication,
   type StoredAuthentication,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { z } from "zod";
 
 /** Supabase's Management API, which both methods' tokens call. */

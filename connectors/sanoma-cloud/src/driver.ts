@@ -6,8 +6,8 @@ import {
   errorMessage,
   retryableStatus,
   vendorCodeOf,
-} from "@sanoma-ai/workflows";
-import { apiNameOf } from "@sanoma-ai/workflows/shared";
+} from "sanoma/workflows";
+import { apiNameOf } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { cloudOps } from "./connector.ts";
 import { type CloudApi, cloudOperations, type Company } from "./operations.ts";

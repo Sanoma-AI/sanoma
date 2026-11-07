@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { petSittingInvoice } from "@sanoma-ai/invoices";
 import { commercialCleaningExample, petSittingExample, residentialCleaningExample } from "@sanoma-ai/invoices/examples";
 import * as renderer from "@sanoma-ai/invoices/node";
-import { memorySecrets, resolveConfig } from "@sanoma-ai/workflows";
+import { memorySecrets, resolveConfig } from "sanoma/workflows";
 import { describe, expect, it, vi } from "vitest";
 import { fileSchema, workflowPdfLimits, type GenerateInput, type PdfFile } from "../src/connector.ts";
 import { invoicesDriver } from "../src/driver.ts";

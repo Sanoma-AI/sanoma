@@ -12,11 +12,11 @@ Sanoma is early. This repo contains the runtime, the app and the connectors. You
 
 - **One repo per business.** Keep `sanoma.config.ts` alongside `sites/`, `workflows/`, `resources/` and `policies/`. The [`sanoma`](packages/sanoma/README.md) command runs the business's code and serves the app on your machine.
 - **[Sites](packages/sanoma/README.md#sites).** Build React pages for your team or the public, with sign-in. Pages can call workflows and access data directly.
-- **Workflows.** Write TypeScript functions for the work behind your pages. They run on [DBOS](https://dbos.dev) with Postgres, so steps, approvals and scheduled waits survive a restart. Each run stays on the [code version](packages/workflows/README.md#versions) it started with. Lint checks help keep workflows [safe to replay](packages/workflows/README.md#keeping-workflows-replay-safe).
-- **[Data](packages/workflows/README.md#collections).** Define collections in `resources/data.ts` and store them in your business's own Postgres database.
+- **Workflows.** Write TypeScript functions for the work behind your pages. They run on [DBOS](https://dbos.dev) with Postgres, so steps, approvals and scheduled waits survive a restart. Each run stays on the [code version](packages/sanoma/workflows/README.md#versions) it started with. Lint checks help keep workflows [safe to replay](packages/sanoma/workflows/README.md#keeping-workflows-replay-safe).
+- **[Data](packages/sanoma/workflows/README.md#collections).** Define collections in `resources/data.ts` and store them in your business's own Postgres database.
 - **Connectors.** Call services like Stripe, Resend and GitHub through typed APIs. Each workflow declares which operations it can call.
-- **Policies and the ledger.** Write [policies](packages/workflows/README.md#policies) in [Cedar](https://docs.cedarpolicy.com) to allow a call, deny it or require someone's approval. The [ledger](packages/workflows/README.md#ledger) records every run.
-- **The agent.** Ask for changes in chat. Sanoma's agent edits and tests a draft copy of the repo. You can also work with Claude Code, Codex or another agent. With a Git remote connected, you [publish changes in the app](packages/workflows/README.md#changes); new companies require an admin's approval. Without a remote, merge the draft branch by hand.
+- **Policies and the ledger.** Write [policies](packages/sanoma/workflows/README.md#policies) in [Cedar](https://docs.cedarpolicy.com) to allow a call, deny it or require someone's approval. The [ledger](packages/sanoma/workflows/README.md#ledger) records every run.
+- **The agent.** Ask for changes in chat. Sanoma's agent edits and tests a draft copy of the repo. You can also work with Claude Code, Codex or another agent. With a Git remote connected, you [publish changes in the app](packages/sanoma/workflows/README.md#changes); new companies require an admin's approval. Without a remote, merge the draft branch by hand.
 
 Run Sanoma locally from the command line or the [desktop app](#desktop-preview), or deploy it to [your own host](packages/sanoma/README.md#hosting-it-yourself), such as Cloudflare with Neon. See [Contents](#contents) for the available connectors.
 
@@ -51,7 +51,7 @@ export default defineWorkflow({
 });
 ```
 
-The app turns the workflow into a graph you can inspect before running it. Approvals appear in the Inbox, and the ledger records each call, policy decision and response. To change the workflow, edit the file. See [`@sanoma-ai/workflows`](packages/workflows/README.md) for the full API.
+The app turns the workflow into a graph you can inspect before running it. Approvals appear in the Inbox, and the ledger records each call, policy decision and response. To change the workflow, edit the file. See [`sanoma/workflows`](packages/sanoma/workflows/README.md) for the full API.
 
 ![The announce workflow's page: its graph, with the ghost.post.create step selected and its details floating over the graph](.github/assets/workflow.png)
 
@@ -71,11 +71,11 @@ After a run finishes, the graph shows the result of each step. The ledger keeps 
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
 | [`packages/`](packages/AGENTS.md)                                        | Core workspace packages                                                                                                               |
 | [`sanoma`](packages/sanoma/README.md)                                    | The bin a company repo runs, checks and exports itself with; what its workflows import                                                |
-| [`@sanoma-ai/workflows`](packages/workflows/README.md)                   | Define connectors and workflows, run them durably on DBOS, and lint them                                                              |
-| [`@sanoma-ai/app`](packages/app/README.md)                               | Web UI over a config, started with `startApp(config)`                                                                                 |
+| [`sanoma/workflows`](packages/sanoma/workflows/README.md)                | Define connectors and workflows, run them durably on DBOS, and lint them                                                              |
+| [`sanoma/app`](packages/sanoma/app/README.md)                            | Web UI over a config, started with `startApp(config)`                                                                                 |
 | [`@sanoma-ai/invoices`](packages/invoices/README.md)                     | Shared invoice validation, exact calculations, industry adapters and React PDF rendering (private)                                    |
-| [`@sanoma-ai/testing`](packages/testing/README.md)                       | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing                                          |
-| [`@sanoma-ai/bridge`](packages/bridge/README.md)                         | OpenTofu providers: the provider-bridge client, its fake, the resource generator                                                      |
+| [`sanoma/testing`](packages/sanoma/testing/README.md)                    | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing                                          |
+| [`sanoma/internal/bridge`](packages/sanoma/bridge/README.md)             | OpenTofu providers: the provider-bridge client, its fake, the resource generator                                                      |
 | [`@sanoma-ai/desktop`](packages/desktop/README.md)                       | The desktop shell (private): runs a company folder's own launcher and shows the app                                                   |
 | [`connectors/`](connectors/AGENTS.md)                                    | Vendor connectors, one workspace package each                                                                                         |
 | [`@sanoma-ai/connector-invoices`](connectors/invoices/README.md)         | Local invoice PDF generation for workflows (private)                                                                                  |
@@ -91,7 +91,7 @@ After a run finishes, the graph shows the result of each step. The ledger keeps 
 | [`@sanoma-ai/connector-supabase`](connectors/supabase/README.md)         | Supabase projects read through its OpenTofu provider, and a replay fake                                                               |
 | [`@sanoma-ai/connector-neon`](connectors/neon/README.md)                 | Neon projects, the company's database that pauses and branches, and an in-memory fake                                                 |
 | [`@sanoma-ai/connector-sanoma-cloud`](connectors/sanoma-cloud/README.md) | Sanoma Cloud: the company's database and host in Sanoma's accounts, over sanoma-ops's workflows                                       |
-| [`@sanoma-ai/connector-better-auth`](connectors/better-auth/README.md)   | Better Auth, the visitor login for public sites and the staff sign-in on a host, on the company's database                            |
+| [`sanoma/better-auth`](packages/sanoma/better-auth/README.md)            | Better Auth, the visitor login for public sites and the staff sign-in on a host, on the company's database                            |
 | [`@sanoma-ai/connector-anthropic`](connectors/anthropic/README.md)       | Anthropic's Claude models for the app's agent, through the AI SDK                                                                     |
 | [`@sanoma-ai/connector-agent37`](connectors/agent37/README.md)           | Agent37 instances, the boxes coding agents work in, driven through Sanoma's runner                                                    |
 | [`modules/`](modules/AGENTS.md)                                          | Placeholder for parts not written yet                                                                                                 |
@@ -146,22 +146,22 @@ pnpm lint && pnpm format:check
 pnpm build          # compiles each package to dist/ for publishing
 ```
 
-Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` through `tsconfig.json` paths and `vitest.config.ts` aliases. You can run tests and typechecks without building first. Published packages ship compiled code in `dist/`; `@sanoma-ai/workflows` also includes `src/` for its source maps.
+Inside the repo, `sanoma/*` and `@sanoma-ai/*` imports resolve to the sources through `tsconfig.json` paths and `vitest.config.ts` aliases. You can run tests and typechecks without building first. Published packages ship compiled code in `dist/` (each part of `sanoma` its own, such as `workflows/dist`); `sanoma/workflows` also ships its `src/` for its source maps.
 
-To try an unpublished change in your own Sanoma repo, use [`@sanoma-ai/dev`](packages/dev/README.md) to link this checkout with `sanoma-dev link`. Run `sanoma-dev unlink` before committing.
+To try an unpublished change in your own Sanoma repo, link this checkout with [`sanoma dev link`](packages/sanoma/dev/README.md). Run `sanoma dev unlink` before committing.
 
 ## Release
 
-[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm using [trusted publishing](https://docs.npmjs.com/trusted-publishers), without an npm token. Each package has its own version. A release publishes versions that are not already on npm.
+[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm using [trusted publishing](https://docs.npmjs.com/trusted-publishers), without an npm token. The connectors carry `sanoma`'s version and are released with it; the platform binaries (`@sanoma-ai/bridge-*`, `@sanoma-ai/postgres-*`) keep versions of their own. A release publishes versions that are not already on npm.
 
 ### Prepare the versions
 
-Open a pull request that bumps `version` in each public package's `package.json` when its shipped contents have changed. Private packages, such as `@sanoma-ai/testing`, do not need a release version. Put the release notes in the PR description.
+Open a pull request that bumps `version` in `packages/sanoma/package.json` and every public connector's `package.json` to the same new version, and a platform binary's when its shipped contents have changed. Private packages, such as `@sanoma-ai/desktop`, do not need a release version. Put the release notes in the PR description.
 
 - A breaking change in a 0.x package requires a minor version bump.
-- A provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) requires new versions of the `@sanoma-ai/bridge-<platform>` packages. A PostgreSQL release (`RELEASE` in `packages/sanoma/scripts/download-postgres.ts`) requires new versions of the `@sanoma-ai/postgres-<platform>` packages.
+- A provider-bridge release (`RELEASE` in `packages/sanoma/bridge/scripts/download-bridge.ts`) requires new versions of the `@sanoma-ai/bridge-<platform>` packages. A PostgreSQL release (`RELEASE` in `packages/sanoma/scripts/download-postgres.ts`) requires new versions of the `@sanoma-ai/postgres-<platform>` packages.
 - `sanoma`'s `devDependencies` on the connectors its template names set the versions a new company starts from, as the workspace has them when `sanoma` is published. For a connector's release to reach new companies, release `sanoma` too; the release check does not ask for it.
-- Bump dependent packages when their published dependency ranges exclude the new version. This includes exact pins (`workspace:*`, used by `sanoma` for the runtime and by `@sanoma-ai/bridge` for its binaries) and peer ranges after a minor bump (`workspace:^`, published as `^` on the version at that time).
+- Bump dependent packages when their published dependency ranges exclude the new version. This includes exact pins (`workspace:*`, used by `sanoma` for the runtime and by `sanoma/internal/bridge` for its binaries) and peer ranges after a minor bump (`workspace:^`, published as `^` on the version at that time).
 
 Run `node scripts/release-check.ts` to find packages that still need a bump, including dependencies that pin other bumped packages. The release workflow runs this check first. It also reports packages missing from npm and public packages whose shipped inputs differ from the commit that set their version. Tests, `AGENTS.md` and manifest-only `devDependencies` changes are excluded. Historical commits alone do not require a bump if the shipped inputs are unchanged.
 
@@ -243,7 +243,7 @@ Declare the image reference Wrangler prints (`registry.cloudflare.com/<account i
 
 On Cloudflare, the company's Worker serves public sites on their own domains without a login. Pages are prerendered or rendered on the Worker using the company's database. A page only wakes the container when it starts a workflow run. See [public sites on the Worker](connectors/cloudflare/README.md#public-sites-on-the-worker).
 
-The container's worker builds the app bundle for a deploy's revision, in a checkout of its own (`GET /__sanoma/app-bundle?revision=<commit>`, [the worker's port](packages/sanoma/README.md#the-workers-port)), using `buildAppBundle` from `@sanoma-ai/app/bundle`. The build needs `workerd`, which `@sanoma-ai/app` installs alongside `wrangler` and `@cloudflare/vite-plugin`.
+The container's worker builds the app bundle for a deploy's revision, in a checkout of its own (`GET /__sanoma/app-bundle?revision=<commit>`, [the worker's port](packages/sanoma/README.md#the-workers-port)), using `buildAppBundle` from `sanoma/app/bundle`. The build needs `workerd`, which `sanoma/app` installs alongside `wrangler` and `@cloudflare/vite-plugin`.
 
 ## License
 

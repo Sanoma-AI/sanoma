@@ -2,9 +2,9 @@ import { spawn } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { IngressRoute } from "@sanoma-ai/app";
-import { errorMessage, isLoopback, type SanomaConfig, startWorker, superviseWorker } from "@sanoma-ai/workflows";
-import { APP_BUNDLE_HEADER, APP_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
+import type { IngressRoute } from "sanoma/app";
+import { errorMessage, isLoopback, type SanomaConfig, startWorker, superviseWorker } from "sanoma/workflows";
+import { APP_BUNDLE_HEADER, APP_BUNDLE_PATH } from "sanoma/workflows/shared";
 import { listenRoutes } from "./listen.ts";
 import { rootOf, type Stoppable, wakeRoute, workerOptions } from "./serve.ts";
 

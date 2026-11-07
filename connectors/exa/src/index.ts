@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { exaOps } from "./connector.ts";
 import { exaDriver } from "./driver.ts";
 import { fakeExa } from "./fake.ts";

@@ -1,6 +1,6 @@
 # packages/bridge-bin
 
-One package per platform provider-bridge is released for, `@sanoma-ai/bridge-<platform>`, each an optional dependency of `@sanoma-ai/bridge`, whose `startBridge` runs its `bin/provider-bridge` (see [The binary](../bridge/README.md#the-binary)).
+One package per platform provider-bridge is released for, `@sanoma-ai/bridge-<platform>`, each an optional dependency of `sanoma`, whose bridge part's `startBridge` runs its `bin/provider-bridge` (see [The binary](../sanoma/bridge/README.md#the-binary)).
 
 - `bin/` and `licenses/` are absent in the checkout (gitignored). Each package's `prepack` fills them with `../../bridge/scripts/download-bridge.ts --platform <platform>`: the binary of the release `RELEASE` pins, checked against its sha256, and the archive's license texts (provider-bridge's `LICENSE` and `NOTICE`, and the vendored modules'), which ship with it; `postpack` removes them. Packing fails while `RELEASE` is empty.
 - `os` and `cpu` sit in `publishConfig`, which pnpm copies into the published manifest: in the manifest itself they would make pnpm warn about the three other platforms on every install and run in the workspace.

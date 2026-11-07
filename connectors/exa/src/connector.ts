@@ -1,4 +1,4 @@
-import { defineConnector, vendorInfo } from "@sanoma-ai/workflows";
+import { defineConnector, vendorInfo } from "sanoma/workflows";
 import { z } from "zod";
 
 /** What of each page to return with it; none of them by default. Exa's `ContentsRequest`, cut. */

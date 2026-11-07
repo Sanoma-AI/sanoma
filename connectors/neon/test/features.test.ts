@@ -1,7 +1,7 @@
-import { describeFeatures } from "@sanoma-ai/testing/features";
+import { describeFeatures } from "sanoma/testing/features";
 import { neon } from "../src/index.ts";
 import { replayOptions } from "./replay.ts";
-import { live } from "@sanoma-ai/testing/replay";
+import { live } from "sanoma/testing/replay";
 import { TEST_KEY } from "./replay.ts";
 
 // features/, on the fake and on the replies in fixtures/.
