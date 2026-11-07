@@ -8,7 +8,7 @@ import base from "../../../../../vitest.config.ts";
  */
 export default defineConfig({
   ...base,
-  root: fileURLToPath(new URL("../../../../", import.meta.url)),
+  root: fileURLToPath(new URL("../../../../../", import.meta.url)),
   test: {
     ...base.test,
     include: ["packages/sanoma/testing/test/fixtures/*.scenarios.ts"],

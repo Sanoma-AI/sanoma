@@ -10,7 +10,7 @@ import { CONTENT_TYPES, contentFields, contentTypes, readContent } from "../src/
 // The repo's content: `readContent`, what the build hands a site's `content`, and `contentTypes`,
 // the `.sanoma/content.ts` that types it, type-checked as a site's tsconfig would.
 
-const checkout = fileURLToPath(new URL("../../../", import.meta.url));
+const checkout = fileURLToPath(new URL("../../../../", import.meta.url));
 const src = fileURLToPath(new URL("../src/", import.meta.url));
 const tscBin = join(dirname(createRequire(import.meta.url).resolve("typescript/package.json")), "bin", "tsc");
 

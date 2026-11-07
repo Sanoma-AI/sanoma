@@ -24,9 +24,11 @@ describe("RELEASE", () => {
   it("pins a jar for each platform the launcher looks up, and each is an optional dependency of sanoma", () => {
     expect(Object.keys(RELEASE.jars).toSorted()).toEqual(POSTGRES_PLATFORMS.toSorted());
     const { optionalDependencies } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-    expect(Object.keys(optionalDependencies).toSorted()).toEqual(
-      POSTGRES_PLATFORMS.map((platform) => `@sanoma-ai/postgres-${platform}`).toSorted(),
-    );
+    expect(
+      Object.keys(optionalDependencies)
+        .filter((name) => name.includes("/postgres-"))
+        .toSorted(),
+    ).toEqual(POSTGRES_PLATFORMS.map((platform) => `@sanoma-ai/postgres-${platform}`).toSorted());
   });
 });
 

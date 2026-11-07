@@ -55,6 +55,21 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
 });
 
 const SERVER = `A site has no server code: ${REMEDY}`;
+/** What a site may import of this package, and the parts refused for a reason of their own (`app`, `testing`). */
+const SITE_PARTS = new Set(["site", "ui", "ui.css", "claims", "app", "testing"]);
+/**
+ * The rest of this package, named one first segment at a time (`workflows`, `internal`, `dist`, …):
+ * oxlint lets through anything one group's negation names, in every group, so `${own}/**` with
+ * the site's entries negated would let `sanoma/testing` and `sanoma/app/*` through too.
+ */
+const manifest = read("../package.json") as { exports: Json; files: string[] };
+const serverParts = [
+  ...new Set(
+    [...Object.keys(manifest.exports).map((key) => key.slice(2)), ...manifest.files.filter((f) => !f.startsWith("!"))]
+      .map((path) => path.split("/")[0]!)
+      .filter((part) => part !== "" && !SITE_PARTS.has(part)),
+  ),
+].toSorted();
 const APP =
   "A site imports how a page looks from `sanoma/ui` and what talks to the app (its route APIs, `api`, `RunForm`, `useActor`) from `sanoma/site`; the rest of the app is its server.";
 const sites = {
@@ -76,28 +91,20 @@ const sites = {
           },
         ].map((path) => ({ ...path, allowTypeImports: true })),
         patterns: [
+          { group: [`${own}/app/**`], message: APP },
+          {
+            group: [`${own}/testing`, `${own}/testing/**`],
+            message: `Fakes and test helpers belong in tests. ${SERVER}`,
+          },
           {
             group: [
-              `${own}/**`,
-              `!${own}/site`,
-              `!${own}/ui`,
-              `!${own}/claims`,
-              // Said below, each for its own reason.
-              `!${own}/app`,
-              `!${own}/app/**`,
-              `!${own}/testing`,
-              `!${own}/testing/**`,
+              ...serverParts.flatMap((part) => [`${own}/${part}`, `${own}/${part}/**`]),
               "@dbos-inc/**",
               "pg/**",
               "drizzle-orm/**",
               "@tanstack/react-start/**",
             ],
             message: SERVER,
-          },
-          { group: [`${own}/app/**`], message: APP },
-          {
-            group: [`${own}/testing`, `${own}/testing/**`],
-            message: `Fakes and test helpers belong in tests. ${SERVER}`,
           },
           {
             group: ["@sanoma-ai/connector-*", "@sanoma-ai/connector-*/**"],

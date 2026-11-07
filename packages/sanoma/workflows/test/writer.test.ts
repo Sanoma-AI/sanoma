@@ -16,7 +16,7 @@ import {
 import { tree } from "./tree.ts";
 
 // The repository's own oxfmt options, which the fixtures are formatted with.
-const options = formatOptions(new URL("../../..", import.meta.url).pathname);
+const options = formatOptions(new URL("../../../..", import.meta.url).pathname);
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/sanoma-ops/${name}`, import.meta.url), "utf8");
 // sanoma-ops' data files at 95da814, copied as they are.
 const github = fixture("github.ts");

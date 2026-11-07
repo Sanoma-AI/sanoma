@@ -72,7 +72,7 @@ function company(): { repo: string; config: ReturnType<typeof defineConfig> } {
   write(join(repo, "resources", "people.ts"), PEOPLE);
   write(join(repo, "workflows", "nightly.ts"), NIGHTLY);
   mkdirSync(join(repo, "node_modules"));
-  symlinkSync(join(appDir, "..", "sanoma"), join(repo, "node_modules", "sanoma"));
+  symlinkSync(join(appDir, ".."), join(repo, "node_modules", "sanoma"));
   return { repo, config: defineConfig({ ...fixture, root: repo, file: join(repo, "sanoma.config.ts"), databaseUrl }) };
 }
 

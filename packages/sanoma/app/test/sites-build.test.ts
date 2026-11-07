@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp, sitesOf, writeSiteFiles } from "sanoma/app/build";
 import { testDatabaseUrl } from "sanoma/testing";
@@ -63,7 +63,7 @@ function company(files: Record<string, string> = {}): string {
   repos.push(repo);
   cpSync(fixtureDir, repo, { recursive: true });
   mkdirSync(join(repo, "node_modules"));
-  symlinkSync(join(appDir, "..", "sanoma"), join(repo, "node_modules", "sanoma"));
+  symlinkSync(join(appDir, ".."), join(repo, "node_modules", "sanoma"));
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(repo, path)), { recursive: true });
     writeFileSync(join(repo, path), text);
@@ -71,10 +71,15 @@ function company(files: Record<string, string> = {}): string {
   return repo;
 }
 
-/** Every entry under `dir`, not following links, with its modification time: what a build must leave as it was. */
+/**
+ * Every entry under `dir`, not following links, with its modification time: what a build must leave
+ * as it was. But Vite's `node_modules/.vite-temp`, where the other tests' builds of the app (from
+ * its `vite.config.ts`, beside `sanoma`'s `node_modules`) load their config meanwhile.
+ */
 const entries = (dir: string) =>
   readdirSync(dir, { recursive: true, withFileTypes: true })
     .map((entry) => join(entry.parentPath, entry.name))
+    .filter((path) => !path.includes(`${sep}.vite-temp`))
     .map((path) => `${path} ${lstatSync(path).mtimeMs}`)
     .toSorted();
 
@@ -222,11 +227,11 @@ describe("a company's app with its sites", () => {
     // A post only in French: no page in English, so its French page links to no other language.
     "content/posts/only-fr.fr.md": ["---", "title: Seulement en français", "---", "", "Des mots."].join("\n"),
   });
-  // And sanoma, which the company's node_modules links to.
+  // And sanoma, which the company's node_modules links to: its own source, the app's and its node_modules.
   const untouched = {
     src: join(appDir, "src"),
-    modules: join(appDir, "node_modules"),
-    sanoma: join(appDir, "..", "sanoma"),
+    modules: join(appDir, "..", "node_modules"),
+    sanoma: join(appDir, "..", "src"),
   };
   const before = { src: [] as string[], modules: [] as string[], sanoma: [] as string[] };
   let result: { distDir: string; built: boolean };

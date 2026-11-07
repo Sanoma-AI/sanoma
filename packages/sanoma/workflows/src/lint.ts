@@ -29,7 +29,8 @@ const REFUSED_PACKAGES: [RegExp, string][] = [
   [/^sanoma\/testing(\/|$)/, `fakes and test helpers belong in tests; ${THROUGH_CTX}`],
   [/^sanoma\/app(\/|$)/, "the app starts runs and decides approvals, so a workflow could approve itself"],
   [/^@sanoma-ai\/connector-[^/]+\/(fake|driver|remote|vault)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
-  [/^sanoma\//, "`sanoma` has no entry points for a workflow: import its names from `sanoma` itself"],
+  // Its other subpaths; `sanoma/workflows` is an author package.
+  [/^sanoma\/(?!workflows$)/, "`sanoma` has no entry points for a workflow: import its names from `sanoma` itself"],
 ];
 
 /**

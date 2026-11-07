@@ -13,7 +13,7 @@ import { tree } from "./tree.ts";
 // The generated SDK, `.sanoma/api.ts`, on the outbound fixture with a vendor beside it, and
 // type-checked as a site's tsconfig would.
 
-const repo = fileURLToPath(new URL("../../../", import.meta.url));
+const repo = fileURLToPath(new URL("../../../../", import.meta.url));
 const shared = fileURLToPath(new URL("../src/shared.ts", import.meta.url));
 const tscBin = join(dirname(createRequire(import.meta.url).resolve("typescript/package.json")), "bin", "tsc");
 

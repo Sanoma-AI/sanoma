@@ -502,7 +502,7 @@ const bad = (line: number, rule: string, text: RegExp) => ({
 // The fragment consumers extend from their `.oxlintrc.json`. Its override globs resolve against
 // the extending config, so the test writes one into a temp project the way a consumer would.
 describe("oxlint.json", () => {
-  const repo = fileURLToPath(new URL("../../../", import.meta.url));
+  const repo = fileURLToPath(new URL("../../../../", import.meta.url));
   const fragment = fileURLToPath(new URL("../oxlint.json", import.meta.url));
   let dir = "";
   const write = (path: string, src: string) => {

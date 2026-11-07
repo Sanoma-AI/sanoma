@@ -47,7 +47,7 @@ The app's chat answers on the company's Anthropic key (`@sanoma-ai/connector-ant
 
 ## Example: a public site with a visitor login
 
-A public site is served to visitors rather than to the people in `resources/people.ts`, and a login connector signs them in. With Better Auth (`sanoma/better-auth`, added to `package.json`), whose visitors' accounts live in the company's own database:
+A public site is served to visitors rather than to the people in `resources/people.ts`, and a login connector signs them in. With Better Auth (`sanoma/better-auth`, part of `sanoma`), whose visitors' accounts live in the company's own database:
 
 ```ts
 // sites/account/site.ts

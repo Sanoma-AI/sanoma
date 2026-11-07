@@ -200,7 +200,7 @@ describe("describeConfig", () => {
   it.each(Object.entries({ bluesky, docker, ghost, github, resend, stripe, supabase }))(
     "takes the %s connector's title, logo, package and homepage from its package.json, which npm can list",
     (vendor, connector) => {
-      const dir = new URL(`../../../connectors/${vendor}/`, import.meta.url);
+      const dir = new URL(`../../../../connectors/${vendor}/`, import.meta.url);
       const pkg = JSON.parse(readFileSync(new URL("package.json", dir), "utf8"));
       expect(pkg.keywords).toContain("sanoma-connector");
       // Its logos are shipped, so npm's copy has them too.
