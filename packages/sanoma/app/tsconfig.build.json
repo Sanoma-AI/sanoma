@@ -1,8 +1,8 @@
 {
   // The Node entries only: startApp and its types, the build (`./build`), the Worker's (`./bundle`) and the worker's
   // steps (`./steps`). `vite build` builds the app itself into dist/client and dist/server. Not composite: its
-  // entries import modules all over src/, which a composite project would have to list one by one. So `tsc -b`
-  // builds it before the package's own project, which reads its declarations from dist/.
+  // entries import modules all over src/, which a composite project would have to list one by one. So `build`
+  // runs `tsc -b` on it before the package's own project, which reads its declarations from dist/.
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",

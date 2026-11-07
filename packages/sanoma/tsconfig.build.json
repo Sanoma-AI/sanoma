@@ -1,7 +1,7 @@
 {
   // The bin and the package's root entry. They import the app's Node entries, which no project can reference
   // (app/tsconfig.build.json is not composite), so this resolves every part as published, from its dist/
-  // (no `sanoma-source`), and `tsc -b` builds the app before it. The references build the other parts first.
+  // (no `sanoma-source`), and `build` runs `tsc -b` on the app first. The references build the other parts.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",

@@ -31,7 +31,6 @@
     "LICENSE",
     "workflows/dist",
     "workflows/src",
-    "!workflows/src/AGENTS.md",
     "workflows/drizzle",
     "!workflows/drizzle/*.config.ts",
     "workflows/oxlint.json",
@@ -60,7 +59,9 @@
     "better-auth/drizzle",
     "!better-auth/drizzle/*.config.ts",
     "better-auth/README.md",
-    "!**/*.tsbuildinfo"
+    "!**/*.tsbuildinfo",
+    "!**/AGENTS.md",
+    "template/AGENTS.md"
   ],
   "type": "module",
   "sideEffects": false,
@@ -270,10 +271,10 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b app/tsconfig.build.json tsconfig.build.json testing/tsconfig.build.json && esbuild workflows/src/sandbox-runner.ts --bundle --platform=node --target=node22 --format=cjs --minify --external:bufferutil --external:utf-8-validate --outfile=workflows/dist/sandbox-runner.cjs --log-level=warning && node scripts/oxlint.ts && cd app && vite build",
+    "build": "tsc -b app/tsconfig.build.json && tsc -b tsconfig.build.json testing/tsconfig.build.json && esbuild workflows/src/sandbox-runner.ts --bundle --platform=node --target=node22 --format=cjs --minify --external:bufferutil --external:utf-8-validate --outfile=workflows/dist/sandbox-runner.cjs --log-level=warning && node scripts/oxlint.ts && cd app && vite build",
     "clean": "rm -rf dist workflows/dist better-auth/dist bridge/dist testing/dist app/dist dev/dist",
     "prepack": "pnpm run clean && pnpm run build",
-    "watch": "tsc -b -w --preserveWatchOutput app/tsconfig.build.json tsconfig.build.json & cd app && vite build --watch",
+    "watch": "tsc -b -w --preserveWatchOutput tsconfig.build.json & cd app && (tsc -w --preserveWatchOutput -p tsconfig.build.json & vite build --watch)",
     "typecheck:ui": "tsc -p app/tsconfig.json",
     "generate": "cd workflows && drizzle-kit generate --config drizzle/company.config.ts && drizzle-kit generate --config drizzle/wakeup.config.ts && cd ../better-auth && drizzle-kit generate --config drizzle/visitors.config.ts && drizzle-kit generate --config drizzle/staff.config.ts",
     "generate:bridge": "cd bridge && pnpm --package=@bufbuild/buf@1.73.0 --package=@bufbuild/protoc-gen-es@2.16.0 dlx buf generate",
