@@ -5,7 +5,7 @@
 ## Usage
 
 ```sh
-npm install sanoma/better-auth
+npm install sanoma
 ```
 
 ```ts
@@ -112,4 +112,4 @@ Every other Better Auth route is a 404, a POST whose `Origin` is not the request
 
 Password reset for visitors, and more social providers (Google).
 
-The logo the app shows is Better Auth's mark, from the [Better Auth repository](https://github.com/better-auth/better-auth) (`demo/nextjs/components/logo.tsx`), in black or white. It is there only to identify the service.
+The logo the app shows is Better Auth's mark, from the [Better Auth repository](https://github.com/better-auth/better-auth) (`demo/nextjs/components/logo.tsx`), in black or white, inline in `src/connector.ts`. It is there only to identify the service.

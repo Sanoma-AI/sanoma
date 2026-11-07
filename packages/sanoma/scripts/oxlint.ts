@@ -1,8 +1,9 @@
 // Writes this package's `oxlint.json`, the lint a company repo's `.oxlintrc.json` extends: run by
 // `build`, before tsc. It is self-contained, with no `extends` into `node_modules` (which the
 // installer lays out), made of:
-// - `sanoma/workflows`'s `oxlint.json` (its overrides for `workflows/**`), with an entry for `sanoma` derived from `sanoma/workflows`'s (the same
-//   names), `sanoma/**` refused, and the plugin (`date`) loaded from this package's `dist/`;
+// - the runtime's `workflows/oxlint.json` (its overrides for `workflows/**`), with an entry for `sanoma`
+//   derived from `sanoma/workflows`'s (the same names), the rest of `sanoma/**` refused but the
+//   subpaths that file names, and the plugin (`date`) loaded from this package's `dist/`;
 // - an override for `sites/**`: a site is client code, reaching the app through `sanoma/site` and
 //   `sanoma/ui` alone, with no server, runtime, connector or environment of its own (the plugin's
 //   `site-file` says the rest);
@@ -15,7 +16,7 @@ type Json = Record<string, any>;
 const read = (path: string): Json => JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
 
 const own = read("../package.json").name as string;
-const workflows = read("../node_modules/sanoma/workflows/oxlint.json");
+const workflows = read("../workflows/oxlint.json");
 const root = read("../../../.oxlintrc.json");
 
 const overrides = (workflows.overrides as Json[]).map((given) => {
@@ -23,7 +24,7 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
   const rule = override.rules["no-restricted-imports"] as [string, { paths: Json[]; patterns: Json[] }] | undefined;
   if (rule === undefined) return override;
   const [severity, { paths, patterns }] = rule;
-  const author = paths.find((p) => p.name === "sanoma/workflows")!;
+  const author = paths.find((p) => p.name === `${own}/workflows`)!;
   return {
     ...override,
     rules: {
@@ -42,7 +43,8 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
           patterns: [
             ...patterns,
             {
-              group: [`${own}/**`],
+              // Its own subpaths the runtime's file names already (`sanoma/workflows`, `sanoma/testing`, …) say why there.
+              group: [`${own}/**`, ...paths.filter((p) => p.name.startsWith(`${own}/`)).map((p) => `!${p.name}`)],
               message: `\`${own}\` has no entry points for a workflow: import its names from \`${own}\` itself.`,
             },
           ],
@@ -66,11 +68,8 @@ const sites = {
       "error",
       {
         paths: [
-          ...[own, "sanoma/workflows", "sanoma/internal/bridge", "pg", "drizzle-orm"].map((name) => ({
-            name,
-            message: SERVER,
-          })),
-          { name: "sanoma/app", message: APP },
+          ...[own, "pg", "drizzle-orm"].map((name) => ({ name, message: SERVER })),
+          { name: `${own}/app`, message: APP },
           {
             name: "@tanstack/react-start",
             message: `${SERVER} Its route APIs (\`Link\`, \`useNavigate\`, …) come from \`sanoma/site\`, and \`createFileRoute\` from \`@tanstack/react-router\`.`,
@@ -83,8 +82,11 @@ const sites = {
               `!${own}/site`,
               `!${own}/ui`,
               `!${own}/claims`,
-              "sanoma/workflows/**",
-              "sanoma/internal/bridge/**",
+              // Said below, each for its own reason.
+              `!${own}/app`,
+              `!${own}/app/**`,
+              `!${own}/testing`,
+              `!${own}/testing/**`,
               "@dbos-inc/**",
               "pg/**",
               "drizzle-orm/**",
@@ -92,9 +94,9 @@ const sites = {
             ],
             message: SERVER,
           },
-          { group: ["sanoma/app/**"], message: APP },
+          { group: [`${own}/app/**`], message: APP },
           {
-            group: ["sanoma/testing", "sanoma/testing/**"],
+            group: [`${own}/testing`, `${own}/testing/**`],
             message: `Fakes and test helpers belong in tests. ${SERVER}`,
           },
           {

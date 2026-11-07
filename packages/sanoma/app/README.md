@@ -7,7 +7,7 @@ It is a [TanStack Start](https://tanstack.com/start) app (React, TanStack Router
 ## Usage
 
 ```sh
-npm install sanoma/app sanoma/workflows
+npm install sanoma
 ```
 
 The [`sanoma`](https://www.npmjs.com/package/sanoma) bin runs the app beside the worker over a repo's `sanoma.config.ts`; `startApp` remains for a custom host. Run it beside the worker, from the same config:

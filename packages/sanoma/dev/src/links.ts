@@ -33,7 +33,7 @@ const ours = (name: string) => name === "sanoma" || name.startsWith("@sanoma-ai/
 /** A `UsageError` unless `cwd` holds a `sanoma.config.ts` and a `package.json`: a repo's root. */
 export function checkRepo(cwd: string): void {
   if (!existsSync(join(cwd, "sanoma.config.ts")) || !existsSync(join(cwd, "package.json"))) {
-    throw new UsageError(`No sanoma.config.ts and package.json in ${cwd}: run sanoma-dev from the repo's root`);
+    throw new UsageError(`No sanoma.config.ts and package.json in ${cwd}: run sanoma dev from the repo's root`);
   }
 }
 
@@ -41,7 +41,7 @@ export function checkRepo(cwd: string): void {
 export const isCheckout = (dir: string) => readManifest(join(dir, "packages/sanoma"))?.name === "sanoma";
 
 /**
- * The packages `sanoma-dev unlink` unlinks: `sanoma` and each `@sanoma-ai/*` the repo's
+ * The packages `sanoma dev unlink` unlinks: `sanoma` and each `@sanoma-ai/*` the repo's
  * `package.json` declares (`dependencies` or `devDependencies`). Only declared ones: linking a
  * package the repo does not declare makes pnpm add a `link:` dependency.
  */
@@ -55,15 +55,11 @@ export function dirIn(checkout: string, name: string): string {
     : join(checkout, "packages", short);
 }
 
-/**
- * The packages `sanoma-dev link` links: the declared ones (`declared`) but this kit, split by
- * whether the checkout has them.
- */
+/** The packages `sanoma dev link` links: the declared ones (`declared`), split by whether the checkout has them. */
 export function linkSet(root: string, checkout: string): { found: Package[]; missing: string[] } {
   const found: Package[] = [];
   const missing: string[] = [];
   for (const name of declared(root)) {
-    if (name === "@sanoma-ai/dev") continue;
     const dir = dirIn(checkout, name);
     if (readManifest(dir)?.name === name) found.push({ name, dir });
     else missing.push(name);

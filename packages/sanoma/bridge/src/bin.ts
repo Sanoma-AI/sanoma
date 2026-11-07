@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 
 /**
  * The platforms provider-bridge is released for, as `${process.platform}-${process.arch}`. Each
- * has a package `@sanoma-ai/bridge-<platform>`, an optional dependency of this one, that holds
+ * has a package `@sanoma-ai/bridge-<platform>`, an optional dependency of `sanoma`, that holds
  * its binary in `bin/provider-bridge`.
  */
 export const BRIDGE_PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"];

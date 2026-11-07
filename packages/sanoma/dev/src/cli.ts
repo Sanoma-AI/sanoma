@@ -1,19 +1,18 @@
-#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { checkRepo, declared, isCheckout, leftoverLinks, linkSet, notLinked, UsageError } from "./links.ts";
 
-const USAGE = `usage: sanoma-dev <command>
+const USAGE = `usage: sanoma dev <command>
 
 Develops sanoma from the Sanoma repo in the working directory (the one holding sanoma.config.ts).
 
-  sanoma-dev link [<checkout>]   install and build a sanoma checkout (default ../sanoma beside the repo), then
+  sanoma dev link [<checkout>]   install and build a sanoma checkout (default ../sanoma beside the repo), then
                                  pnpm link from it, one by one and checked, sanoma and each @sanoma-ai package the
                                  repo declares; \`pnpm dev\` then runs the checkout in dev mode
-  sanoma-dev unlink              undo the link, and fail when package.json or pnpm-workspace.yaml still hold a link:
-  sanoma-dev update              pnpm update --latest sanoma and @sanoma-ai/*, then sanoma check; refused while linked
+  sanoma dev unlink              undo the link, and fail when package.json or pnpm-workspace.yaml still hold a link:
+  sanoma dev update              pnpm update --latest sanoma and @sanoma-ai/*, then sanoma check; refused while linked
 
 link and unlink remove the repo's .sanoma/app before pnpm links or unlinks: the sanoma that ran before
 generated all of it.`;
@@ -85,11 +84,11 @@ function link(root: string, given: string | undefined): number {
   if (failed.length) {
     throw new Error(
       `not linked: ${failed.map((p) => p.name).join(", ")}: pnpm-workspace.yaml has no link: override for it, ` +
-        "or node_modules/<name> is not its directory in the checkout; sanoma-dev unlink undoes the links that took",
+        "or node_modules/<name> is not its directory in the checkout; sanoma dev unlink undoes the links that took",
     );
   }
   console.log(`linked ${found.map((p) => p.name).join(", ")} from ${checkout}`);
-  console.log("pnpm dev now runs the checkout in dev mode; sanoma-dev unlink before you commit");
+  console.log("pnpm dev now runs the checkout in dev mode; sanoma dev unlink before you commit");
   return 0;
 }
 
@@ -106,7 +105,7 @@ function unlink(root: string): number {
 
 function update(root: string): number {
   const left = leftoverLinks(root);
-  if (left.length) throw new UsageError(`linked to a checkout: run sanoma-dev unlink first\n${left.join("\n")}`);
+  if (left.length) throw new UsageError(`linked to a checkout: run sanoma dev unlink first\n${left.join("\n")}`);
   mustPnpm(root, ["update", "--latest", "sanoma", "@sanoma-ai/*"]);
   console.log("updated sanoma and @sanoma-ai/* to their latest releases; running sanoma check");
   const status = pnpm(root, ["exec", "sanoma", "check"]);
@@ -116,11 +115,14 @@ function update(root: string): number {
   return status;
 }
 
-if (import.meta.main) {
+/** `sanoma dev <argv>` in the working directory: its error said on stderr; the exit code. */
+export function dev(argv: string[]): number {
   try {
-    process.exitCode = main(process.argv.slice(2));
+    return main(argv);
   } catch (err) {
     console.error(messageOf(err));
-    process.exitCode = err instanceof UsageError ? USAGE_EXIT : 1;
+    return err instanceof UsageError ? USAGE_EXIT : 1;
   }
 }
+
+if (import.meta.main) process.exitCode = dev(process.argv.slice(2));

@@ -16,7 +16,7 @@ export type { LintProblem } from "./ast.ts";
 const THROUGH_CTX = "a workflow must call vendors through ctx, so the policy sees every call";
 
 /**
- * The packages the author surface is imported from, each allowing the same names: `sanoma`
+ * The specifiers the author surface is imported from, each allowing the same names: `sanoma`
  * re-exports what `sanoma/workflows` allows (and `z`). Adding one here accepts it.
  */
 const AUTHOR_PACKAGES: readonly string[] = ["sanoma/workflows", "sanoma"];

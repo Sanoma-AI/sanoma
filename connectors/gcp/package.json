@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-gcp",
-  "version": "0.2.0",
+  "version": "0.11.21",
   "description": "Google Cloud KMS, IAM and Cloud Run provisioning through isolated OpenTofu provider sessions",
   "keywords": [
     "connector",

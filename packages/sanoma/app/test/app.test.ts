@@ -2645,7 +2645,7 @@ describe("startApp", () => {
   it("says to build the app when it is not built", async () => {
     const empty = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));
     try {
-      await expect(startApp(config, { distDir: empty })).rejects.toThrow(/pnpm --filter sanoma\/app build/);
+      await expect(startApp(config, { distDir: empty })).rejects.toThrow(/pnpm --filter sanoma build/);
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }

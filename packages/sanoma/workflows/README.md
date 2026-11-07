@@ -5,10 +5,10 @@ Business processes as TypeScript functions, run durably on [DBOS](https://dbos.d
 ## Usage
 
 ```sh
-npm install sanoma/workflows zod
+npm install sanoma
 ```
 
-A company repo usually installs [`sanoma`](https://www.npmjs.com/package/sanoma) instead, whose bin runs the worker and the app over its `sanoma.config.ts` and re-exports what a workflow imports from this package; `startWorker` and `startApp` remain for a custom host.
+It is a part of [`sanoma`](https://www.npmjs.com/package/sanoma), whose bin runs the worker and the app over a repo's `sanoma.config.ts` and whose root entry re-exports what a workflow imports from `sanoma/workflows`; `startWorker` and `startApp` remain for a custom host.
 
 A connector declares a vendor's operations: their inputs, outputs and effect. A workflow lists the operations it `uses`, and its `ctx` exposes those and nothing else.
 

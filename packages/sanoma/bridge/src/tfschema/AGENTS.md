@@ -1,16 +1,16 @@
 # packages/sanoma/bridge/src/tfschema
 
-OpenTofu provider schemas as Sanoma resources, at `sanoma/internal/bridge/tfschema` (`../tfschema.ts`). A connector for a vendor with an OpenTofu provider keeps a hand-owned `resources.config.ts` naming the provider and the types it wants; its `pnpm generate` runs `cli.ts` (the package's `sanoma-tfschema` bin) to write `src/resources.gen.ts`, which is checked in. Its driver converts states with `fromTfState` and `toTfState` at run time.
+OpenTofu provider schemas as Sanoma resources, at `sanoma/internal/bridge/tfschema` (`../tfschema.ts`). A connector for a vendor with an OpenTofu provider keeps a hand-owned `resources.config.ts` naming the provider and the types it wants; its `pnpm generate` runs `cli.ts` (`sanoma tfschema`, which the launcher's bin runs through `tfschema(argv)`) to write `src/resources.gen.ts`, which is checked in. Its driver converts states with `fromTfState` and `toTfState` at run time.
 
 ## Contents
 
-| Path                         | What it is                                                                                                |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------- |
-| [`types.ts`](types.ts)       | What is generated (`TfResourceType`, `TfShape`, `TfProvider`) and its input, `ResourcesConfig`            |
-| [`ctyToZod.ts`](ctyToZod.ts) | `ctyToZod`: a cty type as zod source text, with the mapping table as its doc comment                      |
-| [`generate.ts`](generate.ts) | `generateResources`: a schema document, a config and the pinned release to the text of `resources.gen.ts` |
-| [`state.ts`](state.ts)       | `fromTfState` and `toTfState`: between the provider's state and the resource's shape                      |
-| [`cli.ts`](cli.ts)           | `sanoma-tfschema <resources.config.ts> <resources.gen.ts> [--fixtures <dir>]`; importing it runs nothing  |
+| Path                         | What it is                                                                                                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| [`types.ts`](types.ts)       | What is generated (`TfResourceType`, `TfShape`, `TfProvider`) and its input, `ResourcesConfig`                        |
+| [`ctyToZod.ts`](ctyToZod.ts) | `ctyToZod`: a cty type as zod source text, with the mapping table as its doc comment                                  |
+| [`generate.ts`](generate.ts) | `generateResources`: a schema document, a config and the pinned release to the text of `resources.gen.ts`             |
+| [`state.ts`](state.ts)       | `fromTfState` and `toTfState`: between the provider's state and the resource's shape                                  |
+| [`cli.ts`](cli.ts)           | `sanoma tfschema <resources.config.ts> <resources.gen.ts> [--fixtures <dir>]` (`tfschema`); importing it runs nothing |
 
 ## What is generated
 

@@ -1,11 +1,4 @@
-import {
-  compareDeclared,
-  defineConnector,
-  defineResource,
-  dnsRecord,
-  DriverError,
-  vendorInfo,
-} from "sanoma/workflows";
+import { compareDeclared, defineConnector, defineResource, dnsRecord, DriverError, vendorInfo } from "sanoma/workflows";
 import { DOMAIN_NAME } from "sanoma/workflows/shared";
 import { z } from "zod";
 

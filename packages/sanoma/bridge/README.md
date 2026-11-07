@@ -1,6 +1,6 @@
 # sanoma/internal/bridge
 
-Everything OpenTofu in Sanoma. A TypeScript client for [`provider-bridge`](https://github.com/Sanoma-AI/provider-bridge), the Go sidecar that runs OpenTofu providers and serves their schema, import, read, plan and apply over ConnectRPC on a unix socket; a fake that replays the bridge's recorded replies; and, at `sanoma/internal/bridge/tfschema`, the generator that turns a provider's schema into a connector's resource types, with its `sanoma-tfschema` bin. Connectors for bridged vendors (GitHub, Stripe) are built on it; nothing in the browser may import it. It depends on `sanoma/workflows` (a peer), never the other way round.
+Everything OpenTofu in Sanoma. A TypeScript client for [`provider-bridge`](https://github.com/Sanoma-AI/provider-bridge), the Go sidecar that runs OpenTofu providers and serves their schema, import, read, plan and apply over ConnectRPC on a unix socket; a fake that replays the bridge's recorded replies; and, at `sanoma/internal/bridge/tfschema`, the generator that turns a provider's schema into a connector's resource types, run as `sanoma tfschema`. Connectors for bridged vendors (GitHub, Stripe) are built on it; nothing in the browser may import it. It is a part of `sanoma`, at `sanoma/internal/bridge`: it imports `sanoma/workflows`, never the other way round.
 
 ## Usage
 
@@ -139,7 +139,7 @@ The session-protocol-1 binary is published as [provider-bridge v0.2.0](https://g
 
 ## Develop
 
-- `pnpm run generate` rewrites `src/gen/` from `proto/` with buf and `protoc-gen-es` (versions pinned in `package.json`; `@bufbuild/protobuf` at the same version). Never edit `src/gen/` by hand; CI checks it is up to date. When the bridge's proto changes, copy it here verbatim, record the exact source commit in [proto provenance](proto/README.md), and regenerate.
+- `pnpm --filter sanoma run generate:bridge` rewrites `src/gen/` from `proto/` with buf and `protoc-gen-es` (versions pinned in `package.json`; `@bufbuild/protobuf` at the same version). Never edit `src/gen/` by hand; CI checks it is up to date. When the bridge's proto changes, copy it here verbatim, record the exact source commit in [proto provenance](proto/README.md), and regenerate.
 - `testdata/` is a verbatim copy of provider-bridge's (not formatted, not hand-edited): copy it again when the bridge re-records.
 - `SANOMA_LIVE=1 pnpm vitest run packages/sanoma/bridge` also builds the bridge and runs `hashicorp/null`, downloaded once into `provider-bridge-test` in the user cache directory.
 

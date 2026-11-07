@@ -26,14 +26,29 @@ import type { ServerEntry } from "./context.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 
-/** The app package's directory, by its real path (not the symlink pnpm makes): from `src/` or `dist/`. */
+/** The app's directory in the `sanoma` package, by its real path (not the symlink pnpm makes): from `src/` or `dist/`. */
 export const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
+
+/** The `sanoma` package's `package.json`, the app's directory's parent's. */
+const manifestFile = join(pkgDir, "..", "package.json");
+const manifest = JSON.parse(readFileSync(manifestFile, "utf8")) as {
+  version: string;
+  exports: Record<string, string | { default: string }>;
+};
 
 // The runtime and what it loads stay outside the server bundle: the server imports them from the
 // consumer's install, so the app and the worker share one copy. (The app imports no connector; a
 // config's connectors reach it only through startApp.) `ai` too: the chat's stream and a connector's
 // model half (`ConnectorSetup.model`) then share one AI SDK.
-const RUNTIME = ["sanoma/workflows", "sanoma/internal/bridge", "@dbos-inc/dbos-sdk", "pg", "zod", "ai"];
+const RUNTIME_DEPS = ["@dbos-inc/dbos-sdk", "pg", "zod", "ai"];
+// The runtime's own entries are `sanoma`'s exports into `workflows/` and `bridge/`, each by name: the
+// rest of `sanoma` (the app's source among it) is compiled with the pages.
+const RUNTIME = [
+  ...Object.entries(manifest.exports)
+    .filter(([, entry]) => /^\.\/(workflows|bridge)\//.test(typeof entry === "string" ? entry : entry.default))
+    .map(([key]) => `sanoma${key.slice(1)}`),
+  ...RUNTIME_DEPS,
+];
 const isIn = (names: string[], id: string) => names.some((name) => id === name || id.startsWith(`${name}/`));
 
 // The browser bundle may import only types from the runtime (DBOS, Postgres), and the values of
@@ -41,10 +56,10 @@ const isIn = (names: string[], id: string) => names.some((name) => id === name |
 // resolution, so anything else of these reaching the client is a mistake: fail, in dev as in the
 // build. (Start adds these to its own denials, and to the modules marked server-only, such as server/core.ts.)
 const CLIENT_DENIED =
-  /^(@sanoma-ai\/(workflows(?!\/(shared|description)$)|bridge|connector-|testing)|@dbos-inc\/|pg$|drizzle-orm(\/|$))/;
+  /^(sanoma\/(workflows(?!\/(shared|description)$)|internal\/|testing|better-auth)|@sanoma-ai\/connector-|@dbos-inc\/|pg$|drizzle-orm(\/|$))/;
 
 /** What a company file may import without the company depending on it: the app's own copy, so there is one. */
-const SHARED = /^(react|react-dom|@tanstack\/[^/]+|sanoma\/app)(\/.*)?$/;
+const SHARED = /^(react|react-dom|@tanstack\/[^/]+)(\/.*)?$/;
 
 /**
  * `sites/__virtual.ts`, committed and never edited by hand: the sites mount's listing, every
@@ -188,7 +203,6 @@ function siteTsconfig(root: string) {
         "react-dom": [reactDom],
         "react-dom/*": [`${reactDom}/*`],
         "@tanstack/*": [`${dirname(installed("@tanstack/react-router"))}/*`],
-        "sanoma/app/*": [`${src}/*.ts`],
       },
     },
     include: [
@@ -214,11 +228,11 @@ function moduleDir(name: string, from: string): string | undefined {
 /** Where the app package finds `name`. */
 function installed(name: string): string {
   const found = moduleDir(name, pkgDir);
-  if (found === undefined) throw new Error(`${name} is not installed beside sanoma/app (${pkgDir})`);
+  if (found === undefined) throw new Error(`${name} is not installed beside the app (${pkgDir})`);
   return found;
 }
 
-export const defaultRuntimeFrom = join(pkgDir, "package.json");
+export const defaultRuntimeFrom = manifestFile;
 
 const inside = (file: string, dir: string) => {
   const rel = relative(dir, file);
@@ -236,7 +250,7 @@ export interface AppViteOptions {
   repo?: string;
   /**
    * A file the server bundle's runtime imports resolve from: the launcher's own `package.json`, so
-   * the worker and the app share one copy. Defaults to this package's `package.json`.
+   * the worker and the app share one copy. Defaults to `sanoma`'s `package.json`.
    */
   runtimeFrom?: string;
 }
@@ -587,7 +601,7 @@ function sharedDeps(repo: string, src: string): Plugin {
 
 /**
  * The server bundle holds everything but the runtime, which it imports by absolute URL from
- * `runtimeFrom`'s resolution (pg and DBOS through `sanoma/workflows`'), so it needs nothing
+ * `runtimeFrom`'s resolution (`sanoma`'s own, pg and DBOS among its dependencies), so it needs nothing
  * else from the company's install. Build only: dev's server
  * resolves as Node does. With `bundled` (the Worker's build, which has no install to import from),
  * the same resolution, bundled.
@@ -602,13 +616,8 @@ function runtimeExternal(runtimeFrom: string, bundled = false): Plugin {
     applyToEnvironment: (environment) => environment.name === "ssr",
     async resolveId(source, _importer, options) {
       if (!isIn(RUNTIME, source)) return;
-      const opts = { ...options, skipSelf: true };
-      let resolved = await this.resolve(source, runtimeFrom, opts);
-      if (!resolved) {
-        const workflows = await this.resolve("sanoma/workflows", runtimeFrom, opts);
-        if (workflows) resolved = await this.resolve(source, workflows.id, opts);
-      }
-      if (!resolved) return this.error(`${source} does not resolve from ${runtimeFrom} or its sanoma/workflows`);
+      const resolved = await this.resolve(source, runtimeFrom, { ...options, skipSelf: true });
+      if (!resolved) return this.error(`${source} does not resolve from ${runtimeFrom}`);
       return found(resolved.id);
     },
   };
@@ -655,15 +664,15 @@ export async function appDevServer(
       fs: { allow: [vite.searchForWorkspaceRoot(root), vite.searchForWorkspaceRoot(src)] },
     },
     // The runtime as Node loads it, the copy startApp's context holds, wherever it is installed
-    // (Vite would run a linked checkout's copy itself). Vite leaves a dependency's `.js` to Node,
-    // never its `.ts`: `sanoma/site.js` and `sanoma/ui.js` re-export the app's `src/site.ts` and
-    // `src/ui.ts`, whose types Node refuses to strip under node_modules, so from an npm install
-    // every page would fail (a linked checkout hides it). `sanoma` is compiled, as the build
-    // compiles everything.
+    // (Vite would run a linked checkout's copy itself): each of its entries by name, as `external`
+    // takes `sanoma`'s subpaths. The rest of `sanoma` is compiled, as the build compiles everything:
+    // Vite leaves a dependency's `.js` to Node, never its `.ts`, and `sanoma/site` and `sanoma/ui` are
+    // the app's `src/site.ts` and `src/ui.ts`, whose types Node refuses to strip under node_modules,
+    // so from an npm install every page would fail (a linked checkout hides it).
     environments: { ssr: { resolve: { external: RUNTIME, noExternal: ["sanoma"] } } },
     optimizeDeps: {
       // Shipped as source, compiled with the pages.
-      exclude: ["sanoma", "sanoma/app"],
+      exclude: ["sanoma"],
       // Every page, so the first visit finds the dependencies optimized, not a reload to do it.
       entries: [`${src}/routes/**/*.tsx`, "sites/**/*.tsx", "apps/*/sites/**/*.tsx"],
     },
@@ -692,9 +701,6 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
   // A file in the app's source whose id, with the specifier in its query, stands in for a
   // company file's shared import on the server: the module runner resolves it from the app.
   const proxy = `${join(src, "dev-imports.ts")}?sanoma-shared=`;
-  // How Vite's nested include reaches the app from the repo: through sanoma, which a company
-  // installs, or directly.
-  const viaApp = moduleDir("sanoma", repo) ? "sanoma > sanoma/app" : "sanoma/app";
   return [
     {
       // Each file the watcher sees change, for the launcher (`onFileChange`).
@@ -717,20 +723,20 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
     },
     {
       // The browser's pre-bundled dependencies are named from the root, where pnpm installs none of
-      // them: name them through sanoma and the app (Vite's nested form), else CJS React is served
-      // raw and the page does not hydrate.
+      // them: name them through sanoma, which a company installs (Vite's nested form), else CJS React
+      // is served raw and the page does not hydrate.
       name: "sanoma:dev-include-via-app",
       apply: "serve",
       configResolved(config) {
         for (const env of Object.values(config.environments)) {
           if (env.consumer !== "client") continue;
           env.optimizeDeps.include = [
-            ...(env.optimizeDeps.include ?? []).map((id) => (SHARED.test(id) ? `${viaApp} > ${id}` : id)),
+            ...(env.optimizeDeps.include ?? []).map((id) => (SHARED.test(id) ? `sanoma > ${id}` : id)),
             // The kit's Base UI controls reach these CommonJS shims. A lazy site import can
             // evade discovery under excluded app source; name the installed dependency path
             // explicitly so the browser never receives raw CJS.
-            `${viaApp} > @base-ui/react > use-sync-external-store/shim`,
-            `${viaApp} > @base-ui/react > use-sync-external-store/shim/with-selector`,
+            "sanoma > @base-ui/react > use-sync-external-store/shim",
+            "sanoma > @base-ui/react > use-sync-external-store/shim/with-selector",
           ];
         }
       },
@@ -789,18 +795,17 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
 }
 
 /**
- * The build's key: the app's version and source directory, every file under `sites/`, an app's
- * sites and `content/` (dotfiles and dot-folders aside), and where the runtime the server bundle imports by URL is installed (a real path names
- * its version under pnpm), so an upgrade of the runtime is a new build.
+ * The build's key: `sanoma`'s version and the app's source directory, every file under `sites/`, an app's
+ * sites and `content/` (dotfiles and dot-folders aside), and where the runtime the server bundle imports
+ * by URL is installed (`runtimeFrom`, and its dependencies: a real path names its version under
+ * pnpm), so an upgrade of the runtime is a new build.
  */
 function buildKey(repo: string, runtimeFrom: string): string {
   const { src } = appSources();
   const hash = createHash("sha256");
-  const { version } = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) as { version: string };
-  hash.update(`${version}\0${src}\0`);
-  const workflows = moduleDir("sanoma/workflows", dirname(runtimeFrom));
-  for (const name of RUNTIME) {
-    const dir = moduleDir(name, dirname(runtimeFrom)) ?? (workflows && moduleDir(name, realpathSync(workflows)));
+  hash.update(`${manifest.version}\0${src}\0${realpathSync(runtimeFrom)}\0`);
+  for (const name of RUNTIME_DEPS) {
+    const dir = moduleDir(name, dirname(runtimeFrom));
     hash.update(`${name}=${dir === undefined ? "" : realpathSync(dir)}\0`);
   }
   const files = [...siteTrees(repo).map(({ dir }) => dir), "content"]

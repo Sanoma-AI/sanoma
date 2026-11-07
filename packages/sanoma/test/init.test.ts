@@ -34,6 +34,10 @@ import { copyFixture, ensureBuilt, linkConnector, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
 const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as Manifest;
+/** The workspace root's manifest, whose devDependencies are the connectors the tests run. */
+const root = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")) as {
+  devDependencies: Record<string, string>;
+};
 
 let dir = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
@@ -80,8 +84,8 @@ describe("startCompany", () => {
     const pkg = JSON.parse(read("package.json")) as { name: string; dependencies: Record<string, string> };
     expect(pkg.name).toBe("acme-ops");
     expect(pkg.dependencies).toEqual({
-      "@sanoma-ai/connector-anthropic": "latest",
-      "@sanoma-ai/connector-ghost": "latest",
+      "@sanoma-ai/connector-anthropic": own.version,
+      "@sanoma-ai/connector-ghost": own.version,
       sanoma: own.version,
     });
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
@@ -146,26 +150,18 @@ describe("pinDependencies", () => {
     dependencies: Record<string, string>;
   };
 
-  it("pins sanoma and the connectors to the versions a published manifest names", () => {
-    expect(
-      pinDependencies(template.dependencies, {
-        version: "1.2.3",
-        devDependencies: {
-          "@sanoma-ai/connector-anthropic": "0.1.5",
-          "@sanoma-ai/connector-ghost": "0.4.9",
-          "sanoma/testing": "0.1.1",
-        },
-      }),
-    ).toEqual({
-      "@sanoma-ai/connector-anthropic": "0.1.5",
-      "@sanoma-ai/connector-ghost": "0.4.9",
+  it("pins sanoma and the connectors to the launcher's own version", () => {
+    expect(pinDependencies({ ...template.dependencies, "left-alone": "^1" }, { version: "1.2.3" })).toEqual({
+      "@sanoma-ai/connector-anthropic": "1.2.3",
+      "@sanoma-ai/connector-ghost": "1.2.3",
+      "left-alone": "^1",
       sanoma: "1.2.3",
     });
   });
 
-  it("names every template connector as a workspace devDependency, which publishing makes a version", () => {
+  it("names every template connector as a devDependency of the workspace, so the tests run against the checkout", () => {
     for (const name of Object.keys(template.dependencies).filter((dep) => dep !== "sanoma")) {
-      expect(own.devDependencies?.[name], name).toBe("workspace:*");
+      expect(root.devDependencies[name], name).toBe("workspace:*");
     }
   });
 });

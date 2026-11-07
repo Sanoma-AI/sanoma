@@ -1,11 +1,4 @@
-import {
-  diffDeclared,
-  type DnsRecord,
-  dnsRecord,
-  DriverError,
-  errorMessage,
-  type PlanAction,
-} from "sanoma/workflows";
+import { diffDeclared, type DnsRecord, dnsRecord, DriverError, errorMessage, type PlanAction } from "sanoma/workflows";
 import type { z } from "zod";
 import {
   DEFAULT_REGION,

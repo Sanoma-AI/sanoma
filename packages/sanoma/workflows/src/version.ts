@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
 import { upFrom } from "./paths.ts";
 
-/** This package's version, from its package.json: one level above `src/` and `dist/` alike. */
+/** `sanoma`'s version, from its package.json: two levels above `workflows/src/` and `workflows/dist/` alike. */
 export const RUNTIME_VERSION = (
-  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
+  JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }
 ).version;
 
 /**

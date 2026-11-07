@@ -8,7 +8,7 @@ it("is a connector with no operations, no driver and a login half, as the app an
   const description = describeConfig(company);
   expect(description.vendors["better-auth"]).toMatchObject({
     title: "Better Auth",
-    package: "sanoma/better-auth",
+    package: "sanoma",
     fake: false,
     logo: { src: expect.stringMatching(/^data:image\/svg\+xml/), dark: expect.any(String) },
   });

@@ -141,7 +141,7 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): 
   const id = `\0${BUNDLE}`;
   const runtimeId = `\0${RUNTIME}`;
   // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
-  const fromRuntime = createRequire(createRequire(defaultRuntimeFrom).resolve("sanoma/workflows"));
+  const fromRuntime = createRequire(defaultRuntimeFrom);
   const cedar = join(dirname(fromRuntime.resolve("@cedar-policy/cedar-wasm/nodejs")), "..", "web");
   return {
     name: "sanoma:app-bundle",
@@ -185,16 +185,17 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
   return [
     bundleModule(root, configFile, snapshot),
     {
-      // The runtime reads its version from a package.json beside it: inlined from the build's.
+      // The runtime reads its version from `sanoma`'s package.json, two directories above it: inlined from the build's.
       name: "sanoma:runtime-version",
       enforce: "pre",
       applyToEnvironment: ssr,
       transform(code, id) {
         const file = id.split("?")[0]!;
         if (!/[/\\]workflows[/\\](dist[/\\]version\.js|src[/\\]version\.ts)$/.test(file)) return;
-        const read = /JSON\.parse\(\s*readFileSync\(new URL\("\.\.\/package\.json", import\.meta\.url\), "utf8"\)\s*\)/;
+        const read =
+          /JSON\.parse\(\s*readFileSync\(new URL\("\.\.\/\.\.\/package\.json", import\.meta\.url\), "utf8"\)\s*\)/;
         if (!read.test(code)) return this.error(`the Worker's build no longer finds how ${file} reads its version`);
-        const { version } = JSON.parse(readFileSync(join(dirname(file), "..", "package.json"), "utf8")) as {
+        const { version } = JSON.parse(readFileSync(join(dirname(file), "..", "..", "package.json"), "utf8")) as {
           version: string;
         };
         return { code: code.replace(read, JSON.stringify({ version })), map: null };

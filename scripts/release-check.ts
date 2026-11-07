@@ -9,6 +9,8 @@
  * - A package left at a public version that must take every new version it depends on, as npm has its
  *   ranges. An exact pin (`workspace:*`, as `sanoma` pins the runtime) never does, nor a `^` peer range
  *   after a 0.x minor bump. Counts the ones that will pin those in turn.
+ * - A package at a version other than `sanoma`'s: every published package but the binaries
+ *   (`publishConfig.os`, which follow the binary they download) is released with sanoma, at its version.
  *
  * Prints each `name@version` the release will publish, one per line. `release.yml` runs it before
  * publishing; `node scripts/release-check.ts` by hand.
@@ -24,6 +26,8 @@ export interface Manifest {
   /** The package's directory, absolute, as `pnpm ls --json` gives it. */
   path: string;
   private?: boolean;
+  /** A binary package names the platforms it installs on. */
+  publishConfig?: { os?: string[] };
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
@@ -95,7 +99,11 @@ export function releaseCheck(
   const publish: string[] = [];
   /** The version each package will be released at: its own when new; a patch above when it needs one. */
   const next = new Map<string, string>();
+  const sanoma = packages.find((pkg) => pkg.name === "sanoma");
   for (const pkg of packages) {
+    if (sanoma && !pkg.publishConfig?.os && pkg.version !== sanoma.version) {
+      problems.push(`${pkg.name}@${pkg.version} is not at sanoma's version, ${sanoma.version}: give it that one`);
+    }
     const has = npm.get(pkg.name)!;
     if (has === "new package") {
       problems.push(
@@ -137,9 +145,12 @@ export function releaseCheck(
 }
 
 if (import.meta.main) {
-  const packages = (JSON.parse(run("pnpm", ["-r", "ls", "--depth", "-1", "--json"])) as Manifest[]).filter(
-    (pkg) => !pkg.private,
-  );
+  const packages = (JSON.parse(run("pnpm", ["-r", "ls", "--depth", "-1", "--json"])) as Manifest[])
+    .filter((pkg) => !pkg.private)
+    .map((pkg) => {
+      const { publishConfig } = JSON.parse(readFileSync(join(pkg.path, "package.json"), "utf8")) as Manifest;
+      return { ...pkg, publishConfig };
+    });
   const npm = new Map(packages.map((pkg) => [pkg.name, onNpm(pkg)]));
   const { problems, publish } = releaseCheck(packages, npm, changedSince);
   for (const line of publish) console.log(line);

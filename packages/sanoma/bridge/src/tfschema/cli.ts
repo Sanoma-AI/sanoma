@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,12 +8,12 @@ import { parseSchema } from "../schema.ts";
 import { generateResources } from "./generate.ts";
 import type { ResourcesConfig } from "./types.ts";
 
-const USAGE = "usage: sanoma-tfschema <resources.config.ts> <resources.gen.ts> [--fixtures <dir>]";
+const USAGE = "usage: sanoma tfschema <resources.config.ts> <resources.gen.ts> [--fixtures <dir>]";
 
 /**
- * `sanoma-tfschema`, this package's bin: writes a connector's `resources.gen.ts` from its
+ * `sanoma tfschema`: writes a connector's `resources.gen.ts` from its
  * `resources.config.ts` and the recorded schema of the provider release the config names,
- * pinned in `<fixtures>/pins.json` (default: this package's `testdata/`). A connector's
+ * pinned in `<fixtures>/pins.json` (default: the bridge's `testdata/`). A connector's
  * `pnpm generate` runs it from the connector's directory. It reads files only: no network, no
  * provider. Importing this module runs nothing.
  */
@@ -36,11 +35,15 @@ export async function main(argv: string[]): Promise<string> {
   return `wrote ${outPath}: ${config.types.join(", ")}`;
 }
 
-if (import.meta.main) {
+/** `sanoma tfschema <argv>`: what it wrote said on stdout, or its error on stderr; the exit code. */
+export async function tfschema(argv: string[]): Promise<number> {
   try {
-    console.log(await main(process.argv.slice(2)));
+    console.log(await main(argv));
+    return 0;
   } catch (error) {
     console.error((error as Error).message);
-    process.exitCode = 2;
+    return 2;
   }
 }
+
+if (import.meta.main) process.exitCode = await tfschema(process.argv.slice(2));

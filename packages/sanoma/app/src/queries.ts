@@ -1,11 +1,5 @@
 import type { AppApi, ApprovalState, ChangeView, RunStatus, RunSummary } from "sanoma/workflows";
-import type {
-  CollectionEntry,
-  ConfigDescription,
-  OpEntry,
-  SiteCall,
-  WorkflowEntry,
-} from "sanoma/workflows/describe";
+import type { CollectionEntry, ConfigDescription, OpEntry, SiteCall, WorkflowEntry } from "sanoma/workflows/describe";
 import {
   apiNameOf,
   type AvailableApps,

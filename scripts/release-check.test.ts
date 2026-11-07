@@ -83,21 +83,21 @@ describe("changedSince", () => {
 });
 
 describe("releaseCheck", () => {
-  const runtime = workspace("sanoma/workflows", "0.7.1");
   const launcher = workspace("sanoma", "0.7.1");
-  const published = { ...launcher, dependencies: { "sanoma/workflows": "0.7.1" } };
+  const connector = workspace("@sanoma-ai/connector-ghost", "0.7.1");
+  const published = { ...connector, peerDependencies: { sanoma: "0.7.1" } };
 
   it("names a package npm does not have, and lists every version to publish", () => {
-    const neon = workspace("@sanoma-ai/connector-neon", "0.1.0");
+    const neon = workspace("@sanoma-ai/connector-neon", "0.7.1");
     const result = releaseCheck(
-      [runtime, neon],
+      [launcher, neon],
       npm([
-        [runtime.name, "new version"],
+        [launcher.name, "new version"],
         [neon.name, "new package"],
       ]),
       () => [],
     );
-    expect(result.publish).toEqual(["sanoma/workflows@0.7.1", "@sanoma-ai/connector-neon@0.1.0"]);
+    expect(result.publish).toEqual(["sanoma@0.7.1", "@sanoma-ai/connector-neon@0.7.1"]);
     expect(result.problems).toEqual([
       '@sanoma-ai/connector-neon is not on npm: publish it once by hand and set its trusted publisher (README "Release")',
     ]);
@@ -105,26 +105,43 @@ describe("releaseCheck", () => {
 
   it("names a public version whose source changed, and the packages that pin it", () => {
     const result = releaseCheck(
-      [runtime, launcher],
+      [launcher, connector],
       npm([
-        [runtime.name, runtime],
-        [launcher.name, published],
+        [launcher.name, launcher],
+        [connector.name, published],
       ]),
-      (p) => (p === runtime ? ["a1", "b2", "c3", "d4", "e5"] : []),
+      (p) => (p === launcher ? ["a1", "b2", "c3", "d4", "e5"] : []),
     );
     expect(result.publish).toEqual([]);
     expect(result.problems).toEqual([
-      "sanoma/workflows@0.7.1 is on npm, but a1, b2, c3 and 2 more changed its source since: give it a new version",
-      "sanoma@0.7.1 takes sanoma/workflows 0.7.1, not 0.7.2: give it a new version too",
+      "sanoma@0.7.1 is on npm, but a1, b2, c3 and 2 more changed its source since: give it a new version",
+      "@sanoma-ai/connector-ghost@0.7.1 takes sanoma 0.7.1, not 0.7.2: give it a new version too",
+    ]);
+  });
+
+  it("names a package at a version other than sanoma's, but not a binary", () => {
+    const stale = workspace("@sanoma-ai/connector-neon", "0.3.0");
+    const binary = { ...workspace("@sanoma-ai/bridge-linux-x64", "0.5.0"), publishConfig: { os: ["linux"] } };
+    const result = releaseCheck(
+      [launcher, stale, binary],
+      npm([
+        [launcher.name, launcher],
+        [stale.name, stale],
+        [binary.name, binary],
+      ]),
+      () => [],
+    );
+    expect(result.problems).toEqual([
+      "@sanoma-ai/connector-neon@0.3.0 is not at sanoma's version, 0.7.1: give it that one",
     ]);
   });
 
   it("passes when every public version matches its source", () => {
     const result = releaseCheck(
-      [runtime, launcher],
+      [launcher, connector],
       npm([
-        [runtime.name, runtime],
-        [launcher.name, published],
+        [launcher.name, launcher],
+        [connector.name, published],
       ]),
       () => [],
     );

@@ -4,7 +4,7 @@ Helpers for testing [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blo
 
 ## Install
 
-Private to this repository: its tests import it through the workspace, and it is not published.
+Part of `sanoma` (`npm install sanoma`). `sanoma/testing/harness`, `/replay`, `/scenarios` and `/features` need `vitest`, and `/replay` `msw` too: optional peers, installed beside it by a repo that tests with them.
 
 ## A worker for a test
 

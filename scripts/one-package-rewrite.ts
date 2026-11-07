@@ -159,7 +159,7 @@ function rewrite(file: string): void {
   // A relative path wherever one starts: a quoted string, a link target, a word of a script.
   text = text.replace(
     /(^|[\s"'`(=])((?:\.\.?\/)[^\s"'`(),;]*)/gm,
-    (_, before: string, spec: string) => before + rebase(spec, file, file.endsWith(".md")),
+    (_, lead: string, spec: string) => lead + rebase(spec, file, file.endsWith(".md")),
   );
   if (/--filter[= ]+["']?!@sanoma-ai\/(workflows|app|bridge|testing|dev|connector-better-auth)\b/.test(text)) {
     warnings.push(`${file}: a --filter excludes a folded package: drop it, or exclude sanoma`);

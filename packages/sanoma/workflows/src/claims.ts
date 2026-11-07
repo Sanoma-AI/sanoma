@@ -62,9 +62,9 @@ export const claims: Claims = {
   solutions: {},
 };
 
-/** A connector package's tier: its claim's, else official for the `@sanoma-ai/` scope and community otherwise. */
+/** A connector package's tier: its claim's, else official for `sanoma` itself and the `@sanoma-ai/` scope, and community otherwise. */
 export const connectorTier = (pkg: string, from: Claims = claims): Tier =>
-  from.connectors[pkg]?.tier ?? (pkg.startsWith("@sanoma-ai/") ? "official" : "community");
+  from.connectors[pkg]?.tier ?? (pkg === "sanoma" || pkg.startsWith("@sanoma-ai/") ? "official" : "community");
 
 /** The claim on the app whose source is `repo` (`<owner>/<repo>`, as GitHub names it, in any case). */
 export const appClaim = (repo: string, from: Claims = claims): AppClaim | undefined =>

@@ -32,13 +32,15 @@ const repo = fileURLToPath(new URL("../../", import.meta.url));
 const assets = join(repo, ".github/assets");
 
 // What the preview loads, each from its dist/ (as a company repo would), in dependency order.
-const BUILT: [dir: string, outputs: string[]][] = [
-  ["packages/sanoma/workflows", ["dist/index.js"]],
-  ["connectors/ghost", ["dist/index.js", "dist/fake.js"]],
-  ["packages/sanoma/better-auth", ["dist/index.js"]],
-  ["packages/sanoma/testing", ["dist/index.js"]],
-  ["packages/sanoma/app", ["dist/server/server.js"]],
-  ["packages/sanoma", ["dist/cli.js", "dist/index.js"]],
+const BUILT: [dir: string, outputs: string[], script: string][] = [
+  ["packages/sanoma/workflows", ["dist/index.js"], "build:workflows"],
+  ["packages/sanoma/better-auth", ["dist/index.js"], "build:better-auth"],
+  ["packages/sanoma/bridge", ["dist/index.js"], "build:bridge"],
+  ["packages/sanoma/testing", ["dist/index.js"], "build:testing"],
+  ["packages/sanoma/app", ["dist/server/server.js"], "build:app"],
+  ["packages/sanoma/dev", ["dist/cli.js"], "build:dev"],
+  ["packages/sanoma", ["dist/cli.js", "dist/index.js"], "build:core"],
+  ["connectors/ghost", ["dist/index.js", "dist/fake.js"], "build"],
 ];
 
 // The preview's config: the README's workflow, with Ghost answered by its in-memory fake behind the
@@ -113,8 +115,8 @@ for (const signal of SIGNALS) {
 
 try {
   if (!stillsDir && !hasFfmpeg()) fail("ffmpeg is not on PATH; it makes demo.gif (brew install ffmpeg)");
-  say("building what is stale (pnpm run build in each package whose dist/ is older than its src/)");
-  for (const [dir, outputs] of BUILT) ensureBuilt(join(repo, dir), outputs, ["pnpm", "run", "build"]);
+  say("building what is stale (each package or part whose dist/ is older than its src/)");
+  for (const [dir, outputs, script] of BUILT) ensureBuilt(join(repo, dir), outputs, ["pnpm", "run", script]);
   // Loaded once built: sanoma/testing's index imports sanoma/workflows from its dist/.
   const { testDatabaseUrl } = await import("../../packages/sanoma/testing/src/index.ts");
   // `SANOMA_TEST_DATABASE_URL`'s name plus `_readme_shots`: a worktree's own when that is set per worktree.
@@ -343,7 +345,6 @@ function writeRepo(dir: string): void {
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],
     ["@sanoma-ai/connector-ghost", "connectors/ghost"],
-    ["sanoma/testing", "packages/sanoma/testing"],
   ] as const) {
     const at = join(dir, "node_modules", name);
     mkdirSync(dirname(at), { recursive: true });

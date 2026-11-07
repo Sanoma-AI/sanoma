@@ -113,25 +113,22 @@ export async function startCompany(
 /** What `pinDependencies` reads of this package's own manifest. */
 export interface Manifest {
   version: string;
-  devDependencies?: Record<string, string>;
 }
 
 /**
  * The template's dependencies at the versions released with it, as a company starts from them:
- * `sanoma` at this launcher's own version (it pins the runtime exactly), each connector at this
- * package's devDependency on it, which publishing writes as an exact version. The template's
+ * `sanoma` and each `@sanoma-ai/connector-*` at this launcher's own version, as every published
+ * package carries sanoma's version (`scripts/release-check.ts`). The template's
  * `pnpm-workspace.yaml` lets its install past pnpm's minimum release age, so a range or `latest`
- * here would meet a release newer than this template and what it allows. From a checkout, whose
- * manifest says `workspace:*`, or a manifest without devDependencies, a connector stays as the
- * template names it.
+ * here would meet a release newer than this template and what it allows. Any other dependency
+ * stays as the template names it.
  */
 export function pinDependencies(dependencies: Record<string, string>, own: Manifest): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(dependencies).map(([name, range]) => {
-      if (name === "sanoma") return [name, own.version];
-      const released = own.devDependencies?.[name] ?? range;
-      return [name, released.startsWith("workspace:") ? range : released];
-    }),
+    Object.entries(dependencies).map(([name, range]) => [
+      name,
+      name === "sanoma" || name.startsWith("@sanoma-ai/connector-") ? own.version : range,
+    ]),
   );
 }
 

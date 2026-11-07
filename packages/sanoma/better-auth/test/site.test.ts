@@ -65,10 +65,7 @@ beforeAll(async () => {
   repo = mkdtempSync(join(tmpdir(), "sanoma-better-auth-"));
   cpSync(fixtureDir, repo, { recursive: true });
   mkdirSync(join(repo, "node_modules"));
-  symlinkSync(
-    fileURLToPath(new URL("../..", import.meta.url)),
-    join(repo, "node_modules", "sanoma"),
-  );
+  symlinkSync(fileURLToPath(new URL("../..", import.meta.url)), join(repo, "node_modules", "sanoma"));
   [{ distDir }, worker] = await Promise.all([buildApp(repo), startWorker(config)]);
   app = await startApp(config, { port: 0, distDir });
 });

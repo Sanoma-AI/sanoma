@@ -8,8 +8,9 @@
     // package's build config too (they extend this from their own directories).
     "types": ["node"],
     "typeRoots": ["./node_modules/@types"],
-    // Inside the repo, @sanoma-ai/* resolves to source so nothing needs building first.
-    // Published packages resolve to dist/ through their package.json exports.
+    // Inside the repo, `sanoma/*` and @sanoma-ai/* resolve to source so nothing needs building first.
+    // Published packages resolve to dist/ through their package.json exports. The `sanoma/*` here
+    // are packages/sanoma/package.json's `exports`, one each.
     // Keep in sync with resolve.alias in vitest.config.ts.
     "paths": {
       "@sanoma-ai/invoices/pdf-contract": ["./packages/invoices/src/render-contract.ts"],
@@ -18,10 +19,15 @@
       "@sanoma-ai/invoices/node": ["./packages/invoices/src/node.ts"],
       "@sanoma-ai/invoices": ["./packages/invoices/src/index.ts"],
       "@sanoma-ai/invoices/examples": ["./packages/invoices/src/examples.ts"],
+      "sanoma": ["./packages/sanoma/src/index.ts"],
+      "sanoma/resources": ["./packages/sanoma/workflows/src/constructors.ts"],
+      "sanoma/site": ["./packages/sanoma/app/src/site.ts"],
+      "sanoma/ui": ["./packages/sanoma/app/src/ui.ts"],
+      "sanoma/data": ["./packages/sanoma/workflows/src/data.ts"],
+      "sanoma/secrets": ["./packages/sanoma/workflows/src/kms-secrets.ts"],
+      "sanoma/claims": ["./packages/sanoma/workflows/src/claims.ts"],
       "sanoma/workflows": ["./packages/sanoma/workflows/src/index.ts"],
       "sanoma/workflows/data": ["./packages/sanoma/workflows/src/data.ts"],
-      "sanoma/workflows/cloud-identity": ["./packages/sanoma/workflows/src/cloud-identity.ts"],
-      "sanoma/workflows/identity-service": ["./packages/sanoma/workflows/src/identity-service.ts"],
       "sanoma/workflows/describe": ["./packages/sanoma/workflows/src/describe.ts"],
       "sanoma/workflows/description": ["./packages/sanoma/workflows/src/description.ts"],
       "sanoma/workflows/fake": ["./packages/sanoma/workflows/src/fake.ts"],
@@ -30,35 +36,31 @@
       "sanoma/workflows/scenario": ["./packages/sanoma/workflows/src/scenario.ts"],
       "sanoma/workflows/scenarios": ["./packages/sanoma/workflows/src/scenarios.ts"],
       "sanoma/workflows/shared": ["./packages/sanoma/workflows/src/shared.ts"],
-      "sanoma/workflows/kms-secrets": ["./packages/sanoma/workflows/src/kms-secrets.ts"],
       "sanoma/workflows/wakeup-service": ["./packages/sanoma/workflows/src/wakeup-service.ts"],
+      "sanoma/workflows/cloud-identity": ["./packages/sanoma/workflows/src/cloud-identity.ts"],
+      "sanoma/workflows/kms-secrets": ["./packages/sanoma/workflows/src/kms-secrets.ts"],
       "sanoma/workflows/db": ["./packages/sanoma/workflows/src/db/index.ts"],
-      "sanoma/testing": ["./packages/sanoma/testing/src/index.ts"],
-      "sanoma/testing/database": ["./packages/sanoma/testing/src/database.ts"],
-      "sanoma/testing/features": ["./packages/sanoma/testing/src/features.ts"],
-      "sanoma/testing/harness": ["./packages/sanoma/testing/src/harness.ts"],
-      "sanoma/testing/host": ["./packages/sanoma/testing/src/host.ts"],
-      "sanoma/testing/replay": ["./packages/sanoma/testing/src/replay.ts"],
-      "sanoma/testing/sandbox": ["./packages/sanoma/testing/src/sandbox.ts"],
-      "sanoma/testing/scenarios": ["./packages/sanoma/testing/src/scenarios.ts"],
-      "sanoma/testing/wakeup": ["./packages/sanoma/testing/src/wakeup.ts"],
+      "sanoma/workflows/identity-service": ["./packages/sanoma/workflows/src/identity-service.ts"],
       "sanoma/app": ["./packages/sanoma/app/src/index.ts"],
       "sanoma/app/build": ["./packages/sanoma/app/src/build.ts"],
       "sanoma/app/bundle": ["./packages/sanoma/app/src/bundle-build.ts"],
       "sanoma/app/steps": ["./packages/sanoma/app/src/steps/index.ts"],
+      "sanoma/testing": ["./packages/sanoma/testing/src/index.ts"],
+      "sanoma/testing/database": ["./packages/sanoma/testing/src/database.ts"],
+      "sanoma/testing/features": ["./packages/sanoma/testing/src/features.ts"],
+      "sanoma/testing/host": ["./packages/sanoma/testing/src/host.ts"],
+      "sanoma/testing/harness": ["./packages/sanoma/testing/src/harness.ts"],
+      "sanoma/testing/replay": ["./packages/sanoma/testing/src/replay.ts"],
+      "sanoma/testing/scenarios": ["./packages/sanoma/testing/src/scenarios.ts"],
+      "sanoma/testing/sandbox": ["./packages/sanoma/testing/src/sandbox.ts"],
+      "sanoma/testing/wakeup": ["./packages/sanoma/testing/src/wakeup.ts"],
+      "sanoma/better-auth": ["./packages/sanoma/better-auth/src/index.ts"],
       "sanoma/internal/bridge": ["./packages/sanoma/bridge/src/index.ts"],
       "sanoma/internal/bridge/fake": ["./packages/sanoma/bridge/src/fake.ts"],
-      "sanoma/internal/bridge/connector": ["./packages/sanoma/bridge/src/connector.ts"],
       "sanoma/internal/bridge/tfschema": ["./packages/sanoma/bridge/src/tfschema.ts"],
-      "sanoma": ["./packages/sanoma/src/index.ts"],
-      "sanoma/resources": ["./packages/sanoma/src/resources.ts"],
-      "sanoma/site": ["./packages/sanoma/app/src/site.ts"],
-      "sanoma/site": ["./packages/sanoma/app/src/site.ts"],
-      "sanoma/data": ["./packages/sanoma/src/data.ts"],
-      "sanoma/secrets": ["./packages/sanoma/src/secrets.ts"],
-      "sanoma/claims": ["./packages/sanoma/src/claims.ts"],
-      "sanoma/ui": ["./packages/sanoma/app/src/ui.ts"],
-      "sanoma/ui": ["./packages/sanoma/app/src/ui.ts"],
+      "sanoma/internal/bridge/connector": ["./packages/sanoma/bridge/src/connector.ts"],
+      "sanoma/internal/bridge/tfschema/cli": ["./packages/sanoma/bridge/src/tfschema/cli.ts"],
+      "sanoma/internal/dev": ["./packages/sanoma/dev/src/cli.ts"],
       // Before the bare pattern: TypeScript takes the first of two patterns with equal prefixes.
       "@sanoma-ai/connector-supabase/vault": ["./connectors/supabase/src/vault.ts"],
       "@sanoma-ai/connector-*/fake": ["./connectors/*/src/fake.ts"],
@@ -73,6 +75,9 @@
     "packages/*/src",
     "packages/*/test",
     "packages/*/scripts",
+    "packages/sanoma/*/src",
+    "packages/sanoma/*/test",
+    "packages/sanoma/*/scripts",
     "packages/desktop/*.mts",
     "connectors/*/src",
     "connectors/*/test",
@@ -83,5 +88,10 @@
   // The invoice package checks its JSX document and browser adapter in its own tsconfig.
   // A fixture's sites, and its apps', are checked as a company's are, by the tsconfig sanoma writes beside them
   // when a test builds them.
-  "exclude": ["packages/sanoma/app/src", "packages/invoices", "**/test/fixtures/*/sites", "**/test/fixtures/*/apps/*/sites"]
+  "exclude": [
+    "packages/sanoma/app/src",
+    "packages/invoices",
+    "**/test/fixtures/*/sites",
+    "**/test/fixtures/*/apps/*/sites"
+  ]
 }

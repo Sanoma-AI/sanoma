@@ -182,6 +182,8 @@ describe("the claims", () => {
   it("read a tier from the claims, else from the name", () => {
     expect(connectorTier("sanoma-connector-acme", CLAIMS)).toBe("vendor-verified");
     expect(connectorTier("@sanoma-ai/connector-ghost", CLAIMS)).toBe("official");
+    // A connector part of sanoma itself (Better Auth).
+    expect(connectorTier("sanoma", CLAIMS)).toBe("official");
     expect(connectorTier("sanoma-connector-widgets", CLAIMS)).toBe("community");
     expect(appTier("acme/crm", CLAIMS)).toBe("vendor-verified");
     expect(appTier("sanoma-ai/tenant-portal", CLAIMS)).toBe("official");

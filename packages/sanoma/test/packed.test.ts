@@ -26,15 +26,10 @@ const env = {
 const run = promisify(execFile);
 const fixture = fileURLToPath(new URL("./fixtures/sites/", import.meta.url));
 
-const manifest = (dir: string) => JSON.parse(readFileSync(join(checkout, "packages", dir, "package.json"), "utf8"));
-
-/**
- * `sanoma`'s dependencies in this workspace, `@sanoma-ai/<name>` each: packed, as `sanoma` is, into
- * `vendor/<name>.tgz`, from `packages/<name>`, or `connectors/<id>` for `connector-<id>`.
- */
-const workspace = Object.entries(manifest("sanoma").dependencies as Record<string, string>)
-  .filter(([, range]) => range.startsWith("workspace:"))
-  .map(([name]) => name.replace("@sanoma-ai/", ""));
+const sanoma = JSON.parse(readFileSync(join(checkout, "packages/sanoma/package.json"), "utf8")) as {
+  version: string;
+  optionalDependencies: Record<string, string>;
+};
 
 const files: Record<string, string> = {
   "package.json": JSON.stringify({
@@ -51,22 +46,14 @@ const files: Record<string, string> = {
     // The checkout's pnpm, whose pnpm-workspace.yaml overrides (and "-") these rely on.
     packageManager: JSON.parse(readFileSync(join(checkout, "package.json"), "utf8")).packageManager,
   }),
-  // sanoma's dependencies on the others are by version: these tarballs instead of npm's. The
-  // bridge's binaries and PostgreSQL's stay out (the dev server does not start the bridge, and
+  // The bridge's binaries and PostgreSQL's stay out (the dev server does not start the bridge, and
   // SANOMA_DATABASE_URL names the test database).
   "pnpm-workspace.yaml": JSON.stringify({
     // The plugin's peer is the company's to install, as by default: none here.
     autoInstallPeers: false,
     // As the template's: the build scripts of Pi's model providers and of the app's Worker build, which pnpm 11 would stop on.
     allowBuilds: { "@google/genai": false, protobufjs: false, esbuild: false, workerd: false },
-    overrides: {
-      ...Object.fromEntries(workspace.map((dir) => [`@sanoma-ai/${dir}`, `file:vendor/${dir}.tgz`])),
-      ...Object.fromEntries(
-        [manifest("bridge"), manifest("sanoma")].flatMap((m) =>
-          Object.keys(m.optionalDependencies).map((name) => [name, "-"]),
-        ),
-      ),
-    },
+    overrides: Object.fromEntries(Object.keys(sanoma.optionalDependencies).map((name) => [name, "-"])),
   }),
   // The template's model connector: the chat's model, its key not set yet.
   "sanoma.config.ts": readFileSync(join(fixture, "sanoma.config.ts"), "utf8")
@@ -110,15 +97,7 @@ describe("sanoma from packed tarballs: the dev server", () => {
       run("pnpm", ["pack", "--config.ignore-scripts=true", "--out", join(dir, "vendor", `${name}.tgz`)], {
         cwd: join(checkout, from),
       });
-    await Promise.all([
-      ...["sanoma", ...workspace].map((pkg) =>
-        pack(
-          pkg.startsWith("connector-") ? join("connectors", pkg.slice("connector-".length)) : join("packages", pkg),
-          pkg,
-        ),
-      ),
-      pack("connectors/anthropic", "connector-anthropic"),
-    ]);
+    await Promise.all([pack("packages/sanoma", "sanoma"), pack("connectors/anthropic", "connector-anthropic")]);
     // No lockfile to freeze (CI sets it by default).
     await run("pnpm", ["install", "--prefer-offline", "--no-frozen-lockfile"], { cwd: dir });
     // pnpm's hidden hoist, where Node would find the plugin's peer by chance: without it, nowhere.
@@ -175,9 +154,9 @@ describe("sanoma from packed tarballs: the dev server", () => {
         env: { ...process.env, ...env, PATH: `${bin}:${process.env.PATH}`, npm_config_user_agent: "pnpm/11" },
       });
       expect(JSON.parse(readFileSync(join(company, "package.json"), "utf8")).dependencies).toEqual({
-        "@sanoma-ai/connector-anthropic": manifest("../connectors/anthropic").version,
-        "@sanoma-ai/connector-ghost": manifest("../connectors/ghost").version,
-        sanoma: manifest("sanoma").version,
+        "@sanoma-ai/connector-anthropic": sanoma.version,
+        "@sanoma-ai/connector-ghost": sanoma.version,
+        sanoma: sanoma.version,
       });
     } finally {
       rmSync(company, { recursive: true, force: true });

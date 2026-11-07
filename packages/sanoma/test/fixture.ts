@@ -12,22 +12,26 @@ export const repo = fileURLToPath(new URL("../../../", import.meta.url));
 export const cli = join(repo, "packages/sanoma/src/cli.ts");
 
 /**
- * The packages a fixture copy loads through its `node_modules`, each as a published package would
- * be: by its `exports`, from `dist/` (and `sanoma`'s generated `oxlint.json`). `ensureBuilt`
- * builds each whose outputs are missing or older than its source, in dependency order.
+ * What a fixture copy loads through its `node_modules`, each as a published package would be: by
+ * its `exports`, from `dist/` (and `sanoma`'s generated `oxlint.json`): each part of `sanoma` and
+ * the connectors. `ensureBuilt` builds each whose outputs are missing or older than its source, in
+ * dependency order, a part with its own build script.
  */
-const BUILT: [dir: string, outputs: string[]][] = [
-  ["packages/sanoma/workflows", ["dist/index.js"]],
-  ["packages/sanoma/bridge", ["dist/index.js"]],
-  ["connectors/ghost", ["dist/index.js"]],
-  ["connectors/anthropic", ["dist/index.js"]],
-  ["connectors/docker", ["dist/index.js"]],
-  ["packages/sanoma/app", ["dist/server/server.js"]],
-  ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"]],
+const BUILT: [dir: string, outputs: string[], script: string][] = [
+  ["packages/sanoma/workflows", ["dist/index.js"], "build:workflows"],
+  ["packages/sanoma/better-auth", ["dist/index.js"], "build:better-auth"],
+  ["packages/sanoma/bridge", ["dist/index.js"], "build:bridge"],
+  ["packages/sanoma/testing", ["dist/index.js"], "build:testing"],
+  ["packages/sanoma/app", ["dist/server/server.js", "dist/index.js"], "build:app"],
+  ["packages/sanoma/dev", ["dist/cli.js"], "build:dev"],
+  ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"], "build:core"],
+  ["connectors/ghost", ["dist/index.js"], "build"],
+  ["connectors/anthropic", ["dist/index.js"], "build"],
+  ["connectors/docker", ["dist/index.js"], "build"],
 ];
 
 export function ensureBuilt(): void {
-  for (const [dir, outputs] of BUILT) ensure(join(repo, dir), outputs, ["pnpm", "run", "build"]);
+  for (const [dir, outputs, script] of BUILT) ensure(join(repo, dir), outputs, ["pnpm", "run", script]);
 }
 
 const allow = { answer: "allow" };
@@ -86,7 +90,7 @@ export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", 
     dependencies: Record<string, string>;
   };
   const store = join(modules, ".pnpm/sanoma/node_modules");
-  for (const file of ["package.json", ...manifest.files]) {
+  for (const file of ["package.json", ...manifest.files.filter((entry) => !entry.startsWith("!"))]) {
     cpSync(join(sanoma, file), join(store, "sanoma", file), { recursive: true });
   }
   for (const name of Object.keys(manifest.dependencies)) link(join(sanoma, "node_modules", name), join(store, name));
