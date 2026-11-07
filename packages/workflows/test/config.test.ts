@@ -182,6 +182,8 @@ describe("a change's operations, built in", () => {
     expect([...resolved.ops.keys()]).toEqual([
       ...ids,
       "sanoma.connection.test",
+      "sanoma.connection.refresh",
+      "sanoma.connection.revoke",
       "sanoma.connection.prepare",
       "sanoma.connection.configure",
       "sanoma.connection.activate",

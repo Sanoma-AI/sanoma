@@ -514,13 +514,16 @@ export const SCHEDULE_AGENT = "schedule";
 export const HOST_CHECK_AGENT = "host-check";
 /** The runtime's agent that sends a sign-in code (`LOGIN_CODE_WORKFLOW`): a company's policy exempts it from its holds on sending. */
 export const LOGIN_AGENT = "login";
-/** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration, sign-in codes), declared whether a data file names them or not. */
+/** The runtime's agent that renews OAuth grants when they are due (`sanoma.connection.refresh`, called by the worker): the policy decides each. */
+export const RENEWAL_AGENT = "renewal";
+/** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration, sign-in codes, grant renewals), declared whether a data file names them or not. */
 export const RUNTIME_AGENTS: readonly string[] = [
   "scenarios",
   HOST_CHECK_AGENT,
   SCHEDULE_AGENT,
   WAKEUP_AGENT,
   LOGIN_AGENT,
+  RENEWAL_AGENT,
 ];
 
 /** The declared resources of one of the runtime's people types, by `desired`. */

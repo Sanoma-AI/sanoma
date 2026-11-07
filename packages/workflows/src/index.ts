@@ -384,6 +384,7 @@ export {
   type CallAuthentication,
 } from "./authentication.ts";
 export { oauthClient, CallbackError, type AttemptStatus } from "./oauth.ts";
+export type { RenewalOutcome, RenewalState } from "./renewal.ts";
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
 
 export { postgresSecretStore } from "./credentials.ts";

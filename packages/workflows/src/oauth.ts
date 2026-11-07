@@ -11,6 +11,8 @@ import {
   generateRandomState,
   nopkce,
   processAuthorizationCodeResponse,
+  processRefreshTokenResponse,
+  refreshTokenGrantRequest,
   ResponseBodyError,
   skipStateCheck,
   validateAuthResponse,
@@ -35,7 +37,9 @@ import { isLoopback } from "./shared.ts";
 // callback (`receive`: the state checked against the person's attempt, the code sealed), and the
 // worker's `sanoma.connection.exchange` takes the code once (`take`) and posts it to the token
 // endpoint (`requestGrant`). None of it enters workflow history: the `connect` run is given the
-// attempt's id alone. The protocol is oauth4webapi's (panva), which runs on Node and workerd alike.
+// attempt's id alone. A stored grant is renewed with its refresh token (`refreshGrant`), under the
+// connection's lease (`renewal.ts`). The protocol is oauth4webapi's (panva), which runs on Node and
+// workerd alike.
 
 /** The company's OAuth application, stored as a connection's `client` secret: never in a grant. */
 export const oauthClient = z.object({
@@ -286,12 +290,7 @@ export class ConnectionAttempts {
  * request may have reached the provider is `uncertain`, since a code works once.
  */
 export async function requestGrant(flow: OAuthFlow, client: OAuthClient, taken: TakenAttempt): Promise<OAuthGrant> {
-  const server = serverOf(flow);
-  const app = { client_id: client.clientId };
-  const authentication =
-    flow.clientAuthentication === "client_secret_basic"
-      ? ClientSecretBasic(client.clientSecret)
-      : ClientSecretPost(client.clientSecret);
+  const { server, app, authentication, options } = tokenEndpoint(flow, client);
   try {
     // The state was checked at the callback; here the code is put back in oauth4webapi's shape.
     const params = validateAuthResponse(server, app, new URLSearchParams({ code: taken.code }), skipStateCheck);
@@ -302,20 +301,102 @@ export async function requestGrant(flow: OAuthFlow, client: OAuthClient, taken: 
       params,
       taken.redirectUri,
       flow.pkce ? taken.verifier : nopkce,
-      {
-        signal: AbortSignal.timeout(30_000),
-        [allowInsecureRequests]: isLoopback(new URL(flow.tokenUrl).hostname),
-      },
+      options,
     );
-    const token = await processAuthorizationCodeResponse(server, app, response);
-    return {
-      accessToken: token.access_token,
-      tokenType: token.token_type,
-      ...(token.refresh_token && { refreshToken: token.refresh_token }),
-      ...(token.expires_in !== undefined && { expiresAt: Date.now() + token.expires_in * 1000 }),
-      ...(token.scope !== undefined && { scopes: token.scope.split(/[\s,]+/).filter(Boolean) }),
-    };
+    return grantOf(await processAuthorizationCodeResponse(server, app, response));
   } catch (error) {
     throw new AuthenticationError(error instanceof ResponseBodyError ? "rejected" : "uncertain");
+  }
+}
+
+/** The provider's token endpoint as oauth4webapi takes it, with the application's authentication. */
+function tokenEndpoint(flow: OAuthFlow, client: OAuthClient) {
+  return {
+    server: serverOf(flow),
+    app: { client_id: client.clientId },
+    authentication:
+      flow.clientAuthentication === "client_secret_basic"
+        ? ClientSecretBasic(client.clientSecret)
+        : ClientSecretPost(client.clientSecret),
+    options: {
+      signal: AbortSignal.timeout(30_000),
+      [allowInsecureRequests]: isLoopback(new URL(flow.tokenUrl).hostname),
+    },
+  };
+}
+
+/** A token endpoint's answer as a grant, `previous`'s refresh token and scopes kept where the answer leaves them out (RFC 6749 section 6). */
+function grantOf(
+  token: { access_token: string; token_type: string; refresh_token?: string; expires_in?: number; scope?: string },
+  previous?: OAuthGrant,
+): OAuthGrant {
+  const refreshToken = token.refresh_token ?? previous?.refreshToken;
+  const scopes = token.scope !== undefined ? token.scope.split(/[\s,]+/).filter(Boolean) : previous?.scopes;
+  return {
+    accessToken: token.access_token,
+    tokenType: token.token_type,
+    ...(refreshToken && { refreshToken }),
+    ...(token.expires_in !== undefined && { expiresAt: Date.now() + token.expires_in * 1000 }),
+    ...(scopes !== undefined && { scopes }),
+  };
+}
+
+/**
+ * The system errors (Node's, under fetch's `TypeError`) by which a connection failed before any
+ * request was sent: no address, refused, unreachable, the connect timing out, or TLS refusing the
+ * server. The provider never saw the refresh token.
+ */
+const NOT_SENT = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+
+/** True when `error`, a failed fetch, failed before its request was sent (`NOT_SENT`). */
+const notSent = (error: unknown): boolean => {
+  const cause = (error as { cause?: { code?: unknown; errors?: { code?: unknown }[] } } | null)?.cause;
+  // Several addresses tried (happy eyeballs): an AggregateError of each one's failure.
+  const codes = [cause?.code, ...(cause?.errors ?? []).map((e) => e?.code)];
+  return codes.some((code) => typeof code === "string" && NOT_SENT.has(code));
+};
+
+/**
+ * The grant renewed at the provider's token endpoint with its refresh token. A connection that
+ * failed before the request was sent (`notSent`) is `unavailable`: nothing reached the provider,
+ * so it is asked again later. A refusal (any 4xx answer) issued nothing: `unavailable` for 429
+ * (ask later), `revoked` for `invalid_grant` (the refresh token no longer works, so only
+ * Reconnect helps), `rejected` for any other. Anything else once the request may have reached the
+ * provider (no answer, a 5xx, an answer that does not read as a grant) is `uncertain`: a provider
+ * that rotates refresh tokens may have spent this one, so it is never sent again.
+ */
+export async function refreshGrant(flow: OAuthFlow, client: OAuthClient, grant: OAuthGrant): Promise<OAuthGrant> {
+  if (!grant.refreshToken) throw new AuthenticationError("expired");
+  const { server, app, authentication, options } = tokenEndpoint(flow, client);
+  let response: Response;
+  try {
+    response = await refreshTokenGrantRequest(server, app, authentication, grant.refreshToken, options);
+  } catch (error) {
+    throw new AuthenticationError(notSent(error) ? "unavailable" : "uncertain");
+  }
+  try {
+    return grantOf(await processRefreshTokenResponse(server, app, response), grant);
+  } catch (error) {
+    // Too many requests: refused, nothing issued, and worth asking again later.
+    if (response.status === 429) throw new AuthenticationError("unavailable");
+    // Any other 4xx refused the refresh token, nothing issued: `invalid_grant` says it no longer counts.
+    if (response.status >= 400 && response.status < 500)
+      throw new AuthenticationError(
+        error instanceof ResponseBodyError && error.error === "invalid_grant" ? "revoked" : "rejected",
+      );
+    // A 2xx the library refused, or a server error: whether a grant was issued is not known.
+    throw new AuthenticationError("uncertain");
   }
 }

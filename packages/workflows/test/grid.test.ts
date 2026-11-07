@@ -127,6 +127,8 @@ describe("permissionsGrid", () => {
         "sanoma.connection.create",
         "sanoma.connection.disconnect",
         "sanoma.connection.prepare",
+        "sanoma.connection.refresh",
+        "sanoma.connection.revoke",
         "sanoma.connection.test",
         "sanoma.run.inspect",
       ].map((id) => ({
@@ -185,6 +187,8 @@ describe("permissionsGrid", () => {
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
 
+      [...allowed, ...visitorDenied],
+      [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],

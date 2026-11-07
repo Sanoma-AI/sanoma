@@ -36,7 +36,10 @@ async function organizationsOf(token: string): Promise<AuthenticationIdentity> {
  * own OAuth application in its Supabase organization (Settings, OAuth Apps) with the redirect URI
  * `<app origin>/connect/supabase/callback`, and enters its client ID and secret on the connector
  * page. Supabase takes scopes from the application, not the request, so none are sent. The grant
- * carries an expiry; until renewal is wired (sanoma#467), an expired grant needs Reconnect.
+ * carries an expiry (`expires_in`, which Supabase's API reference requires but does not fix), and
+ * the runtime renews it with its refresh token before then, and when the Management API answers
+ * 401 (Supabase's guide: "handle HTTP Unauthorized errors"). Revoke asks Supabase to end the
+ * application's authorization and its tokens (`POST /v1/oauth/revoke`, JSON, not RFC 7009's form).
  */
 export const supabaseOAuth: OAuthAuthentication = defineAuthentication({
   kind: "oauth2",
@@ -49,10 +52,26 @@ export const supabaseOAuth: OAuthAuthentication = defineAuthentication({
     pkce: true,
     clientAuthentication: "client_secret_basic",
     refresh: "refresh_token",
+    tokenRejected: [401],
+    // No `refreshTokenLifetime`: Supabase publishes none (2026-11-06), so a grant renews on use only.
   },
   async verify(grant) {
     const identity = await organizationsOf(grant.accessToken);
     return grant.expiresAt === undefined ? identity : { ...identity, expiresAt: grant.expiresAt };
+  },
+  async revoke(grant, client) {
+    if (!grant.refreshToken) throw new AuthenticationError("unsupported");
+    const res = await fetch(`${API}/v1/oauth/revoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        client_id: client.clientId,
+        client_secret: client.clientSecret,
+        refresh_token: grant.refreshToken,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new AuthenticationError(res.status === 401 || res.status === 403 ? "rejected" : "unavailable");
   },
 });
 

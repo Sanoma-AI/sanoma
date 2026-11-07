@@ -26,10 +26,16 @@ import { startApp } from "../src/index.ts";
 // OAuth consent in the browser: Connect account on the connector page opens the provider in a new
 // tab, the provider (a loopback server here) sends the person back to the app's callback, the
 // worker's `connect` run exchanges the code, and the page that started it shows the account
-// connected. A callback this browser did not start comes back as a plain `?error=` message.
+// connected. The card shows when the grant is valid until; Test renews it once due, and the card
+// says when; Revoke asks the provider to end it. A callback this browser did not start comes back
+// as a plain `?error=` message.
 
 const CLIENT = { clientId: "acme-app", clientSecret: "acme-app-secret-never-shown" };
 const ACCESS = "acme-access-never-shown";
+const REFRESH = "acme-refresh-never-shown";
+/** The refresh tokens the provider was sent to renew, and to revoke. */
+const renewed: string[] = [];
+const revoked: string[] = [];
 /** The challenge each code was issued for. */
 const challenges = new Map<string, string>();
 
@@ -47,6 +53,14 @@ const provider = createServer((req, res) => {
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
       const form = new URLSearchParams(body);
+      if (form.get("grant_type") === "refresh_token") {
+        renewed.push(form.get("refresh_token")!);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({ access_token: ACCESS, refresh_token: REFRESH, token_type: "Bearer", expires_in: 3600 }),
+        );
+        return;
+      }
       const verifier = createHash("sha256")
         .update(form.get("code_verifier") ?? "")
         .digest("base64url");
@@ -55,10 +69,18 @@ const provider = createServer((req, res) => {
       res.end(
         JSON.stringify(
           ok
-            ? { access_token: ACCESS, token_type: "Bearer", expires_in: 3600, scope: "read" }
+            ? // Due for renewal at once: a minute is under the five the runtime renews ahead.
+              { access_token: ACCESS, refresh_token: REFRESH, token_type: "Bearer", expires_in: 60, scope: "read" }
             : { error: "invalid_grant" },
         ),
       );
+    });
+  } else if (url.pathname === "/revoke") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      revoked.push(new URLSearchParams(body).get("token")!);
+      res.writeHead(200).end();
     });
   } else res.writeHead(404).end();
 });
@@ -76,6 +98,14 @@ const oauth = defineAuthentication({
     scopes: ["read"],
     pkce: true,
     clientAuthentication: "client_secret_basic",
+    refresh: "refresh_token",
+  },
+  async revoke(grant) {
+    const res = await fetch(`${origin}/revoke`, {
+      method: "POST",
+      body: new URLSearchParams({ token: grant.refreshToken! }),
+    });
+    if (!res.ok) throw new Error("not revoked");
   },
   verify: async (grant) => {
     if (grant.accessToken !== ACCESS) throw new AuthenticationError("rejected");
@@ -145,10 +175,19 @@ it("connects an account by consent in a new tab, and says why a callback it did 
     await page.waitForFunction(`document.body.textContent.includes('Connected. The account is verified.')`, {
       timeout: 30_000,
     });
-    await page.waitForFunction(`document.body.textContent.includes('Access expires')`);
+    await page.waitForFunction(`document.body.textContent.includes('Valid until')`);
     expect(await page.evaluate(`document.body.textContent`)).toContain("acme-org");
+    // Test renews the grant, due within the minute it was issued for (unless the worker already did).
+    await page.click("button::-p-text(Test)");
+    await page.waitForFunction(`document.body.textContent.includes('Renewed')`, { timeout: 30_000 });
+    expect(renewed).toEqual([REFRESH]);
     await page.screenshot({ path: "/tmp/connection-oauth-connected.png", fullPage: true });
-    for (const value of [CLIENT.clientSecret, ACCESS]) expect(await page.content()).not.toContain(value);
+    for (const value of [CLIENT.clientSecret, ACCESS, REFRESH]) expect(await page.content()).not.toContain(value);
+    // Revoke ends the grant at the provider and disconnects the account.
+    await page.click("button::-p-text(Revoke)");
+    await page.waitForFunction(`!document.body.textContent.includes('Revoke')`, { timeout: 30_000 });
+    expect(revoked).toEqual([REFRESH]);
+    expect(await page.evaluate(`document.body.textContent`)).toContain("disconnected");
 
     // A callback whose state this browser holds no attempt cookie for: refused, said in plain words.
     const stray = await browser.newPage();
