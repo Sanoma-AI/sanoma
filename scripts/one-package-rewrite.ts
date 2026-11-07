@@ -52,7 +52,10 @@ const NAMES: readonly (readonly [from: string, to: string])[] = [
 const FOLDED = new Set([...NAMES.map(([from]) => from), "@sanoma-ai/dev"]);
 const DEP_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] as const;
 const TEXT = /\.(c|m)?[jt]sx?$|\.jsonc?$|\.md$|\.ya?ml$|\.css$|\.sh$|(^|\/)Dockerfile$/;
-const SKIP = /(^|\/)(pnpm-lock\.yaml|testdata\/.*(?<!\.md))$|^scripts\/one-package-rewrite\.ts$/;
+// Left as they are: the lockfile, test data, this script, and the binaries' manifests, which name
+// `@sanoma-ai/bridge` as npm has them, unchanged until the binary is.
+const SKIP =
+  /(^|\/)(pnpm-lock\.yaml|testdata\/.*(?<!\.md))$|^scripts\/one-package-rewrite\.ts$|^packages\/bridge-bin\/[^/]+\/package\.json$/;
 
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 << 20 });
 const warnings: string[] = [];
