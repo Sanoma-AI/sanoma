@@ -143,6 +143,8 @@ const oauth = defineAuthentication({
     clientAuthentication: "client_secret_basic",
     refresh: "refresh_token",
     tokenRejected: [401],
+    // A day: a grant nobody uses is renewed by the worker before its refresh token lapses.
+    refreshTokenLifetime: 86_400,
   },
   async verify(grant) {
     const res = await fetch(`${API}/me`, { headers: { authorization: `Bearer ${grant.accessToken}` } });
@@ -242,6 +244,12 @@ async function connect(options: Parameters<typeof config>[0] = {}): Promise<Sano
 
 const read = (client: SanomaClient) => client.call("acme.thing.read", {}, { actor: "alice", connection: main });
 const card = async (client: SanomaClient) => (await client.connections({ actor: "alice" }))[0]!;
+/** Moves `acme/main`'s scheduled renewal into the past, as if its time had come. */
+const comeDue = async () =>
+  (await pool.db())
+    .update(connectionRenewals)
+    .set({ dueAt: sql`now() - interval '1 second'` })
+    .where(eq(connectionRenewals.connectionId, "acme/main"));
 const renewalRow = async () =>
   (
     await (await pool.db()).select().from(connectionRenewals).where(eq(connectionRenewals.connectionId, "acme/main"))
@@ -402,6 +410,31 @@ describe("OAuth renewal", () => {
     expect((await card(client)).status).toBe("uncertain");
   }, 60_000);
 
+  it("keeps using the grant when the token endpoint could not be reached, and marks uncertain one sent with no answer", async () => {
+    provider.expiresIn = 60;
+    await connect();
+    const client = await processOf();
+    const original = globalThis.fetch;
+    const failing = (code: string) =>
+      vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation((input, init) =>
+          String(input instanceof Request ? input.url : input) === `${PROVIDER}/token`
+            ? Promise.reject(new TypeError("fetch failed", { cause: Object.assign(new Error(code), { code }) }))
+            : original(input, init),
+        );
+    // Refused before anything was sent: the access token, still valid, keeps working; asked again later.
+    failing("ECONNREFUSED");
+    expect(await read(client)).toEqual({ thing: "of org-1" });
+    expect(await card(client)).toMatchObject({ status: "connected", renewal: { outcome: "unavailable" } });
+    expect(refreshed).toHaveLength(0);
+    // The connection dropped once the request was out: the refresh token may be spent, so never resent.
+    vi.restoreAllMocks();
+    failing("ECONNRESET");
+    await expect(read(client)).rejects.toMatchObject({ cause: { problem: "uncertain" } });
+    expect((await card(client)).status).toBe("uncertain");
+  }, 60_000);
+
   it("rotates the refresh token, and treats a refused one as revoked with nothing more scheduled", async () => {
     provider.expiresIn = 60;
     await connect();
@@ -417,9 +450,13 @@ describe("OAuth renewal", () => {
     expect((await renewalRow())?.dueAt).toBeNull();
   }, 60_000);
 
-  it("gives a due renewal to one worker when two look at once", async () => {
-    provider.expiresIn = 60;
+  it("schedules a renewal only before the refresh token lapses, and gives a due one to one worker when two look at once", async () => {
     await connect();
+    // Scheduled at nine tenths of the refresh token's day, not by the access token's hour.
+    const scheduled = (await renewalRow())!.dueAt!.getTime() - Date.now();
+    expect(scheduled).toBeGreaterThan(21 * 3_600_000);
+    expect(scheduled).toBeLessThanOrEqual(86_400 * 900);
+    await comeDue();
     const pools = [lazyDb(databaseUrl, "worker-a"), lazyDb(databaseUrl, "worker-b")];
     try {
       const [a, b] = pools.map((p) => new ConnectionRenewals(() => p.db()));
@@ -434,10 +471,9 @@ describe("OAuth renewal", () => {
   }, 60_000);
 
   it("schedules the next renewal as the worker's deadline, and the worker renews it as the renewal agent", async () => {
-    provider.expiresIn = 60;
     await connect();
-    // Renewed now, since it is due: the grant it stores lives an hour, so the next is due in 55 minutes.
-    provider.expiresIn = 3600;
+    // Its time come, though the access token has an hour left: renewed now, and the next is due in about a day.
+    await comeDue();
     const worker = await startWorker(config());
     try {
       await waitFor(

@@ -342,11 +342,40 @@ function grantOf(
 }
 
 /**
- * The grant renewed at the provider's token endpoint with its refresh token. A refusal (any 4xx
- * answer) issued nothing: `unavailable` for 429 (ask later), `revoked` for `invalid_grant` (the refresh token no longer works, so
- * only Reconnect helps), `rejected` for any other. Anything else once the request may have reached
- * the provider (no answer, a 5xx, an answer that does not read as a grant) is `uncertain`: a
- * provider that rotates refresh tokens may have spent this one, so it is never sent again.
+ * The system errors (Node's, under fetch's `TypeError`) by which a connection failed before any
+ * request was sent: no address, refused, unreachable, the connect timing out, or TLS refusing the
+ * server. The provider never saw the refresh token.
+ */
+const NOT_SENT = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+
+/** True when `error`, a failed fetch, failed before its request was sent (`NOT_SENT`). */
+const notSent = (error: unknown): boolean => {
+  const cause = (error as { cause?: { code?: unknown; errors?: { code?: unknown }[] } } | null)?.cause;
+  // Several addresses tried (happy eyeballs): an AggregateError of each one's failure.
+  const codes = [cause?.code, ...(cause?.errors ?? []).map((e) => e?.code)];
+  return codes.some((code) => typeof code === "string" && NOT_SENT.has(code));
+};
+
+/**
+ * The grant renewed at the provider's token endpoint with its refresh token. A connection that
+ * failed before the request was sent (`notSent`) is `unavailable`: nothing reached the provider,
+ * so it is asked again later. A refusal (any 4xx answer) issued nothing: `unavailable` for 429
+ * (ask later), `revoked` for `invalid_grant` (the refresh token no longer works, so only
+ * Reconnect helps), `rejected` for any other. Anything else once the request may have reached the
+ * provider (no answer, a 5xx, an answer that does not read as a grant) is `uncertain`: a provider
+ * that rotates refresh tokens may have spent this one, so it is never sent again.
  */
 export async function refreshGrant(flow: OAuthFlow, client: OAuthClient, grant: OAuthGrant): Promise<OAuthGrant> {
   if (!grant.refreshToken) throw new AuthenticationError("expired");
@@ -354,8 +383,8 @@ export async function refreshGrant(flow: OAuthFlow, client: OAuthClient, grant: 
   let response: Response;
   try {
     response = await refreshTokenGrantRequest(server, app, authentication, grant.refreshToken, options);
-  } catch {
-    throw new AuthenticationError("uncertain");
+  } catch (error) {
+    throw new AuthenticationError(notSent(error) ? "unavailable" : "uncertain");
   }
   try {
     return grantOf(await processRefreshTokenResponse(server, app, response), grant);

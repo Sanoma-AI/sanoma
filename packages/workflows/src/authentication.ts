@@ -138,11 +138,18 @@ export interface OAuthFlow {
   /** How the token request authenticates the application: HTTP Basic, or form fields. */
   clientAuthentication: "client_secret_basic" | "client_secret_post";
   /**
-   * How the provider renews a grant: with its refresh token (RFC 6749 section 6), near its expiry
-   * and when a call's answer says the access token was rejected (`tokenRejected`). Without it an
-   * expired grant is `expired`, and Reconnect obtains a new one.
+   * How the provider renews a grant: with its refresh token (RFC 6749 section 6), when a call finds
+   * it near its expiry or the provider rejected it (`tokenRejected`). Without it an expired grant
+   * is `expired`, and Reconnect obtains a new one.
    */
   refresh?: "refresh_token";
+  /**
+   * Seconds a refresh token stays usable unused, for a provider that publishes it: the runtime then
+   * renews a grant nobody uses before its refresh token lapses, a wakeup of a stopped instance
+   * (`due_at`). Left out, as for a provider that publishes none, a grant renews only on use, and
+   * an idle instance is never woken for it.
+   */
+  refreshTokenLifetime?: number;
   /**
    * The HTTP statuses the provider's API answers when it refused the access token before acting
    * on the request (401, for most): a driver failure with one of them renews the grant and calls
@@ -244,6 +251,10 @@ export function defineAuthentication(definition: Authentication | Omit<OAuthAuth
         typeof oauth.pkce !== "boolean" ||
         !["client_secret_basic", "client_secret_post"].includes(oauth.clientAuthentication) ||
         (oauth.refresh !== undefined && oauth.refresh !== "refresh_token") ||
+        (oauth.refreshTokenLifetime !== undefined &&
+          (oauth.refresh === undefined ||
+            !Number.isInteger(oauth.refreshTokenLifetime) ||
+            oauth.refreshTokenLifetime <= 0)) ||
         (oauth.tokenRejected !== undefined &&
           (!Array.isArray(oauth.tokenRejected) ||
             oauth.tokenRejected.some((status) => !Number.isInteger(status) || status < 400 || status > 499)))

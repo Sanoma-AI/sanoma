@@ -142,6 +142,8 @@ it("connects by consent, lists the organization with the stored grant, renews it
     const [renewed] = await client.connections({ actor: "alice" });
     expect(renewed?.renewal).toMatchObject({ outcome: "refreshed" });
     expect(renewed?.renewal?.refreshedAt).toBeDefined();
+    // Supabase publishes no refresh-token lifetime: renewed on use only, never scheduled, so an idle instance is never woken for it.
+    expect(renewed?.renewal?.dueAt).toBeUndefined();
 
     // Revoke asks Supabase with the application and the current refresh token, then drops the grant.
     await client.call(

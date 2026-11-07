@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, gt, isNotNull, sql } from "drizzle-orm";
-import type { AuthenticationProblem, OAuthGrant } from "./authentication.ts";
+import type { AuthenticationProblem, OAuthFlow, OAuthGrant } from "./authentication.ts";
 import type { Db } from "./db.ts";
 import { connectionRenewals, connections } from "./db/company.ts";
 import type { DeadlineRegistry } from "./deadlines.ts";
@@ -13,25 +13,34 @@ import { errorMessage } from "./shared.ts";
 // version it read (the store's expected-version write, the fence against any other writer). Before
 // the request goes out the holder marks the lease `sentAt`, so a process that finds the lease
 // lapsed after that knows a refresh token may have been spent with nothing stored, and marks the
-// connection `uncertain` rather than send it again. The next renewal's due time is a row too: a
-// worker registers it as a deadline with its wakeup (`renewWhenDue`), never a timer that keeps it up.
+// connection `uncertain` rather than send it again. A grant renews on use: when a call finds it
+// near its expiry, or the provider rejected it. Only for a flow that declares how long its refresh
+// token lasts (`refreshTokenLifetime`) is a renewal scheduled too, so a grant nobody uses keeps a
+// live refresh token: its due time is a row, which a worker registers as a deadline with its
+// wakeup (`renewWhenDue`), never a timer that keeps it up. Without one, an idle instance is never woken.
 
 /** How a connection's last renewal ended: `refreshed`, or the problem it met. */
 export type RenewalOutcome = "refreshed" | AuthenticationProblem;
 
 /** How long one process holds a connection's lease: the token request's 30 s, the store's write, and room. */
 export const LEASE_MS = 60_000;
-/** How long before a grant expires it is renewed, on use or by the worker. */
+/** How long before a grant expires a call renews it. */
 export const RENEW_AHEAD_MS = 5 * 60_000;
 /** How long a due renewal the worker took waits before it is taken again, should it end with no answer. */
 const RETRY_MS = 5 * 60_000;
 
-/** When a grant's renewal is due: `RENEW_AHEAD_MS` before it expires; none for a grant without an expiry or a refresh token. */
-export const renewalDueAt = (grant: OAuthGrant): Date | null =>
-  grant.refreshToken !== undefined && grant.expiresAt !== undefined ? new Date(grant.expiresAt - RENEW_AHEAD_MS) : null;
+/** True when a call should renew `grant` first: it has a refresh token and expires within `RENEW_AHEAD_MS`. */
+export const renewalDue = (grant: OAuthGrant): boolean =>
+  grant.refreshToken !== undefined && grant.expiresAt !== undefined && grant.expiresAt - Date.now() <= RENEW_AHEAD_MS;
 
-/** True when `grant` can be renewed and its renewal is due. */
-export const renewalDue = (grant: OAuthGrant): boolean => (renewalDueAt(grant)?.getTime() ?? Infinity) <= Date.now();
+/**
+ * When the worker renews a grant just stored, should no call renew it first: with a tenth of its
+ * refresh token's lifetime left (`refreshTokenLifetime`). None for a flow that declares no lifetime.
+ */
+export const renewalDueAt = (flow: OAuthFlow, grant: OAuthGrant): Date | null =>
+  flow.refreshTokenLifetime !== undefined && grant.refreshToken !== undefined
+    ? new Date(Date.now() + flow.refreshTokenLifetime * 900)
+    : null;
 
 /**
  * A connection's lease, taken: `holder` fences every write under it. `abandoned` when the lease

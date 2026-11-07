@@ -53,6 +53,7 @@ export const supabaseOAuth: OAuthAuthentication = defineAuthentication({
     clientAuthentication: "client_secret_basic",
     refresh: "refresh_token",
     tokenRejected: [401],
+    // No `refreshTokenLifetime`: Supabase publishes none (2026-11-06), so a grant renews on use only.
   },
   async verify(grant) {
     const identity = await organizationsOf(grant.accessToken);

@@ -480,23 +480,26 @@ A code is never sent twice. If the provider issued a grant and the store did not
 
 #### Renewal, Reconnect, Disconnect and Revoke
 
-`refresh: "refresh_token"` on the flow declares that the provider renews grants with a refresh token (RFC 6749 section 6). `tokenRejected` names the HTTP statuses (400 to 499) by which the provider says it refused an access token, such as `[401]`; a method's `revoke(grant, client)` revokes a grant at the provider, for a provider with a revocation endpoint:
+`refresh: "refresh_token"` on the flow declares that the provider renews grants with a refresh token (RFC 6749 section 6). `tokenRejected` names the HTTP statuses (400 to 499) by which the provider says it refused an access token, such as `[401]`. `refreshTokenLifetime` is how many seconds a refresh token stays usable unused, for a provider that publishes it. A method's `revoke(grant, client)` revokes a grant at the provider, for a provider with a revocation endpoint:
 
 ```ts
-oauth: { /* ... */ refresh: "refresh_token", tokenRejected: [401] },
+oauth: { /* ... */ refresh: "refresh_token", tokenRejected: [401], refreshTokenLifetime: 30 * 86_400 },
 revoke: async (grant, client) => { /* the provider's revocation request */ },
 ```
 
-A grant is renewed in three cases, always by `refreshGrant` (oauth4webapi's refresh request) and written with the store's expected version, as the exchange writes it:
+A grant renews on use. Renewal is always `refreshGrant` (oauth4webapi's refresh request), written with the store's expected version, as the exchange writes it:
 
-- **Near expiry, on use.** A call that authenticates a grant expiring within five minutes renews it first. If the provider cannot be reached (`unavailable`) and the grant has not expired, the call goes on with it.
+- **Near expiry.** A call that authenticates a grant expiring within five minutes renews it first. If the renewal is `unavailable` and the grant has not expired, the call goes on with it, and the next call asks again.
 - **On a declared rejection.** A driver error whose `status` is in `tokenRejected`, or a verifier that answers `rejected`, renews the grant once and retries once. A second rejection fails the call. A status the connector did not declare is never retried.
-- **When due, by the worker.** Each grant's next renewal is a row (`due_at`, five minutes before it expires). The worker counts the earliest as a deadline (`worker.deadlines`, [Hosts](#hosts)), so a worker that stops when quiet registers it with its wakeup; nothing in process keeps it running. At that time the runtime's `renewal` agent calls `sanoma.connection.refresh`, a policy decision and ledger record like any other: a policy that forbids it stops the scheduled renewals of that account, and use renews it again.
+
+Renewal on use is part of the call that needs it, which the policy already allowed: it is not a policy decision or a ledger record of its own. That is the design.
+
+An idle instance is never woken to renew an access token: scale to zero keeps one registered wake. A wake is scheduled only to keep a **refresh token** alive, and only when the flow declares `refreshTokenLifetime`. Then each stored grant's next renewal is a row (`due_at`, when a tenth of the refresh token's lifetime is left). The worker counts the earliest as a deadline (`worker.deadlines`, [Hosts](#hosts)), so a worker that stops when quiet registers it with its wakeup; nothing in process keeps it running. When it comes, the runtime's `renewal` agent calls `sanoma.connection.refresh`, a policy decision and ledger record like any other. A policy that forbids it stops that account's scheduled renewals, and use renews it again. Without `refreshTokenLifetime` (Supabase publishes none), a grant nobody uses is renewed by the next call that uses it, or needs Reconnect if its refresh token lapsed meanwhile.
 
 One process renews a connection at a time. A lease in `sanoma_connection_renewals` (one minute, a holder ID fencing every write under it) covers the read, the refresh request and the write; a process that finds the lease held waits for the grant the holder stores. Before the request goes out, the holder marks the lease sent. A refresh token is never sent twice, so these leave the account `uncertain`, under a new revision, and the card asks for **Reconnect**:
 
 - The provider answered and the store did not keep the new grant, or another writer changed it in between.
-- The request had no answer (a network failure or a timeout), since the provider may have rotated the refresh token.
+- The request was sent and had no answer (the connection dropped, or a timeout), since the provider may have rotated the refresh token. A connection that failed before anything was sent (no address, refused, unreachable, a connect timeout, TLS refusing the server) is `unavailable` instead: the grant still in force keeps being used and the renewal is asked again later.
 - A lease lapsed after its holder sent the request (a worker that stopped mid-renewal): the next process does not resend it.
 
 A provider's `invalid_grant` is `revoked`; any other refusal is `rejected`, and `429` is `unavailable` (tried again later). Each renewal's outcome and time are kept for the card, never a token. `sanoma.connection.test` reports `expiresAt` and `refreshedAt` beside the health state; `sanoma.connection.refresh` takes `{ connection }` and returns `{ id, refreshed, expiresAt? }`.
