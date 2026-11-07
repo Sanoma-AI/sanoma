@@ -53,13 +53,25 @@ const fail = (how: Failure, value: string): never => {
 };
 
 const marker = z.object({ $secret: z.string() });
+/** The `call.secrets` each `token.pair` call was given. */
+const given: unknown[] = [];
 const vaultOps = defineConnector("vault", {
-  token: { use: { effect: "read", input: z.object({ token: marker, how: Failure }), output: z.object({}) } },
+  token: {
+    use: { effect: "read", input: z.object({ token: marker, how: Failure }), output: z.object({}) },
+    pair: { effect: "read", input: z.object({ short: marker, long: marker }), output: z.object({}) },
+  },
 });
 const vault = withSetup(vaultOps, {
   driver: () =>
     defineDriver(vaultOps, {
-      token: { use: async (input, call) => fail(input.how, (await resolveSecrets(input, call.secrets)).token) },
+      token: {
+        use: async (input, call) => fail(input.how, (await resolveSecrets(input, call.secrets)).token),
+        pair: async (input, call) => {
+          given.push(call.secrets);
+          const { long } = await resolveSecrets(input, call.secrets);
+          return fail("message", long);
+        },
+      },
     }),
 });
 /** A driver that reads its environment, as one without named accounts does. */
@@ -190,11 +202,28 @@ describe("a driver's error, with what it read in it", () => {
       const error = await client
         .call("vault.token.use", { token: secret("VAULT_TOKEN"), how }, { actor: "alice" })
         .catch((e: unknown) => e);
-      // A final error stays final, and a retryable one (a plain error) retryable.
-      expect(error).toMatchObject({ code: "driver_failed", retryable: how === "cause" });
+      // Retried only when the driver's own error says so; its status kept.
+      expect(error).toMatchObject({ code: "driver_failed", retryable: false });
       expect(error).not.toHaveProperty("cause");
       expect(told(error)).not.toContain(token);
     }
+  });
+
+  it("is cleared of a value that begins another, whole, and the driver's store is the same at each call", async () => {
+    const long = planted("long");
+    const short = long.slice(0, 20);
+    sentinels.add(short);
+    await client.setSecret("VAULT_SHORT", short, { by: "alice" });
+    await client.setSecret("VAULT_LONG", long, { by: "alice" });
+    given.length = 0;
+    for (let i = 0; i < 2; i++) {
+      const error = await client
+        .call("vault.token.pair", { short: secret("VAULT_SHORT"), long: secret("VAULT_LONG") }, { actor: "alice" })
+        .catch((e: unknown) => e);
+      expect(error).toMatchObject({ message: "vault refused the token [redacted]" });
+    }
+    // A driver keeping state by its store (the change driver's hosts) finds it again.
+    expect(given[0]).toBe(given[1]);
   });
 
   it("is cleared of the environment the driver declares", async () => {

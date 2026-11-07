@@ -17,10 +17,10 @@ beforeAll(async () => {
   try {
     await db.query(
       `CREATE SCHEMA store;
-       CREATE TABLE public.runs (id int, input text, output jsonb, note varchar(200), sealed bytea);
+       CREATE TABLE public.runs (id int, input text, output jsonb, note varchar(200), sealed bytea, doc xml);
        CREATE TABLE store."Kept Values" ("the value" text[], other int);
        INSERT INTO public.runs VALUES
-         (1, 'token planted-sentinel-0001 sent', '{"nested": {"key": "planted-sentinel-0002"}}', 'clean', 'planted-sentinel-0003');
+         (1, 'token planted-sentinel-0001 sent', '{"nested": {"key": "planted-sentinel-0002"}}', 'clean', 'planted-sentinel-0003', '<a>planted-sentinel-0005</a>');
        INSERT INTO store."Kept Values" VALUES (ARRAY['a', 'planted-sentinel-0004'], 1);`,
     );
   } finally {
@@ -30,13 +30,14 @@ beforeAll(async () => {
 afterAll(() => database.remove());
 
 it("names the schema, table and column of each sentinel a text column holds, bytes left out", async () => {
-  const planted = ["planted-sentinel-0001", "planted-sentinel-0002", "planted-sentinel-0003", "planted-sentinel-0004"];
-  expect(await findSentinels(url, [...planted, "never-planted-0005"])).toEqual([
+  const planted = [1, 2, 3, 4, 5].map((n) => `planted-sentinel-000${n}`);
+  expect(await findSentinels(url, [...planted, "never-planted-0006"])).toEqual([
+    { schema: "public", table: "runs", column: "doc", sentinel: "planted-sentinel-0005" },
     { schema: "public", table: "runs", column: "input", sentinel: "planted-sentinel-0001" },
     { schema: "public", table: "runs", column: "output", sentinel: "planted-sentinel-0002" },
     { schema: "store", table: "Kept Values", column: "the value", sentinel: "planted-sentinel-0004" },
   ]);
-  expect(await findSentinels(url, ["never-planted-0005"])).toEqual([]);
+  expect(await findSentinels(url, ["never-planted-0006"])).toEqual([]);
 });
 
 it("refuses a sentinel JSON would write otherwise, or one short enough to match by chance", async () => {
