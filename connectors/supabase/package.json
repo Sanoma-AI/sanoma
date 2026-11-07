@@ -60,7 +60,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "generate": "sanoma tfschema src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
+    "generate": "node --conditions=sanoma-source ../../packages/sanoma/src/cli.ts tfschema src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
     "prepack": "pnpm run clean && pnpm run build",
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
