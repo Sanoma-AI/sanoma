@@ -1,4 +1,10 @@
-import { AuthenticationError, type AuthenticationIdentity, defineAuthentication } from "@sanoma-ai/workflows";
+import {
+  AuthenticationError,
+  type AuthenticationIdentity,
+  defineAuthentication,
+  type OAuthAuthentication,
+  type StoredAuthentication,
+} from "@sanoma-ai/workflows";
 import { z } from "zod";
 
 /** Supabase's Management API, which both methods' tokens call. */
@@ -32,7 +38,7 @@ async function organizationsOf(token: string): Promise<AuthenticationIdentity> {
  * page. Supabase takes scopes from the application, not the request, so none are sent. The grant
  * carries an expiry; until renewal is wired (sanoma#467), an expired grant needs Reconnect.
  */
-export const supabaseOAuth = defineAuthentication({
+export const supabaseOAuth: OAuthAuthentication = defineAuthentication({
   kind: "oauth2",
   version: 1,
   storage: { writable: true, conditionalWrites: true, maxBytes: 16_384 },
@@ -50,16 +56,18 @@ export const supabaseOAuth = defineAuthentication({
   },
 });
 
+const accessTokenBundle = z.object({
+  accessToken: z
+    .string()
+    .min(1)
+    .describe("A personal access token from supabase.com/dashboard/account/tokens that can manage the projects"),
+});
+
 /** A personal access token, pasted on the connector page: its user's organizations are the account. */
-export const supabaseAccessToken = defineAuthentication({
+export const supabaseAccessToken: StoredAuthentication<typeof accessTokenBundle> = defineAuthentication({
   kind: "api-key",
   version: 1,
-  schema: z.object({
-    accessToken: z
-      .string()
-      .min(1)
-      .describe("A personal access token from supabase.com/dashboard/account/tokens that can manage the projects"),
-  }),
+  schema: accessTokenBundle,
   storage: { writable: false, conditionalWrites: false, maxBytes: 8192 },
   verify: ({ accessToken }) => organizationsOf(accessToken),
 });
