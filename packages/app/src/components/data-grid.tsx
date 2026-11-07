@@ -146,6 +146,9 @@ function HiddenFields({
   set: (next: Partial<DataSearch>) => void;
 }) {
   const fields = Object.keys(collection.fields).filter((field) => field !== collection.key);
+  // A collection declared in code (no data file) changes its columns there.
+  const changes = collection.declared !== undefined;
+  if (fields.length === 0 && !changes) return null;
   const hidden = fields.filter((field) => hide.includes(field));
   const toggle = (field: string, shown: boolean) => {
     const next = shown ? hidden.filter((f) => f !== field) : [...hidden, field];
@@ -168,10 +171,12 @@ function HiddenFields({
               {field}
             </DropdownMenuCheckboxItem>
           ))}
-          {fields.length > 0 && <DropdownMenuSeparator />}
-          <DropdownMenuItem onClick={() => set({ column: { change: "add" }, record: undefined, new: undefined })}>
-            New column
-          </DropdownMenuItem>
+          {changes && fields.length > 0 && <DropdownMenuSeparator />}
+          {changes && (
+            <DropdownMenuItem onClick={() => set({ column: { change: "add" }, record: undefined, new: undefined })}>
+              New column
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       {hidden.length > 0 && (

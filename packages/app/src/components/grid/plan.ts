@@ -8,64 +8,10 @@ import { z } from "zod";
 // the app drafts the plan here from the rows it read and the declaration: `planOf` is that one
 // seam, which the runtime's plan replaces.
 
-/** A column's type: the runtime's field types, a choice, a link to another collection, or free-form JSON. */
-export type FieldType =
-  | "text"
-  | "number"
-  | "boolean"
-  | "date"
-  | "person"
-  | { enum: string[] }
-  | { link: string }
-  | "json";
-
-/** The rows a change cannot convert: how many, and at most `SAMPLE` of them by key. */
-export interface WontConvert {
-  count: number;
-  sample: { key: string; value: unknown }[];
-}
-
-/** What becomes of the rows a retype cannot convert: kept as text, cleared, or the change called off. */
-export type RetypeDecision = "keep-text" | "clear-unconvertible" | "cancel";
-
-/** One change to a table, with the rows it touches counted (`empty`, `filled`, `unmatched`, `wontConvert.count`). */
-export type TableChange =
-  | { kind: "add"; field: string; type: FieldType; required: boolean; empty: number }
-  | { kind: "rename"; from: string; to: string }
-  | {
-      kind: "retype";
-      field: string;
-      from: FieldType;
-      to: FieldType;
-      wontConvert: WontConvert;
-      decision?: RetypeDecision;
-    }
-  | { kind: "require"; field: string; empty: number }
-  | { kind: "delete"; field: string; filled: number }
-  | { kind: "link"; field: string; to: string; unmatched: number }
-  | { kind: "convert"; field: string; key: string; type: FieldType; wontConvert: WontConvert };
-
-/** A table change as the person reviews it: what the declarations before and after differ in. */
-export interface TableChangePlan {
-  collection: string;
-  changes: TableChange[];
-  /** The records in the table now. */
-  rows: number;
-  /** "Show SQL": the statements, in order; informational, and empty until the runtime plans the change. */
-  sql: string[];
-  /** True while a change has rows that won't convert and no decision. */
-  blocked: boolean;
-}
-
-/** How many of the rows that won't convert a plan names. */
-export const SAMPLE = 20;
-
-/** What the review says in place of the SQL until the runtime plans a table change. */
-export const NO_SQL = "SQL is shown once the table change lands";
-
 /** A field's name, as `collection()` takes it. */
 const FIELD_NAME = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Letters, digits and _, not a digit first");
 
+/** A column's type: the runtime's field types, a choice, a link to another collection, or free-form JSON. */
 const FieldTypeSchema = z.union([
   z.enum(["text", "number", "boolean", "date", "person", "json"]),
   z.strictObject({
@@ -76,6 +22,78 @@ const FieldTypeSchema = z.union([
   }),
   z.strictObject({ link: z.string().min(1) }),
 ]);
+export type FieldType = z.infer<typeof FieldTypeSchema>;
+
+/** The rows a change cannot convert: how many, and at most `SAMPLE` of them by key. */
+const WontConvertSchema = z.object({
+  count: z.number().int(),
+  sample: z.array(z.object({ key: z.string(), value: z.unknown() })),
+});
+export type WontConvert = z.infer<typeof WontConvertSchema>;
+
+/** What becomes of the rows a retype cannot convert: kept as text, cleared, or the change called off. */
+const RetypeDecisionSchema = z.enum(["keep-text", "clear-unconvertible", "cancel"]);
+export type RetypeDecision = z.infer<typeof RetypeDecisionSchema>;
+
+const COUNT = z.number().int();
+
+/** One change to a table, with the rows it touches counted (`empty`, `filled`, `unmatched`, `wontConvert.count`). */
+const TableChangeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("add"), field: z.string(), type: FieldTypeSchema, required: z.boolean(), empty: COUNT }),
+  z.object({ kind: z.literal("rename"), from: z.string(), to: z.string() }),
+  z.object({
+    kind: z.literal("retype"),
+    field: z.string(),
+    from: FieldTypeSchema,
+    to: FieldTypeSchema,
+    wontConvert: WontConvertSchema,
+    decision: RetypeDecisionSchema.optional(),
+  }),
+  z.object({ kind: z.literal("require"), field: z.string(), empty: COUNT }),
+  z.object({ kind: z.literal("delete"), field: z.string(), filled: COUNT }),
+  z.object({ kind: z.literal("link"), field: z.string(), to: z.string(), unmatched: COUNT }),
+  z.object({
+    kind: z.literal("convert"),
+    field: z.string(),
+    key: z.string(),
+    type: FieldTypeSchema,
+    wontConvert: WontConvertSchema,
+  }),
+]);
+export type TableChange = z.infer<typeof TableChangeSchema>;
+
+/**
+ * A table change as the person reviews it: what the declarations before and after differ in, the
+ * records in the table now (`rows`), "Show SQL" (`sql`, the statements in order, informational,
+ * empty until the runtime plans the change), and `blocked` while a change has rows that won't
+ * convert and no decision. A change's page reads the plan it carries through this, as anything
+ * else starting a `patch` could have written it.
+ */
+export const TableChangePlan = z.object({
+  collection: z.string(),
+  changes: z.array(TableChangeSchema).min(1),
+  rows: COUNT,
+  sql: z.array(z.string()),
+  blocked: z.boolean(),
+});
+export type TableChangePlan = z.infer<typeof TableChangePlan>;
+
+/** How many of the rows that won't convert a plan names. */
+export const SAMPLE = 20;
+
+/** What the review says in place of the SQL until the runtime plans a table change. */
+export const NO_SQL = "SQL is shown once the table change lands";
+
+/**
+ * What a draft plan (no SQL) changes, said beside it: only the data file, so the records keep
+ * what they hold until the runtime plans and applies a table change.
+ */
+export const FILE_ONLY =
+  "Until real tables land, this changes resources/data.ts only: each record keeps what it holds, and one the new declaration no longer fits shows as needs fixing.";
+
+/** Whether a plan's change touches what the records hold: anything but an optional new column. */
+export const touchesRecords = (plan: TableChangePlan) =>
+  plan.rows > 0 && plan.changes.some((change) => change.kind !== "add" || change.required);
 
 /** A change to a collection's columns, as the grid proposes it: a `TableChange` before its rows are counted. */
 export const ColumnChange = z.discriminatedUnion("kind", [
@@ -284,7 +302,9 @@ export function happens(plan: TableChangePlan): string {
   const all = plan.rows === 1 ? "The record" : `All ${plan.rows} records`;
   switch (change?.kind) {
     case "add":
-      return `${plan.collection} gains a ${change.field} column. ${all} show it empty, and nothing else changes.`;
+      return change.required && plan.rows > 0
+        ? `${plan.collection} gains a required ${change.field} column. ${all} show it empty, and each needs a value before it saves again.`
+        : `${plan.collection} gains a ${change.field} column. ${all} show it empty, and nothing else changes.`;
     case "rename":
       return `${change.from} is called ${change.to} from now on. ${all} keep their values.`;
     case "retype":

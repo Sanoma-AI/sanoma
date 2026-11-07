@@ -9,7 +9,16 @@ import { cn, plural } from "#/lib/utils.ts";
 import type { ChangeDetail } from "../../api.ts";
 import type { Verbs } from "../approval.tsx";
 import { CardHeading, ToneBadge } from "../kit.tsx";
-import { diffLines, NO_SQL, type RetypeDecision, type TableChange, type TableChangePlan, typeWords } from "./plan.ts";
+import {
+  diffLines,
+  FILE_ONLY,
+  NO_SQL,
+  type RetypeDecision,
+  type TableChange,
+  type TableChangePlan,
+  touchesRecords,
+  typeWords,
+} from "./plan.ts";
 
 // A table change's review on its change's page (`routes/changes/$id.tsx`), from the plan the
 // change carries (`ChangeState.plan`): a card per change in its kind's words and tone (Safe, Needs
@@ -132,19 +141,26 @@ function WontConvert({
 function Planned({ change, plan, keyField }: { change: TableChange; plan: TableChangePlan; keyField: string }) {
   const all = plan.rows === 1 ? "The record" : `All ${plan.rows} records`;
   switch (change.kind) {
-    case "add":
+    case "add": {
+      const needs = change.required && change.empty > 0;
       return (
-        <ChangeCard title={`Add ${change.field}`} detail={typeWords(change.type)} tone="ok" said="Safe">
+        <ChangeCard
+          title={`Add ${change.field}`}
+          detail={typeWords(change.type)}
+          tone={needs ? "waiting" : "ok"}
+          said={needs ? "Needs values" : "Safe"}
+        >
           <p>
             {all} show it empty.
-            {change.required && change.empty > 0 && " It is required: each needs a value before it saves again."}
+            {needs && " It is required: each needs a value before it saves again."}
           </p>
         </ChangeCard>
       );
+    }
     case "rename":
       return (
         <ChangeCard title={`Rename ${change.from} to ${change.to}`} tone="ok" said="Safe">
-          <p>{all} keep their values.</p>
+          <p>{all} keep their values under the new name.</p>
         </ChangeCard>
       );
     case "retype":
@@ -215,14 +231,15 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
 /**
  * A table change's review: how many changes over how many records, a card per change, Try it
  * first, The details (`collection` as main declares it, the data file's lines; none once main no
- * longer declares it), and, over a run that failed, Couldn't apply this change.
+ * longer declares it), and, over a run that failed before merging, Couldn't apply this change.
+ * A plan with no SQL yet says so when it touches the records (`FILE_ONLY`): only the file changes.
  */
 export function TableChangeReview({
   change,
   plan,
   collection,
 }: {
-  change: Pick<ChangeDetail, "runId" | "status">;
+  change: Pick<ChangeDetail, "runId" | "status" | "state">;
   plan: TableChangePlan;
   collection: CollectionEntry | undefined;
 }) {
@@ -231,7 +248,7 @@ export function TableChangeReview({
   const many = plan.changes.length > 1;
   return (
     <section aria-label="The table change" className="flex flex-col gap-3">
-      {change.status === "failed" && (
+      {change.status === "failed" && !change.state.merged && (
         <Card size="sm" role="status" aria-label="Couldn't apply this change" className="ring-tone-bad-foreground/40">
           <CardHeader className="flex flex-wrap items-center gap-x-2.5">
             <CardHeading>Couldn't apply this change</CardHeading>
@@ -249,6 +266,11 @@ export function TableChangeReview({
         {plural(plan.changes.length, "change")} to {plan.collection} · {records(plan.rows)}
         {many && ". They apply together: either every one lands, or none does."}
       </p>
+      {!plan.sql.length && touchesRecords(plan) && (
+        <p role="note" className="rounded-lg border px-3 py-2 text-sm text-muted-foreground">
+          {FILE_ONLY}
+        </p>
+      )}
       {plan.changes.map((planned, i) => (
         <Planned key={i} change={planned} plan={plan} keyField={keyField} />
       ))}

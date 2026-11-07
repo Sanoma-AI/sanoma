@@ -519,12 +519,14 @@ export function DataGrid({
                 return HEADS[header.id] ? (
                   <TableHead key={header.id} {...head}>
                     {HEADS[header.id]}
-                    {header.id === BY && <NewColumnLink />}
+                    {header.id === BY && collection.declared && <NewColumnLink />}
                     {resizer}
                   </TableHead>
                 ) : (
                   <SortHead key={header.id} field={header.id} order={order} staged={staged !== undefined} {...head}>
-                    <ColumnMenu collection={collection} field={header.id} rows={listed} hide={hide} />
+                    {collection.declared && (
+                      <ColumnMenu collection={collection} field={header.id} rows={listed} hide={hide} />
+                    )}
                     {resizer}
                   </SortHead>
                 );

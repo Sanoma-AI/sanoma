@@ -8,11 +8,12 @@ import {
   type ColumnChange,
   declarationEdit,
   diffLines,
+  FILE_ONLY,
   happens,
   keysIn,
   planOf,
   problemOf,
-  type TableChangePlan,
+  TableChangePlan,
 } from "../src/components/grid/plan.ts";
 import { TABLE_CHANGE_PLAN } from "./fixtures/table-change-plan.ts";
 
@@ -75,6 +76,10 @@ describe("planOf", () => {
     });
     expect(happens(plan)).toBe(
       "outbound gains a priority column. All 4 records show it empty, and nothing else changes.",
+    );
+    // A required one leaves each record needing a value.
+    expect(happens(planOf(outbound, rows, { ...change, required: true }))).toBe(
+      "outbound gains a required priority column. All 4 records show it empty, and each needs a value before it saves again.",
     );
   });
 
@@ -170,16 +175,16 @@ describe("a column change", () => {
 describe("TableChangeReview", () => {
   // By a path TypeScript does not follow: the components are JSX and DOM, checked by typecheck:ui.
   type Review = (props: {
-    change: { runId: string; status: string };
+    change: { runId: string; status: string; state: { merged?: object } };
     plan: TableChangePlan;
     collection: CollectionEntry | undefined;
   }) => ReactNode;
   const load = (path: string) => import(new URL(path, import.meta.url).href) as Promise<{ TableChangeReview: Review }>;
 
   /** The review of the plan fixture as the server renders it, in a router, as the app's pages are. */
-  const render = async (status: string) => {
+  const render = async (status: string, state: { merged?: object } = {}) => {
     const { TableChangeReview } = await load("../src/components/grid/review.tsx");
-    const change = { runId: "change:ui-1234abcd", status };
+    const change = { runId: "change:ui-1234abcd", status, state };
     const router = createRouter({
       routeTree: createRootRoute({
         component: () => createElement(TableChangeReview, { change, plan: TABLE_CHANGE_PLAN, collection: outbound }),
@@ -201,6 +206,10 @@ describe("TableChangeReview", () => {
       ["Remove seats", "Keeps the data"],
     ]);
     expect(html).toContain("4 changes to outbound · 312 records. They apply together");
+    // The plan a change carries reads back as one, as the change's page reads it.
+    expect(TableChangePlan.parse(TABLE_CHANGE_PLAN)).toEqual(TABLE_CHANGE_PLAN);
+    // No SQL yet: only the data file changes, and the review says so.
+    expect(html).toContain(FILE_ONLY);
     expect(html).toContain("297 records convert. 15 can't, because what's in them isn't a number.");
     expect(html).toContain('<td class="px-3 py-1.5">about 40k</td>');
     expect(html).toContain("and 12 records more");
@@ -211,5 +220,8 @@ describe("TableChangeReview", () => {
     expect(html).toContain('href="/runs/change%3Aui-1234abcd"');
     // A run under way has nothing to say it could not apply.
     expect(cards(await render("waiting")).map(([title]) => title)).not.toContain("Couldn't apply this change");
+    // Nor one that merged and failed after: what merged is applied.
+    const merged = await render("failed", { merged: { sha: "abc", at: 0 } });
+    expect(cards(merged).map(([title]) => title)).not.toContain("Couldn't apply this change");
   });
 });

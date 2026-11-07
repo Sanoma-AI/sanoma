@@ -30,12 +30,14 @@ import { FROM } from "../data-grid.tsx";
 import {
   ColumnChange,
   type FieldType,
+  FILE_ONLY,
   happens,
   keysIn,
   planOf,
   problemOf,
   requiredOf,
   takenToday,
+  touchesRecords,
   typeOf,
 } from "./plan.ts";
 
@@ -327,6 +329,9 @@ export function ColumnPanel({
             <span className="text-sm">
               {plan && !unchanged ? happens(plan) : unchanged ? "Nothing changes." : problem}
             </span>
+            {plan && !unchanged && !plan.sql.length && touchesRecords(plan) && (
+              <span className="text-xs text-muted-foreground">{FILE_ONLY}</span>
+            )}
           </div>
           {failed && <Notice variant="destructive">{failed}</Notice>}
           <div className="flex items-center gap-2">

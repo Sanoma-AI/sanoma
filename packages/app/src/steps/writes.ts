@@ -94,11 +94,12 @@ async function written(step: AppStepContext, file: string, text: string, message
  * `rename` names (`renameFields`), as the run's actor, and lands it.
  * With a repository that drafts and has a remote a connector's remote half is for, it is a change:
  * the file written in a draft of its own (`ui-<id>`), committed there, and the change opened for
- * review (`SanomaClient.openChange`, carrying `plan`, a column change's, for its review), whose
+ * review (`SanomaClient.openChange`, carrying `plan` when `at` is a collection's, for its review), whose
  * run holds a change to the rules for `admin`; the change's run id. Otherwise the file is written
  * in the checkout and committed as Adopt does, but a change to the rules (a people file) only by
- * someone in `admin`: `not_approver` for anyone else, since nothing would review it. Refused (`invalid_input`) for a declaration the description
- * does not name, and, with the writer's reason and the `field`, for a field the file computes or a
+ * someone in `admin`: `not_approver` for anyone else, since nothing would review it. Refused
+ * (`invalid_input`) for a declaration the description does not name, a rename the file cannot
+ * take, and, with the writer's reason and the `field`, for a field the file computes or a
  * declaration that is no object literal.
  */
 export async function patch(step: AppStepContext, { at, fields, rename = {}, plan }: PatchInput): Promise<PatchOutput> {
@@ -112,16 +113,29 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
     ...description.apps.map((a) => a.at),
   ].some((known) => known?.file === at.file && known.export === at.export);
   if (!named) throw new SanomaError("invalid_input", `${at.file}#${at.export} is not a declaration`);
+  // A plan is a column change's, so it goes on the change only with a collection's declaration.
+  const planned =
+    plan !== undefined &&
+    description.collections.some((c) => c.declared?.at.file === at.file && c.declared.at.export === at.export);
   const paths = [...Object.keys(fields), ...Object.keys(rename)];
   const message = `Change ${paths.join(", ")} of ${at.export === "default" ? at.file : at.export}`;
-  /** The file under `dir` as it is, and with the fields set; refused, saying why, when they cannot be. */
+  /**
+   * The file under `dir` as it is, and with the fields set and renamed; refused, saying why, when
+   * they cannot be (a rename's every failure is the text refusing it: a name taken, a field gone).
+   */
   const edited = async (dir: string) => {
     try {
       const before = await readFile(join(dir, at.file), "utf8");
       const options = formatOptions(root);
       const set = Object.keys(fields).length ? await setFields(before, at.export, fields, options) : before;
-      return { before, text: Object.keys(rename).length ? await renameFields(set, at.export, rename, options) : set };
+      const text = Object.keys(rename).length
+        ? await renameFields(set, at.export, rename, options).catch((err: unknown) => {
+            throw err instanceof NotLiteral ? err : new SanomaError("invalid_input", errorMessage(err));
+          })
+        : set;
+      return { before, text };
     } catch (err) {
+      if (err instanceof SanomaError) throw err;
       if (err instanceof NotLiteral) {
         throw new SanomaError("invalid_input", err.reason, { ...(err.field && { field: err.field }) });
       }
@@ -142,7 +156,7 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
       // No page for its pull request's status to link: the app's origin is no fact the worker has,
       // and a run's input is its starter's to choose.
       return {
-        change: await client.openChange({ id, title: message, ...(plan !== undefined && { plan }) }, { startedBy: by }),
+        change: await client.openChange({ id, title: message, ...(planned && { plan }) }, { startedBy: by }),
       };
     } catch (err) {
       // No change opened on it (a policy refusing the change, say): the draft would be left behind with nothing to close it.
