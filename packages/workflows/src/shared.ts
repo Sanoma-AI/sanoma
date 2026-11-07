@@ -228,9 +228,12 @@ export type Deleted = { key: string; deleted: boolean };
 export const FIELD_TYPES = ["text", "number", "boolean", "date", "person"] as const;
 
 const COLLECTION_NAME = /^[a-z][a-zA-Z0-9]*$/;
-const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** A field's name, as `collection()` takes it: letters, digits and _, not a digit first. */
+export const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const KINDS = `${FIELD_TYPES.map((t) => `"${t}"`).join(", ")}, { type, optional: true } or { enum: [...] }`;
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+/** Whether `v` is a plain object: not null, not a list. */
+export const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * Throws unless `collection()` takes this declaration: the name a lowercase letter then letters

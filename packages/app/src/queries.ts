@@ -792,7 +792,7 @@ export const ConnectSearch = z.object({
   github: z.enum(["connected", "expired", "failed", "bad-org", "nobody"]).optional().catch(undefined),
 });
 
-/** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */
+/** The grid's search with neither the record form nor the column panel open: for a link's or `navigate`'s `search`. */
 export const closeRecord = (prev: DataSearch): DataSearch => ({
   ...prev,
   record: undefined,
@@ -804,6 +804,11 @@ export const closeRecord = (prev: DataSearch): DataSearch => ({
 export const openRecord =
   (key: string) =>
   (prev: DataSearch): DataSearch => ({ ...prev, record: key, new: undefined, column: undefined });
+
+/** The grid's search with the column panel open on `column`, the record form closed: for a link's or `navigate`'s `search`. */
+export const openColumn =
+  (column: ColumnSearch) =>
+  (prev: DataSearch): DataSearch => ({ ...prev, column, record: undefined, new: undefined });
 
 /** The highest code point: after every string that starts with a prefix, under `list`'s byte order. */
 const LAST = "\u{10FFFF}";

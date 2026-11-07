@@ -10,13 +10,14 @@ import type { ChangeDetail } from "../../api.ts";
 import type { Verbs } from "../approval.tsx";
 import { CardHeading, ToneBadge } from "../kit.tsx";
 import {
+  allRecords,
   diffLines,
   FILE_ONLY,
+  fileOnly,
   NO_SQL,
   type RetypeDecision,
   type TableChange,
   type TableChangePlan,
-  touchesRecords,
   typeWords,
 } from "./plan.ts";
 
@@ -30,9 +31,6 @@ import {
 
 /** A table change's Publish and Reject, as its review calls them. */
 export const TABLE_VERBS: Verbs = { approve: "Approve and apply", reject: "Send back" };
-
-/** How many records, in words. */
-const records = (n: number) => plural(n, "record");
 
 /** A change card: its title, what kind of change it is (`tone`, `said`), and what it does to the records. */
 function ChangeCard({
@@ -110,7 +108,7 @@ function WontConvert({
         </table>
         {count > sample.length && (
           <p className="border-t px-3 py-1.5 text-xs text-muted-foreground">
-            and {records(count - sample.length)} more
+            and {plural(count - sample.length, "record")} more
           </p>
         )}
       </div>
@@ -139,7 +137,7 @@ function WontConvert({
 
 /** One change of the plan as its card: what it does, in its kind's words and tone. */
 function Planned({ change, plan, keyField }: { change: TableChange; plan: TableChangePlan; keyField: string }) {
-  const all = plan.rows === 1 ? "The record" : `All ${plan.rows} records`;
+  const all = allRecords(plan);
   switch (change.kind) {
     case "add": {
       const needs = change.required && change.empty > 0;
@@ -178,7 +176,7 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
       ) : (
         <ChangeCard title={title} tone="waiting" said="Needs a decision">
           <p>
-            {records(plan.rows - wont)} convert. {wont} can't, because what's in them isn't {typeWords(to)}.
+            {plural(plan.rows - wont, "record")} convert. {wont} can't, because what's in them isn't {typeWords(to)}.
           </p>
           <WontConvert
             keyField={keyField}
@@ -197,7 +195,7 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
         >
           <p>
             {change.empty
-              ? `${records(change.empty)} have it empty: each needs a value before it saves again.`
+              ? `${plural(change.empty, "record")} have it empty: each needs a value before it saves again.`
               : "Every record has it."}
           </p>
         </ChangeCard>
@@ -220,7 +218,7 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
         >
           <p>
             {change.unmatched
-              ? `${records(change.unmatched)} to match against ${change.to}'s records.`
+              ? `${plural(change.unmatched, "record")} to match against ${change.to}'s records.`
               : `${all} match.`}
           </p>
         </ChangeCard>
@@ -263,10 +261,10 @@ export function TableChangeReview({
         </Card>
       )}
       <p className="text-sm text-muted-foreground">
-        {plural(plan.changes.length, "change")} to {plan.collection} · {records(plan.rows)}
+        {plural(plan.changes.length, "change")} to {plan.collection} · {plural(plan.rows, "record")}
         {many && ". They apply together: either every one lands, or none does."}
       </p>
-      {!plan.sql.length && touchesRecords(plan) && (
+      {fileOnly(plan) && (
         <p role="note" className="rounded-lg border px-3 py-2 text-sm text-muted-foreground">
           {FILE_ONLY}
         </p>

@@ -1,5 +1,6 @@
 import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
 import { changeIdOf, errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
+import { deepEquals } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
@@ -24,20 +25,21 @@ import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "#/co
 import { Input } from "#/components/ui/input.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { proposeColumnChangeFn } from "../../functions.ts";
-import { type ColumnSearch, type DataSearch, refreshWritten, remoteQuery } from "../../queries.ts";
+import { closeRecord, type ColumnSearch, openColumn, refreshWritten, remoteQuery } from "../../queries.ts";
 import { ButtonLink, CardHeading, Notice, ToneBadge } from "../common.tsx";
 import { FROM } from "../data-grid.tsx";
 import {
   ColumnChange,
   type FieldType,
   FILE_ONLY,
+  fileOnly,
   happens,
   keysIn,
+  NOT_YET,
   planOf,
   problemOf,
   requiredOf,
   takenToday,
-  touchesRecords,
   typeOf,
 } from "./plan.ts";
 
@@ -73,11 +75,6 @@ export function writeWidths(name: string, widths: ColumnSizingState) {
 /** Where a heading's own control sits: at its right, before its resizer. */
 const AT_HEAD_END = "absolute top-1/2 right-2 -translate-y-1/2";
 
-/** The page's search with the column panel open on `column`, the record form closed. */
-const opening =
-  (column: ColumnSearch) =>
-  (prev: DataSearch): DataSearch => ({ ...prev, column, record: undefined, new: undefined });
-
 /**
  * A field's menu on its heading: Rename, Change type, Hide column (the page's `?hide=`), on a
  * free-form field the keys its records hold with how many (`rows`, those on screen) to make a
@@ -95,10 +92,9 @@ export function ColumnMenu({
   hide: string[] | undefined;
 }) {
   const navigate = useNavigate({ from: FROM });
-  const open = (column: ColumnSearch) => void navigate({ search: opening(column), resetScroll: false });
+  const open = (column: ColumnSearch) => void navigate({ search: openColumn(column), resetScroll: false });
   const declared = collection.fields[field];
   if (field === collection.key || declared === undefined) return null;
-  const keys = typeOf(declared) === "json" ? keysIn(rows, field) : [];
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -122,18 +118,7 @@ export function ColumnMenu({
         >
           Hide column
         </DropdownMenuItem>
-        {keys.length > 0 && (
-          <DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Convert to column: found in this free-form column</DropdownMenuLabel>
-            {keys.map(({ key, count }) => (
-              <DropdownMenuItem key={key} onClick={() => open({ change: "convert", field, key })}>
-                <code className="text-xs">{key}</code>
-                <span className="ml-auto text-xs text-muted-foreground">in {count}</span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        )}
+        {typeOf(declared) === "json" && <KeysIn field={field} rows={rows} open={open} />}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={() => open({ change: "delete", field })}>
           Remove column
@@ -143,11 +128,40 @@ export function ColumnMenu({
   );
 }
 
+/**
+ * The keys a free-form field's records hold, with how many (`rows`, those on screen), each to make
+ * a column of: counted only while its menu is open, since the menu's content mounts then.
+ */
+function KeysIn({
+  field,
+  rows,
+  open,
+}: {
+  field: string;
+  rows: readonly Saved[];
+  open: (column: ColumnSearch) => void;
+}) {
+  const keys = keysIn(rows, field);
+  if (keys.length === 0) return null;
+  return (
+    <DropdownMenuGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel>Convert to column: found in this free-form column</DropdownMenuLabel>
+      {keys.map(({ key, count }) => (
+        <DropdownMenuItem key={key} onClick={() => open({ change: "convert", field, key })}>
+          <code className="text-xs">{key}</code>
+          <span className="ml-auto text-xs text-muted-foreground">in {count}</span>
+        </DropdownMenuItem>
+      ))}
+    </DropdownMenuGroup>
+  );
+}
+
 /** New column: the panel, opened from the last heading's "+". */
 export function NewColumnLink() {
   return (
     <ButtonLink variant="ghost" size="icon-xs" className={AT_HEAD_END}>
-      <Link from={FROM} search={opening({ change: "add" })} resetScroll={false} preload={false}>
+      <Link from={FROM} search={openColumn({ change: "add" })} resetScroll={false} preload={false}>
         <PlusIcon aria-hidden="true" />
         <span className="sr-only">New column</span>
       </Link>
@@ -167,8 +181,9 @@ const TYPES: { label: string; type: FieldType | typeof CHOICES }[] = [
   { label: "Link to another table", type: { link: "" } },
   { label: "Free-form", type: "json" },
 ];
-const sameChip = (a: FieldType | typeof CHOICES, b: FieldType) =>
-  a === CHOICES ? typeof b === "object" && "enum" in b : JSON.stringify(a) === JSON.stringify(b);
+const isChoice = (type: FieldType): type is Extract<FieldType, { enum: unknown }> =>
+  typeof type === "object" && "enum" in type;
+const sameChip = (a: FieldType | typeof CHOICES, b: FieldType) => (a === CHOICES ? isChoice(b) : deepEquals(a, b));
 
 /** The panel's heading for each change. */
 function titleOf(collection: CollectionEntry, { change, field, key }: ColumnSearch) {
@@ -207,15 +222,14 @@ export function ColumnPanel({
   const declared = column.field === undefined ? undefined : collection.fields[column.field];
   const [name, setName] = useState(column.change === "rename" ? (column.field ?? "") : "");
   const [type, setType] = useState<FieldType>(declared && column.change === "retype" ? typeOf(declared) : "text");
-  const [choices, setChoices] = useState(typeof type === "object" && "enum" in type ? type.enum.join("\n") : "");
+  const [choices, setChoices] = useState(isChoice(type) ? type.enum.join("\n") : "");
   const [optional, setOptional] = useState(true);
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string>();
   const field = column.field ?? "";
-  const typed: FieldType =
-    typeof type === "object" && "enum" in type
-      ? { enum: choices.split("\n").flatMap((line) => (line.trim() ? [line.trim()] : [])) }
-      : type;
+  const typed: FieldType = isChoice(type)
+    ? { enum: choices.split("\n").flatMap((line) => (line.trim() ? [line.trim()] : [])) }
+    : type;
   const intent = {
     add: { kind: "add", field: name, type: typed, required: !optional },
     rename: { kind: "rename", from: field, to: name },
@@ -228,9 +242,7 @@ export function ColumnPanel({
   const plan = parsed.success && !problem ? planOf(collection, rows, parsed.data) : undefined;
   const unchanged =
     (column.change === "rename" && name === field) ||
-    (column.change === "retype" &&
-      declared !== undefined &&
-      JSON.stringify(typed) === JSON.stringify(typeOf(declared)));
+    (column.change === "retype" && declared !== undefined && deepEquals(typed, typeOf(declared)));
 
   async function propose() {
     if (!parsed.success) return;
@@ -244,7 +256,7 @@ export function ColumnPanel({
       }
       toast.success(`Written to ${landed.file}`);
       await refreshWritten(queryClient, landed.file);
-      await navigate({ search: (prev) => ({ ...prev, column: undefined }), resetScroll: false });
+      await navigate({ search: closeRecord, resetScroll: false });
     } catch (err) {
       setFailed(errorMessage(err));
     } finally {
@@ -258,7 +270,7 @@ export function ColumnPanel({
         <CardHeading className="self-center">{titleOf(collection, column)}</CardHeading>
         <CardAction>
           <ButtonLink variant="ghost" size="icon-sm">
-            <Link from={FROM} search={(prev) => ({ ...prev, column: undefined })} resetScroll={false}>
+            <Link from={FROM} search={closeRecord} resetScroll={false}>
               <XIcon aria-hidden="true" />
               <span className="sr-only">Close</span>
             </Link>
@@ -295,7 +307,7 @@ export function ColumnPanel({
                       variant={on ? "default" : "outline"}
                       aria-pressed={on}
                       disabled={!offered}
-                      title={offered ? undefined : "Links and free-form columns arrive with real tables"}
+                      title={offered ? undefined : NOT_YET}
                       onClick={() => setType(chip.type === CHOICES ? { enum: [] } : chip.type)}
                     >
                       {chip.label}
@@ -305,7 +317,7 @@ export function ColumnPanel({
               </div>
             </FieldSet>
           )}
-          {typeof type === "object" && "enum" in type && (
+          {isChoice(type) && (
             <Field>
               <FieldLabel htmlFor="column-choices">
                 Choices <span className="font-normal text-muted-foreground">· one per line</span>
@@ -326,12 +338,8 @@ export function ColumnPanel({
           )}
           <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 px-3 py-2.5" role="status">
             <span className="text-xs text-muted-foreground">What will happen</span>
-            <span className="text-sm">
-              {plan && !unchanged ? happens(plan) : unchanged ? "Nothing changes." : problem}
-            </span>
-            {plan && !unchanged && !plan.sql.length && touchesRecords(plan) && (
-              <span className="text-xs text-muted-foreground">{FILE_ONLY}</span>
-            )}
+            <span className="text-sm">{unchanged ? "Nothing changes." : plan ? happens(plan) : problem}</span>
+            {plan && !unchanged && fileOnly(plan) && <span className="text-xs text-muted-foreground">{FILE_ONLY}</span>}
           </div>
           {failed && <Notice variant="destructive">{failed}</Notice>}
           <div className="flex items-center gap-2">

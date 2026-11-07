@@ -5,13 +5,14 @@ import type { ResolvedConfig, SanomaConfig } from "./config.ts";
 import type { SanomaClient } from "./client.ts";
 import { defineWorkflow, type Principal, type WorkflowDefinition } from "./define.ts";
 import { AtSchema } from "./description.ts";
-import type {
-  ADOPT_WORKFLOW,
-  CONNECT_EXISTING_WORKFLOW,
-  GO_LIVE_HOST_WORKFLOW,
-  GO_LIVE_WORKFLOW,
-  PATCH_WORKFLOW,
-  WorkflowFn,
+import {
+  type ADOPT_WORKFLOW,
+  type CONNECT_EXISTING_WORKFLOW,
+  FIELD_NAME,
+  type GO_LIVE_HOST_WORKFLOW,
+  type GO_LIVE_WORKFLOW,
+  type PATCH_WORKFLOW,
+  type WorkflowFn,
 } from "./shared.ts";
 import type { Source } from "./source.ts";
 
@@ -41,15 +42,7 @@ export const PatchInput = z
   .object({
     at: AtSchema,
     fields: z.record(z.string().min(1), z.json()),
-    rename: z
-      .record(
-        z.string().min(1),
-        z
-          .string()
-          .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
-          .nullable(),
-      )
-      .optional(),
+    rename: z.record(z.string().min(1), z.string().regex(FIELD_NAME).nullable()).optional(),
     plan: z.json().optional(),
   })
   .refine(({ fields, rename = {} }) => Object.keys(fields).length + Object.keys(rename).length > 0, {
