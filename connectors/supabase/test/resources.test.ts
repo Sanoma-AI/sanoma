@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fromTfState } from "sanoma/internal/bridge/tfschema";
 import type { Op } from "sanoma/workflows";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { describe, expect, it } from "vitest";
 import { supabaseTf } from "../src/connector.ts";
 import { supabase } from "../src/index.ts";

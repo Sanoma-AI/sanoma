@@ -13,7 +13,7 @@ import {
   SanomaClient,
   startWorker,
 } from "sanoma/workflows";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { neon, neonApiKey } from "../src/index.ts";
 
 // Protocol doubles from Neon's pinned SDK schema; no real API key or vendor account is used.

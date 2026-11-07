@@ -8,7 +8,7 @@
       "sanoma/workflows": ["../workflows/src/index.ts"],
       "sanoma/workflows/describe": ["../workflows/src/describe.ts"],
       "sanoma/workflows/description": ["../workflows/src/description.ts"],
-      "sanoma/workflows/resources": ["../workflows/src/constructors.ts"],
+      "sanoma/resources": ["../workflows/src/constructors.ts"],
       "sanoma/workflows/scenario": ["../workflows/src/scenario.ts"],
       "sanoma/workflows/shared": ["../workflows/src/shared.ts"],
       "sanoma/workflows/wakeup-service": ["../workflows/src/wakeup-service.ts"],

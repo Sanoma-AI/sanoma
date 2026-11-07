@@ -24,7 +24,7 @@ import {
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { credentials, databaseOn } from "sanoma/workflows/db";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { eq, inArray } from "drizzle-orm";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";

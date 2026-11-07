@@ -7,7 +7,7 @@ import { testDatabaseUrl } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { defineWorkflow, type LedgerRecord, memoryLedger, resolveConfig, withSetup } from "sanoma/workflows";
 import { writeLockfile } from "sanoma/workflows/describe";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fakeCloudflare } from "../src/fake.ts";

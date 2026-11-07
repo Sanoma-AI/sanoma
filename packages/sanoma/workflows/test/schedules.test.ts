@@ -287,7 +287,7 @@ describe("schedules on Postgres", () => {
     const root = rootWith({
       "package.json": JSON.stringify({ name: app }),
       "resources/people.ts": [
-        'import { sanoma } from "sanoma/workflows/resources";',
+        'import { sanoma } from "sanoma/resources";',
         'export const ada = sanoma.person({ id: "ada" });',
         "",
       ].join("\n"),

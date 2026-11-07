@@ -103,10 +103,6 @@
       "types": "./workflows/dist/index.d.ts",
       "default": "./workflows/dist/index.js"
     },
-    "./workflows/data": {
-      "types": "./workflows/dist/data.d.ts",
-      "default": "./workflows/dist/data.js"
-    },
     "./workflows/describe": {
       "types": "./workflows/dist/describe.d.ts",
       "default": "./workflows/dist/describe.js"
@@ -122,10 +118,6 @@
     "./workflows/plugin": {
       "types": "./workflows/dist/plugin.d.ts",
       "default": "./workflows/dist/plugin.js"
-    },
-    "./workflows/resources": {
-      "types": "./workflows/dist/constructors.d.ts",
-      "default": "./workflows/dist/constructors.js"
     },
     "./workflows/scenario": {
       "types": "./workflows/dist/scenario.d.ts",
@@ -146,10 +138,6 @@
     "./workflows/cloud-identity": {
       "types": "./workflows/dist/cloud-identity.d.ts",
       "default": "./workflows/dist/cloud-identity.js"
-    },
-    "./workflows/kms-secrets": {
-      "types": "./workflows/dist/kms-secrets.d.ts",
-      "default": "./workflows/dist/kms-secrets.js"
     },
     "./workflows/db": {
       "types": "./workflows/dist/db/index.d.ts",

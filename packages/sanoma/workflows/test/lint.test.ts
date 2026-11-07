@@ -80,7 +80,7 @@ describe("lintWorkflow", () => {
   });
 
   it("refuses the KMS store entry in workflows", () => {
-    expect(messages('import { kmsPostgresStore } from "sanoma/workflows/kms-secrets";')).toEqual([
+    expect(messages('import { kmsPostgresStore } from "sanoma/secrets";')).toEqual([
       expect.stringMatching(/import .*kms-secrets.*not allowed/),
     ]);
   });

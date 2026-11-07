@@ -81,8 +81,8 @@ export {
 export { type AppEntry, appSourceOf, readApps } from "./apps.ts";
 export { type AppDefinition, defineApp } from "./definitions.ts";
 export { appFolders, APPS_DIR, declarationFiles, filesUnder, kindDirs } from "./paths.ts";
-// `sanoma` itself (the people types' constructors) is at `sanoma/workflows/resources`, for data files.
-// `collection()` itself is at `sanoma/workflows/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
+// `sanoma` itself (the people types' constructors) is at `sanoma/resources`, for data files.
+// `collection()` itself is at `sanoma/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
 export { isCollection } from "./collection.ts";
 export { type CredentialStatus, credentialsOf } from "./env.ts";
 export {
@@ -195,7 +195,7 @@ export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export { superviseWorker, type Supervisor, type SupervisorOptions } from "./supervisor.ts";
 export type { DeadlineSource, Deadlines, SelfStop, Wait } from "./deadlines.ts";
 export { nextFire, nextScheduledFire, timeMatcherFile, type TimeMatcherClass, useTimeMatcher } from "./schedules.ts";
-// `secret` itself is at `sanoma/workflows/resources`, for data files; this is the drivers' side.
+// `secret` itself is at `sanoma/resources`, for data files; this is the drivers' side.
 export {
   generateSecret,
   isSecret,

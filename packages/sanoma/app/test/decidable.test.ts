@@ -1,5 +1,5 @@
 import type { ApprovalState, RunSummary } from "sanoma/workflows";
-import { sanoma } from "sanoma/workflows/resources";
+import { sanoma } from "sanoma/resources";
 import type { PeopleResource } from "sanoma/workflows/shared";
 import { describe, expect, it } from "vitest";
 import { decidableBy } from "../src/lib/decidable.ts";

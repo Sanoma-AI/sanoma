@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { memoryLedger, resolveConfig, SanomaClient, type SanomaConfig } from "sanoma/workflows";
-import { collection } from "sanoma/workflows/data";
+import { collection } from "sanoma/data";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";

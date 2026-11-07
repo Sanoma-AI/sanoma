@@ -18,7 +18,7 @@ import {
 } from "sanoma/workflows";
 import { describeConfig } from "sanoma/workflows/describe";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { z } from "zod";
 import type { AppContext } from "../src/context.ts";
 import { choose, goLiveChoices } from "../src/server/go-live.ts";

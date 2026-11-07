@@ -84,9 +84,9 @@ describe("loadModules", () => {
   it("serves the runtime's modules by every name, defineApp only to an app's app.ts", () => {
     const root = company({
       "resources/people.ts": `import { sanoma, secret } from "sanoma/resources";\nexport const ada = sanoma.person({ id: "ada", name: "Ada" });\nexport const token = secret("TOKEN");\n`,
-      "resources/team.ts": `import { sanoma } from "sanoma/workflows/resources";\nimport { ada } from "./people.ts";\nexport const team = sanoma.group({ name: "team", members: [ada] });\n`,
+      "resources/team.ts": `import { sanoma } from "sanoma/resources";\nimport { ada } from "./people.ts";\nexport const team = sanoma.group({ name: "team", members: [ada] });\n`,
       "resources/data.ts": `import { collection } from "sanoma/data";\nexport const leads = collection({ name: "leads", key: "email", fields: { email: "text" } });\n`,
-      "apps/crm/resources/data.ts": `import { collection } from "sanoma/workflows/data";\nexport const contacts = collection({ name: "contacts", key: "email", fields: { email: "text" } });\n`,
+      "apps/crm/resources/data.ts": `import { collection } from "sanoma/data";\nexport const contacts = collection({ name: "contacts", key: "email", fields: { email: "text" } });\n`,
       "apps/crm/app.ts": `import { defineApp } from "sanoma";\nexport default defineApp({ source: "https://github.com/acme/crm" });\n`,
       "apps/shop/app.ts": `import { defineApp } from "sanoma/workflows";\nexport default defineApp({});\n`,
       "sites/help/site.ts": `import { defineSite } from "sanoma/site";\nexport default defineSite({ title: "Help" });\n`,

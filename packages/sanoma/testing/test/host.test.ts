@@ -13,7 +13,7 @@ import {
   type SanomaConfig,
 } from "sanoma/workflows";
 import { writeLockfile } from "sanoma/workflows/describe";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testDatabaseUrl } from "../src/index.ts";
 import {

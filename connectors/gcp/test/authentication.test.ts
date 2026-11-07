@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { defineConnection, encodeCredentials, verifyAuthentication } from "sanoma/workflows";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { accountOf, checkIdentity, gcpAuthentication, type GcpIdentity } from "../src/authentication.ts";
 import { gcp, gcpWithIdentity } from "../src/index.ts";
 

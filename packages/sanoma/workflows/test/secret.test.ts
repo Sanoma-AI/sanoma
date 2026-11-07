@@ -7,7 +7,7 @@ import { decrypt, encrypt } from "../src/credentials.ts";
 import { deploymentKey } from "../src/deployment-key.ts";
 import { memorySecrets, resolveSecrets } from "../src/index.ts";
 import { secret } from "../src/secret.ts";
-import { secret as fromResources } from "sanoma/workflows/resources";
+import { secret as fromResources } from "sanoma/resources";
 
 describe("secret", () => {
   it("is a frozen marker naming the secret, from the entry data files import it from", () => {

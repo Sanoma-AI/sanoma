@@ -1,3 +1,4 @@
+/// <reference lib="es2025.regexp" />
 /**
  * sanoma#686's rewrite, for a branch that merges main after the core became the one `sanoma` package:
  * `node scripts/one-package-rewrite.ts` from the repository's root, then `pnpm install`. Running it
@@ -31,12 +32,16 @@ const MOVES: readonly (readonly [from: string, to: string])[] = [
 
 /**
  * Each folded package's name, and the specifier that replaces it (`@sanoma-ai/dev` has none: it is
- * `sanoma dev`). The app's site surface already had its `sanoma/*` names: a subpath before its package.
+ * `sanoma dev`). The app's site surface and the runtime's data-file entries already had their
+ * `sanoma/*` names: a subpath before its package.
  */
 const NAMES: readonly (readonly [from: string, to: string])[] = [
   ["@sanoma-ai/app/site", "sanoma/site"],
   ["@sanoma-ai/app/ui.css", "sanoma/ui.css"],
   ["@sanoma-ai/app/ui", "sanoma/ui"],
+  ["@sanoma-ai/workflows/resources", "sanoma/resources"],
+  ["@sanoma-ai/workflows/data", "sanoma/data"],
+  ["@sanoma-ai/workflows/kms-secrets", "sanoma/secrets"],
   ["@sanoma-ai/workflows", "sanoma/workflows"],
   ["@sanoma-ai/app", "sanoma/app"],
   ["@sanoma-ai/testing", "sanoma/testing"],
@@ -104,8 +109,6 @@ function rebase(spec: string, file: string, markdown = false): string {
   return next + suffix;
 }
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-
 /** Every mention of a folded package's name or directory, in `text`, the new one. */
 function renamed(text: string): string {
   // An npm page of a folded package: its README, in the repository.
@@ -115,16 +118,16 @@ function renamed(text: string): string {
       `https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/${name.replace("connector-", "")}/README.md`,
   );
   out = out.replace(
-    new RegExp(`(--filter[= ]+)(["']?)(${[...FOLDED].map(escape).join("|")})\\2(?![\\w/-])`, "g"),
+    new RegExp(`(--filter[= ]+)(["']?)(${[...FOLDED].map(RegExp.escape).join("|")})\\2(?![\\w/-])`, "g"),
     "$1$2sanoma$2",
   );
   for (const [from, to] of NAMES) {
     // Plain, or escaped as in a regular expression's source (`@sanoma-ai\/app`).
-    const name = from.split("/").map(escape).join("(\\\\?/)");
+    const name = from.split("/").map(RegExp.escape).join("(\\\\?/)");
     out = out.replace(new RegExp(`${name}(?![\\w-])`, "g"), (_, slash: string) => to.split("/").join(slash));
   }
   for (const [from, to] of MOVES) {
-    out = out.replace(new RegExp(`(?<![\\w.-])${escape(from)}(?![\\w-])`, "g"), to);
+    out = out.replace(new RegExp(`(?<![\\w.-])${RegExp.escape(from)}(?![\\w-])`, "g"), to);
   }
   return out;
 }

@@ -108,12 +108,11 @@ const APP_ENTRIES: ReadonlySet<string> = new Set(["sanoma", "sanoma/workflows"])
  * never changes it). `only` loads only the files whose text it passes; the answer is kept by its
  * identity, so pass one function, not a new one per call.
  *
- * Served to the files, by specifier: `sanoma/resources` and `sanoma/workflows/resources`
- * (`sanoma`, the constructors of the vendor `sanoma`, and `secret`); each connector's
- * `<info.package>/resources` (its vendor's constructors, under its id); `sanoma/data` and
- * `sanoma/workflows/data` (`collection`); `sanoma/site` and `sanoma/site`
- * (`defineSite`); and to an app's `apps/<app>/app.ts` alone, `sanoma` and `sanoma/workflows`
- * (`defineApp`). Anything else is resolved as Node does.
+ * Served to the files, by specifier: `sanoma/resources` (`sanoma`, the constructors of the vendor
+ * `sanoma`, and `secret`); each connector's `<info.package>/resources` (its vendor's constructors,
+ * under its id); `sanoma/data` (`collection`); `sanoma/site` (`defineSite`); and to an app's
+ * `apps/<app>/app.ts` alone, `sanoma` and `sanoma/workflows` (`defineApp`). Anything else is
+ * resolved as Node does.
  */
 export function loadModules(
   root: string,

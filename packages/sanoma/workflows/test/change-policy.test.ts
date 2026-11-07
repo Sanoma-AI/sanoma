@@ -63,7 +63,7 @@ describe("touchesOf", () => {
 describe("mayDeclarePeople", () => {
   it("is a file that imports `sanoma` by any name, or the whole entry, and no other", () => {
     expect(mayDeclarePeople(`import { sanoma } from "sanoma/resources";`)).toBe(true);
-    expect(mayDeclarePeople(`import { secret, sanoma as rt } from "sanoma/workflows/resources";`)).toBe(true);
+    expect(mayDeclarePeople(`import { secret, sanoma as rt } from "sanoma/resources";`)).toBe(true);
     expect(mayDeclarePeople(`import * as rt from "sanoma/resources";`)).toBe(true);
     expect(mayDeclarePeople(`export * from "sanoma/resources";`)).toBe(true);
     expect(mayDeclarePeople(`import { secret } from "sanoma/resources";`)).toBe(false);

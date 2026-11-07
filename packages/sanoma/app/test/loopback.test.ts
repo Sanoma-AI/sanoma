@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isLoopback } from "sanoma/workflows/shared";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
-import { sanoma } from "sanoma/workflows/resources";
+import { sanoma } from "sanoma/resources";
 import { admitting } from "../src/login/admission.ts";
 import { actorFromCookie, hostName, loopbackLogin, placeOf } from "../src/loopback.ts";
 

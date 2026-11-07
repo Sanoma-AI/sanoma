@@ -15,7 +15,7 @@ import {
   wakeUrlOf,
 } from "sanoma/workflows";
 import type { DataValue } from "sanoma/workflows/describe";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { WAKEUP_TOKEN } from "sanoma/workflows/wakeup-service";
 import {
   ApiError,

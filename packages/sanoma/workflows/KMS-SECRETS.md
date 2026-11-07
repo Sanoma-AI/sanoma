@@ -1,6 +1,6 @@
 # GCP KMS-protected credential storage
 
-`sanoma/workflows/kms-secrets` implements the managed Cloud storage adapter from #470. Encrypted credentials live in **Postgres**, in `sanoma_kms.secrets` in the company database supplied by trusted bootstrap. Supabase can host that Postgres database; no separate key-value database is needed. GCP KMS protects encryption keys, not the credential records. BYOC Supabase Vault is a separate adapter. AWS Secrets Manager remains deferred.
+`sanoma/secrets` implements the managed Cloud storage adapter from #470. Encrypted credentials live in **Postgres**, in `sanoma_kms.secrets` in the company database supplied by trusted bootstrap. Supabase can host that Postgres database; no separate key-value database is needed. GCP KMS protects encryption keys, not the credential records. BYOC Supabase Vault is a separate adapter. AWS Secrets Manager remains deferred.
 
 ## Runtime boundary
 
@@ -38,7 +38,7 @@ export default defineConfig({
 });
 ```
 
-The company ID, key reference, broker endpoint and credential reader come from trusted deployment bootstrap. `credential` reads the current bearer value from protected host configuration and is called again when the short-lived Google token needs renewal. It must not read that value from the store it unlocks. Optional `decryptKeyNames` allows retained company keys during replacement or backup recovery. The helper is also exported by `sanoma/workflows/kms-secrets`; `sanoma/secrets` makes it available to company repos that install only `sanoma` and their connectors.
+The company ID, key reference, broker endpoint and credential reader come from trusted deployment bootstrap. `credential` reads the current bearer value from protected host configuration and is called again when the short-lived Google token needs renewal. It must not read that value from the store it unlocks. Optional `decryptKeyNames` allows retained company keys during replacement or backup recovery. `sanoma/secrets` exports the helper, so a company repo that installs only `sanoma` and its connectors has it.
 
 `managedKmsStore` returns a `SecretStoreFactory`: non-secret `id` and capabilities plus `create({ database })`. The runtime binds a fresh adapter to its own database connection for each access context. Each bound managed adapter opens its SDK client lazily and owns its refreshed-token state; runtime shutdown closes that client. Reusing a configuration does not rebind an earlier instance to another database. Configuration descriptions inspect metadata without querying the broker, KMS or Postgres; startup validates the selected store.
 
@@ -49,7 +49,7 @@ For standalone use or an explicitly supplied KMS client, use the lower-level `km
 ```ts
 import { KeyManagementServiceClient } from "@google-cloud/kms";
 import { databaseOn } from "sanoma/workflows/db";
-import { kmsPostgresStore } from "sanoma/workflows/kms-secrets";
+import { kmsPostgresStore } from "sanoma/secrets";
 
 const companyDatabase = databaseOn(companyPool);
 const kms = new KeyManagementServiceClient({ authClient: companyAuthClient });

@@ -19,7 +19,7 @@ import {
   startWorker,
   withSetup,
 } from "sanoma/workflows";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { CALLBACK_ERRORS } from "../src/api.ts";
 import { startApp } from "../src/index.ts";
 

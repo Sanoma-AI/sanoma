@@ -1,6 +1,6 @@
 import { checkDerivedHost, noSecretIn } from "sanoma/testing/host";
 import { type CallContext, memorySecrets } from "sanoma/workflows";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { afterAll, describe, expect, it } from "vitest";
 import { container, host } from "../src/connector.ts";
 import { fakeCloudflare } from "../src/fake.ts";

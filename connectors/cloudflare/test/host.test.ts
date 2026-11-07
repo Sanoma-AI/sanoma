@@ -14,7 +14,7 @@ import {
   withSetup,
 } from "sanoma/workflows";
 import { writeLockfile } from "sanoma/workflows/describe";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cloudflareOps, container } from "../src/connector.ts";
 import { fakeCloudflare, stubAppBundle, stubContainer } from "../src/fake.ts";

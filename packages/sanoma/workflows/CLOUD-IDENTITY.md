@@ -137,7 +137,7 @@ import { readFile } from "node:fs/promises";
 import { KeyManagementServiceClient } from "@google-cloud/kms";
 import { cloudIdentityAuth } from "sanoma/workflows/cloud-identity";
 import { databaseOn } from "sanoma/workflows/db";
-import { kmsPostgresStore } from "sanoma/workflows/kms-secrets";
+import { kmsPostgresStore } from "sanoma/secrets";
 
 const companyDatabase = databaseOn(companyScopedPool);
 const authClient = cloudIdentityAuth({

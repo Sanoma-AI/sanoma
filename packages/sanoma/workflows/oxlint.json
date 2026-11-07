@@ -102,7 +102,7 @@
                   "sanoma/workflows/scenarios",
                   "sanoma/workflows/cloud-identity",
                   "sanoma/workflows/identity-service",
-                  "sanoma/workflows/kms-secrets",
+                  "sanoma/secrets",
                   "sanoma/workflows/wakeup-service",
                   "sanoma/workflows/db"
                 ],

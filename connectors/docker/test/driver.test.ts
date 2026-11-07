@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { dockerAvailable } from "sanoma/testing/host";
 import { type Driver, memorySecrets } from "sanoma/workflows";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeBridge } from "../../../packages/sanoma/bridge/test/fake-bridge.ts";
 import { containerType, dockerTf } from "../src/connector.ts";

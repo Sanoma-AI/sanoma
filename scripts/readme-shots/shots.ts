@@ -337,10 +337,7 @@ function writeRepo(dir: string): void {
   writeFileSync(join(dir, "sites/launches/site.ts"), SITE_TS);
   writeFileSync(join(dir, "sites/launches/routes/index.tsx"), page[1]);
   mkdirSync(join(dir, "resources"));
-  writeFileSync(
-    join(dir, "resources/data.ts"),
-    readFileSync(DATA_TS, "utf8").replace('"sanoma/workflows/data"', '"sanoma/data"'),
-  );
+  writeFileSync(join(dir, "resources/data.ts"), readFileSync(DATA_TS, "utf8"));
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "acme", private: true, type: "module" }));
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],

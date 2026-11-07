@@ -14,7 +14,7 @@ import {
   type Secrets,
 } from "sanoma/workflows";
 import { describeConfig } from "sanoma/workflows/describe";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { mintInstanceToken } from "sanoma/workflows/wakeup-service";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { alarm } from "../src/connector.ts";
@@ -109,7 +109,7 @@ describe("cloudflare.alarm in a data file", () => {
       join(root, "resources", "infra.ts"),
       [
         'import { cloudflare } from "@sanoma-ai/connector-cloudflare/resources";',
-        'import { secret } from "sanoma/workflows/resources";',
+        'import { secret } from "sanoma/resources";',
         "",
         "export const host = cloudflare.container({",
         '  name: "company",',

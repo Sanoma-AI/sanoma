@@ -1587,7 +1587,7 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     mkdirSync(join(root, "resources"));
     writeFileSync(
       join(root, "resources", "people.ts"),
-      `import { sanoma } from "sanoma/workflows/resources";\n\nexport const ada = sanoma.person({ id: "ada" });\nexport const other = sanoma.person({ id: "ada" });\n`,
+      `import { sanoma } from "sanoma/resources";\n\nexport const ada = sanoma.person({ id: "ada" });\nexport const other = sanoma.person({ id: "ada" });\n`,
     );
     const broken = { ...people, root };
     await expect(

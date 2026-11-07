@@ -26,7 +26,7 @@ import {
   type SanomaConfig,
 } from "sanoma/workflows";
 import { loadDataFiles, readLockfile, readResources } from "sanoma/workflows/describe";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { startWakeupService, type WakeupService } from "sanoma/workflows/wakeup-service";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";

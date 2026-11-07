@@ -19,7 +19,7 @@ import {
   vendorCodeOf,
 } from "sanoma/workflows";
 import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "sanoma/workflows/describe";
-import { secret } from "sanoma/workflows/resources";
+import { secret } from "sanoma/resources";
 import { INFRA } from "../api.ts";
 import { invalid } from "../server/core.ts";
 import {
