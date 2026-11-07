@@ -487,31 +487,33 @@ export interface ContainerOptions {
  * data file leaves out; its port is the image's. A create and an update are one upsert, a deploy
  * at revision R in three steps, each with its own wait, so a visitor is answered throughout:
  *
- * 1. Build first: the app bundle at R (`appBundle`), asked of the Worker's object, which starts its
- *    container when it is stopped and passes the ask on to the worker running there. The deployed
- *    Worker's container, still at R-1, builds it when it runs the declared image and can (not
- *    stale); else R's own does: the Worker at R is uploaded first, serving visitors the app
- *    deployed meanwhile (`serving`), and asked once that version is live.
+ * 1. The database and the bundle at R first: the Worker at R is uploaded serving visitors the app
+ *    deployed (`serving`), and once that version is live the app bundle at R (`appBundle`) is
+ *    asked of its object, which drains a worker at another revision or image and starts the
+ *    container at R. R's worker prepares the database (R's migrations) at its start, before its
+ *    port answers, then builds the bundle. The database moves before the app: the app on the
+ *    Worker never migrates (`checkPreparedOnly`) and refuses a database without its migrations,
+ *    while a database a newer release migrated serves the app deployed. So never the deployed
+ *    container's build: R's app would go live over R-1's database.
  * 2. One upload: the Worker at R, the bundle's modules under `app/`, its assets through an upload
  *    session, every binding (the text that says what it runs, the secrets, the database as a
  *    Hyperdrive config, the assets, the object's namespace and its container's image), and its
  *    version tagged with R, which a plan compares with the revision. The visitors' next request
  *    runs it.
- * 3. Restart last: once the upload is live, the object, asked for its health with `start`, drains
- *    a worker at another revision or image and starts the container at R (`instance.js`), and the
- *    wait ends once it answers there. An update whose plan is none (the upload made, the restart
- *    not seen: a deploy that died in its wait, or the restart of the worker that ran it) makes this
- *    step alone.
+ * 3. The restart confirmed last: once the upload is live, the object, asked for its health with
+ *    `start`, keeps the container already at R (`instance.js`), and the wait ends once it answers
+ *    there. An update whose plan is none (the upload made, the restart not seen: a deploy that
+ *    died in its wait, or the restart of the worker that ran it) makes this step alone.
  *
- * After each upload, before the object is asked, `live` waits until that version answers, by
- * the id the upload answered with: an upload reaches every location over a while. Before them, as Wrangler orders it: the image copied
- * and pinned, then prepared, the Hyperdrive config made or set again, and on a create the Worker
- * uploaded without an app (`no-app.js`, the migration on its first upload), its workers.dev URL
- * turned on and its application made, then uploaded once more so its object learns the
- * application. A domain declared before and no longer is detached before the first upload of R's
- * bindings, and a missing one attached after the upload with the app. The instance token
- * (`SANOMA_WAKEUP_TOKEN`), which the bundle and the restart are asked with, is the declared one,
- * else the stored one, minted when none is, and always bound.
+ * After each upload, before the object is asked, `live` waits until that version answers, by the
+ * id the upload answered with: an upload reaches every location over a while. Before them, as
+ * Wrangler orders it: the image copied and pinned, then prepared, the Hyperdrive config made or set
+ * again, and on a create the Worker uploaded without an app (`no-app.js`, the migration on its
+ * first upload), its workers.dev URL turned on and its application made, then uploaded once more
+ * so its object learns the application. A domain declared before and no longer is detached before
+ * the first upload of R's bindings, and a missing one attached after the upload with the app. The
+ * instance token (`SANOMA_WAKEUP_TOKEN`), which the bundle and the restart are asked with, is the
+ * declared one, else the stored one, minted when none is, and always bound.
  */
 export function containerOps(
   api: () => CloudflareApi,
@@ -795,24 +797,20 @@ export function containerOps(
         modules: [...entry, ...app],
       };
     };
-    // A domain declared before and no longer is detached while the bindings still record it, before
-    // the first upload of R's, and a missing one attached once the upload with the app records it:
-    // whatever fails in between, none is left attached and unrecorded, and the next apply attaches
-    // what is still missing. Once: the list is emptied.
-    const gone = attached.filter((d) => before.has(d.hostname) && !hostnames.has(d.hostname));
-    const detach = async () => {
-      for (const domain of gone.splice(0)) await cf.detachDomain(domain.id);
-    };
-    /** The version of the Worker at R this put uploaded before its bundle, whose object starts R's container. */
-    let first: string | undefined;
+    /**
+     * Uploads the Worker at R serving the app deployed (`serving`): its version's id. A domain
+     * declared before and no longer is detached first, while the bindings still record it, and a
+     * missing one attached once the upload with the app records it: whatever fails in between,
+     * none is left attached and unrecorded, and the next apply attaches what is still missing.
+     */
     const uploadServing = async () => {
-      await detach();
-      first = await cf.upload(script, await serving());
-      return first;
+      for (const domain of attached) {
+        if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+      }
+      return cf.upload(script, await serving());
     };
-    if (!current) {
-      first = await cf.upload(script, { ...bare, migrations: MIGRATION });
-    }
+    /** The version of the Worker at R this put uploads before its bundle, whose object starts R's container. */
+    let deployment = current ? undefined : await cf.upload(script, { ...bare, migrations: MIGRATION });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
     if (!app) {
@@ -824,27 +822,16 @@ export function containerOps(
       // the application exists: without this upload every start answers "There is no container
       // application assigned to this Durable Object namespace", for good (found live 2026-10-29;
       // a Worker deployed again after the application started at once).
-      await uploadServing();
+      deployment = await uploadServing();
     }
     const at = { script, url, token };
-    const polling = { startTimeoutMs, pollMs };
-    // 1. Build first: by the deployed Worker's container when it runs the declared image and can
-    // (another token, a Worker without the route, a revision whose worker ends: stale); else by
-    // R's, which the Worker at R starts, serving visitors the app deployed meanwhile, once that
-    // version answers: until then an earlier one may.
-    const deployed =
-      first || textOf(current?.bindings).get(TEXT.image) !== image
-        ? undefined
-        : await appBundle(cf, { ...at, revision }, polling);
-    const builtAtR = async () => {
-      const deployment = first ?? (await uploadServing());
-      await live(cf, at, deployment);
-      return appBundle(cf, { ...at, revision, deployment }, polling);
-    };
-    const bundle = deployed && !("stale" in deployed) ? deployed : await builtAtR();
+    // 1. The database and the bundle at R first, by R's container, which the Worker at R starts once
+    // that version answers (until then an earlier one may), visitors served the app deployed meanwhile.
+    deployment ??= await uploadServing();
+    await live(cf, at, deployment);
+    const bundle = await appBundle(cf, { ...at, revision, deployment }, { startTimeoutMs, pollMs });
     const jwt = bundle.assets.length ? await uploadAssets(cf, script, bundle.assets) : undefined;
     // 2. One upload, its version tagged with the app's revision.
-    await detach();
     const last: Upload = {
       ...worker,
       bindings: withApp(jwt),
@@ -857,7 +844,7 @@ export function containerOps(
     const version = await cf.upload(script, last);
     for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
     await live(cf, at, version);
-    // 3. Restart last.
+    // 3. The restart confirmed last.
     await restarted(cf, at, revision, configurationRevision);
     const state: ContainerState = {
       id: app.id,

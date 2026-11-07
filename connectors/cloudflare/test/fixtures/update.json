@@ -297,13 +297,56 @@
   },
   {
     "method": "GET",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company/content/v2",
+    "status": 200,
+    "headers": {
+      "content-type": "multipart/form-data; boundary=sanoma-content-boundary"
+    },
+    "body": "--sanoma-content-boundary\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nimport { Instance, serve } from \"./instance.js\";\nexport default { fetch: (r, e, c) => serve(r, e, c, () => import(\"./app/index.js\")) };\n\r\n--sanoma-content-boundary\r\nContent-Disposition: form-data; name=\"instance.js\"; filename=\"instance.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport class Instance {}\nexport const serve = () => {};\n\r\n--sanoma-content-boundary\r\nContent-Disposition: form-data; name=\"app/index.js\"; filename=\"app/index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport default { fetch: () => new Response(\"abc123\") };\n\r\n--sanoma-content-boundary--\r\n"
+  },
+  {
+    "method": "PUT",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "id": "sanoma-company",
+        "etag": "9b1e8f2c",
+        "created_on": "2026-10-26T12:00:00.000000Z",
+        "modified_on": "2026-10-26T12:00:00.000000Z",
+        "compatibility_date": "2026-10-01",
+        "has_modules": true,
+        "usage_model": "standard",
+        "deployment_id": "00000005-0000-4000-a000-000000000000"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/health",
+    "status": 200,
+    "headers": {
+      "x-sanoma-deployment": "00000005-0000-4000-a000-000000000000"
+    },
+    "body": {
+      "revision": "def456",
+      "running": false,
+      "ready": false
+    }
+  },
+  {
+    "method": "GET",
     "path": "/__sanoma/app-bundle?revision=def456",
     "status": 202,
     "body": {
       "building": "def456"
     },
     "headers": {
-      "x-sanoma-app-bundle": "1"
+      "x-sanoma-app-bundle": "1",
+      "x-sanoma-deployment": "00000005-0000-4000-a000-000000000000"
     }
   },
   {
@@ -343,7 +386,8 @@
       "prerendered": []
     },
     "headers": {
-      "x-sanoma-app-bundle": "1"
+      "x-sanoma-app-bundle": "1",
+      "x-sanoma-deployment": "00000005-0000-4000-a000-000000000000"
     }
   },
   {
@@ -376,7 +420,7 @@
         "compatibility_date": "2026-10-01",
         "has_modules": true,
         "usage_model": "standard",
-        "deployment_id": "00000004-0000-4000-a000-000000000000"
+        "deployment_id": "00000006-0000-4000-a000-000000000000"
       }
     }
   },
@@ -385,12 +429,12 @@
     "path": "/__sanoma/health",
     "status": 200,
     "headers": {
-      "x-sanoma-deployment": "00000004-0000-4000-a000-000000000000"
+      "x-sanoma-deployment": "00000006-0000-4000-a000-000000000000"
     },
     "body": {
       "revision": "def456",
-      "running": true,
-      "ready": true
+      "running": false,
+      "ready": false
     }
   },
   {

@@ -99,74 +99,56 @@ interface BundleAsk {
   url: string;
   token: string;
   revision: string;
-  /**
-   * The id of the Worker version this deploy uploaded, whose answers alone count; undefined to
-   * ask whichever version is deployed, which may be `{ stale }`.
-   */
-  deployment?: string;
+  /** The id of the Worker version this deploy uploaded at the revision, whose answers alone count. */
+  deployment: string;
 }
 
 /**
  * The app bundle at `revision`, asked of the Worker at `url` with the instance token until it
- * gives it: the object starts its container when it is stopped, and both it and the worker answer
- * 202 meanwhile. A failed build, a revision the route refuses or, from the version this deploy
- * uploaded, a container that ended is a refusal. Asked of whichever version is deployed, one that
- * cannot build it is `{ stale }`, why: a token refused (the Worker or its container holds another),
- * a container that ended, or a 404 the route did not mark (a Worker without it). Asked of the
- * version uploaded (`deployment`), an answer without its deployment is an earlier version's, still
- * answering while the upload reaches every location: asked again, whatever its status. Any other
- * answer (no answer, an error of Cloudflare's, a body cut off, a workers.dev URL not routed yet) is
- * asked again. Still none after `startTimeoutMs` is a retryable `DriverError` that says what the
- * last ask saw. One ask may take the whole budget: a bundle is large.
+ * gives it: the object starts its container at the revision when it is stopped or runs another,
+ * and both it and the worker answer 202 meanwhile. An answer without the version `deployment` is an
+ * earlier version's, still answering while the upload reaches every location: asked again,
+ * whatever its status. A failed build, a revision the route refuses, a container that ended or the
+ * version uploaded refusing the ask (any 4xx of its own, such as another token's 401) is a refusal. Any other answer (no answer, an error of Cloudflare's, a body cut off, a workers.dev URL
+ * not routed yet) is asked again. Still none after `startTimeoutMs` is a retryable `DriverError`
+ * that says what the last ask saw. One ask may take the whole budget: a bundle is large.
  */
-export function appBundle(
-  cf: CloudflareApi,
-  ask: BundleAsk & { deployment: string },
-  polling: Polling,
-): Promise<AppBundle>;
-export function appBundle(cf: CloudflareApi, ask: BundleAsk, polling: Polling): Promise<AppBundle | { stale: string }>;
 export function appBundle(
   cf: CloudflareApi,
   { script, url, token, revision, deployment }: BundleAsk,
   polling: Polling,
-): Promise<AppBundle | { stale: string }> {
-  return waitFor<AppBundle | { stale: string }>(
-    `${script}: still building the app bundle at ${revision}`,
-    polling,
-    async () => {
-      try {
-        const res = await cf.send(`${url}${APP_BUNDLE_PATH}?revision=${encodeURIComponent(revision)}`, {
-          method: "GET",
-          headers: { authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(polling.startTimeoutMs),
-        });
-        const route = res.headers.has(APP_BUNDLE_HEADER);
-        const by = res.headers.get(DEPLOYMENT_HEADER);
-        if (deployment !== undefined && by !== deployment) {
-          await res.body?.cancel();
-          return { last: `an earlier version (${by || "unmarked"}) answered ${res.status}` };
-        }
-        // Undefined when it is none (a body cut off where the JSON is).
-        const body = (await res.json().catch(() => undefined)) as { error?: unknown; exit?: unknown } | undefined;
-        if (route && res.status === 200 && body !== undefined) return { value: body as unknown as AppBundle };
-        const said = typeof body?.error === "string" ? body.error : `${APP_BUNDLE_PATH} answered ${res.status}`;
-        const exit = typeof body?.exit === "string";
-        if (deployment === undefined && (res.status === 401 || exit || (!route && res.status === 404))) {
-          return { value: { stale: said } };
-        }
-        // The worker's own refusal (the build's failure, a revision it refuses), or the uploaded version's container ended.
-        if (exit || (route && res.status !== 200 && res.status !== 202))
-          throw refused(`${script}: no app bundle at ${revision}: ${said}`);
-        return {
-          last: res.status === 202 ? (route ? "the worker is building it" : "its container is starting") : said,
-        };
-      } catch (error) {
-        if (error instanceof DriverError) throw error;
-        // No answer this time (a timeout, a body cut off): asked again.
-        return { last: errorMessage(error) };
+): Promise<AppBundle> {
+  return waitFor<AppBundle>(`${script}: still building the app bundle at ${revision}`, polling, async () => {
+    try {
+      const res = await cf.send(`${url}${APP_BUNDLE_PATH}?revision=${encodeURIComponent(revision)}`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(polling.startTimeoutMs),
+      });
+      const by = res.headers.get(DEPLOYMENT_HEADER);
+      if (by !== deployment) {
+        await res.body?.cancel();
+        return { last: `an earlier version (${by || "unmarked"}) answered ${res.status}` };
       }
-    },
-  );
+      const route = res.headers.has(APP_BUNDLE_HEADER);
+      // Undefined when it is none (a body cut off where the JSON is).
+      const body = (await res.json().catch(() => undefined)) as { error?: unknown; exit?: unknown } | undefined;
+      if (route && res.status === 200 && body !== undefined) return { value: body as unknown as AppBundle };
+      const said = typeof body?.error === "string" ? body.error : `${APP_BUNDLE_PATH} answered ${res.status}`;
+      // The worker's own refusal (the build's failure, a revision it refuses), the container ended, or
+      // the version uploaded refuses the ask (the token its bindings hold is another): none passes on asking.
+      const own4xx = res.status >= 400 && res.status < 500;
+      if (typeof body?.exit === "string" || own4xx || (route && res.status !== 200 && res.status !== 202))
+        throw refused(`${script}: no app bundle at ${revision}: ${said}`);
+      return {
+        last: res.status === 202 ? (route ? "the worker is building it" : "its container is starting") : said,
+      };
+    } catch (error) {
+      if (error instanceof DriverError) throw error;
+      // No answer this time (a timeout, a body cut off): asked again.
+      return { last: errorMessage(error) };
+    }
+  });
 }
 
 /** Puts the bundle's assets in through an upload session for `script`'s next upload: the completion jwt that upload redeems. */

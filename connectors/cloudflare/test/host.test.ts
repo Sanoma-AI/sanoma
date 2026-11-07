@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { checkHost, hostCheck, hostCheckWorkflows, inProcessHost, testRepository } from "@sanoma-ai/testing/host";
 import {
@@ -16,7 +17,7 @@ import { writeLockfile } from "@sanoma-ai/workflows/describe";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cloudflareOps, container } from "../src/connector.ts";
-import { fakeCloudflare, stubAppBundle } from "../src/fake.ts";
+import { fakeCloudflare, stubAppBundle, stubContainer } from "../src/fake.ts";
 
 // Needs Postgres: `pnpm db:up`. The Host contract's conformance kit against `cloudflare.container`
 // on the fake: its Worker script served in this process (the package's own `serve` over the app
@@ -325,8 +326,12 @@ describe("cloudflare.host's deploy while an upload propagates, on the fake", () 
     port: 3000,
     secrets: HOST_SECRETS,
   };
-  // The version before answers the next five requests after each upload.
-  const fake = fakeCloudflare({ propagation: 5 });
+  // The version before answers the next five requests after each upload, and a container takes a
+  // while to start, as a real one does: long enough for a visitor to ask meanwhile.
+  const fake = fakeCloudflare({
+    propagation: 5,
+    start: async (input) => (await delay(300), stubContainer(input)),
+  });
   const secrets = memorySecrets({ HOST_KEY: key, DB_URL: DATABASE_URL, OTHER_TOKEN: "swi_another-instance-token" });
   const call = caller(secrets);
   const op = (name: string, input: object) => fake.driver.ops[`host.${name}`]!(input, call(`cloudflare.host.${name}`));
@@ -345,10 +350,22 @@ describe("cloudflare.host's deploy while an upload propagates, on the fake", () 
     await op("delete", { id: "company" });
   });
 
-  it("a deploy survives version propagation lag: the deployed Worker refuses the token, and the earlier version's answers are not yet, not stale", async () => {
+  it("a deploy keeps the sign-in page answering: the new revision's app goes live only over a database its worker prepared", async () => {
     const made = (await op("create", { desired })) as { state: Record<string, unknown> };
-    // Another instance token: the Worker deployed refuses the bundle's ask (401), so the Worker at
-    // def456 is uploaded, and the version before still answers 401 for a while after it.
+    // The same image and token: the container deployed could build 5ee7f60's bundle, but no worker
+    // made 5ee7f60's migrations yet (a revision no other check deployed), and its app refuses a
+    // database without them.
+    const next = { ...desired, revision: "5ee7f60" };
+    const seen = await visited(String(made.state.worker_url), () => op("update", { id: "company", desired: next }));
+    expect(seen).toEqual(["200 abc123", "200 5ee7f60"]);
+    expect(fake.state.scripts["sanoma-company"]!.tag).toBe("5ee7f60");
+    await op("delete", { id: "company" });
+  });
+
+  it("a deploy survives version propagation lag: the Worker deployed holds another token, and the earlier version's answers are not yet", async () => {
+    const made = (await op("create", { desired })) as { state: Record<string, unknown> };
+    // Another instance token: the Worker at def456 binds it, and the version before still answers
+    // its asks 401 for a while after the upload.
     const next = {
       ...desired,
       revision: "def456",

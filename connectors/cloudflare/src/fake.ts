@@ -20,6 +20,7 @@ import {
   containerOps,
   type HyperdriveOrigin,
   inZone,
+  originOf,
   type ReadBinding,
   type RecordWrite,
   scriptOf,
@@ -175,14 +176,17 @@ const b64 = (text: string) => Buffer.from(text).toString("base64");
  * asset. Its fetch answers `/healthz`, an asset from `ASSETS`, a POST by having the host start the
  * worker (as a page that queues a run does), and any other page with the revision it was built at
  * (`x-sanoma-revision`) and the visitor's address it was given (`x-sanoma-client-ip`); a 500
- * without its `DATABASE` binding. Not the app's own bundle: that one is a build for `workerd`
- * (`nodejs_compat`, its wasm modules), which Node cannot import.
+ * without its `DATABASE` binding, or while its database lacks the revision's migrations, which a
+ * worker at the revision makes at its start (`DATABASE.prepared`), as the app on the Worker never
+ * migrates (`checkPreparedOnly`) and refuses a database behind it. Not the app's own bundle: that
+ * one is a build for `workerd` (`nodejs_compat`, its wasm modules), which Node cannot import.
  */
 export function stubAppBundle(revision: string): AppBundle {
   const main = `const REVISION = ${JSON.stringify(revision)};
 export default {
   async fetch(request, env, ctx, host) {
     if (typeof env.DATABASE?.connectionString !== "string") return new Response("no DATABASE binding\\n", { status: 500 });
+    if (!env.DATABASE.prepared(REVISION)) return new Response("the database has no Sanoma's tables yet\\n", { status: 500 });
     const url = new URL(request.url);
     if (url.pathname === "/healthz") return new Response("ok\\n");
     if (url.pathname.startsWith("/assets/")) return env.ASSETS.fetch(request);
@@ -469,7 +473,9 @@ interface FakeVersion {
  * Each Worker runs the package's own code (`worker/instance.js`): its fetch (`serve`) over the
  * upload's `app/index.js`, written to a folder and imported (the placeholder of a create's first
  * uploads, then the bundle's main module, `stubAppBundle` unless `bundle` says), its `DATABASE`
- * the config's direct URL, its `ASSETS` the uploaded contents; and its object over a `ctx` in this
+ * the config's direct URL (and `prepared(revision)`: whether a container's worker at that
+ * revision started over it, as each prepares its database at its start), its `ASSETS` the
+ * uploaded contents; and its object over a `ctx` in this
  * process: its container runs `start`'s runtime (the image and the revision label it was started
  * at, the Worker's text bindings as its environment), its port's `/__sanoma/app-bundle` answers
  * `bundle`'s as the runtime's route does, SIGTERM stops the runtime, its storage is in memory, and
@@ -504,7 +510,25 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   const databases = new Map<string, string>();
   /** The assets' contents, by hash, which the state does not keep. */
   const contents = new Map<string, { content: Buffer; contentType: string }>();
+  /**
+   * The revisions whose worker prepared each database, by its URL as a Hyperdrive config gives it:
+   * a container's worker makes its revision's migrations at its start, before its port answers,
+   * and a database keeps every migration made, so an app at any revision prepared there before is
+   * served (by revision, not by the journal's order: an app at a revision no worker started over it
+   * is refused, though its migrations may be there).
+   */
+  const preparedAt = new Map<string, Set<string>>();
   const started: FakeContainer[] = [];
+  /** `start`, its worker having prepared its database (`SANOMA_DATABASE_URL`, a host's) at its revision once it runs. */
+  const preparing: StartContainer = async (input) => {
+    const made = await start(input);
+    const url = input.env.SANOMA_DATABASE_URL;
+    if (url) {
+      const database = connectionString(originOf("", url));
+      preparedAt.set(database, (preparedAt.get(database) ?? new Set()).add(input.revision));
+    }
+    return made;
+  };
   /** The open assets upload sessions, by jwt: the Worker's name, its manifest and the hashes still to upload. */
   const sessions = new Map<string, { script: string; manifest: Record<string, string>; missing: Set<string> }>();
   /** The completion jwts an upload may redeem: the Worker's name and its manifest, each path's hash. */
@@ -686,8 +710,12 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           } else if (binding.type === "hyperdrive") {
             const url = databases.get(binding.id);
             if (url === undefined) throw fail(400, 10021, `no Hyperdrive config ${binding.id}`);
-            // The direct URL: Hyperdrive's pooled one is Cloudflare's own.
-            env[binding.name] = { connectionString: url };
+            // The direct URL: Hyperdrive's pooled one is Cloudflare's own. With the fake's own
+            // `prepared`: whether a worker at a revision made its migrations there, which the app reads.
+            env[binding.name] = {
+              connectionString: url,
+              prepared: (revision: string) => preparedAt.get(url)?.has(revision) ?? false,
+            };
           } else if (binding.type === "version_metadata") {
             env[binding.name] = { id: version, tag: annotations?.["workers/tag"] ?? "", timestamp: "" };
           } else if (binding.type === "assets") {
@@ -720,7 +748,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           objects.set(
             script,
             fakeObject(
-              start,
+              preparing,
               bundle,
               () => workers.get(script)?.live?.images ?? {},
               (image) => appOf(script) && (state.images[image] ?? image),
