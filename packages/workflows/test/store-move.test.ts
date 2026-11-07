@@ -14,7 +14,7 @@ import {
 } from "../src/index.ts";
 import { configuredSecrets, postgresSecretStore } from "../src/credentials.ts";
 import { lazyDb, prepareDatabase } from "../src/db.ts";
-import { connectionRenewals, secretMoveItems, secretMoves } from "../src/db/company.ts";
+import { connectionRenewals, connections, secretMoveItems, secretMoves } from "../src/db/company.ts";
 import { type GcpKmsClient, KMS_SECRETS_SQL, kmsPostgresStore } from "../src/kms-secrets.ts";
 import { readStoreMoves, storeMoveDriver } from "../src/store-move.ts";
 import { SanomaClient, startWorker } from "../src/index.ts";
@@ -333,17 +333,39 @@ describe("moving secrets between stores", () => {
       names: ["ONE", "TWO", "THREE"],
       retainHours: 0,
     });
-    // An OAuth renewal that has sent its refresh token: the fence waits until its grant is stored.
-    const lease = `acme/renewing-${randomUUID()}`;
-    await (await db()).insert(connectionRenewals).values({
-      connectionId: lease,
-      holder: randomUUID(),
-      leaseUntil: sql`now() + interval '1 minute'`,
-      sentAt: sql`now()`,
-    });
-    await expect(a.call("transfer", { move })).rejects.toMatchObject({ retryable: true, message: /renewal/ });
+    // OAuth renewals that have sent their refresh tokens: the fence waits for the one whose grant
+    // is kept at the source to store it, and not for one bound elsewhere.
+    const leases = { here: `acme/here-${randomUUID()}`, elsewhere: `acme/elsewhere-${randomUUID()}` };
+    await (await db()).insert(connections).values(
+      Object.entries(leases).map(([where, id]) => ({
+        id,
+        vendor: "acme",
+        method: "oauth",
+        account: "org-1",
+        scopes: [],
+        revision: randomUUID(),
+        definition: "d",
+        credential: id,
+        location: {
+          store: where === "here" ? "postgres" : "memory",
+          namespace,
+          path: id,
+          management: "sanoma" as const,
+        },
+        updatedBy: "alice",
+      })),
+    );
+    await (await db()).insert(connectionRenewals).values(
+      Object.values(leases).map((connectionId) => ({
+        connectionId,
+        holder: randomUUID(),
+        leaseUntil: sql`now() + interval '1 minute'`,
+        sentAt: sql`now()`,
+      })),
+    );
+    expect(await a.call("transfer", { move })).toEqual({ copied: [], unchanged: 0, missing: [], renewing: true });
     expect((await (await db()).select().from(secretMoves).where(eq(secretMoves.id, move)))[0]?.fenced).toBe(false);
-    await (await db()).delete(connectionRenewals).where(eq(connectionRenewals.connectionId, lease));
+    await (await db()).delete(connectionRenewals).where(eq(connectionRenewals.connectionId, leases.here));
     await expect(a.call("transfer", { move })).rejects.toMatchObject({ retryable: true });
     const [first] = (await (await db()).select().from(secretMoveItems).where(eq(secretMoveItems.moveId, move))).filter(
       (i) => i.state === "copied",

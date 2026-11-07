@@ -436,31 +436,55 @@ describe("OAuth renewal", () => {
     expect((await card(client)).status).toBe("uncertain");
   }, 60_000);
 
-  it("fails a renewal closed while a store move has paused writes, keeping the valid grant, and renews once it lets go", async () => {
+  it("fails a renewal closed when a store move pauses writes while it waits, keeping the valid grant, and renews once it lets go", async () => {
     provider.expiresIn = 60;
     await connect();
     const client = await processOf();
-    // A move's transfer under way from the built-in store's namespace: its fence, as `transfer` sets it.
+    // A move's transfer pausing writes at the built-in store's namespace, as `transfer` does: the
+    // renewals locked, then the fence in. A renewal that comes meanwhile waits on the lock.
     const move = `migrate-store:${randomUUID()}`;
-    await (await pool.db()).insert(secretMoves).values({
-      id: move,
-      destinationName: "elsewhere",
-      sourceStore: "postgres",
-      sourceNamespace: "default",
-      destinationStore: "memory",
-      destinationNamespace: "default",
-      phase: "transferring",
-      fenced: true,
-      retainHours: 0,
-      startedBy: "alice",
+    const mover = lazyDb(databaseUrl, "mover");
+    let commit!: () => void;
+    const held = new Promise<void>((resolve) => {
+      commit = resolve;
+    });
+    let fencing!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      fencing = resolve;
+    });
+    const transfer = (await mover.db()).transaction(async (tx) => {
+      await tx.execute(sql`LOCK TABLE ${connectionRenewals} IN SHARE MODE`);
+      await tx.insert(secretMoves).values({
+        id: move,
+        destinationName: "elsewhere",
+        sourceStore: "postgres",
+        sourceNamespace: "default",
+        destinationStore: "memory",
+        destinationNamespace: "default",
+        phase: "transferring",
+        fenced: true,
+        retainHours: 0,
+        startedBy: "alice",
+      });
+      fencing();
+      await held;
     });
     try {
+      await locked;
+      const reading = read(client);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(refreshed).toHaveLength(0);
+      commit();
+      await transfer;
       // No refresh token spent with nowhere to keep its successor: the access token, still valid, serves.
-      expect(await read(client)).toEqual({ thing: "of org-1" });
+      expect(await reading).toEqual({ thing: "of org-1" });
       expect(refreshed).toHaveLength(0);
       expect(await card(client)).toMatchObject({ status: "connected", renewal: { outcome: "unavailable" } });
       expect(await renewalRow()).toMatchObject({ holder: null, sentAt: null });
     } finally {
+      commit();
+      await transfer.catch(() => {});
+      await mover.close();
       await (await pool.db()).delete(secretMoves).where(eq(secretMoves.id, move));
     }
     expect(await read(client)).toEqual({ thing: "of org-1" });
@@ -579,5 +603,36 @@ describe("Disconnect and revoke", () => {
     expect((await card(allowed)).status).toBe("disconnected");
     expect(await store.read({ namespace: "default", path: "ACME_MAIN" })).toBeUndefined();
     expect(await store.read({ namespace: "default", path: "ACME_APP" })).toBeDefined();
+  }, 60_000);
+
+  it("refuses a revoke or disconnect while a store move has paused writes, before anything changes", async () => {
+    const store = memorySecretStore();
+    const client = await connect({ store });
+    const move = `migrate-store:${randomUUID()}`;
+    await (await pool.db()).insert(secretMoves).values({
+      id: move,
+      destinationName: "elsewhere",
+      sourceStore: "memory",
+      sourceNamespace: "default",
+      destinationStore: "postgres",
+      destinationNamespace: "default",
+      phase: "transferring",
+      fenced: true,
+      retainHours: 0,
+      startedBy: "alice",
+    });
+    const { revision } = await card(client);
+    const input = { connection: ref, expectedRevision: revision! };
+    try {
+      for (const op of ["sanoma.connection.revoke", "sanoma.connection.disconnect"])
+        await expect(client.call(op, input, { actor: "alice" })).rejects.toThrow(/paused writes/);
+      expect(revocations).toEqual([]);
+      expect((await card(client)).status).toBe("connected");
+      expect(await store.read({ namespace: "default", path: "ACME_MAIN" })).toBeDefined();
+    } finally {
+      await (await pool.db()).delete(secretMoves).where(eq(secretMoves.id, move));
+    }
+    await client.call("sanoma.connection.disconnect", input, { actor: "alice" });
+    expect(await store.read({ namespace: "default", path: "ACME_MAIN" })).toBeUndefined();
   }, 60_000);
 });

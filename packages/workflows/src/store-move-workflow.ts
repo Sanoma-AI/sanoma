@@ -46,7 +46,13 @@ export function migrateStoreWorkflow(): WorkflowDefinition<any, any> {
         names: input.names,
         retainHours: input.retainHours,
       });
-      await ctx.sanoma.storeMigration.transfer({ move }, { name: "Copy" });
+      let copy = await ctx.sanoma.storeMigration.transfer({ move }, { name: "Copy" });
+      // An OAuth renewal at the source has sent its refresh token: it stores its grant (within its
+      // lease, a minute at most) before writes there pause.
+      while (copy.renewing) {
+        await ctx.sleep({ seconds: 2 }, { name: "Wait for a renewal" });
+        copy = await ctx.sanoma.storeMigration.transfer({ move }, { name: "Copy after the renewal" });
+      }
       let checked = await ctx.sanoma.storeMigration.verify({ move }, { name: "Read back" });
       let waits = 0;
       while (checked.next === "transfer" || checked.next === "wait") {

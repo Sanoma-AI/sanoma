@@ -156,6 +156,10 @@ const BOUND: SecretStoreCapabilities = {
   changeDetection: "read",
 };
 
+/** Why a change to a connection's stored grant waits: a store move has paused writes where it is kept. */
+const MOVE_PAUSED =
+  "A move between secret stores has paused writes where this account's grant is kept; try again once the move is switched over or cancelled";
+
 function refuse(message: string): never {
   throw new SanomaError("invalid_input", message);
 }
@@ -1001,12 +1005,9 @@ export class ConnectionRegistry {
           const client = this.declaration(row.id, row.rule)?.client?.$secret;
           if (!client) throw new AuthenticationError("unsupported");
           const application = await this.application(client);
-          if (!(await this.renewals.sending(selected.id, holder))) throw new AuthenticationError("unavailable");
-          // A move between stores has paused writes where the grant lives: its successor could not
-          // be kept, so the refresh token is not spent. Asked after `sending`, which a move's transfer
-          // waits out before it pauses them (`store-move.ts`); the grant still valid serves meanwhile.
-          const at = secrets.location(credential);
-          if (await writesPaused(await this.own(), at.store, at.namespace))
+          // Lapsed, or a store move has paused writes where the grant lives: the refresh token is
+          // not spent, and the grant still valid serves meanwhile.
+          if (!(await this.renewals.sending(selected.id, holder, secrets.location(credential))))
             throw new AuthenticationError("unavailable");
           sent = true;
           const grant = await refreshGrant(method.oauth, application, decodeCredentials(method, current.value));
@@ -1113,6 +1114,8 @@ export class ConnectionRegistry {
       const client = await this.application(setup.client);
       // The application changed since consent: its code was issued to another client.
       if (client.clientId !== taken.clientId) throw new AuthenticationError("rejected");
+      // A store move has paused writes where the grant would be kept: the code is not spent.
+      if (await this.paused(setup.credential)) throw new AuthenticationError("unavailable");
       sent = true;
       const grant = await requestGrant(method.oauth, client, taken);
       const identity = await verifyAuthentication(method, grant, { connectionId: setup.id, vendor: setup.vendor });
@@ -1255,6 +1258,18 @@ export class ConnectionRegistry {
     actor: string,
   ): Promise<{ id: string; revision: string; status: "disconnected" }> {
     const row = await this.owned(ref, actor);
+    const secrets = this.secrets;
+    const location =
+      this.oauthMethod(row.vendor, row.method) && row.credential && secrets
+        ? secrets.location(row.credential)
+        : undefined;
+    // A store that cannot delete keeps it, unusable: the account's new revision refuses every call.
+    const drops =
+      location?.management === "sanoma" &&
+      location.namespace !== "" &&
+      secrets!.store.capabilities.deletion !== "unsupported";
+    // Refused before anything changes, rather than disconnected with its grant left behind.
+    if (drops && (await writesPaused(await this.own(), location.store, location.namespace))) refuse(MOVE_PAUSED);
     const revision = randomUUID();
     const [changed] = await (
       await this.db()
@@ -1264,17 +1279,9 @@ export class ConnectionRegistry {
       .where(and(eq(connections.id, row.id), eq(connections.revision, expectedRevision)))
       .returning({ id: connections.id });
     if (!changed) refuse("The connection changed; reload before disconnecting it");
-    if (this.oauthMethod(row.vendor, row.method) && row.credential && this.secrets) {
-      const location = this.secrets.location(row.credential);
-      // A store that cannot delete keeps it, unusable: the account's new revision refuses every call.
-      if (
-        location.management === "sanoma" &&
-        location.namespace !== "" &&
-        this.secrets.store.capabilities.deletion !== "unsupported"
-      ) {
-        await this.renewals.forget(row.id);
-        await this.dropGrant(row.credential, actor);
-      }
+    if (drops) {
+      await this.renewals.forget(row.id);
+      await this.dropGrant(row.credential!, actor);
     }
     return { id: row.id, revision, status: "disconnected" };
   }
@@ -1287,6 +1294,12 @@ export class ConnectionRegistry {
       if ((error as { code?: string })?.code !== "conflict") throw error;
       await this.secrets!.delete(credential, { by: actor });
     }
+  }
+
+  /** True when a store move has paused writes where `credential` is kept (`writesPaused`). */
+  private async paused(credential: string): Promise<boolean> {
+    const at = this.secrets!.location(credential);
+    return writesPaused(await this.own(), at.store, at.namespace);
   }
 
   /**
@@ -1304,6 +1317,8 @@ export class ConnectionRegistry {
     const client = this.declaration(row.id, row.rule)?.client?.$secret;
     if (!method?.revoke || !row.credential || !client || !this.secrets) throw new AuthenticationError("unsupported");
     if (row.revision !== expectedRevision) refuse("The connection changed; reload before revoking it");
+    // Before the provider: a revoked grant the paused store could not then delete would stay behind.
+    if (await this.paused(row.credential)) refuse(MOVE_PAUSED);
     const [bundle, application] = await Promise.all([this.secrets.read(row.credential), this.application(client)]);
     if (!bundle) throw new AuthenticationError("missing");
     try {

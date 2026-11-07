@@ -125,7 +125,13 @@ export const storeMoveOps = defineConnector("sanoma", {
       description:
         "Pause writes at the source, then copy each value into the destination under its own protection, with expected versions at both ends; a repeat skips what already matches and never replaces a value the move did not write",
       input: z.object({ move: MoveId }),
-      output: z.object({ copied: z.array(z.string()), unchanged: z.number(), missing: z.array(z.string()) }),
+      output: z.object({
+        copied: z.array(z.string()),
+        unchanged: z.number(),
+        missing: z.array(z.string()),
+        // Nothing paused or copied yet: an OAuth renewal at the source has sent its refresh token, and stores its grant first.
+        renewing: z.boolean(),
+      }),
       target,
     },
     verify: {
@@ -519,29 +525,38 @@ export function storeMoveDriver({ config, secrets, registry, db, declared }: Sto
         if (which(move) !== "source") refuse("the deployed code no longer selects the source: nothing more is copied");
         // Quiesce: from here on the source refuses writers (`configuredSecrets`), so the move is the one writer.
         if (move.fenced) await whileActive(id, { phase: "transferring" });
-        else
+        else if (
           await (
             await db()
           ).transaction(async (tx) => {
             // An OAuth renewal that has sent its refresh token stores the grant it brings back first:
             // the lock holds off a renewal's `sending` until the fence is in, which it then finds.
             await tx.execute(sql`LOCK TABLE ${connectionRenewals} IN SHARE MODE`);
+            // A grant bound elsewhere is never paused; one with no bound location may be here.
             const [inFlight] = await tx
               .select({ id: connectionRenewals.connectionId })
               .from(connectionRenewals)
-              .where(and(isNotNull(connectionRenewals.sentAt), gt(connectionRenewals.leaseUntil, sql`now()`)))
+              .innerJoin(connections, eq(connections.id, connectionRenewals.connectionId))
+              .where(
+                and(
+                  isNotNull(connectionRenewals.sentAt),
+                  gt(connectionRenewals.leaseUntil, sql`now()`),
+                  sql`coalesce(${connections.location}->>'store', ${move.sourceStore}) = ${move.sourceStore}`,
+                  sql`coalesce(${connections.location}->>'namespace', ${move.sourceNamespace}) = ${move.sourceNamespace}`,
+                ),
+              )
               .limit(1);
-            if (inFlight)
-              throw new DriverError("Store move: an OAuth renewal is under way; the copy starts once it is stored", {
-                retryable: true,
-              });
+            if (inFlight) return true;
             const [row] = await tx
               .update(secretMoves)
               .set({ phase: "transferring", fenced: true })
               .where(and(eq(secretMoves.id, id), inArray(secretMoves.phase, ACTIVE)))
               .returning({ id: secretMoves.id });
             if (!row) refuse("the move was cancelled meanwhile");
-          });
+            return false;
+          })
+        )
+          return { copied: [], unchanged: 0, missing: [], renewing: true };
         const superseded = await supersededAt(move.destinationStore, move.destinationNamespace);
         const copied: string[] = [],
           missing: string[] = [],
@@ -601,7 +616,7 @@ export function storeMoveDriver({ config, secrets, registry, db, declared }: Sto
             id,
             `the destination holds other values for ${conflicts.join(", ")}, which the move did not write: resolve them there, then move again`,
           );
-        return { copied, unchanged, missing };
+        return { copied, unchanged, missing, renewing: false };
       },
 
       async verify({ move: id }) {
