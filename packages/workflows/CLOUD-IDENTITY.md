@@ -253,7 +253,7 @@ This establishes the Google trust path, not a deployed provisioning broker or pr
 | `SANOMA_IDENTITY_AUDIT_DATABASE_URL` | Required protected audit-writer connection string.                                                                  |
 | `SANOMA_IDENTITY_HOST`               | Listening address, default `0.0.0.0` for the command.                                                               |
 | `SANOMA_IDENTITY_CONCURRENCY`        | Maximum in-flight broker requests, default `32`, allowed `1`–`256`; excess requests receive 429 with a retry delay. |
-| `PORT`                               | Listening port, default `8080`.                                                                                     |
+| `PORT`                               | Listening port, default `8080`; `3000` in the runtime image, and Cloud Run sets it to the container port.           |
 | `SANOMA_IDENTITY_SOURCE_ACCOUNT`     | Provisioning only: fixed source service-account email.                                                              |
 | `SANOMA_IDENTITY_SOURCE_SUBJECT`     | Provisioning only: its immutable numeric Google `uniqueId`.                                                         |
 | `SANOMA_IDENTITY_AUDIENCE`           | Provisioning only: exact WIF provider audience.                                                                     |
@@ -281,7 +281,7 @@ Trusted programmatic composition may call `startIdentityService(options)` from `
 
 The published [runtime image](../sanoma/README.md#hosting-it-yourself), `ghcr.io/sanoma-ai/runtime:<sanoma version>`, runs the service with the command `identity` (from `sanoma` 0.11.21): it checks out no company and runs that release's `sanoma identity` as the non-root `node` user. Cloud Run deploys public GitHub Container Registry images as they are ([Cloud Run: supported container registries](https://docs.cloud.google.com/run/docs/deploying#images), page updated 2026-10-30), so a Cloud Run v2 service names that image directly, with no Artifact Registry copy; the release never replaces a version's tag, and Cloud Run records the digest it resolved in each revision. Google recommends an Artifact Registry remote repository in front of GitHub Container Registry for higher availability; later, if pulls prove unreliable.
 
-Each mode is its own Cloud Run v2 service, under its own attached service account. A `gcp.cloudRunService` declaration for the provisioning mode:
+A `gcp.cloudRunService` declaration for the provisioning mode:
 
 ```ts
 import { gcp } from "@sanoma-ai/connector-gcp/resources";
@@ -330,6 +330,4 @@ export const provisioningIssuer = gcp.cloudRunService(
 );
 ```
 
-Runtime mode is the same service with `SANOMA_IDENTITY_MODE: "runtime"`, without the three provisioning settings, under its own attached account, databases and secrets. Cloud Run sets `PORT` to the container port; elsewhere the image's `PORT` is 3000 unless the host sets it. The two database URLs are Secret Manager secrets of the service's project, read by its attached account at start.
-
-These [settings](#standalone-identity-service) are the service's own host configuration, its bootstrap, never a company's environment: no company config, connector page or secret store holds them, and a company's runtime never receives them. The declaration names the secrets, never their values. Neither the service tests nor the image's CI check substitutes for live deployment verification.
+Runtime mode is a second service like it, with `SANOMA_IDENTITY_MODE: "runtime"` and without the three provisioning settings. The two database URLs are Secret Manager secrets of the service's project, read by its attached account at start: the declaration names them, never their values. Neither the service tests nor the image's CI check substitutes for live deployment verification.
