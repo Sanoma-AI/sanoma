@@ -21,6 +21,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, posix } from "node:path";
+// Each folded package's name, and the specifier that replaces it, as the runtime's loader names them to an
+// import of one (`@sanoma-ai/dev` has none: it is `sanoma dev`).
+import { FOLDED as NAMES } from "../packages/sanoma/workflows/src/folded.ts";
 
 /** Each folded package's directory, before and after. */
 const MOVES: readonly (readonly [from: string, to: string])[] = [
@@ -32,32 +35,13 @@ const MOVES: readonly (readonly [from: string, to: string])[] = [
   ["connectors/better-auth", "packages/sanoma/better-auth"],
 ];
 
-/**
- * Each folded package's name, and the specifier that replaces it (`@sanoma-ai/dev` has none: it is
- * `sanoma dev`). The app's site surface and the runtime's data-file entries already had their
- * `sanoma/*` names: a subpath before its package.
- */
-const NAMES: readonly (readonly [from: string, to: string])[] = [
-  ["@sanoma-ai/app/site", "sanoma/site"],
-  ["@sanoma-ai/app/ui.css", "sanoma/ui.css"],
-  ["@sanoma-ai/app/ui", "sanoma/ui"],
-  ["@sanoma-ai/workflows/resources", "sanoma/resources"],
-  ["@sanoma-ai/workflows/data", "sanoma/data"],
-  ["@sanoma-ai/workflows/kms-secrets", "sanoma/secrets"],
-  ["@sanoma-ai/workflows", "sanoma/workflows"],
-  ["@sanoma-ai/app", "sanoma/app"],
-  ["@sanoma-ai/testing", "sanoma/testing"],
-  ["@sanoma-ai/bridge", "sanoma/internal/bridge"],
-  ["@sanoma-ai/connector-better-auth", "sanoma/better-auth"],
-];
-
-const FOLDED = new Set([...NAMES.map(([from]) => from), "@sanoma-ai/dev"]);
+const FOLDED = new Set<string>([...NAMES.map(([from]) => from), "@sanoma-ai/dev"]);
 const DEP_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] as const;
 const TEXT = /\.(c|m)?[jt]sx?$|\.jsonc?$|\.md$|\.ya?ml$|\.css$|\.sh$|(^|\/)Dockerfile$/;
-// Left as they are: the lockfile, test data, this script, and the binaries' manifests, which name
-// `@sanoma-ai/bridge` as npm has them, unchanged until the binary is.
+// Left as they are: the lockfile, test data, this script, the table of old names and its test, and the
+// binaries' manifests, which name `@sanoma-ai/bridge` as npm has them, unchanged until the binary is.
 const SKIP =
-  /(^|\/)(pnpm-lock\.yaml|testdata\/.*(?<!\.md))$|^scripts\/one-package-rewrite\.ts$|^packages\/bridge-bin\/[^/]+\/package\.json$/;
+  /(^|\/)(pnpm-lock\.yaml|testdata\/.*(?<!\.md))$|^scripts\/one-package-rewrite\.ts$|^packages\/sanoma\/workflows\/(src|test)\/folded(\.test)?\.ts$|^packages\/bridge-bin\/[^/]+\/package\.json$/;
 
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 << 20 });
 const warnings: string[] = [];

@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { collectionIn } from "./collection.ts";
 import { callerFile } from "./define.ts";
 import { defineApp, defineSite } from "./definitions.ts";
+import { foldedInto } from "./folded.ts";
 import { type Connector, VENDOR } from "./op.ts";
 import { APPS_DIR, appOfPath, DATA_ENTRIES, inside, relPath, SECRET_ENTRIES, SITE_ENTRIES } from "./paths.ts";
 import { type Declared, isDeclared, isObject, joinPath, type Resource, resourceTypesOf } from "./resource.ts";
@@ -99,6 +100,26 @@ export const madeOf = (value: unknown): Made | undefined =>
 /** Where `defineApp` comes from, served only to an app's `app.ts`. */
 const APP_ENTRIES: ReadonlySet<string> = new Set(["sanoma", "sanoma/workflows"]);
 
+/** The runtime's own entries, which serve its modules: no connector's constructors are served at one. */
+const RUNTIME_ENTRIES: ReadonlySet<string> = new Set([
+  ...SECRET_ENTRIES,
+  ...DATA_ENTRIES,
+  ...SITE_ENTRIES,
+  ...APP_ENTRIES,
+]);
+
+/**
+ * Where each connector's constructors are served, `<info.package>/resources`, with its vendor: none
+ * for a connector without a package, nor for one that is part of `sanoma` (Better Auth, its package
+ * `sanoma`), whose `/resources` is the runtime's own entry.
+ */
+const constructorEntries = (connectors: readonly Connector<any, any>[]): [entry: string, vendor: string][] =>
+  connectors.flatMap((connector) => {
+    const { id, info } = connector[VENDOR];
+    const entry = `${info?.package}/resources`;
+    return info?.package && !RUNTIME_ENTRIES.has(entry) ? [[entry, id]] : [];
+  });
+
 /**
  * Loads `paths` (absolute, under `root`) as the generation of `root` and the constructors of
  * `connectors` (`types`, by default theirs) has them, and says what each gave, by its path
@@ -109,10 +130,11 @@ const APP_ENTRIES: ReadonlySet<string> = new Set(["sanoma", "sanoma/workflows"])
  * identity, so pass one function, not a new one per call.
  *
  * Served to the files, by specifier: `sanoma/resources` (`sanoma`, the constructors of the vendor
- * `sanoma`, and `secret`); each connector's `<info.package>/resources` (its vendor's constructors,
- * under its id); `sanoma/data` (`collection`); `sanoma/site` (`defineSite`); and to an app's
- * `apps/<app>/app.ts` alone, `sanoma` and `sanoma/workflows` (`defineApp`). Anything else is
- * resolved as Node does.
+ * `sanoma`, and `secret`); each connector's `<info.package>/resources` (`constructorEntries`: its
+ * vendor's constructors, under its id); `sanoma/data` (`collection`); `sanoma/site` (`defineSite`);
+ * and to an app's `apps/<app>/app.ts` alone, `sanoma` and `sanoma/workflows` (`defineApp`). An
+ * import of a package folded into `sanoma` (`FOLDED`) throws, naming its `sanoma` specifier
+ * (`foldedInto`). Anything else is resolved as Node does.
  */
 export function loadModules(
   root: string,
@@ -302,11 +324,7 @@ function generationOf(
   connectors: readonly Connector<any, any>[],
   types: ReadonlyMap<string, Resource>,
 ): Generation {
-  const packages = connectors.flatMap((c) => {
-    const { id, info } = c[VENDOR];
-    return info?.package ? [`${info.package}/resources`, id] : [];
-  });
-  const typesKey = [...packages, ...[...types.values()].map(idOf)].join(" ");
+  const typesKey = [...constructorEntries(connectors).flat(), ...[...types.values()].map(idOf)].join(" ");
   let current: Generation | undefined;
   for (const gen of registry.generations.values()) {
     if (gen.root !== root) continue;
@@ -362,10 +380,7 @@ function runtimeModules(
       },
     });
   const modules = new Map<string, Record<string, unknown>>();
-  for (const connector of connectors) {
-    const { id, info } = connector[VENDOR];
-    if (info?.package) modules.set(`${info.package}/resources`, { [id]: constructorsOf(id) });
-  }
+  for (const [entry, id] of constructorEntries(connectors)) modules.set(entry, { [id]: constructorsOf(id) });
   for (const entry of SECRET_ENTRIES) modules.set(entry, { sanoma: constructorsOf("sanoma"), secret });
   const collection = (declaration: Parameters<typeof collectionIn>[1]) => {
     const file = callerFile();
@@ -428,6 +443,12 @@ function hook() {
       const tag = tagOf(context.parentURL);
       const gen = tag === null ? undefined : registry.generations.get(tag);
       if (gen === undefined) return next(specifier, context);
+      const folded = foldedInto(specifier);
+      if (folded !== undefined) {
+        throw new Error(
+          `"${specifier}" is "${folded}" now: sanoma's packages are the one \`sanoma\`. Import it from there, or run scripts/one-package-rewrite.ts from a sanoma checkout in the repository's root`,
+        );
+      }
       if (
         gen.virtual.has(specifier) &&
         (!APP_ENTRIES.has(specifier) || (context.parentURL!.startsWith("file:") && isAppFile(gen, context.parentURL!)))

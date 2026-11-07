@@ -125,6 +125,20 @@ describe("loadModules", () => {
     });
   });
 
+  it("serves a connector that is part of sanoma (its package `sanoma`) no constructors at the runtime's entry", () => {
+    const own = defineConnector("own-part", {}, { package: "sanoma" });
+    const root = company({
+      "resources/people.ts": `import * as entry from "sanoma/resources";\nexport const names = Object.keys(entry).toSorted();\n`,
+    });
+    for (const connectors of [
+      [own, ...CONNECTORS],
+      [...CONNECTORS, own],
+    ]) {
+      const loaded = loadModules(root, [join(root, "resources/people.ts")], connectors);
+      expect(exportsOf(loaded, "resources/people.ts").names).toEqual(["sanoma", "secret"]);
+    }
+  });
+
   it("keeps a generation while nothing changed, and starts one when a file or a helper does", () => {
     const root = company({
       "resources/helper.ts": `export const size = 1;\n`,
