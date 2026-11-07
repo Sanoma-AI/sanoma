@@ -29,9 +29,17 @@ import {
 } from "./secret-store.ts";
 import { and, eq, getTableColumns, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./db.ts";
-import { connectionHealth, connections, connectionSetups } from "./db/company.ts";
+import { connectionHealth, connectionRenewals, connections, connectionSetups } from "./db/company.ts";
 import { ConnectionAttempts, oauthApplication, type OAuthClient, refreshGrant, requestGrant } from "./oauth.ts";
-import { ConnectionRenewals, LEASE_MS, type Lease, type RenewalState, renewalDue, renewalDueAt } from "./renewal.ts";
+import {
+  ConnectionRenewals,
+  LEASE_MS,
+  type Lease,
+  type RenewalState,
+  renewalDue,
+  renewalDueAt,
+  renewalState,
+} from "./renewal.ts";
 import { RENEWAL_AGENT } from "./shared.ts";
 
 /** Serializable account reference; vendor literal prevents cross-connector selection in typed calls. */
@@ -402,20 +410,25 @@ export class ConnectionRegistry {
         checkedAt: connectionHealth.checkedAt,
         externallyRenewed: connectionHealth.externallyRenewed,
         expiresAt: connectionHealth.expiresAt,
+        renewal: {
+          refreshedAt: connectionRenewals.refreshedAt,
+          outcome: connectionRenewals.outcome,
+          dueAt: connectionRenewals.dueAt,
+        },
       })
       .from(connections)
       .leftJoin(
         connectionHealth,
         and(eq(connections.id, connectionHealth.connectionId), eq(connections.revision, connectionHealth.revision)),
       )
+      .leftJoin(connectionRenewals, eq(connections.id, connectionRenewals.connectionId))
       .where(or(isNull(connections.owner), eq(connections.owner, actor)));
-    const renewals = await this.renewals.states();
     const found = new Map(rows.map((r) => [r.id, r]));
     const ids = new Set([...this.catalog.definitions.keys(), ...rows.filter((r) => r.rule).map((r) => r.id)]);
     const cards: ConnectionCard[] = [];
     for (const id of ids) {
       const row = found.get(id);
-      const declaration = row?.rule ? this.catalog.rules.get(row.rule) : this.catalog.definitions.get(id);
+      const declaration = this.declaration(id, row?.rule);
       if (!declaration || (row?.rule && row.owner !== actor)) continue;
       const method = this.catalog.methods.get(declaration.vendor)?.[declaration.method];
       if (!method) continue;
@@ -447,7 +460,7 @@ export class ConnectionRegistry {
         ...(row?.updatedBy && { updatedBy: row.updatedBy }),
         ...(row?.updatedAt && { updatedAt: row.updatedAt.toISOString() }),
         ...(storageProblem && { storageProblem }),
-        ...(row && method.kind === "oauth2" && renewals.has(id) && { renewal: renewals.get(id)! }),
+        ...(row?.renewal && method.kind === "oauth2" && { renewal: renewalState(row.renewal) }),
         ...(row?.health &&
           row.checkedAt && {
             health: {
@@ -486,7 +499,7 @@ export class ConnectionRegistry {
     } else {
       id = target.connection.$connection;
       row = await this.row(id);
-      declaration = row?.rule ? this.catalog.rules.get(row.rule) : this.catalog.definitions.get(id);
+      declaration = this.declaration(id, row?.rule);
       if (!declaration || declaration.vendor !== target.connection.vendor) refuse("The connection is not declared");
       if (row?.rule && row.owner !== actor.id)
         throw new SanomaError("policy_denied", "The connection belongs to another principal");
@@ -642,11 +655,10 @@ export class ConnectionRegistry {
     };
   }
 
+  /** The connection's health, checked now, and when its OAuth grant was last renewed (only an OAuth grant's renewal has a row). */
   async test(ref: ConnectionRef, actor: Principal): Promise<ConnectionHealth> {
     const health = await this.check(ref, actor);
-    const refreshedAt = this.oauthMethod(ref.vendor, (await this.row(ref.$connection))?.method ?? "")
-      ? (await this.renewals.states()).get(ref.$connection)?.refreshedAt
-      : undefined;
+    const refreshedAt = (await this.renewals.state(ref.$connection))?.refreshedAt;
     return refreshedAt ? { ...health, refreshedAt } : health;
   }
 
@@ -804,7 +816,7 @@ export class ConnectionRegistry {
       refuse("The connection is missing or disconnected");
     if (ref.revision !== undefined && ref.revision !== row.revision)
       refuse("The connection changed after authorization; start a new call");
-    const declaration = row.rule ? this.catalog.rules.get(row.rule) : this.catalog.definitions.get(row.id);
+    const declaration = this.declaration(row.id, row.rule);
     if (!declaration || declaration.vendor !== vendor || declaration.method !== row.method)
       refuse("The connection is not declared");
     if (row.rule && row.owner !== actor)
@@ -892,13 +904,14 @@ export class ConnectionRegistry {
    */
   private async leased<T>(id: string, body: (lease: Lease) => Promise<T>, waiting?: () => Promise<T | undefined>) {
     const until = Date.now() + LEASE_MS + 5_000;
-    for (;;) {
+    // Backs off from a quarter second to two, so the processes waiting on one renewal stay few queries.
+    for (let pause = 250; ; pause = Math.min(pause * 2, 2_000)) {
       const lease = await this.renewals.take(id);
       if (lease) return body(lease);
       const settled = await waiting?.();
       if (settled !== undefined) return settled;
       if (Date.now() > until) throw new AuthenticationError("unavailable");
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, pause));
     }
   }
 
@@ -931,8 +944,7 @@ export class ConnectionRegistry {
   ): Promise<SecretValue> {
     const secrets = this.secrets;
     const credential = selected.credentials?.$secret;
-    const client = this.declarationOf(selected.id, selected.vendor)?.client?.$secret;
-    if (!secrets || !credential || !client) throw new AuthenticationError("unsupported");
+    if (!secrets || !credential) throw new AuthenticationError("unsupported");
     const replaced = (current: SecretValue | undefined) =>
       current !== undefined &&
       (rejected !== undefined ? current.version !== rejected : !renewalDue(decodeCredentials(method, current.value)));
@@ -942,18 +954,17 @@ export class ConnectionRegistry {
         let sent = false;
         try {
           if (abandoned) throw new AuthenticationError("uncertain");
-          const current = await secrets.read(credential);
+          const [current, row] = await Promise.all([secrets.read(credential), this.row(selected.id, this.own)]);
           if (!current) throw new AuthenticationError("missing");
           if (replaced(current)) {
             await this.renewals.release(selected.id, holder);
             return current;
           }
-          const row = await this.row(selected.id, this.own);
           if (row?.revision !== selected.revision || row.status !== "connected")
             refuse("The connection changed; start a new call");
-          const app = await secrets.read(client);
-          if (!app) throw new AuthenticationError("missing");
-          const application: OAuthClient = decodeCredentials(oauthApplication, app.value);
+          const client = this.declaration(row.id, row.rule)?.client?.$secret;
+          if (!client) throw new AuthenticationError("unsupported");
+          const application = await this.application(client);
           if (!(await this.renewals.sending(selected.id, holder))) throw new AuthenticationError("unavailable");
           sent = true;
           const grant = await refreshGrant(method.oauth, application, decodeCredentials(method, current.value));
@@ -1014,11 +1025,15 @@ export class ConnectionRegistry {
   }
 
   /** The declaration a connection's row is of: its rule's, or the declared connection. */
-  private declarationOf(id: string, vendor: string): ConnectionDefinition | ConnectionRule | undefined {
-    const declared = this.catalog.definitions.get(id);
-    if (declared) return declared.vendor === vendor ? declared : undefined;
-    const rule = [...this.catalog.rules.entries()].find(([ruleId]) => id.startsWith(`${ruleId}/`))?.[1];
-    return rule?.vendor === vendor ? rule : undefined;
+  private declaration(id: string, rule?: string | null): ConnectionDefinition | ConnectionRule | undefined {
+    return rule ? this.catalog.rules.get(rule) : this.catalog.definitions.get(id);
+  }
+
+  /** The company's OAuth application, as stored under `secret`. */
+  private async application(secret: string): Promise<OAuthClient> {
+    const stored = await this.secrets?.read(secret);
+    if (!stored) throw new AuthenticationError("missing");
+    return decodeCredentials(oauthApplication, stored.value);
   }
 
   /**
@@ -1046,9 +1061,7 @@ export class ConnectionRegistry {
       if ("connection" in target && (target.connection.revision ?? null) !== setup.expectedRevision)
         refuse("The connection changed since consent; connect again");
       const taken = await this.attempts.take(attempt, actor.id, setup.id);
-      const stored = await this.secrets.read(setup.client);
-      if (!stored) throw new AuthenticationError("missing");
-      const client = decodeCredentials(oauthApplication, stored.value);
+      const client = await this.application(setup.client);
       // The application changed since consent: its code was issued to another client.
       if (client.clientId !== taken.clientId) throw new AuthenticationError("rejected");
       sent = true;
@@ -1080,7 +1093,7 @@ export class ConnectionRegistry {
           await this.renewals.release(selected.id, holder);
           return false;
         }
-        await this.renewals.release(selected.id, holder, { fresh: true, dueAt: renewalDueAt(grant) });
+        await this.renewals.release(selected.id, holder, { outcome: null, dueAt: renewalDueAt(grant) });
         return true;
       }).catch(() => false);
       if (!kept) {
@@ -1174,11 +1187,7 @@ export class ConnectionRegistry {
   /** A declared connection's row, refused for another principal's (`owner`, unless undefined: anyone's). */
   private async owned(ref: ConnectionRef, owner: string | undefined) {
     const row = await this.row(ref.$connection);
-    if (
-      !row ||
-      row.vendor !== ref.vendor ||
-      (row.rule ? !this.catalog.rules.has(row.rule) : !this.catalog.definitions.has(row.id))
-    )
+    if (!row || row.vendor !== ref.vendor || !this.declaration(row.id, row.rule))
       refuse("The connection is not declared");
     if (row.rule && owner !== undefined && row.owner !== owner)
       throw new SanomaError("policy_denied", "The connection belongs to another principal");
@@ -1243,13 +1252,13 @@ export class ConnectionRegistry {
   ): Promise<{ id: string; revision: string; status: "disconnected" }> {
     const row = await this.owned(ref, actor);
     const method = this.oauthMethod(row.vendor, row.method);
-    const client = this.declarationOf(row.id, row.vendor)?.client?.$secret;
+    const client = this.declaration(row.id, row.rule)?.client?.$secret;
     if (!method?.revoke || !row.credential || !client || !this.secrets) throw new AuthenticationError("unsupported");
     if (row.revision !== expectedRevision) refuse("The connection changed; reload before revoking it");
-    const [bundle, app] = [await this.secrets.read(row.credential), await this.secrets.read(client)];
-    if (!bundle || !app) throw new AuthenticationError("missing");
+    const [bundle, application] = await Promise.all([this.secrets.read(row.credential), this.application(client)]);
+    if (!bundle) throw new AuthenticationError("missing");
     try {
-      await method.revoke(decodeCredentials(method, bundle.value), decodeCredentials(oauthApplication, app.value));
+      await method.revoke(decodeCredentials(method, bundle.value), application);
     } catch {
       throw new AuthenticationError("unavailable");
     }

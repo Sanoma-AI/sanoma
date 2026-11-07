@@ -26,13 +26,12 @@ export const RENEW_AHEAD_MS = 5 * 60_000;
 /** How long a due renewal the worker took waits before it is taken again, should it end with no answer. */
 const RETRY_MS = 5 * 60_000;
 
-/** True when `grant` can be renewed and expires within `RENEW_AHEAD_MS`. */
-export const renewalDue = (grant: OAuthGrant): boolean =>
-  grant.refreshToken !== undefined && grant.expiresAt !== undefined && grant.expiresAt - Date.now() <= RENEW_AHEAD_MS;
-
 /** When a grant's renewal is due: `RENEW_AHEAD_MS` before it expires; none for a grant without an expiry or a refresh token. */
 export const renewalDueAt = (grant: OAuthGrant): Date | null =>
   grant.refreshToken !== undefined && grant.expiresAt !== undefined ? new Date(grant.expiresAt - RENEW_AHEAD_MS) : null;
+
+/** True when `grant` can be renewed and its renewal is due. */
+export const renewalDue = (grant: OAuthGrant): boolean => (renewalDueAt(grant)?.getTime() ?? Infinity) <= Date.now();
 
 /**
  * A connection's lease, taken: `holder` fences every write under it. `abandoned` when the lease
@@ -50,6 +49,17 @@ export interface RenewalState {
   outcome?: RenewalOutcome;
   dueAt?: string;
 }
+
+/** A renewal row's state, from its columns (null where it has none). */
+export const renewalState = (r: {
+  refreshedAt: Date | null;
+  outcome: RenewalOutcome | null;
+  dueAt: Date | null;
+}): RenewalState => ({
+  ...(r.refreshedAt && { refreshedAt: r.refreshedAt.toISOString() }),
+  ...(r.outcome && { outcome: r.outcome }),
+  ...(r.dueAt && { dueAt: r.dueAt.toISOString() }),
+});
 
 /** The renewal rows of one company's database. */
 export class ConnectionRenewals {
@@ -100,14 +110,14 @@ export class ConnectionRenewals {
   }
 
   /**
-   * Gives the lease up, recording what it did: `outcome` (and `refreshedAt` now, for `refreshed`),
-   * the next due time (`dueAt`, null for none; kept when left out), or a new grant's start
-   * (`fresh`: its renewal history cleared). A lease that lapsed and was taken is not this one's to give up.
+   * Gives the lease up, recording what it did: `outcome` (and `refreshedAt` now, for `refreshed`;
+   * null for a new grant, its renewal history cleared) and the next due time (`dueAt`, null for
+   * none); each kept when left out. A lease that lapsed and was taken is not this one's to give up.
    */
   async release(
     id: string,
     holder: string,
-    record: { outcome?: RenewalOutcome; dueAt?: Date | null; fresh?: boolean } = {},
+    record: { outcome?: RenewalOutcome | null; dueAt?: Date | null } = {},
   ): Promise<void> {
     await (
       await this.db()
@@ -117,9 +127,9 @@ export class ConnectionRenewals {
         holder: null,
         leaseUntil: null,
         sentAt: null,
-        ...(record.outcome && { outcome: record.outcome }),
+        ...(record.outcome !== undefined && { outcome: record.outcome }),
         ...(record.outcome === "refreshed" && { refreshedAt: sql`now()` }),
-        ...(record.fresh && { outcome: null, refreshedAt: null }),
+        ...(record.outcome === null && { refreshedAt: null }),
         ...(record.dueAt !== undefined && { dueAt: record.dueAt }),
       })
       .where(and(eq(connectionRenewals.connectionId, id), eq(connectionRenewals.holder, holder)));
@@ -140,19 +150,15 @@ export class ConnectionRenewals {
       .where(eq(connectionRenewals.connectionId, id));
   }
 
-  /** Each connection's renewal, by id, for the cards. */
-  async states(): Promise<Map<string, RenewalState>> {
-    const rows = await (await this.db()).select().from(connectionRenewals);
-    return new Map(
-      rows.map((r) => [
-        r.connectionId,
-        {
-          ...(r.refreshedAt && { refreshedAt: r.refreshedAt.toISOString() }),
-          ...(r.outcome && { outcome: r.outcome }),
-          ...(r.dueAt && { dueAt: r.dueAt.toISOString() }),
-        },
-      ]),
-    );
+  /** Connection `id`'s renewal: none before its first lease. */
+  async state(id: string): Promise<RenewalState | undefined> {
+    const [row] = await (
+      await this.db()
+    )
+      .select()
+      .from(connectionRenewals)
+      .where(eq(connectionRenewals.connectionId, id));
+    return row && renewalState(row);
   }
 
   /**

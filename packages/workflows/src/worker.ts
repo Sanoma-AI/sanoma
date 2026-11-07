@@ -29,7 +29,7 @@ import {
 } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
-import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
+import { errorCode, errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { dbosLogger, info, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
@@ -346,8 +346,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
             );
           } catch (error) {
             // The policy refuses the agent: no renewal is scheduled again until a call renews the grant.
-            if ((error as { code?: unknown } | null)?.code === "policy_denied")
-              await connections.renewals.unschedule(id);
+            if (errorCode(error) === "policy_denied") await connections.renewals.unschedule(id);
             throw error;
           }
         },

@@ -3,6 +3,7 @@ import type {
   ConnectionCard,
   ConnectionReview,
   ConnectionTarget,
+  RenewalOutcome,
   SecretLocation,
 } from "@sanoma-ai/workflows";
 import { CALL_WORKFLOW, CONNECT_WORKFLOW, STORAGE_ADVICE, STORAGE_PROBLEMS } from "@sanoma-ai/workflows/shared";
@@ -222,7 +223,7 @@ type Method = ConnectionsResponse["methods"][string][string] | undefined;
 /** Health and renewal states only a new consent fixes. */
 const RECONNECT: ReadonlySet<string> = new Set(["expired", "revoked", "rejected", "uncertain", "missing"]);
 /** Why a renewal failed, as the card says it: never the provider's words. */
-const RENEWAL_PROBLEMS: Partial<Record<string, string>> = {
+const RENEWAL_PROBLEMS: Partial<Record<RenewalOutcome, string>> = {
   revoked: "the provider no longer accepts the refresh token",
   rejected: "the provider refused the renewal",
   expired: "the grant has no refresh token",
@@ -258,11 +259,8 @@ function ConnectionRow({
   const renewalProblem = card.renewal?.outcome !== "refreshed" ? card.renewal?.outcome : undefined;
   // Only a new consent helps: the grant is gone at the provider, or may have been renewed and not kept.
   const needsReconnect =
-    oauth &&
-    card.status !== "disconnected" &&
-    (card.status === "uncertain" ||
-      RECONNECT.has(state) ||
-      (renewalProblem !== undefined && RECONNECT.has(renewalProblem)));
+    oauth && card.status !== "disconnected" && (RECONNECT.has(state) || RECONNECT.has(renewalProblem ?? ""));
+  const disconnectable = oauth && !!card.revision && card.status !== "disconnected";
   async function act(action: "test" | "disconnect" | "revoke") {
     setBusy(true);
     setError(undefined);
@@ -348,7 +346,7 @@ function ConnectionRow({
             )}
           </ItemDescription>
         )}
-        {renewalProblem && card.status === "connected" && (
+        {renewalProblem && card.status === "connected" && !needsReconnect && (
           <ItemDescription className="line-clamp-none">
             The last renewal failed: {RENEWAL_PROBLEMS[renewalProblem] ?? renewalProblem.replaceAll("_", " ")}.
           </ItemDescription>
@@ -367,10 +365,13 @@ function ConnectionRow({
         )}
         {needsReconnect && card.status !== "uncertain" && (
           <ItemDescription className="line-clamp-none">
-            The provider no longer accepts this grant. Reconnect to authorize a new one.
+            {renewalProblem && RENEWAL_PROBLEMS[renewalProblem]
+              ? `The last renewal failed: ${RENEWAL_PROBLEMS[renewalProblem]}.`
+              : "The provider no longer accepts this grant."}{" "}
+            Reconnect to authorize a new one.
           </ItemDescription>
         )}
-        {oauth && card.revision && card.status !== "disconnected" && (
+        {disconnectable && (
           <ItemDescription className="line-clamp-none">
             Disconnect deletes the grant Sanoma keeps and leaves the OAuth application for other accounts.
             {method?.revocable
@@ -446,7 +447,7 @@ function ConnectionRow({
             Disconnect
           </Button>
         )}
-        {oauth && method?.revocable && card.revision && card.status !== "disconnected" && (
+        {disconnectable && method?.revocable && (
           <Button variant="ghost" disabled={busy} onClick={() => void act("revoke")}>
             Revoke
           </Button>

@@ -357,15 +357,17 @@ export async function refreshGrant(flow: OAuthFlow, client: OAuthClient, grant: 
   } catch {
     throw new AuthenticationError("uncertain");
   }
-  // Too many requests: refused, nothing issued, and worth asking again later.
-  if (response.status === 429) throw new AuthenticationError("unavailable");
-  if (response.status >= 400 && response.status < 500) {
-    const body = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
-    throw new AuthenticationError(body?.error === "invalid_grant" ? "revoked" : "rejected");
-  }
   try {
     return grantOf(await processRefreshTokenResponse(server, app, response), grant);
-  } catch {
+  } catch (error) {
+    // Too many requests: refused, nothing issued, and worth asking again later.
+    if (response.status === 429) throw new AuthenticationError("unavailable");
+    // Any other 4xx refused the refresh token, nothing issued: `invalid_grant` says it no longer counts.
+    if (response.status >= 400 && response.status < 500)
+      throw new AuthenticationError(
+        error instanceof ResponseBodyError && error.error === "invalid_grant" ? "revoked" : "rejected",
+      );
+    // A 2xx the library refused, or a server error: whether a grant was issued is not known.
     throw new AuthenticationError("uncertain");
   }
 }
