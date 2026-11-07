@@ -478,7 +478,10 @@ describe("the stop rule with the environment's wakeup", () => {
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
     host = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
-  afterEach(() => {
+  afterEach(async () => {
+    // Stopped before the wakes are cleared: vitest runs afterEach hooks last-registered first, so
+    // the worker's hook would otherwise stop it after, and a late PUT would land in the next test.
+    await app.worker?.stop();
     vi.unstubAllEnvs();
     wakes.length = 0;
     answer = { status: 204 };
