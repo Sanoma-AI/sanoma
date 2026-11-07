@@ -1,6 +1,6 @@
 # packages/testing/test
 
-Tests for `@sanoma-ai/testing`. `harness.test.ts`, `scenarios.test.ts`, `host.test.ts`, `wakeup.test.ts`, `database.test.ts` and `stack.test.ts` need Postgres (`pnpm db:up`).
+Tests for `@sanoma-ai/testing`. `harness.test.ts`, `scenarios.test.ts`, `host.test.ts`, `wakeup.test.ts`, `database.test.ts`, `sentinel.test.ts` and `stack.test.ts` need Postgres (`pnpm db:up`).
 
 ## Contents
 
@@ -14,4 +14,5 @@ Tests for `@sanoma-ai/testing`. `harness.test.ts`, `scenarios.test.ts`, `host.te
 | [`stack.test.ts`](stack.test.ts)         | Scale to zero on fakes: a `stops-when-quiet` `fakeHost` over `inProcessHost`, `fakeWakeup` applied for it, a sleeping run and a schedule; the worker stops idle, the process stops, wakes start it and a fresh worker                                                                                      |
 | [`sandbox.test.ts`](sandbox.test.ts)     | `checkSandbox` against `fakeSandbox`, the checks a backend does not declare left out and the rest failed at once when no box opens; the fake in a config                                                                                                                                                   |
 | [`scenarios.test.ts`](scenarios.test.ts) | `describeScenarios` on a fixture config, a file that does not load (run in a vitest of its own), and `runScenario`                                                                                                                                                                                         |
+| [`sentinel.test.ts`](sentinel.test.ts)   | `findSentinels` on a database of its own: the schema, table and column of each sentinel a text, `jsonb` or array column holds, bytes left out; a sentinel it could not find as written refused                                                                                                             |
 | [`fixtures/`](fixtures/)                 | A root with a config of the workflows package's announce workflow on the packages' connectors, a copy of its announce scenarios in `scenarios/`, a root with a broken feature file (`broken/scenarios/`), and the vitest config that runs `broken.scenarios.ts`                                            |

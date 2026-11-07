@@ -3,11 +3,23 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeCloudflare, type StartContainer, stubContainer } from "@sanoma-ai/connector-cloudflare/fake";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { findSentinels, testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { postgresSecretStore } from "../src/credentials.ts";
 import { lazyDb } from "../src/db.ts";
-import { type CallContext, memorySecretStore, SecretAccess, type SecretConfiguration } from "../src/index.ts";
+import {
+  type CallContext,
+  defineConnector,
+  defineDriver,
+  DriverError,
+  memorySecretStore,
+  resolveSecrets,
+  SanomaClient,
+  SecretAccess,
+  type SecretConfiguration,
+  withSetup,
+} from "../src/index.ts";
 import { secret } from "../src/secret.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
 
@@ -35,6 +47,29 @@ const company: SecretConfiguration = {
     ELSEWHERE: { env: "NEVER_DELIVERED" },
   },
 };
+
+/** An operation reading a credential through its marker, failing with it in its message when asked to. */
+const probeOps = defineConnector("probe", {
+  credential: {
+    use: {
+      effect: "read",
+      input: z.object({ credential: z.object({ $secret: z.string() }), fail: z.boolean() }),
+      output: z.object({ used: z.boolean() }),
+    },
+  },
+});
+const probe = withSetup(probeOps, {
+  driver: () =>
+    defineDriver(probeOps, {
+      credential: {
+        use: async (input, call) => {
+          const { credential } = await resolveSecrets(input, call.secrets);
+          if (input.fail) throw new DriverError(`probe refused ${credential}`, { retryable: false });
+          return { used: true };
+        },
+      },
+    }),
+});
 
 /** The fake's stub container, keeping the environment each start was given. */
 function capturing() {
@@ -79,7 +114,7 @@ describe("bootstrap a Cloudflare host delivers to its container", () => {
         secrets: applier,
       };
       // As apply derives the host's secrets: markers only, resolved by the driver at its upload.
-      await fake.driver.ops["host.create"]!(
+      const created = await fake.driver.ops["host.create"]!(
         {
           desired: {
             name: "bootstrap",
@@ -97,6 +132,8 @@ describe("bootstrap a Cloudflare host delivers to its container", () => {
         },
         call,
       );
+      // What the ledger records of the create holds none of the values it delivered.
+      for (const value of [signing, encryption, provisioning]) expect(JSON.stringify(created)).not.toContain(value);
       const env = container.delivered.at(-1)!;
       // Values, never a path on the applying machine, and nothing the host was not declared to carry.
       expect(env).toMatchObject({
@@ -136,6 +173,24 @@ describe("bootstrap a Cloudflare host delivers to its container", () => {
       await store.write({ namespace, path: "ELSEWHERE" }, "stored", { expectedVersion: null, by: "test" });
       expect(await runtime.read("ELSEWHERE")).toBeUndefined();
       await expect(runtime.ensure("ELSEWHERE", () => "made")).rejects.toMatchObject({ code: "read_only" });
+
+      // The company's runtime there: a call reading the delivered credential, and one failing with
+      // it in its error, leave none of what the host delivered in the database.
+      const client = await SanomaClient.connect({
+        databaseUrl,
+        workflows: [],
+        connectors: [probe],
+        secrets: { ...company, namespace },
+      });
+      try {
+        const use = (fail: boolean) =>
+          client.call("probe.credential.use", { credential: secret("PROVISIONING"), fail }, { actor: "alice" });
+        expect(await use(false)).toEqual({ used: true });
+        await expect(use(true)).rejects.toMatchObject({ message: "probe refused [redacted]" });
+      } finally {
+        await client.close();
+      }
+      expect(await findSentinels(databaseUrl, [signing, encryption, provisioning])).toEqual([]);
     },
   );
 });

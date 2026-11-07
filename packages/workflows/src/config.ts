@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
 import { configuredSecrets } from "./credentials.ts";
 import { inspectRun } from "./run-status.ts";
@@ -6,8 +7,8 @@ import {
   type IdentityProvisioning,
   type IdentityProvisioningDatabase,
 } from "./identity-provisioning.ts";
-import { secretNamesIn, secretsForInput } from "./secret.ts";
-import { isRunControlError } from "./errors.ts";
+import { type Secrets, secretNamesIn, secretsForInput } from "./secret.ts";
+import { isRunControlError, vendorCodeOf } from "./errors.ts";
 import type { CallAuthentication } from "./authentication.ts";
 import { currentRun } from "./run.ts";
 import {
@@ -86,6 +87,7 @@ import {
   CONNECT_WORKFLOW,
   MIGRATE_STORE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
+  errorMessage,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
@@ -978,7 +980,9 @@ export function indexDrivers(
       if (!ops.has(id)) {
         throw new Error(`Driver "${d.vendor}" implements ${id}, which no connector in \`connectors\` declares`);
       }
-      const unselected = d.env ? guarded(d.vendor, d.env, fn) : fn;
+      // What a driver without a connection read (its secrets, the environment it declares) is
+      // taken out of an error it throws; a connection's driver's errors are replaced below.
+      const unselected = clearingReads(d.env ? guarded(d.vendor, d.env, fn) : fn, Object.keys(d.env?.shape ?? {}));
       map.set(id, async (input, call) => {
         if (options.sandbox) return fn(input, call);
         if (!call.connection) {
@@ -1002,16 +1006,7 @@ export function indexDrivers(
           } catch (error) {
             if (isRunControlError(error)) throw error;
             // SDK exceptions can contain the complete request, including authorization headers.
-            // Drivers may come from another installed copy of this package.
-            const failure = error as { code?: unknown; retryable?: unknown; status?: unknown } | null;
-            const status = failure?.code === "driver_failed" ? failure.status : undefined;
-            throw new DriverError(`${d.vendor} operation failed`, {
-              retryable: failure?.code === "driver_failed" && failure.retryable === true,
-              ...(typeof status === "number" &&
-                Number.isInteger(status) &&
-                status >= 100 &&
-                status <= 599 && { status }),
-            });
+            throw driverFailure(`${d.vendor} operation failed`, error);
           }
         };
         const authentication = await connections.authenticate(selected, principal);
@@ -1028,6 +1023,105 @@ export function indexDrivers(
     }
   }
   return map;
+}
+
+/**
+ * A `DriverError` saying `message` in place of `error`, keeping only what a driver's own error
+ * says of itself (from another installed copy of this package too): retryable only when it says
+ * so, its HTTP status and its vendor's code. Nothing else of it (stack, cause, properties) is kept.
+ */
+function driverFailure(message: string, error: unknown): DriverError {
+  const failure = error as { code?: unknown; retryable?: unknown; status?: unknown } | null;
+  const own = failure?.code === "driver_failed";
+  const status = own ? failure.status : undefined;
+  const vendorCode = own ? vendorCodeOf(error) : undefined;
+  return new DriverError(message, {
+    retryable: own && failure.retryable === true,
+    ...(typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 && { status }),
+    ...(vendorCode !== undefined && { vendorCode }),
+  });
+}
+
+/** The shortest value a driver's error is cleared of: a shorter one would match ordinary words. */
+const REDACTED_LENGTH = 8;
+/** How deep `mentions` looks into an error's properties: an SDK's error may hold a request, its socket and its agent. */
+const MENTIONS_DEPTH = 4;
+/** The values the call under way has read, for `clearingReads`. */
+const reading = new AsyncLocalStorage<Set<string>>();
+/** Each store's noting view, one per store, so a driver that keeps state by its `call.secrets` finds it again. */
+const noting = new WeakMap<Secrets, Secrets>();
+
+/** Keeps `value` among what the call under way read, when it is long enough to look for. */
+function note<T extends string | undefined>(value: T): T {
+  if (value !== undefined && value.length >= REDACTED_LENGTH) reading.getStore()?.add(value);
+  return value;
+}
+
+/** `secrets`, noting each value read or made through it among what the call under way read. */
+function notingOf(secrets: Secrets): Secrets {
+  let view = noting.get(secrets);
+  if (!view) {
+    view = {
+      get: async (name) => note(await secrets.get(name)),
+      ensure: async (name, make) => note(await secrets.ensure(name, make)),
+      delete: (name) => secrets.delete(name),
+    };
+    noting.set(secrets, view);
+  }
+  return view;
+}
+
+/**
+ * Whether `value` holds one of `read`: a string that does, or an object (an error) with an own
+ * property that does, its message, stack and cause among them, a few levels deep. Bytes are not
+ * read, and a property that throws when read holds nothing.
+ */
+function mentions(value: unknown, read: ReadonlySet<string>, depth = 0, seen = new Set<unknown>()): boolean {
+  if (typeof value === "string") {
+    for (const one of read) if (value.includes(one)) return true;
+    return false;
+  }
+  if (typeof value !== "object" || value === null || ArrayBuffer.isView(value) || seen.has(value)) return false;
+  if (depth > MENTIONS_DEPTH) return false;
+  seen.add(value);
+  return Object.getOwnPropertyNames(value).some((key) => {
+    let property: unknown;
+    try {
+      property = (value as Record<string, unknown>)[key];
+    } catch {
+      return false;
+    }
+    return mentions(property, read, depth + 1, seen);
+  });
+}
+
+/**
+ * `fn`, whose error is cleared of the values it read: those it got or made through
+ * `call.secrets` and those of the variables `env` names, eight characters or more. An error
+ * holding none, or ending the run (`isRunControlError`), is thrown as it is; one that does becomes
+ * `driverFailure` of its message with each value as `[redacted]`, longest first. An SDK's or a
+ * provider's error may repeat the request, a token among it, and the error a step throws is kept
+ * by DBOS (all of it) and the ledger.
+ */
+function clearingReads(fn: DriverFn, env: readonly string[]): DriverFn {
+  return async (input, call) => {
+    const read = new Set<string>();
+    try {
+      return await reading.run(read, () => fn(input, { ...call, secrets: notingOf(call.secrets) }));
+    } catch (error) {
+      if (isRunControlError(error)) throw error;
+      for (const name of env) {
+        const value = process.env[name];
+        if (value !== undefined && value.length >= REDACTED_LENGTH) read.add(value);
+      }
+      const message = errorMessage(error);
+      if (!read.size || !(mentions(message, read) || mentions(error, read))) throw error;
+      let cleared = message;
+      for (const one of [...read].toSorted((x, y) => y.length - x.length))
+        cleared = cleared.replaceAll(one, "[redacted]");
+      throw driverFailure(cleared, error);
+    }
+  };
 }
 
 /**

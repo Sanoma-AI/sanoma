@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { findSentinels, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { connectionAttempts, connectionHealth, connections, connectionSetups, ledger } from "../src/db/company.ts";
 import { workflowStatus } from "../src/db/dbos.ts";
 import {
@@ -180,19 +180,10 @@ beforeEach(async () => {
   tokenRequests.mockClear();
 });
 // Every test's history, before the next one truncates it: no code, verifier, state, token or
-// client secret in workflow history, the ledger or the attempts' rows (which hold them sealed).
+// client secret in any column of the database (the attempts' rows hold them sealed).
 afterEach(async (test) => {
   vi.restoreAllMocks();
-  const db = await pool.db();
-  const text = await db.execute<{ row: string }>(sql`
-    SELECT t::text AS row FROM dbos.workflow_status t
-    UNION ALL SELECT t::text FROM dbos.operation_outputs t
-    UNION ALL SELECT t::text FROM dbos.workflow_events t
-    UNION ALL SELECT t::text FROM dbos.notifications t
-    UNION ALL SELECT t::text FROM ${ledger} t
-    UNION ALL SELECT t::text FROM ${connectionAttempts} t`);
-  const history = text.rows.map((r) => r.row).join("\n");
-  for (const sentinel of sentinels) test.expect(history).not.toContain(sentinel);
+  test.expect(await findSentinels(databaseUrl, sentinels)).toEqual([]);
 });
 
 /** Runs `body` with a client and a worker over `store`. */
@@ -423,6 +414,30 @@ describe("OAuth consent", () => {
       expect(await client.connectionAttempt(started.attempt, { actor: "alice" })).toMatchObject({
         state: "failed",
         problem: "declined",
+      });
+    });
+  });
+
+  it("ends an attempt on another error the provider sends, keeping and repeating nothing it said", async () => {
+    await withRuntime(async (client) => {
+      const started = await authorize(client);
+      const state = new URL(started.url).searchParams.get("state")!;
+      const said = `SENTINEL-description-${randomUUID()}`;
+      sentinels.add(state).add(said);
+      const callback = new URLSearchParams({
+        error: "server_error",
+        error_description: said,
+        error_uri: `https://oauth.test/errors/${said}`,
+        state,
+      });
+      const error = (await client
+        .receiveConnection("acme", started.attempt, callback, { actor: "alice" })
+        .catch((e: unknown) => e)) as Error;
+      expect(error).toMatchObject({ reason: "rejected" });
+      expect(JSON.stringify({ error, message: error.message, stack: error.stack })).not.toContain(said);
+      expect(await client.connectionAttempt(started.attempt, { actor: "alice" })).toMatchObject({
+        state: "failed",
+        problem: "rejected",
       });
     });
   });

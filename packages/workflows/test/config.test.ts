@@ -213,7 +213,7 @@ describe("a change's operations, built in", () => {
     ]);
     expect(ids.map((id) => resolved.ops.get(id)!.effect)).toEqual(["write", "write", "write", "write"]);
     expect(resolved.ops.get("sanoma.change.merge")!.target!({ id: "c1" })).toBe("change:c1");
-    await expect(resolved.drivers.get("sanoma.change.merge")!({}, {} as never)).rejects.toThrow(
+    await expect(resolved.drivers.get("sanoma.change.merge")!({}, { secrets: {} } as never)).rejects.toThrow(
       "This worker was given no repository",
     );
     // Not a vendor with credentials to set.
