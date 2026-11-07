@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { checkRepo, declared, isCheckout, leftoverLinks, linkSet, notLinked, UsageError } from "./links.ts";
+import { errorMessage, UsageError } from "sanoma/workflows/shared";
+import { checkRepo, declared, isCheckout, leftoverLinks, linkSet, notLinked } from "./links.ts";
 
 const USAGE = `usage: sanoma dev <command>
 
@@ -16,11 +17,6 @@ Develops sanoma from the Sanoma repo in the working directory (the one holding s
 
 link and unlink remove the repo's .sanoma/app before pnpm links or unlinks: the sanoma that ran before
 generated all of it.`;
-
-/** Exit codes: 2 for how the bin was called or what it found, 1 for a failure while running. */
-const USAGE_EXIT = 2;
-
-const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** Runs pnpm in `cwd`, its output passed through; its exit code (1 for a signal). Throws when pnpm cannot start. */
 function pnpm(cwd: string, args: string[]): number {
@@ -43,13 +39,16 @@ function clearGenerated(root: string): void {
   console.log("removed .sanoma/app");
 }
 
-/** Runs the command line in the working directory; returns the exit code. */
-function main(argv: string[]): number {
+/**
+ * `sanoma dev <argv>` in the working directory: the exit code. A mistake in the call is a `UsageError`, which
+ * the bin exits 2 for; a failure while running throws, exit 1.
+ */
+export function dev(argv: string[]): number {
   let parsed;
   try {
     parsed = parseArgs({ args: argv, allowPositionals: true, options: { help: { type: "boolean", short: "h" } } });
   } catch (err) {
-    throw new UsageError(`${messageOf(err)}\n\n${USAGE}`);
+    throw new UsageError(`${errorMessage(err)}\n\n${USAGE}`);
   }
   if (parsed.values.help) {
     console.log(USAGE);
@@ -114,15 +113,3 @@ function update(root: string): number {
   );
   return status;
 }
-
-/** `sanoma dev <argv>` in the working directory: its error said on stderr; the exit code. */
-export function dev(argv: string[]): number {
-  try {
-    return main(argv);
-  } catch (err) {
-    console.error(messageOf(err));
-    return err instanceof UsageError ? USAGE_EXIT : 1;
-  }
-}
-
-if (import.meta.main) process.exitCode = dev(process.argv.slice(2));

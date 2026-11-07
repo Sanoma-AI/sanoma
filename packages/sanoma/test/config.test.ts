@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveConfig } from "sanoma/workflows";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, UsageError } from "../src/config.ts";
+import { UsageError } from "sanoma/workflows/shared";
+import { loadConfig } from "../src/config.ts";
 
 let dir = "";
 afterEach(() => rmSync(dir, { recursive: true, force: true }));

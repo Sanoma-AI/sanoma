@@ -15,7 +15,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { declared, dirIn, leftoverLinks, linkSet } from "../src/links.ts";
 
-const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+// The bin, from source: `sanoma-source` resolves `sanoma/*` to the parts' sources.
+const sanoma = fileURLToPath(new URL("../../src/cli.ts", import.meta.url));
 
 let dir = "";
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -124,7 +125,7 @@ mkdir -p "node_modules/$(dirname "$name")" && ln -sfn "$2" "node_modules/$name"
   );
   chmodSync(join(bin, "pnpm"), 0o755);
   rmSync(calls, { force: true });
-  const run = spawnSync(process.execPath, [cli, ...args], {
+  const run = spawnSync(process.execPath, ["--conditions=sanoma-source", sanoma, "dev", ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, ...env },

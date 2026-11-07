@@ -29,8 +29,12 @@ export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from ".
 /** The app's directory in the `sanoma` package, by its real path (not the symlink pnpm makes): from `src/` or `dist/`. */
 export const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 
-/** The `sanoma` package's `package.json`, the app's directory's parent's. */
-const manifestFile = join(pkgDir, "..", "package.json");
+/**
+ * The `sanoma` package's `package.json`, the app's directory's parent's: a build's server bundle
+ * imports the runtime as it resolves from here, the launcher's own copy, so the worker and the app
+ * share one.
+ */
+export const manifestFile = join(pkgDir, "..", "package.json");
 const manifest = JSON.parse(readFileSync(manifestFile, "utf8")) as {
   version: string;
   exports: Record<string, string | { default: string }>;
@@ -232,8 +236,6 @@ function installed(name: string): string {
   return found;
 }
 
-export const defaultRuntimeFrom = manifestFile;
-
 const inside = (file: string, dir: string) => {
   const rel = relative(dir, file);
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
@@ -248,16 +250,11 @@ export const companyFile = (id: string, repo: string) => {
 export interface AppViteOptions {
   /** A company repo: build it, the app's routes and its sites, as one Start build. Without one, the package's own build. */
   repo?: string;
-  /**
-   * A file the server bundle's runtime imports resolve from: the launcher's own `package.json`, so
-   * the worker and the app share one copy. Defaults to `sanoma`'s `package.json`.
-   */
-  runtimeFrom?: string;
 }
 
 /** The Vite config of the app's build: the package's own, or with `repo` a company repo's with its sites. */
 export function appViteConfig(options: AppViteOptions = {}): InlineConfig {
-  return options.repo === undefined ? packageConfig() : repoConfig(realpathSync(options.repo), options.runtimeFrom);
+  return options.repo === undefined ? packageConfig() : repoConfig(realpathSync(options.repo));
 }
 
 const tailwindcss = async () => (await import("@tailwindcss/vite")).default();
@@ -307,8 +304,8 @@ let tailwindHook = false;
 function tailwindFromApp(): void {
   if (tailwindHook) return;
   tailwindHook = true;
-  const fromApp = createRequire(defaultRuntimeFrom);
-  const parentURL = pathToFileURL(defaultRuntimeFrom).href;
+  const fromApp = createRequire(manifestFile);
+  const parentURL = pathToFileURL(manifestFile).href;
   registerHooks({
     resolve(specifier, context, next) {
       if (!/^tailwindcss(\/|$)/.test(specifier)) return next(specifier, context);
@@ -336,7 +333,7 @@ export const specifier = (file: string) => JSON.stringify(file.split(sep).join("
  * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does. With `bundle`,
  * the plugins that make it the Worker's app bundle instead (`buildAppBundle`).
  */
-export function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom, bundle?: PluginOption[]): InlineConfig {
+export function repoConfig(repo: string, bundle?: PluginOption[]): InlineConfig {
   const { src } = appSources();
   // The route tree is the one both builds share; the Worker's keeps its own cache and temporary files.
   const routeTree = join(repo, ".sanoma", "app", "routeTree.gen.ts");
@@ -371,7 +368,7 @@ export function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom, bundl
         },
       },
       sharedDeps(repo, src),
-      runtimeExternal(runtimeFrom, bundle !== undefined),
+      runtimeExternal(bundle !== undefined),
       ...(bundle ?? []),
       contentPlugin(repo),
       sitesPlugin(repo),
@@ -601,12 +598,12 @@ function sharedDeps(repo: string, src: string): Plugin {
 
 /**
  * The server bundle holds everything but the runtime, which it imports by absolute URL from
- * `runtimeFrom`'s resolution (`sanoma`'s own, pg and DBOS among its dependencies), so it needs nothing
+ * `manifestFile`'s resolution (`sanoma`'s own, pg and DBOS among its dependencies), so it needs nothing
  * else from the company's install. Build only: dev's server
  * resolves as Node does. With `bundled` (the Worker's build, which has no install to import from),
  * the same resolution, bundled.
  */
-function runtimeExternal(runtimeFrom: string, bundled = false): Plugin {
+function runtimeExternal(bundled = false): Plugin {
   const found = (id: string) => (bundled ? id : { id: pathToFileURL(id).href, external: "absolute" as const });
   return {
     name: "sanoma:runtime-external",
@@ -616,8 +613,8 @@ function runtimeExternal(runtimeFrom: string, bundled = false): Plugin {
     applyToEnvironment: (environment) => environment.name === "ssr",
     async resolveId(source, _importer, options) {
       if (!isIn(RUNTIME, source)) return;
-      const resolved = await this.resolve(source, runtimeFrom, { ...options, skipSelf: true });
-      if (!resolved) return this.error(`${source} does not resolve from ${runtimeFrom}`);
+      const resolved = await this.resolve(source, manifestFile, { ...options, skipSelf: true });
+      if (!resolved) return this.error(`${source} does not resolve from ${manifestFile}`);
       return found(resolved.id);
     },
   };
@@ -797,15 +794,15 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
 /**
  * The build's key: `sanoma`'s version and the app's source directory, every file under `sites/`, an app's
  * sites and `content/` (dotfiles and dot-folders aside), and where the runtime the server bundle imports
- * by URL is installed (`runtimeFrom`, and its dependencies: a real path names its version under
+ * by URL is installed (`manifestFile`'s, and its dependencies: a real path names its version under
  * pnpm), so an upgrade of the runtime is a new build.
  */
-function buildKey(repo: string, runtimeFrom: string): string {
+function buildKey(repo: string): string {
   const { src } = appSources();
   const hash = createHash("sha256");
-  hash.update(`${manifest.version}\0${src}\0${realpathSync(runtimeFrom)}\0`);
+  hash.update(`${manifest.version}\0${src}\0${manifestFile}\0`);
   for (const name of RUNTIME_DEPS) {
-    const dir = moduleDir(name, dirname(runtimeFrom));
+    const dir = moduleDir(name, dirname(manifestFile));
     hash.update(`${name}=${dir === undefined ? "" : realpathSync(dir)}\0`);
   }
   const files = [...siteTrees(repo).map(({ dir }) => dir), "content"]
@@ -828,8 +825,6 @@ function buildKey(repo: string, runtimeFrom: string): string {
 export interface BuildAppOptions {
   /** Receives what the build has to say: a refused site folder, Vite's warnings and errors. */
   log?: (line: string) => void;
-  /** See `AppViteOptions.runtimeFrom`. */
-  runtimeFrom?: string;
 }
 
 /** Vite's logger at `warn`, each warning and error said through `log`; Vite's own without one. */
@@ -858,8 +853,7 @@ export async function buildApp(
   for (const dir of sitesOf(root).refused) {
     log?.(`${dir} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
   }
-  const runtimeFrom = options.runtimeFrom ?? defaultRuntimeFrom;
-  const distDir = join(root, ".sanoma", "app", "build", buildKey(root, runtimeFrom));
+  const distDir = join(root, ".sanoma", "app", "build", buildKey(root));
   const routeTree = join(root, ".sanoma", "app", "routeTree.gen.ts");
   const reused = () => {
     const saved = join(distDir, "routeTree.gen.ts");
@@ -872,7 +866,7 @@ export async function buildApp(
   const customLogger = quietLogger(vite, log);
   try {
     const builder = await vite.createBuilder({
-      ...appViteConfig({ repo: root, runtimeFrom }),
+      ...appViteConfig({ repo: root }),
       build: { outDir, emptyOutDir: true },
       logLevel: "warn",
       customLogger,

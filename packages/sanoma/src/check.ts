@@ -16,7 +16,7 @@ import {
 import { problemLine, warningLine } from "sanoma/workflows/shared";
 import { runScenarios } from "sanoma/workflows/scenarios";
 import type { Loaded } from "./config.ts";
-import { runtimeFrom, siteBuild } from "./sites.ts";
+import { siteBuild } from "./sites.ts";
 
 export interface CheckOptions {
   /** The Postgres the scenarios' worker runs on, answering already: a database of its own, never the config's. */
@@ -117,7 +117,7 @@ async function checkSites(
   log: (line: string) => void,
 ): Promise<{ typed: string[]; built: string[] }> {
   log(`build ${sites.join(" ")}`);
-  const built = await build.buildApp(root, { runtimeFrom: runtimeFrom() }).then(
+  const built = await build.buildApp(root).then(
     () => [],
     (err: unknown) => buildProblems(errorMessage(err), log),
   );
@@ -134,7 +134,7 @@ async function checkBundle(config: Loaded["config"], root: string, log: (line: s
   const { buildAppBundle, NodeOnlyImport } = await import("sanoma/app/bundle");
   log("build the app bundle");
   try {
-    await buildAppBundle(root, { config, runtimeFrom: runtimeFrom() });
+    await buildAppBundle(root, { config });
     return [];
   } catch (err) {
     if (err instanceof NodeOnlyImport) return [err.message];

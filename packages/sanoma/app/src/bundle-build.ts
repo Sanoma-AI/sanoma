@@ -18,7 +18,7 @@ import { type AppBundle, prerenderedAsset } from "./app-bundle.ts";
 import {
   appSources,
   companyFile,
-  defaultRuntimeFrom,
+  manifestFile,
   pkgDir,
   quietLogger,
   repoConfig,
@@ -106,8 +106,6 @@ export interface BuildAppBundleOptions {
   domains?: Readonly<Record<string, string>>;
   /** See `BuildAppOptions.log`. */
   log?: (line: string) => void;
-  /** See `AppViteOptions.runtimeFrom`. */
-  runtimeFrom?: string;
 }
 
 /**
@@ -141,7 +139,7 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): 
   const id = `\0${BUNDLE}`;
   const runtimeId = `\0${RUNTIME}`;
   // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
-  const fromRuntime = createRequire(defaultRuntimeFrom);
+  const fromRuntime = createRequire(manifestFile);
   const cedar = join(dirname(fromRuntime.resolve("@cedar-policy/cedar-wasm/nodejs")), "..", "web");
   return {
     name: "sanoma:app-bundle",
@@ -562,7 +560,7 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
   rmSync(outDir, { recursive: true, force: true });
   const vite = await import("vite");
   const built: InlineConfig = {
-    ...repoConfig(root, options.runtimeFrom ?? defaultRuntimeFrom, await bundlePlugins(root, config.file, snapshot)),
+    ...repoConfig(root, await bundlePlugins(root, config.file, snapshot)),
     build: { outDir, emptyOutDir: true },
     logLevel: "warn",
     customLogger: quietLogger(vite, log),

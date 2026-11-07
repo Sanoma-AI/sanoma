@@ -1,11 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-/**
- * This package's `package.json`, by real path: a sites build's server bundle imports the runtime
- * as it resolves from here, the launcher's own copy, so the worker and the app share one.
- */
-export const runtimeFrom = () => realpathSync(fileURLToPath(new URL("../package.json", import.meta.url)));
+import { existsSync } from "node:fs";
 
 /**
  * `sanoma/app/build` when the repo has a `sites/` directory, or an app has one

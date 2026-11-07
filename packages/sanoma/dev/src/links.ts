@@ -1,8 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-
-/** How the bin was called, or what it found where it was called: exit 2. */
-export class UsageError extends Error {}
+import { UsageError } from "sanoma/workflows/shared";
 
 interface Manifest {
   name?: string;

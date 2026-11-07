@@ -45,5 +45,3 @@ export async function tfschema(argv: string[]): Promise<number> {
     return 2;
   }
 }
-
-if (import.meta.main) process.exitCode = await tfschema(process.argv.slice(2));

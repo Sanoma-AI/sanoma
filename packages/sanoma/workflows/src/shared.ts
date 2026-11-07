@@ -623,6 +623,9 @@ export const approverLabel = (approver: Approver): string =>
 /** An error's message, or the value as text when it is not an Error. */
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** A mistake in how the bin was called or in what it found: its message is printed alone, and the exit code is 2. */
+export class UsageError extends Error {}
+
 /** True when an outline's op id, a computed segment shown as `*`, could be this op: `a.*.c` fits `a.b.c`. */
 export function fitsOp(pattern: string, op: string): boolean {
   const want = pattern.split(".");

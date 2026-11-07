@@ -5,15 +5,17 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, parseEnv } from "node:util";
 import type { SanomaConfig } from "sanoma/workflows";
-import { type Loaded, type LoadedConfig, loadConfig, UsageError } from "./config.ts";
+import { errorMessage, UsageError } from "sanoma/workflows/shared";
+import { type Loaded, type LoadedConfig, loadConfig } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
 import { emit, eventsOn } from "./events.ts";
 import type { EnsuredPostgres } from "./postgres.ts";
 import type { Listening } from "./listen.ts";
 
-// Only Node's modules, ./config.ts and ./events.ts are imported here: each command imports what it runs, so
-// `--help`, `env`, `ledger export` and the dev-mode parent load neither the worker nor the app (the
-// parent loads the app's Node-only build module to see whether there are sites).
+// Only Node's modules, sanoma/workflows/shared, ./config.ts and ./events.ts are imported here: each
+// command imports what it runs, so `--help`, `env`, `ledger export` and the dev-mode parent load
+// neither the worker nor the app (the parent loads the app's Node-only build module to see whether
+// there are sites).
 
 const USAGE = `usage: sanoma [command]
 
@@ -60,11 +62,9 @@ const USAGE_EXIT = 2;
 
 const log = (line: string) => console.error(line);
 
-const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
 /** A failure to start or stop: its message on stderr, and as an `error` event. */
 function fail(err: unknown): void {
-  const message = messageOf(err);
+  const message = errorMessage(err);
   log(message);
   emit({ event: "error", message });
 }
@@ -78,7 +78,7 @@ export async function main(argv: string[]): Promise<number> {
   try {
     args = parse(argv);
   } catch (err) {
-    throw new UsageError(`${messageOf(err)}\n\n${USAGE.trimEnd()}`);
+    throw new UsageError(`${errorMessage(err)}\n\n${USAGE.trimEnd()}`);
   }
   const { positionals, values } = args;
   if (values.help) {
@@ -135,13 +135,12 @@ export async function main(argv: string[]): Promise<number> {
       // Hidden: the worker's port runs it in a revision's checkout (`appBundleRoute`).
       if (!values.out || rest.length) throw new UsageError("usage: sanoma app-bundle --out <file>");
       const { config, root } = await loadConfig();
-      const [{ buildAppBundle }, { parseDomains }, { runtimeFrom }] = await Promise.all([
+      const [{ buildAppBundle }, { parseDomains }] = await Promise.all([
         import("sanoma/app/bundle"),
         import("./serve.ts"),
-        import("./sites.ts"),
       ]);
       const domains = parseDomains(process.env.SANOMA_DOMAINS) ?? {};
-      const bundle = await buildAppBundle(root, { config, domains, runtimeFrom: runtimeFrom(), log });
+      const bundle = await buildAppBundle(root, { config, domains, log });
       writeFileSync(values.out, JSON.stringify(bundle));
       return 0;
     }

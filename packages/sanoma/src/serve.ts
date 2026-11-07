@@ -18,10 +18,9 @@ import {
   superviseWorker,
 } from "sanoma/workflows";
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "sanoma/workflows/describe";
-import { domainsOf } from "sanoma/workflows/shared";
+import { domainsOf, UsageError } from "sanoma/workflows/shared";
 import type { WakeupService } from "sanoma/workflows/wakeup-service";
-import { UsageError } from "./config.ts";
-import { runtimeFrom, siteBuild } from "./sites.ts";
+import { siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
 
 export interface Stoppable {
@@ -140,7 +139,7 @@ async function appSites(
   if (sites.length && !hot) {
     if (dev) log(`SANOMA_APP_HOST=${dev} is not this machine: the sites are built, not served hot`);
     log(`building the app with ${named}`);
-    const { distDir, built } = await build.buildApp(root, { log, runtimeFrom: runtimeFrom() });
+    const { distDir, built } = await build.buildApp(root, { log });
     if (!built) log("app build up to date");
     return { distDir };
   }
