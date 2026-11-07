@@ -626,6 +626,22 @@ export const errorMessage = (err: unknown) => (err instanceof Error ? err.messag
 /** A mistake in how the bin was called or in what it found: its message is printed alone, and the exit code is 2. */
 export class UsageError extends Error {}
 
+/** The entries of `sanoma` a browser bundle may load: plain values and React, no server, runtime or credentials. */
+export const CLIENT_ENTRIES: ReadonlySet<string> = new Set([
+  "sanoma/site",
+  "sanoma/ui",
+  "sanoma/ui.css",
+  "sanoma/claims",
+  "sanoma/workflows/shared",
+  "sanoma/workflows/description",
+]);
+
+/** The specifiers of `sanoma`'s `exports` (its `package.json`'s) that are server code: every one but `CLIENT_ENTRIES`. */
+export const serverEntries = (exports: object): string[] =>
+  Object.keys(exports)
+    .map((key) => `sanoma${key.slice(1)}`)
+    .filter((name) => !CLIENT_ENTRIES.has(name));
+
 /** True when an outline's op id, a computed segment shown as `*`, could be this op: `a.*.c` fits `a.b.c`. */
 export function fitsOp(pattern: string, op: string): boolean {
   const want = pattern.split(".");

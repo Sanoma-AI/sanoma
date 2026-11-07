@@ -29,8 +29,8 @@ const REFUSED_PACKAGES: [RegExp, string][] = [
   [/^sanoma\/testing(\/|$)/, `fakes and test helpers belong in tests; ${THROUGH_CTX}`],
   [/^sanoma\/app(\/|$)/, "the app starts runs and decides approvals, so a workflow could approve itself"],
   [/^@sanoma-ai\/connector-[^/]+\/(fake|driver|remote|vault)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
-  // Its other subpaths; `sanoma/workflows` is an author package.
-  [/^sanoma\/(?!workflows$)/, "`sanoma` has no entry points for a workflow: import its names from `sanoma` itself"],
+  // Its other subpaths (`sanoma/workflows`, an author package, is allowed first).
+  [/^sanoma\//, "`sanoma` has no entry points for a workflow: import its names from `sanoma` itself"],
 ];
 
 /**
@@ -199,8 +199,8 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
         : "")
     );
   }
-  for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
+  for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
   return "import only from `sanoma` (or `sanoma/workflows`), a `@sanoma-ai/connector-*` package, zod, or a file beside this one";
 }
 

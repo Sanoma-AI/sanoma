@@ -1001,6 +1001,7 @@ describe("a build that fails, or leaves a site out", () => {
     ["the runtime", '"sanoma/workflows"'],
     ["the runtime through sanoma", '"sanoma"'],
     ["the app's Node entry", '"sanoma/app"'],
+    ["a server entry outside the runtime's folder", '"sanoma/secrets"'],
   ])("refuses a site that imports %s", async (_, from) => {
     const repo = company({
       "sites/hello/routes/index.tsx": sitePage("/sites/hello/", `import * as runtime from ${from};`, "String(runtime)"),

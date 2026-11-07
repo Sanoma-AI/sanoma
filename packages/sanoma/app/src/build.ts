@@ -1,3 +1,4 @@
+/// <reference lib="es2025.regexp" />
 // The app's build, Node only: the package's own (`vite.config.ts`), and a company repo's with its
 // sites, the app's routes plus every `sites/<name>/routes` as one TanStack Start build under
 // `<repo>/.sanoma/app`. Nothing is written into the app package or under `node_modules`. Only
@@ -19,7 +20,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { APP_NAME, problemLine, SITE_NAME, siteKey } from "sanoma/workflows/shared";
+import { APP_NAME, problemLine, serverEntries, SITE_NAME, siteKey } from "sanoma/workflows/shared";
 import type { InlineConfig, Logger, Plugin, PluginOption, ViteDevServer } from "vite";
 import { CONTENT_TYPES, type ContentProblem, contentTypes, readContent, STYLESHEET_FILE } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
@@ -56,11 +57,12 @@ const RUNTIME = [
 const isIn = (names: string[], id: string) => names.some((name) => id === name || id.startsWith(`${name}/`));
 
 // The browser bundle may import only types from the runtime (DBOS, Postgres), and the values of
-// `sanoma/workflows/shared` and `/description` (zod alone). `import type` is erased before
-// resolution, so anything else of these reaching the client is a mistake: fail, in dev as in the
-// build. (Start adds these to its own denials, and to the modules marked server-only, such as server/core.ts.)
-const CLIENT_DENIED =
-  /^(sanoma\/(workflows(?!\/(shared|description)$)|internal\/|testing|better-auth)|@sanoma-ai\/connector-|@dbos-inc\/|pg$|drizzle-orm(\/|$))/;
+// `sanoma`'s client entries (`CLIENT_ENTRIES`). `import type` is erased before resolution, so
+// anything else of these reaching the client is a mistake: fail, in dev as in the build. (Start
+// adds these to its own denials, and to the modules marked server-only, such as server/core.ts.)
+const CLIENT_DENIED = new RegExp(
+  `^((${serverEntries(manifest.exports).map(RegExp.escape).join("|")})$|@sanoma-ai/connector-|@dbos-inc/|pg$|drizzle-orm(/|$))`,
+);
 
 /** What a company file may import without the company depending on it: the app's own copy, so there is one. */
 const SHARED = /^(react|react-dom|@tanstack\/[^/]+)(\/.*)?$/;
@@ -389,8 +391,7 @@ export function repoConfig(repo: string, bundle?: PluginOption[]): InlineConfig 
           // The app's source (relative to the root when it is installed in the repo) and the sites.
           include: [`${src}/**`, `${srcDirectory}/**`, "sites/**", "apps/*/sites/**"],
           // The defaults exclude node_modules, where the app's own source is in a company's install.
-          // A site reaches the runtime most easily through `sanoma`, and Node's startApp through the app's root.
-          client: { specifiers: [CLIENT_DENIED, /^(sanoma|sanoma\/app)$/], excludeFiles: [] },
+          client: { specifiers: [CLIENT_DENIED], excludeFiles: [] },
           server: { excludeFiles: [] },
         },
       }),

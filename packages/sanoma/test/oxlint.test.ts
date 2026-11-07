@@ -18,7 +18,7 @@ beforeAll(() => {
     join(dir, "workflows/via-sanoma.ts"),
     `import { defineWorkflow, z, defineConfig } from "sanoma";
 import type { Ctx } from "sanoma";
-import { main } from "sanoma/dist/cli.js";
+import { main } from "sanoma/app/build";
 export const all = [defineWorkflow, z, defineConfig, main, Date.now()] as [unknown, unknown, Ctx<[]>, unknown, number];
 `,
   );
@@ -45,17 +45,17 @@ import { ghost } from "@sanoma-ai/connector-ghost";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { serverOnly } from "@tanstack/react-start/server";
 import { defineWorkflow } from "sanoma";
-import { main } from "sanoma/dist/cli.js";
+import { secret } from "sanoma/resources";
 import { startApp } from "sanoma/app";
 import { startWorker } from "sanoma/workflows";
 import { fake } from "sanoma/testing";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { readFileSync } from "node:fs";
 import { hello } from "../../../workflows/hello";
-import { handler } from "sanoma/app/server";
-import { Badge } from "sanoma/app/ui";
+import { handler } from "sanoma/app/build";
+import { Badge } from "sanoma/internal/bridge";
 import kinds from "virtual:sanoma/content";
-export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, Badge, kinds, process.env.KEY];
+export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, secret, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, Badge, kinds, process.env.KEY];
 export const pg = require("pg");
 export type Types = [Ctx<[]>, typeof Hello];
 `,
@@ -125,7 +125,7 @@ describe("the shipped oxlint.json", () => {
         file: "workflows/via-sanoma.ts",
         line: 3,
         rule: imports,
-        text: expect.stringMatching(/sanoma\/dist\/cli\.js.*no entry points for a workflow/),
+        text: expect.stringMatching(/sanoma\/app\/build.*no entry points for a workflow/),
       },
       {
         file: "workflows/via-sanoma.ts",
@@ -173,7 +173,7 @@ describe("the shipped oxlint.json", () => {
       },
       { file: index, line: 10, rule: imports, text: expect.stringMatching(server) },
       { file: index, line: 11, rule: imports, text: expect.stringMatching(/^'sanoma' /) },
-      { file: index, line: 12, rule: imports, text: expect.stringMatching(/^'sanoma\/dist\/cli\.js'/) },
+      { file: index, line: 12, rule: imports, text: expect.stringMatching(/^'sanoma\/resources' .*/) },
       { file: index, line: 13, rule: imports, text: expect.stringMatching(/`sanoma\/ui`/) },
       { file: index, line: 14, rule: imports, text: expect.stringMatching(server) },
       { file: index, line: 15, rule: imports, text: expect.stringMatching(/belong in tests/) },
@@ -189,15 +189,9 @@ describe("the shipped oxlint.json", () => {
         file: index,
         line: 19,
         rule: imports,
-        text: expect.stringMatching(/^'sanoma\/app\/server'.*`sanoma\/ui`/),
+        text: expect.stringMatching(/^'sanoma\/app\/build'.*`sanoma\/ui`/),
       },
-      // The kit's one path is sanoma's.
-      {
-        file: index,
-        line: 20,
-        rule: imports,
-        text: expect.stringMatching(/^'sanoma\/app\/ui'.*looks from `sanoma\/ui`/),
-      },
+      { file: index, line: 20, rule: imports, text: expect.stringMatching(server) },
       {
         file: index,
         line: 21,

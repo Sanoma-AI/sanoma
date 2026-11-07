@@ -2,20 +2,24 @@
 // `build`. It is self-contained, with no `extends` into `node_modules` (which the
 // installer lays out), made of:
 // - the runtime's `workflows/oxlint.json` (its overrides for `workflows/**`), with an entry for `sanoma`
-//   derived from `sanoma/workflows`'s (the same names), the rest of `sanoma/**` refused but the
-//   subpaths that file names, and the plugin (`date`) loaded from this package's `dist/`;
-// - an override for `sites/**`: a site is client code, reaching the app through `sanoma/site` and
-//   `sanoma/ui` alone, with no server, runtime, connector or environment of its own (the plugin's
-//   `site-file` says the rest);
+//   derived from `sanoma/workflows`'s (the same names), each other entry of `sanoma` that file does
+//   not name refused, and the plugin (`date`) loaded from this package's `dist/`;
+// - an override for `sites/**`: a site is client code, importing none of `sanoma`'s server entries
+//   (`serverEntries`: its `exports` but the client ones) and no runtime, connector or environment of
+//   its own (the plugin's `site-file` says the rest);
 // - the rules this checkout holds its own code to (the root `.oxlintrc.json`), without its test
 //   framework's and its own paths.
+// Each entry is named exactly: a path `exports` does not list does not resolve.
 import { readFileSync, writeFileSync } from "node:fs";
 import { REMEDY } from "../src/site-lint.ts";
+import { serverEntries } from "../workflows/src/shared.ts";
 
 type Json = Record<string, any>;
 const read = (path: string): Json => JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
 
-const own = read("../package.json").name as string;
+const manifest = read("../package.json") as { name: string; exports: Json };
+const own = manifest.name;
+const entries = Object.keys(manifest.exports).map((key) => `${own}${key.slice(1)}`);
 const workflows = read("../workflows/oxlint.json");
 const root = read("../../../.oxlintrc.json");
 
@@ -25,6 +29,7 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
   if (rule === undefined) return override;
   const [severity, { paths, patterns }] = rule;
   const author = paths.find((p) => p.name === `${own}/workflows`)!;
+  const named = new Set([own, ...paths.map((p) => p.name), ...patterns.flatMap((p) => p.group as string[])]);
   return {
     ...override,
     rules: {
@@ -39,15 +44,14 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
               name: own,
               message: `A workflow imports only these and types from ${own}: the rest (defineConfig, the ledger stores) belongs in sanoma.config.ts, where the drivers and credentials are. Ask for approval with \`ctx.approval\`.`,
             },
+            ...entries
+              .filter((name) => !named.has(name))
+              .map((name) => ({
+                name,
+                message: `\`${own}\` has no entry points for a workflow: import its names from \`${own}\` itself.`,
+              })),
           ],
-          patterns: [
-            ...patterns,
-            {
-              // Its own subpaths the runtime's file names already (`sanoma/workflows`, `sanoma/testing`, …) say why there.
-              group: [`${own}/**`, ...paths.filter((p) => p.name.startsWith(`${own}/`)).map((p) => `!${p.name}`)],
-              message: `\`${own}\` has no entry points for a workflow: import its names from \`${own}\` itself.`,
-            },
-          ],
+          patterns,
         },
       ],
     },
@@ -55,23 +59,15 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
 });
 
 const SERVER = `A site has no server code: ${REMEDY}`;
-/** What a site may import of this package, and the parts refused for a reason of their own (`app`, `testing`). */
-const SITE_PARTS = new Set(["site", "ui", "ui.css", "claims", "app", "testing"]);
-/**
- * The rest of this package, named one first segment at a time (`workflows`, `internal`, `dist`, …):
- * oxlint lets through anything one group's negation names, in every group, so `${own}/**` with
- * the site's entries negated would let `sanoma/testing` and `sanoma/app/*` through too.
- */
-const manifest = read("../package.json") as { exports: Json; files: string[] };
-const serverParts = [
-  ...new Set(
-    [...Object.keys(manifest.exports).map((key) => key.slice(2)), ...manifest.files.filter((f) => !f.startsWith("!"))]
-      .map((path) => path.split("/")[0]!)
-      .filter((part) => part !== "" && !SITE_PARTS.has(part)),
-  ),
-].toSorted();
 const APP =
   "A site imports how a page looks from `sanoma/ui` and what talks to the app (its route APIs, `api`, `RunForm`, `useActor`) from `sanoma/site`; the rest of the app is its server.";
+/** Why a site may not import one of `sanoma`'s server entries. */
+const refusal = (name: string): string => {
+  const part = name.split("/")[1];
+  if (part === "app") return APP;
+  if (part === "testing") return `Fakes and test helpers belong in tests. ${SERVER}`;
+  return SERVER;
+};
 const sites = {
   files: ["sites/**", "apps/*/sites/**"],
   // The listing of the sites the build generates.
@@ -83,27 +79,16 @@ const sites = {
       "error",
       {
         paths: [
-          ...[own, "pg", "drizzle-orm"].map((name) => ({ name, message: SERVER })),
-          { name: `${own}/app`, message: APP },
+          ...serverEntries(manifest.exports).map((name) => ({ name, message: refusal(name) })),
+          ...["pg", "drizzle-orm"].map((name) => ({ name, message: SERVER })),
           {
             name: "@tanstack/react-start",
             message: `${SERVER} Its route APIs (\`Link\`, \`useNavigate\`, …) come from \`sanoma/site\`, and \`createFileRoute\` from \`@tanstack/react-router\`.`,
           },
         ].map((path) => ({ ...path, allowTypeImports: true })),
         patterns: [
-          { group: [`${own}/app/**`], message: APP },
           {
-            group: [`${own}/testing`, `${own}/testing/**`],
-            message: `Fakes and test helpers belong in tests. ${SERVER}`,
-          },
-          {
-            group: [
-              ...serverParts.flatMap((part) => [`${own}/${part}`, `${own}/${part}/**`]),
-              "@dbos-inc/**",
-              "pg/**",
-              "drizzle-orm/**",
-              "@tanstack/react-start/**",
-            ],
+            group: ["@dbos-inc/**", "pg/**", "drizzle-orm/**", "@tanstack/react-start/**"],
             message: SERVER,
           },
           {
