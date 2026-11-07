@@ -1,8 +1,9 @@
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tfConnector } from "@sanoma-ai/bridge/connector";
+import { BridgeError } from "@sanoma-ai/bridge";
 import { type BridgeState, stateBridge } from "@sanoma-ai/bridge/fake";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { findSentinels, testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { fakeHost, testRepository } from "@sanoma-ai/testing/host";
 import { fakeWakeup } from "@sanoma-ai/testing/wakeup";
@@ -475,6 +476,34 @@ describe("the apply workflow on a vendor that replaces", () => {
     const forgotten = await apply({ only: [deploys], answers: { [deploys]: "forget" } });
     expect(forgotten.report.plan.steps).toMatchObject([{ action: "gone", answer: "forget" }]);
     expect(readLockfile(root).bindings[deploys]).toBeUndefined();
+  });
+
+  /** A provider's diagnostic, repeating the token it was sent. */
+  const said = (summary: string) => [
+    { severity: "error" as const, summary, detail: `token ${token} was refused`, attributePath: "token" },
+  ];
+  it("records a provider's failure without the secret its diagnostics repeat", async () => {
+    const { plan, apply: applied } = bridge;
+    // Planning refuses, the bridge's error and its diagnostics naming the token; then applying does.
+    bridge.plan = async () => {
+      throw new BridgeError("invalid_argument", `invalid token ${token}`, said("Invalid token"));
+    };
+    declare("ap");
+    try {
+      const planned = await apply({ only: [web] });
+      bridge.plan = plan;
+      bridge.apply = async () => ({ errors: said("Unauthorized"), warnings: [] });
+      const failed = await apply({ only: [web] });
+      for (const { runId, report } of [planned, failed]) {
+        expect(JSON.stringify(report)).toContain("[redacted]");
+        expect(JSON.stringify(report)).not.toContain(token);
+        expect(JSON.stringify(await app.client.ledger(runId))).not.toContain(token);
+      }
+      expect(await findSentinels(testDatabaseUrl("apply-acme"), [token])).toEqual([]);
+    } finally {
+      Object.assign(bridge, { plan, apply: applied });
+      declare("us");
+    }
   });
 
   it("fails an update the vendor plans otherwise by the time it runs, and goes on", async () => {

@@ -11,6 +11,7 @@ import type { Fake } from "@sanoma-ai/workflows/fake";
 
 export type { Fake, FakeCall, FakeOptions } from "@sanoma-ai/workflows/fake";
 export { ensureBuilt, waitFor } from "./build.ts";
+export { findSentinels, type SentinelHit } from "./sentinel.ts";
 
 /**
  * The Postgres URL for one test file: `SANOMA_TEST_DATABASE_URL` (default

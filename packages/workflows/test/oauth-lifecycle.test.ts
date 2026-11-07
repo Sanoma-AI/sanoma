@@ -4,7 +4,8 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { findSentinels, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { runEnded } from "@sanoma-ai/testing/host";
 import {
   connectionAttempts,
   connectionHealth,
@@ -32,6 +33,8 @@ import {
   withSetup,
 } from "../src/index.ts";
 import { lazyDb } from "../src/db.ts";
+import { postgresSecretStore } from "../src/credentials.ts";
+import type { ConnectionAttempts } from "../src/oauth.ts";
 import { ConnectionRenewals } from "../src/renewal.ts";
 import { secret } from "../src/secret.ts";
 import { rootWith } from "./harness.ts";
@@ -41,7 +44,7 @@ import { rootWith } from "./harness.ts";
 // "processes" (each a client with its own pools and, with the built-in store, its own store
 // handle on the same tables), a holder that stopped before or after sending, a renewed grant the
 // store did not keep, rotation, revocation and disconnect. Every token is a sentinel the last
-// check looks for in the ledger, DBOS's tables and the runtime's lifecycle rows.
+// check looks for in every column of the database.
 
 const PROVIDER = "https://oauth.lifecycle.test";
 const API = "https://api.lifecycle.test";
@@ -53,8 +56,9 @@ const sentinels = new Set<string>([CLIENT.clientSecret]);
 const codes = new Map<string, { challenge: string; redirectUri: string }>();
 const access = new Set<string>();
 const refresh = new Map<string, { spent: boolean }>();
-/** The refresh tokens the provider was sent, in order. */
+/** The refresh tokens the provider was sent, in order, and the codes. */
 const refreshed: string[] = [];
+const exchanged: string[] = [];
 const revocations: string[] = [];
 const provider = {
   /** How long each issued access token lives, in seconds: under five minutes is due at once. */
@@ -70,6 +74,8 @@ const provider = {
   thingStatus: undefined as number | undefined,
   /** Holds `/me` (the verifier) until it resolves. */
   holdMe: undefined as Promise<void> | undefined,
+  /** Holds each code's exchange until it resolves. */
+  holdCode: undefined as Promise<void> | undefined,
 };
 const thingCalls = vi.fn<() => void>();
 
@@ -104,6 +110,8 @@ const server = setupServer(
       known.spent = true;
       return HttpResponse.json(issue());
     }
+    exchanged.push(form.get("code") ?? "");
+    await provider.holdCode;
     const code = codes.get(form.get("code") ?? "");
     const challenge = createHash("sha256")
       .update(form.get("code_verifier") ?? "")
@@ -194,6 +202,9 @@ const ref = { vendor: "acme", $connection: main.$connection };
 
 const databaseUrl = testDatabaseUrl("oauth_lifecycle");
 const pool = lazyDb(databaseUrl, "oauth-lifecycle-tests");
+/** The built-in store, through a handle of the test's own, and `main`'s grant's address in it. */
+const builtIn = postgresSecretStore(() => pool.db());
+const GRANT = { namespace: "default", path: "ACME_MAIN" };
 /** The built-in store (Postgres) unless one is given: each config's handle on it is its own. */
 const config = (options: { store?: SecretStore; root?: string } = {}): SanomaConfig => ({
   databaseUrl,
@@ -212,31 +223,27 @@ async function processOf(options: Parameters<typeof config>[0] = {}): Promise<Sa
   return client;
 }
 
+/** Starts consent for `main` as alice, and the provider's callback for it, its code issued. */
+async function consented(client: SanomaClient) {
+  const started = await client.authorizeConnection(
+    { connection: ref },
+    { actor: "alice", id: randomUUID(), redirectUri: REDIRECT, client: CLIENT },
+  );
+  const url = new URL(started.url);
+  const code = `SENTINEL-code-${randomUUID()}`;
+  sentinels.add(code).add(url.searchParams.get("state")!);
+  codes.set(code, { challenge: url.searchParams.get("code_challenge")!, redirectUri: REDIRECT });
+  return { attempt: started.attempt, callback: new URLSearchParams({ code, state: url.searchParams.get("state")! }) };
+}
+
 /** Connects `main` by consent through a worker, which then stops: no background renewal runs after. */
 async function connect(options: Parameters<typeof config>[0] = {}): Promise<SanomaClient> {
   const worker = await startWorker(config(options));
   const client = await processOf(options);
   try {
-    const started = await client.authorizeConnection(
-      { connection: ref },
-      { actor: "alice", id: randomUUID(), redirectUri: REDIRECT, client: CLIENT },
-    );
-    const url = new URL(started.url);
-    const code = `SENTINEL-code-${randomUUID()}`;
-    sentinels.add(code).add(url.searchParams.get("state")!);
-    codes.set(code, { challenge: url.searchParams.get("code_challenge")!, redirectUri: REDIRECT });
-    const { runId } = await client.receiveConnection(
-      "acme",
-      started.attempt,
-      new URLSearchParams({ code, state: url.searchParams.get("state")! }),
-      { actor: "alice" },
-    );
-    const run = await waitFor(
-      () => client.run(runId),
-      (r) => r?.status === "finished" || r?.status === "failed",
-      20_000,
-    );
-    expect(run?.status).toBe("finished");
+    const { attempt, callback } = await consented(client);
+    const { runId } = await client.receiveConnection("acme", attempt, callback, { actor: "alice" });
+    expect((await runEnded(client, runId, 20_000))?.status).toBe("finished");
   } finally {
     await worker.stop();
   }
@@ -277,31 +284,20 @@ beforeEach(async () => {
     during: undefined,
     thingStatus: undefined,
     holdMe: undefined,
+    holdCode: undefined,
   });
   provider.thingRejects.clear();
   refreshed.length = 0;
+  exchanged.length = 0;
   revocations.length = 0;
   thingCalls.mockClear();
 });
 afterEach(async (test) => {
   vi.restoreAllMocks();
   await Promise.all(opened.splice(0).map((client) => client.close()));
-  // No token, code or client secret in the ledger, DBOS's tables or the lifecycle rows (the
-  // credentials table holds them sealed, so it is not read).
-  const text = await (
-    await pool.db()
-  ).execute<{ row: string }>(sql`
-    SELECT t::text AS row FROM dbos.workflow_status t
-    UNION ALL SELECT t::text FROM dbos.operation_outputs t
-    UNION ALL SELECT t::text FROM dbos.workflow_events t
-    UNION ALL SELECT t::text FROM dbos.notifications t
-    UNION ALL SELECT t::text FROM ${ledger} t
-    UNION ALL SELECT t::text FROM ${connections} t
-    UNION ALL SELECT t::text FROM ${connectionHealth} t
-    UNION ALL SELECT t::text FROM ${connectionRenewals} t
-    UNION ALL SELECT t::text FROM ${connectionAttempts} t`);
-  const history = text.rows.map((r) => r.row).join("\n");
-  for (const sentinel of sentinels) test.expect(history).not.toContain(sentinel);
+  // No token, code or client secret in any column of the database (the credentials and the
+  // attempts hold them sealed).
+  test.expect(await findSentinels(databaseUrl, sentinels)).toEqual([]);
 });
 
 describe("OAuth renewal", () => {
@@ -560,6 +556,91 @@ describe("OAuth renewal", () => {
       await worker.stop();
     }
   }, 120_000);
+});
+
+describe("The exchange across processes", () => {
+  it("sends a code once when its worker stops mid-exchange: the next one finds it taken and leaves the account to Reconnect", async () => {
+    const client = await processOf();
+    const { attempt, callback } = await consented(client);
+    // The token endpoint never answers the first worker, which stops with its request out.
+    provider.holdCode = new Promise(() => {});
+    const first = await startWorker(config());
+    const { runId } = await client.receiveConnection("acme", attempt, callback, { actor: "alice" });
+    await waitFor(async () => exchanged.length);
+    await first.stop();
+    const next = await startWorker(config());
+    try {
+      expect((await runEnded(client, runId, 20_000))?.status).toBe("failed");
+    } finally {
+      await next.stop();
+    }
+    expect(exchanged).toHaveLength(1);
+    expect(await client.connectionAttempt(attempt, { actor: "alice" })).toMatchObject({
+      state: "failed",
+      problem: "uncertain",
+    });
+    expect(await builtIn.read(GRANT)).toBeUndefined();
+  }, 60_000);
+
+  it("refuses a consumed exchange replayed from another process, sending nothing", async () => {
+    const a = await connect();
+    const b = await processOf();
+    const { attempt, callback } = await consented(b);
+    const worker = await startWorker(config());
+    try {
+      const { runId } = await b.receiveConnection("acme", attempt, callback, { actor: "alice" });
+      expect((await runEnded(b, runId, 20_000))?.status).toBe("finished");
+      // The browser's callback again, at another process, and the exchange's take again there.
+      await expect(a.receiveConnection("acme", attempt, callback, { actor: "alice" })).rejects.toMatchObject({
+        reason: "replayed",
+      });
+      const attempts = (a as unknown as { config: { connections: { attempts: ConnectionAttempts } } }).config
+        .connections.attempts;
+      await expect(attempts.take(attempt, "alice", "acme/main")).rejects.toMatchObject({ problem: "uncertain" });
+      expect(exchanged).toHaveLength(2);
+    } finally {
+      await worker.stop();
+    }
+  }, 60_000);
+
+  it("never writes a renewed grant over one another process rotated in the built-in store meanwhile", async () => {
+    provider.expiresIn = 60;
+    await connect();
+    const client = await processOf();
+    // Another process's own handle on the store, replacing the grant while this one renews it.
+    provider.during = async () => {
+      const current = await builtIn.read(GRANT);
+      await builtIn.write(GRANT, current!.value, { expectedVersion: current!.version, by: "elsewhere" });
+    };
+    await expect(read(client)).rejects.toMatchObject({ cause: { problem: "uncertain" } });
+    expect((await builtIn.read(GRANT))?.updatedBy).toBe("elsewhere");
+    expect((await card(client)).status).toBe("uncertain");
+  }, 60_000);
+
+  it("refuses the next call of a process once another disconnected the account; one already sent completes", async () => {
+    const a = await connect();
+    const b = await processOf();
+    expect(await read(b)).toEqual({ thing: "of org-1" });
+    // A call already at the provider when the other process disconnects is not undone.
+    const arrived = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    server.use(
+      http.get(`${API}/thing`, async () => {
+        arrived.resolve();
+        await answer.promise;
+        return HttpResponse.json({ thing: "of org-1" });
+      }),
+    );
+    const sent = read(b);
+    await arrived.promise;
+    const { revision } = await card(a);
+    await a.call("sanoma.connection.disconnect", { connection: ref, expectedRevision: revision! }, { actor: "alice" });
+    answer.resolve();
+    expect(await sent).toEqual({ thing: "of org-1" });
+    server.resetHandlers();
+    await expect(read(b)).rejects.toThrow(/missing or disconnected/);
+    expect(await builtIn.read(GRANT)).toBeUndefined();
+  }, 60_000);
 });
 
 describe("Disconnect and revoke", () => {

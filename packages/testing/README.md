@@ -38,6 +38,18 @@ Object.values(email.state.broadcasts).map((b) => b.status); // ["sent"]
 await worker.stop();
 ```
 
+## Finding a planted secret
+
+`findSentinels(databaseUrl, sentinels)` reads every `text`, `varchar`, `char`, `json` and `jsonb` column (and array of them) of every table in every schema of a database but Postgres's own, the company's tables, DBOS's and a store's alike, and returns `{ schema, table, column, sentinel }` for each column that holds one of `sentinels`. A test gives a credential a value nothing else would write (12 characters or more of letters, digits and `_ . : ~ + / = -`, which JSON writes as they are; another is refused), runs what handles it, and expects none: `expect(await findSentinels(url, sentinels)).toEqual([])` fails naming each place. Bytes (`bytea`) are not read, and a value the store keeps sealed is no hit, so the credentials table is read with the rest.
+
+```ts
+import { findSentinels, testDatabaseUrl } from "@sanoma-ai/testing";
+
+const token = `SENTINEL-token-${crypto.randomUUID()}`;
+// ...store it, run what uses it, then:
+expect(await findSentinels(testDatabaseUrl("announce"), [token])).toEqual([]);
+```
+
 ## A test app
 
 `@sanoma-ai/testing/harness` starts a worker and its clients for the tests of a `describe` (or a file), and stops them after (install `vitest` and `@dbos-inc/dbos-sdk` beside it). `useTestApp(config, { databaseUrl, ...options })` takes `startTestWorker`'s arguments and returns a `TestApp`:

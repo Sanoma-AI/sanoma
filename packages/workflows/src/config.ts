@@ -7,7 +7,7 @@ import {
   type IdentityProvisioningDatabase,
 } from "./identity-provisioning.ts";
 import { secretNamesIn, secretsForInput } from "./secret.ts";
-import { isRunControlError } from "./errors.ts";
+import { isFinal, isRunControlError, vendorCodeOf } from "./errors.ts";
 import type { CallAuthentication } from "./authentication.ts";
 import { currentRun } from "./run.ts";
 import {
@@ -86,6 +86,7 @@ import {
   CONNECT_WORKFLOW,
   MIGRATE_STORE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
+  errorMessage,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
@@ -978,7 +979,9 @@ export function indexDrivers(
       if (!ops.has(id)) {
         throw new Error(`Driver "${d.vendor}" implements ${id}, which no connector in \`connectors\` declares`);
       }
-      const unselected = d.env ? guarded(d.vendor, d.env, fn) : fn;
+      // What a driver without a connection read (its secrets, the environment it declares) is
+      // taken out of an error it throws; a connection's driver's errors are replaced below.
+      const unselected = clearingReads(d.env ? guarded(d.vendor, d.env, fn) : fn, Object.keys(d.env?.shape ?? {}));
       map.set(id, async (input, call) => {
         if (options.sandbox) return fn(input, call);
         if (!call.connection) {
@@ -1028,6 +1031,62 @@ export function indexDrivers(
     }
   }
   return map;
+}
+
+/** The shortest value a driver's error is cleared of: a shorter one would match ordinary words. */
+const REDACTED_LENGTH = 8;
+
+/** Whether `value` holds one of `read`: a string that does, or an object (an error) with an own property, its message, stack and cause among them, that does. */
+function mentions(value: unknown, read: ReadonlySet<string>, seen = new Set<unknown>()): boolean {
+  if (typeof value === "string") {
+    for (const one of read) if (value.includes(one)) return true;
+    return false;
+  }
+  if (typeof value !== "object" || value === null || seen.has(value)) return false;
+  seen.add(value);
+  return Object.getOwnPropertyNames(value).some((key) => mentions((value as Record<string, unknown>)[key], read, seen));
+}
+
+/**
+ * `fn`, whose error is cleared of the values it read: those it got or made through
+ * `call.secrets` and those of the variables `env` names, eight characters or more. An error
+ * holding none is thrown as it is; one that does becomes a `DriverError` with its message, each
+ * value as `[redacted]`, and what it said of itself (`retryable`, `status`, `vendorCode`), with no
+ * stack, cause or other property. An SDK's or a provider's error may repeat the request, a token
+ * among it, and the error a step throws is kept by DBOS (all of it) and the ledger.
+ */
+function clearingReads(fn: DriverFn, env: readonly string[]): DriverFn {
+  return async (input, call) => {
+    const read = new Set<string>();
+    const note = <T extends string | undefined>(value: T): T => {
+      if (value !== undefined && value.length >= REDACTED_LENGTH) read.add(value);
+      return value;
+    };
+    const { secrets } = call;
+    try {
+      return await fn(input, {
+        ...call,
+        secrets: {
+          get: async (name) => note(await secrets.get(name)),
+          ensure: async (name, make) => note(await secrets.ensure(name, make)),
+          delete: (name) => secrets.delete(name),
+        },
+      });
+    } catch (error) {
+      for (const name of env) note(process.env[name]);
+      if (!read.size || !mentions(error, read)) throw error;
+      let message = errorMessage(error);
+      for (const one of read) message = message.replaceAll(one, "[redacted]");
+      const { status } = error as { status?: unknown };
+      const vendorCode = vendorCodeOf(error);
+      throw new DriverError(message, {
+        // Retried as before: a final error says so, any other is tried again.
+        retryable: !isFinal(error),
+        ...(typeof status === "number" && { status }),
+        ...(vendorCode !== undefined && { vendorCode }),
+      });
+    }
+  };
 }
 
 /**
