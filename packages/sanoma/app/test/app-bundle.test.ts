@@ -1,6 +1,6 @@
 import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppBundle } from "sanoma/app";
 import { buildAppBundle, NodeOnlyImport, prerenderedPages } from "sanoma/app/bundle";
@@ -79,6 +79,8 @@ function company(): { repo: string; config: ReturnType<typeof defineConfig> } {
 const temporary: string[] = [];
 let bundle: AppBundle;
 let worker: Awaited<ReturnType<typeof unstable_startWorker>>;
+/** The same upload with no DATABASE binding, so the app cannot be made: what answers there needs no app. */
+let appless: Awaited<ReturnType<typeof unstable_startWorker>>;
 
 const get = (url: string, init?: RequestInit) => worker.fetch(url, init as never) as unknown as Promise<Response>;
 /** A request as TLS in front of a Worker hands it on (the dev server is plain http): an invite's URL and a cookie are then https's. */
@@ -98,55 +100,61 @@ beforeAll(async () => {
   for (const { name, content } of bundle.modules) write(join(dir, "script", name), Buffer.from(content, "base64"));
   for (const { path, content } of bundle.assets) write(join(dir, "assets", path), Buffer.from(content, "base64"));
   write(join(dir, "script", "router.js"), ROUTER);
-  // As Cloudflare runs the upload: the router the main module, the bundle's modules beside it, the assets bound.
-  write(
-    join(dir, "wrangler.json"),
-    JSON.stringify({
-      name: "sanoma-app-test",
-      main: "script/router.js",
-      compatibility_date: bundle.compatibilityDate,
-      compatibility_flags: bundle.compatibilityFlags,
-      no_bundle: true,
-      rules: [
-        { type: "ESModule", globs: ["**/*.js"] },
-        { type: "CompiledWasm", globs: ["**/*.wasm"] },
-      ],
-      assets: {
-        directory: "assets",
-        binding: "ASSETS",
-        // The client build straight from the assets; every other path the Worker's.
-        run_worker_first: ["/*", "!/assets/*"],
-        html_handling: "none",
-        not_found_handling: "none",
+  /** The upload as Cloudflare runs it: the router the main module, the bundle's modules beside it, the assets bound. */
+  const start = (file: string, vars: Record<string, unknown>) => {
+    write(
+      join(dir, file),
+      JSON.stringify({
+        name: "sanoma-app-test",
+        main: "script/router.js",
+        compatibility_date: bundle.compatibilityDate,
+        compatibility_flags: bundle.compatibilityFlags,
+        no_bundle: true,
+        rules: [
+          { type: "ESModule", globs: ["**/*.js"] },
+          { type: "CompiledWasm", globs: ["**/*.wasm"] },
+        ],
+        assets: {
+          directory: "assets",
+          binding: "ASSETS",
+          // The client build straight from the assets; every other path the Worker's.
+          run_worker_first: ["/*", "!/assets/*"],
+          html_handling: "none",
+          not_found_handling: "none",
+        },
+        vars,
+      }),
+    );
+    return unstable_startWorker({
+      config: join(dir, file),
+      dev: {
+        server: { hostname: "127.0.0.1", port: 0 },
+        inspector: false,
+        persist: false,
+        watch: false,
+        logLevel: "error",
       },
-      vars: {
-        DATABASE: { connectionString: databaseUrl },
-        SANOMA_HOSTNAME: HOSTNAME,
-        SANOMA_DOMAINS: Object.entries(DOMAINS)
-          .map(([site, domain]) => `${site}=${domain}`)
-          .join(","),
-        // The worker's secrets, which the Worker's bindings carry: the client checks the stored
-        // secrets' key, and the logins' cookies and the invite requests are signed under the signing key.
-        SANOMA_SECRETS_KEY: process.env.SANOMA_SECRETS_KEY,
-        SANOMA_SIGNING_KEY: process.env.SANOMA_SIGNING_KEY,
-      },
-    }),
-  );
-  worker = await unstable_startWorker({
-    config: join(dir, "wrangler.json"),
-    dev: {
-      server: { hostname: "127.0.0.1", port: 0 },
-      inspector: false,
-      persist: false,
-      watch: false,
-      logLevel: "error",
-    },
-  });
-  await worker.ready;
+    });
+  };
+  const vars = {
+    SANOMA_HOSTNAME: HOSTNAME,
+    SANOMA_DOMAINS: Object.entries(DOMAINS)
+      .map(([site, domain]) => `${site}=${domain}`)
+      .join(","),
+    // The worker's secrets, which the Worker's bindings carry: the client checks the stored
+    // secrets' key, and the logins' cookies and the invite requests are signed under the signing key.
+    SANOMA_SECRETS_KEY: process.env.SANOMA_SECRETS_KEY,
+    SANOMA_SIGNING_KEY: process.env.SANOMA_SIGNING_KEY,
+  };
+  [worker, appless] = await Promise.all([
+    start("wrangler.json", { ...vars, DATABASE: { connectionString: databaseUrl } }),
+    start("wrangler-appless.json", vars),
+  ]);
+  await Promise.all([worker.ready, appless.ready]);
 }, 300_000);
 
 afterAll(async () => {
-  await worker?.dispose();
+  await Promise.all([worker?.dispose(), appless?.dispose()]);
   for (const dir of temporary) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -216,6 +224,26 @@ describe("buildAppBundle", () => {
     }
   });
 
+  it("carries only what its main module reaches, by its static and dynamic imports", () => {
+    const code = new Map(
+      bundle.modules.flatMap(({ name, type, content }) =>
+        type === "esm" ? [[name, Buffer.from(content, "base64").toString()] as const] : [],
+      ),
+    );
+    const reached = new Set<string>();
+    const reach = (name: string) => {
+      const text = code.get(name);
+      if (text === undefined || reached.has(name)) return;
+      reached.add(name);
+      for (const [, path] of text.matchAll(/\b(?:from|import)\s*\(?\s*"(\.\.?\/[^"]+\.js)"/g)) {
+        reach(posix.join(posix.dirname(name), path!));
+      }
+    };
+    reach(bundle.mainModule);
+    // The runtime's sandbox (Cucumber, faker), imported by a function the Worker never calls, among them once.
+    expect([...code.keys()].filter((name) => !reached.has(name))).toEqual([]);
+  });
+
   it("carries the workflow files' workflows and what a connector reads of its package, as Node loads them", () => {
     const code = bundle.modules.map(({ content }) => Buffer.from(content, "base64").toString()).join("\n");
     expect(code).toContain('tidied: "nightly"');
@@ -236,6 +264,12 @@ describe("buildAppBundle", () => {
     const queried = await get("https://intl.example/fr?ref=mail");
     expect(queried.headers.get("etag")).toBeNull();
     expect(await queried.text()).toContain("Bienvenue sur le site intl");
+  });
+
+  it("answers a prerendered page without the app, which a Worker with no database cannot make", async () => {
+    const page = (await appless.fetch("https://intl.example/fr")) as unknown as Response;
+    expect([page.status, await page.text()]).toEqual([200, expect.stringContaining("Bienvenue sur le site intl")]);
+    expect(((await appless.fetch(`https://${HOSTNAME}/healthz`)) as unknown as Response).status).toBe(500);
   });
 
   it("serves the client build straight from the Worker's assets, for a page to hydrate", async () => {

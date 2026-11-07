@@ -41,3 +41,8 @@ declare module "virtual:sanoma/app-runtime" {
 declare module "virtual:sanoma/app-bundle" {
   export const config: import("sanoma/workflows").SanomaConfig;
 }
+
+/** The domains the app bundle prerenders pages for, which its main module answers from the assets (`bundleModule` in `bundle-build.ts`). */
+declare module "virtual:sanoma/prerendered" {
+  export const domains: string[];
+}

@@ -28,13 +28,19 @@ describe("useRootSnapshot", () => {
     const config = defineConfig({ workflows: [hello], connectors: [], root });
     // As the container reads them, from the files (none here), then the bundle's own.
     const read = readRootSnapshot(config);
-    expect(read).toMatchObject({ appName: "sanoma", policies: [], people: { people: [], problems: [] } });
+    expect(read).toMatchObject({
+      appName: "sanoma",
+      policies: [],
+      checkedPolicies: { policies: [], problems: [] },
+      people: { people: [], problems: [] },
+    });
     const people = { people: [], problems: [{ file: "resources/people.ts", message: "a problem" }] } as never;
     useRootSnapshot(root, {
       appName: "acme",
       version: "acme@from-the-container",
       builtInCodes: { change: "code-from-the-container" },
       policies: [{ file: "policies/visitors.cedar", text: POLICY }],
+      checkedPolicies: { policies: [], problems: [] },
       people,
     });
     const resolved = resolveConfig(config);
@@ -46,6 +52,39 @@ describe("useRootSnapshot", () => {
     });
     expect(readPolicyFiles(root)).toEqual([{ file: "policies/visitors.cedar", text: POLICY }]);
     expect(readPeople(root)).toBe(people);
+  });
+});
+
+describe("a bundled root's policies", () => {
+  const config = defineConfig({ workflows: [hello], connectors: [], root });
+  const snapshot = { ...readRootSnapshot(config), people: { people: [], problems: [] } };
+  // A permit for a workflow the config does not have: checked here, it is a problem.
+  const files = [{ file: "policies/visitors.cedar", text: POLICY.replace("workflow:hello", "workflow:gone") }];
+
+  it("are the ones checked where the files are, never checked again", () => {
+    const policies = [
+      {
+        id: "policies/visitors.cedar#1",
+        text: POLICY,
+        file: "policies/visitors.cedar",
+        line: 1,
+        column: 1,
+        effect: "permit" as const,
+        scope: "anonymous" as const,
+      },
+    ];
+    useRootSnapshot(root, { ...snapshot, policies: files, checkedPolicies: { policies, problems: [] } });
+    const resolved = resolveConfig(config);
+    expect(resolved.policyProblems).toEqual([]);
+    expect(resolved.policies).toBe(policies);
+  });
+
+  it("refuse everything with the problems found where the files are", () => {
+    const problems = ["policies/visitors.cedar:1:1: found where the files are"];
+    useRootSnapshot(root, { ...snapshot, policies: files, checkedPolicies: { policies: [], problems } });
+    const resolved = resolveConfig(config);
+    expect(resolved.policyProblems).toEqual(problems);
+    expect(resolved.policies).toBeUndefined();
   });
 });
 

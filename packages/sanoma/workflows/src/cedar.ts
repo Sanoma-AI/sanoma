@@ -22,7 +22,17 @@ import {
 } from "./policy.ts";
 import { rootSnapshot } from "./bundled.ts";
 import { admit, readPeople } from "./resources.ts";
-import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf, shapeOf } from "./schema.ts";
+import {
+  cedarValue,
+  type CedarSchemaJson,
+  type CedarWasm,
+  cedarWasm,
+  contextTypeOf,
+  messageOf,
+  NAMESPACE,
+  schemaOf,
+  shapeOf,
+} from "./schema.ts";
 import {
   ANONYMOUS,
   approverLabel,
@@ -262,26 +272,37 @@ export function cedarPolicy(
   policies: readonly CedarPolicySource[],
   people: readonly PeopleResource[],
 ): Policy {
-  const cedar = cedarWasm();
-  const schema = schemaOf(resolved, people);
   const staticPolicies = { ...Object.fromEntries(policies.map((p) => [p.id, p.text])), [ALLOW_ID]: ALLOW };
   // What lets a visitor in at a start or a direct call: the company's permits alone, the forbids aside.
   const permits = Object.fromEntries(policies.filter((p) => p.effect === "permit").map((p) => [p.id, p.text]));
   const version = hash(staticPolicies);
-  // Cedar caches both per thread, by name: one for these policies over this schema, and its permits.
-  const set = `sanoma-${hash({ staticPolicies, schema })}`;
-  const permitsSet = `${set}-permits`;
-  for (const answer of [
-    cedar.preparsePolicySet(set, { staticPolicies }),
-    cedar.preparsePolicySet(permitsSet, { staticPolicies: permits }),
-    cedar.preparseSchema(set, schema),
-  ]) {
-    if (answer.type === "failure") {
-      throw new Error(`The Cedar policies do not parse: ${answer.errors.map(messageOf).join("; ")}`);
-    }
-  }
   const hasPermits = Object.keys(permits).length > 0;
   const directory = directoryOf(people);
+
+  let prepared: { cedar: CedarWasm; schema: CedarSchemaJson; set: string; permitsSet: string } | undefined;
+  /**
+   * Cedar with the schema and both policy sets parsed, on the first question: a process that asks
+   * none (a Worker's isolate serving a page or the sign-in) never builds the schema or has Cedar
+   * parse it, the most of its first request's work.
+   */
+  const prepare = () => {
+    if (prepared) return prepared;
+    const cedar = cedarWasm();
+    const schema = schemaOf(resolved, people);
+    // Cedar caches both per thread, by name: one for these policies over this schema, and its permits.
+    const set = `sanoma-${hash({ staticPolicies, schema })}`;
+    const permitsSet = `${set}-permits`;
+    for (const answer of [
+      cedar.preparsePolicySet(set, { staticPolicies }),
+      cedar.preparsePolicySet(permitsSet, { staticPolicies: permits }),
+      cedar.preparseSchema(set, schema),
+    ]) {
+      if (answer.type === "failure") {
+        throw new Error(`The Cedar policies do not parse: ${answer.errors.map(messageOf).join("; ")}`);
+      }
+    }
+    return (prepared = { cedar, schema, set, permitsSet });
+  };
 
   /**
    * The determining `forbid`s, in the order written, each with whom it holds for: the first that
@@ -296,7 +317,7 @@ export function cedarPolicy(
   };
 
   /** The entity type `action` acts on, as the schema has it. */
-  const appliesTo = (action: string) => schema[NAMESPACE]?.actions[action]?.appliesTo?.resourceTypes?.[0];
+  const appliesTo = (action: string) => prepare().schema[NAMESPACE]?.actions[action]?.appliesTo?.resourceTypes?.[0];
 
   /**
    * What `request` is about: a workflow start on its `Workflow`; an operation on its target, in its
@@ -309,6 +330,7 @@ export function cedarPolicy(
     context: (names: string[]) => Record<string, unknown>,
     entity: (names: string[]) => Record<string, unknown>,
   ) => {
+    const { schema } = prepare();
     const entities = directory.entities(principal);
     const on = appliesTo(action);
     const shape = on === undefined ? undefined : shapeOf(schema, on);
@@ -349,6 +371,7 @@ export function cedarPolicy(
     atStart: boolean,
     entity: Record<string, unknown> = {},
   ): Decision => {
+    const { cedar, schema, set, permitsSet } = prepare();
     const principal = directory.principal(actor);
     const attrs = () => entity;
     /** The answer of the policy set `id`. */
@@ -433,6 +456,7 @@ export function cedarPolicy(
 
   const preview = (requests: readonly PreviewRequest[]): PreviewAnswer[] =>
     requests.map(({ principal: actor, action, resource, inRun }) => {
+      const { cedar, schema } = prepare();
       const principal = directory.principal(actor);
       const partial = (asked: Record<string, string>) => {
         const answer = cedar.isAuthorizedPartial({
@@ -511,21 +535,35 @@ export function visitorPermits(
  * (`loadPolicies`, `validatePolicies`), each a printable line (`file:line:col: <policy id>:
  * <message>`), a policy that refuses every call, start and preview naming the first: a repo never
  * runs on part of its rules. `policies` are what it is made from: undefined while they have problems.
+ * A root with a bundled snapshot is checked where its files are, once (`RootSnapshot.checkedPolicies`):
+ * the bundle decides with what that found, and never checks again.
  */
 export function policyAt(
   root: string | undefined,
   resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
-): { policy: Policy; policies?: CedarPolicySource[]; problems: string[] } {
+): { policy: Policy; policies?: readonly CedarPolicySource[]; problems: string[] } {
   const files = root === undefined ? [] : readPolicyFiles(root);
   if (!files.length) return { policy: allowAll, policies: [], problems: [] };
   const { people } = readPeople(root);
+  const { policies, problems } = rootSnapshot(root)?.checkedPolicies ?? checkPolicies(files, resolved, people);
+  if (!problems.length) return { policy: cedarPolicy(resolved, policies, people), policies, problems: [] };
+  return { policy: denyAll(`The policies do not hold: ${problems[0]}`), problems };
+}
+
+/** `files`' policies (`loadPolicies`) and their problems, theirs and `validatePolicies`', each a printable line. */
+function checkPolicies(
+  files: readonly { file: string; text: string }[],
+  resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
+  people: readonly PeopleResource[],
+): { policies: CedarPolicySource[]; problems: string[] } {
   const { policies, problems } = loadPolicies(files);
   problems.push(...validatePolicies(resolved, policies, people));
-  if (!problems.length) return { policy: cedarPolicy(resolved, policies, people), policies, problems: [] };
-  const lines = problems.map(({ policy, ...p }) =>
-    problemLine({ ...p, message: policy ? `${policy}: ${p.message}` : p.message }),
-  );
-  return { policy: denyAll(`The policies do not hold: ${lines[0]}`), problems: lines };
+  return {
+    policies,
+    problems: problems.map(({ policy, ...p }) =>
+      problemLine({ ...p, message: policy ? `${policy}: ${p.message}` : p.message }),
+    ),
+  };
 }
 
 /** A policy as a preview names it. */

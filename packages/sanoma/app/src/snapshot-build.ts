@@ -159,6 +159,7 @@ const rootless = ({ appName, version, builtInCodes }: ResolvedConfig) => ({
   version,
   builtInCodes,
   policies: [],
+  checkedPolicies: { policies: [], problems: [] },
   people: { people: [], problems: [] },
 });
 

@@ -1,10 +1,11 @@
+import type { CedarPolicySource } from "./cedar.ts";
 import type { DeclaredPeople } from "./resources.ts";
 
 // What the runtime reads from a company's root that a bundle carries where the root's files are
 // not: the Cloudflare host's Worker, which serves the public sites without the working tree. Read
 // once beside the files (`readRootSnapshot` in `config.ts`), bundled as data, and registered for
-// the root it was read from (`useRootSnapshot`); `readPeople`, `readPolicyFiles`, the app's name
-// and its versions then answer from it for that root, and never read a file there.
+// the root it was read from (`useRootSnapshot`); `readPeople`, `readPolicyFiles`, the app's name,
+// its versions and its policy then answer from it for that root, and never read a file there.
 
 /** A root's people, policies, app name and versions, as read where its files are. */
 export interface RootSnapshot {
@@ -16,6 +17,12 @@ export interface RootSnapshot {
   builtInCodes: Readonly<Record<string, string>>;
   /** `readPolicyFiles`: each `.cedar` file under `policies/` (and an app's), by path from the root. */
   policies: { file: string; text: string }[];
+  /**
+   * The policies as `policyAt` read and checked them where the files are, against the config the
+   * bundle carries (`ResolvedConfig.policies`, or none, and `policyProblems`): the bundle decides
+   * with them and never checks them again, Cedar's validation being most of a cold isolate's first request.
+   */
+  checkedPolicies: { policies: readonly CedarPolicySource[]; problems: string[] };
   /** `readPeople`: the people, agents and groups the data files declare, with their problems. */
   people: DeclaredPeople;
 }

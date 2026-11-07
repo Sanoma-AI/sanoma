@@ -131,21 +131,34 @@ const entries = (paths: string[], name: string) =>
  */
 const RUNTIME = "virtual:sanoma/app-runtime";
 
+/** The domains with a page prerendered, which the main module answers from the assets without the app. */
+const PRERENDERED_DOMAINS = "virtual:sanoma/prerendered";
+
 /**
- * `virtual:sanoma/app-runtime`, which `worker/app.ts` imports first, and `virtual:sanoma/app-bundle`,
- * the config as `sanoma` loads it (its file's, with the declaration files joined, `joinDeclarations`).
+ * `virtual:sanoma/app-runtime`, which `worker/app.ts` imports first, `virtual:sanoma/app-bundle`,
+ * the config as `sanoma` loads it (its file's, with the declaration files joined, `joinDeclarations`),
+ * and `virtual:sanoma/prerendered`, the domains of `prerendered`, which `worker/main.ts` imports.
  */
-function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): Plugin {
+function bundleModule(root: string, configFile: string, snapshot: AppSnapshot, prerendered: readonly string[]): Plugin {
   const id = `\0${BUNDLE}`;
   const runtimeId = `\0${RUNTIME}`;
+  const prerenderedId = `\0${PRERENDERED_DOMAINS}`;
   // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
   const fromRuntime = createRequire(manifestFile);
   const cedar = join(dirname(fromRuntime.resolve("@cedar-policy/cedar-wasm/nodejs")), "..", "web");
   return {
     name: "sanoma:app-bundle",
     enforce: "pre",
-    resolveId: (source) => (source === BUNDLE ? id : source === RUNTIME ? runtimeId : undefined),
+    resolveId: (source) =>
+      source === BUNDLE
+        ? id
+        : source === RUNTIME
+          ? runtimeId
+          : source === PRERENDERED_DOMAINS
+            ? prerenderedId
+            : undefined,
     load(loaded) {
+      if (loaded === prerenderedId) return `export const domains = ${JSON.stringify(prerendered)};\n`;
       if (loaded === runtimeId) {
         return [
           'import { useCedarWasm, useRootSnapshot, useTimeMatcher } from "sanoma/workflows";\n',
@@ -175,13 +188,22 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): 
   };
 }
 
-/** The Worker's plugins: the bundle's module, the runtime's version and files, DBOS's optional packages stubbed, Node-only imports refused, and Cloudflare's over the ssr environment. */
-async function bundlePlugins(root: string, configFile: string, snapshot: AppSnapshot): Promise<PluginOption[]> {
+/**
+ * The Worker's plugins: the bundle's modules, the runtime's version and files, DBOS's optional
+ * packages stubbed, Node-only imports refused, the chunks the main module never reaches left out,
+ * and Cloudflare's over the ssr environment.
+ */
+async function bundlePlugins(
+  root: string,
+  configFile: string,
+  snapshot: AppSnapshot,
+  prerendered: readonly string[],
+): Promise<PluginOption[]> {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
   const { src } = appSources();
   const missing = join(pkgDir, "src", "worker", "missing.js");
   return [
-    bundleModule(root, configFile, snapshot),
+    bundleModule(root, configFile, snapshot, prerendered),
     {
       // The runtime imports `sanoma`'s package.json for its version: only that, not its dependencies' names.
       name: "sanoma:runtime-version",
@@ -269,6 +291,27 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
           // Said from the repo, or for the app's own from its package.
           const named = companyFile(file, root) ? relative(root, file) : `sanoma/app/${relative(pkgDir, file)}`;
           throw new NodeOnlyImport(named, symbol, module);
+        }
+      },
+    },
+    {
+      // The upload is what the main module reaches, by static and dynamic imports: a chunk whose
+      // only import went with the code tree-shaking removed (the runtime's `sandbox.ts`, Cucumber
+      // and faker with it, imported by a function the Worker never calls) is still emitted, and
+      // would only be uploaded and compiled for nothing.
+      name: "sanoma:reachable",
+      applyToEnvironment: ssr,
+      generateBundle(_options, bundle) {
+        const reached = new Set<string>();
+        const reach = (name: string) => {
+          const chunk = bundle[name];
+          if (reached.has(name) || chunk?.type !== "chunk") return;
+          reached.add(name);
+          for (const next of [...chunk.imports, ...chunk.dynamicImports]) reach(next);
+        };
+        for (const file of Object.values(bundle)) if (file.type === "chunk" && file.isEntry) reach(file.fileName);
+        for (const file of Object.values(bundle)) {
+          if (file.type === "chunk" && !reached.has(file.fileName)) delete bundle[file.fileName];
         }
       },
     },
@@ -546,6 +589,7 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
     log?.(`${dir} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
   }
   const snapshot = await appSnapshot(config);
+  const targets = pagesToPrerender(snapshot, options.domains ?? {});
   const outDir = join(root, ".sanoma", "app", "bundle", `build.${process.pid}.tmp`);
   // Cloudflare's plugin points its own preview at the build through `<root>/.wrangler/deploy`.
   const wrangler = join(root, ".wrangler");
@@ -553,7 +597,15 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
   rmSync(outDir, { recursive: true, force: true });
   const vite = await import("vite");
   const built: InlineConfig = {
-    ...repoConfig(root, await bundlePlugins(root, config.file, snapshot)),
+    ...repoConfig(
+      root,
+      await bundlePlugins(
+        root,
+        config.file,
+        snapshot,
+        targets.filter(({ pages }) => pages.length).map(({ domain }) => domain),
+      ),
+    ),
     build: { outDir, emptyOutDir: true },
     logLevel: "warn",
     customLogger: quietLogger(vite, log),
@@ -567,14 +619,7 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
     const client = join(outDir, "client");
     const server = join(outDir, "server");
     const { main } = JSON.parse(readFileSync(join(server, "wrangler.json"), "utf8")) as { main: string };
-    const prerendered = await runOnWorkerd(
-      root,
-      server,
-      client,
-      main,
-      pagesToPrerender(snapshot, options.domains ?? {}),
-      snapshot.published,
-    );
+    const prerendered = await runOnWorkerd(root, server, client, main, targets, snapshot.published);
     return {
       version: snapshot.version,
       mainModule: main,
