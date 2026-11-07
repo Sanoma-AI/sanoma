@@ -1,5 +1,5 @@
 import type { ConnectionCard, ConnectionReview, ConnectionTarget, SecretLocation } from "@sanoma-ai/workflows";
-import { CALL_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import { CALL_WORKFLOW, STORAGE_ADVICE, STORAGE_PROBLEMS } from "@sanoma-ai/workflows/shared";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -222,7 +222,13 @@ function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][numb
             {card.health.externallyRenewed && " · Externally renewed"}
           </ItemDescription>
         )}
-        {unsupportedWrite && (
+        {card.storageProblem && (
+          <ItemDescription className="line-clamp-none">
+            This method {STORAGE_PROBLEMS[card.storageProblem]}. Before connecting, change your company’s code:{" "}
+            {STORAGE_ADVICE[card.storageProblem]}.
+          </ItemDescription>
+        )}
+        {unsupportedWrite && !card.storageProblem && (
           <ItemDescription className="line-clamp-none">
             This store lacks conditional writes. Use an external binding or select a store that supports safe credential
             replacement.
@@ -256,7 +262,14 @@ function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][numb
       <ItemActions>
         <Button
           variant="outline"
-          disabled={busy || !method?.verifiable || !data.store.ready || (oauth && !external) || unsupportedWrite}
+          disabled={
+            busy ||
+            !method?.verifiable ||
+            !data.store.ready ||
+            (oauth && !external) ||
+            unsupportedWrite ||
+            !!card.storageProblem
+          }
           onClick={() => setEditing(true)}
         >
           {identity

@@ -1,3 +1,4 @@
+import type { AuthenticationStoreProblem } from "./authentication.ts";
 import type { RunSummary } from "./client.ts";
 import type { CredentialStatus } from "./env.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
@@ -728,3 +729,20 @@ export interface CollectionApi<R> {
   /** Deletes the record, or with `ifRecord` only while it still matches (status 409, `record_changed`, otherwise). */
   delete: OpFn<{ key: string; ifRecord?: Record<string, unknown> }, Deleted>;
 }
+
+/**
+ * What each `ConnectionCard.storageProblem` (`authenticationStoreProblem`) means, for the
+ * connector page and `sanoma check` alike.
+ */
+export const STORAGE_PROBLEMS: Readonly<Record<AuthenticationStoreProblem, string>> = {
+  read_only: "writes its credentials (a refresh replaces them), and they are bound read-only",
+  unsupported: "replaces its credentials with a conditional write, which this store does not offer",
+  too_large: "may keep credentials larger than this store holds",
+};
+
+/** What to do instead, for each `STORAGE_PROBLEMS` entry: on the connector page and in `sanoma check`. */
+export const STORAGE_ADVICE: Readonly<Record<AuthenticationStoreProblem, string>> = {
+  read_only: "bind them to a path Sanoma manages in a writable store, such as the built-in one",
+  unsupported: "choose the built-in store or another that offers conditional writes",
+  too_large: "choose a store with a larger limit",
+};

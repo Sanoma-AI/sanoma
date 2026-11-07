@@ -988,13 +988,22 @@ const failed = ({ where, status, own }: Answer, advice?: string) =>
 
 const NO_TOKEN = `add ${WAKEUP_TOKEN} to the host's secrets (secret("${WAKEUP_TOKEN}", { generate: true })) and apply the host`;
 
+/** Where `register` reaches the host, beside the token in the same store: this alarm's host, never an earlier one's. */
+const storeHost = async (secrets: CallContext["secrets"], host: string) => {
+  const stored = await secrets.get(HOST_URL);
+  if (stored === host) return;
+  if (stored !== undefined) await secrets.delete(HOST_URL);
+  await secrets.ensure(HOST_URL, () => host);
+};
+
 /**
  * `cloudflare.alarm`'s operations and `alarm.register` over `api().send`: the host's own Worker's
  * wake route (`/__sanoma/wake`), each request with the company's `SANOMA_WAKEUP_TOKEN`, read from
  * the secret the alarm's `token` names (`tokenName`; `register` reads the default). `create`
- * mints and stores the token when none is, and the host's URL as `SANOMA_HOST_URL`. `register`
- * sends to the host's URL from the environment, `SANOMA_HOST_URL`, which the Worker sets in the
- * container's; off the host, from the stored one.
+ * mints and stores the token when none is, and, for the default token's alarm, the host's URL as
+ * `SANOMA_HOST_URL` (replacing an earlier host's); a plan that finds another URL stored, or none,
+ * is an update that stores it again. `register` sends to the stored URL, on the host and off it:
+ * a connector reads no fact from the process environment.
  */
 export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
   const route = async (host: string, method: string, token: string, body?: unknown): Promise<Answer> => {
@@ -1054,6 +1063,9 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     if (!state) return { action: "create", planned, unknown, replace: [] };
     // The alarm is the host's object's: a new host is a new alarm.
     if (planned.host !== state.host) return { action: "replace", planned, unknown, replace: ["host"] };
+    // An alarm applied before `register` read only the store, or replaced while an earlier host's URL stayed
+    // there (the environment hid both), stores its host's URL again.
+    if ((await call.secrets.get(HOST_URL)) !== state.host) return { action: "update", planned: state, ...NONE };
     return { action: "none", planned: state, ...NONE };
   };
 
@@ -1076,18 +1088,21 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
         const advice = own ?? "apply the host again";
         throw refused(`alarm.create: the host's ${WAKEUP_TOKEN} is not the stored ${name}: ${advice}`, "token");
       }
-      // Only for a register made off the host (a test's, a kit's): on it, the Worker's binding comes first.
-      await secrets.ensure(HOST_URL, () => host);
+      // Only for the default token, which `register` sends: a workflow's alarm for another host, under a token of
+      // its own, must not move the company's registrations there.
+      if (name === WAKEUP_TOKEN) await storeHost(secrets, host);
       return { id: host, state };
     },
     update: async (
       { id, state: known, desired }: { id: string; state?: Record<string, unknown>; desired: Record<string, unknown> },
       call: CallContext,
     ) => {
-      const { state } = await readWith(id, tokenName(desired, known), call);
+      const name = tokenName(desired, known);
+      const { state } = await readWith(id, name, call);
       if (!state || hostUrl(desired.host) !== state.host) {
         throw refused(`alarm.update: a new host is a new alarm`, "plan_changed");
       }
+      if (name === WAKEUP_TOKEN) await storeHost(call.secrets, state.host);
       return { id, state };
     },
     delete: async ({ id, state }: { id: string; state?: Record<string, unknown> }, { secrets }: CallContext) => {
@@ -1099,13 +1114,9 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     register: async (registration: WakeupRegistration, call: CallContext) => {
       const token = await call.secrets.get(WAKEUP_TOKEN);
       if (!token) throw refused(`alarm.register: ${WAKEUP_TOKEN} is not set: apply the alarm, which mints it`);
-      // On the host, the Worker's binding is in the environment; off it, only a stored one names the host.
-      const host = process.env[HOST_URL] || (await call.secrets.get(HOST_URL));
-      if (!host) {
-        throw refused(
-          `alarm.register: ${HOST_URL} is set neither in the environment (the Worker sets it on the host) nor among the stored credentials (apply the alarm, which stores it)`,
-        );
-      }
+      // From the store the token is in, which `alarm.create` writes both to: never the process environment.
+      const host = await call.secrets.get(HOST_URL);
+      if (!host) throw refused(`alarm.register: ${HOST_URL} is not stored: apply the alarm, which stores it`);
       const answer = await route(hostUrl(host), "PUT", token, registration);
       if (answer.status === 204) return {};
       throw failed(answer, answer.status === 404 && answer.own ? NO_TOKEN : undefined);

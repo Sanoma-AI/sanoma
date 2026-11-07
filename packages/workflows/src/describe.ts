@@ -40,6 +40,8 @@ import {
   principalOf,
   problemLine,
   siteAtHostname,
+  STORAGE_ADVICE,
+  STORAGE_PROBLEMS,
 } from "./shared.ts";
 import { readSites, type SiteEntry, siteDomains } from "./sites.ts";
 import { sourceKeyIds } from "./host.ts";
@@ -306,6 +308,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
         resolved.root === undefined ? {} : siteDomains(resolved.root),
       ),
       ...loginProblems(resolved, dataFiles.resources),
+      ...connectionStorageProblems(resolved),
     ],
     apps,
     policy: {
@@ -340,6 +343,21 @@ function loginProblems(resolved: ResolvedConfig, people: readonly PeopleResource
         `agent, \`unless { principal == Sanoma::Principal::"${LOGIN_AGENT}" }\``,
     },
   ];
+}
+
+/**
+ * Each declared connection and creation rule whose method's storage needs its binding cannot meet
+ * (`ConnectionRegistry.storageProblems`): refused before consent, never kept elsewhere instead.
+ */
+function connectionStorageProblems(resolved: ResolvedConfig): ResourceProblem[] {
+  return resolved.connections.storageProblems().map(({ id, method, problem, location }) => ({
+    file: "sanoma.config.ts",
+    message:
+      `${location ? "connection" : "connection rule"} ${id}: its ${method} method ${STORAGE_PROBLEMS[problem]}: ${STORAGE_ADVICE[problem]}` +
+      (location
+        ? ` (now ${location.store}${location.namespace ? ` ${location.namespace}` : ""} ${location.path})`
+        : ""),
+  }));
 }
 
 /** That the root's `kind` `name`, in `file`, is named as an app is. */

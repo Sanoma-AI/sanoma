@@ -2,7 +2,8 @@ import type { Principal } from "./define.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
-  checkAuthenticationStore,
+  authenticationStoreProblem,
+  type AuthenticationStoreProblem,
   decodeCredentials,
   defineAuthentication,
   verifyAuthentication,
@@ -15,7 +16,12 @@ import {
 import { type Connector, setupOf, VENDOR, defineConnector, defineDriver, type CallContext } from "./op.ts";
 import { isSecret, type Secret } from "./secret.ts";
 import { SanomaError } from "./errors.ts";
-import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
+import {
+  SecretStoreError,
+  type SecretAccess,
+  type SecretLocation,
+  type SecretStoreCapabilities,
+} from "./secret-store.ts";
 import { and, eq, getTableColumns, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./db.ts";
 import { connectionHealth, connections, connectionSetups } from "./db/company.ts";
@@ -70,6 +76,20 @@ export interface ConnectionCard {
   updatedBy?: string;
   updatedAt?: string;
   health?: ConnectionHealth;
+  /**
+   * Why its credentials cannot be kept where they are bound (`authenticationStoreProblem`), found
+   * before anyone consents: `read_only` (the method writes them, a refresh, and the binding or
+   * store is read-only), `unsupported` (it needs conditional writes the store lacks), `too_large`.
+   */
+  storageProblem?: AuthenticationStoreProblem;
+}
+/** A declared account or creation rule whose method's storage needs its binding cannot meet (`storageProblems`). */
+export interface ConnectionStorageProblem {
+  id: string;
+  method: string;
+  problem: AuthenticationStoreProblem;
+  /** Where its credentials are bound; none for a rule's, kept under a name of their own, Sanoma's, in the store. */
+  location?: SecretLocation;
 }
 export interface ConnectionHealth {
   state:
@@ -98,6 +118,15 @@ export interface ConnectionSetup {
   previousLocation?: SecretLocation;
 }
 const idPart = /^[a-z][a-z0-9-]{0,63}$/;
+/** A value bound to the environment or bootstrap: read-only to Sanoma, whatever the store. */
+const BOUND: SecretStoreCapabilities = {
+  writable: false,
+  maxBytes: Number.MAX_SAFE_INTEGER,
+  conditionalWrites: "none",
+  deletion: "unsupported",
+  changeDetection: "read",
+};
+
 function refuse(message: string): never {
   throw new SanomaError("invalid_input", message);
 }
@@ -329,6 +358,8 @@ export class ConnectionRegistry {
           : "default" in declaration
             ? declaration.credentials?.$secret
             : row?.credential;
+      const location = credential && this.secrets ? this.secrets.location(credential) : undefined;
+      const storageProblem = this.storeProblem(method, location);
       cards.push({
         id,
         vendor: declaration.vendor,
@@ -344,10 +375,11 @@ export class ConnectionRegistry {
           : row.definition !== this.bindingFingerprint(declaration, method, credential)
             ? "configuration_changed"
             : row.status,
-        ...(credential && this.secrets && { location: this.secrets.location(credential) }),
+        ...(location && { location }),
         ...(row?.location && { boundLocation: row.location }),
         ...(row?.updatedBy && { updatedBy: row.updatedBy }),
         ...(row?.updatedAt && { updatedAt: row.updatedAt.toISOString() }),
+        ...(storageProblem && { storageProblem }),
         ...(row?.health &&
           row.checkedAt && {
             health: {
@@ -622,20 +654,44 @@ export class ConnectionRegistry {
       .digest("hex");
   }
 
+  /** Why `method` cannot keep its credentials at `location` (`authenticationStoreProblem`); none without a store or a location. */
+  private storeProblem(method: Authentication, location?: SecretLocation): AuthenticationStoreProblem | undefined {
+    if (!this.secrets || !location) return undefined;
+    return authenticationStoreProblem(
+      method,
+      location.namespace === "" ? BOUND : this.secrets.store.capabilities,
+      location.management,
+    );
+  }
+
   private checkStore(method: Authentication, credential?: string | null): void {
-    if (!this.secrets || !credential) return;
-    const location = this.secrets.location(credential);
-    const caps =
-      location.namespace === ""
-        ? {
-            writable: false,
-            maxBytes: Number.MAX_SAFE_INTEGER,
-            conditionalWrites: "none" as const,
-            deletion: "unsupported" as const,
-            changeDetection: "read" as const,
-          }
-        : this.secrets.store.capabilities;
-    checkAuthenticationStore(method, caps, location.management);
+    const problem = this.secrets && credential && this.storeProblem(method, this.secrets.location(credential));
+    if (problem) throw new SecretStoreError(problem);
+  }
+
+  /**
+   * Each declared account and creation rule whose method cannot keep its credentials where they
+   * are bound, as preview would refuse it: `sanoma check` reports them, before anyone consents.
+   * No store or vendor is contacted.
+   */
+  storageProblems(): ConnectionStorageProblem[] {
+    const secrets = this.secrets;
+    if (!secrets) return [];
+    const problems: ConnectionStorageProblem[] = [];
+    for (const d of this.catalog.definitions.values()) {
+      const method = this.catalog.methods.get(d.vendor)![d.method]!;
+      const credential = method.kind === "workload-identity" ? undefined : d.credentials?.$secret;
+      const location = credential ? secrets.location(credential) : undefined;
+      const problem = this.storeProblem(method, location);
+      if (problem) problems.push({ id: d.$connection, method: d.method, problem, location });
+    }
+    for (const [id, rule] of this.catalog.rules) {
+      const method = this.catalog.methods.get(rule.vendor)![rule.method]!;
+      // A rule's accounts are each kept under a name of their own, which no binding names: Sanoma's, in the store.
+      const problem = authenticationStoreProblem(method, secrets.store.capabilities, "sanoma");
+      if (problem) problems.push({ id, method: rule.method, problem });
+    }
+    return problems;
   }
 
   private async row(id: string) {
