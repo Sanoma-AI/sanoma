@@ -587,7 +587,7 @@ function ConnectionDialog({
                 <strong>Destination:</strong>{" "}
                 {review.location
                   ? `${review.location.store} · ${review.location.namespace} · ${review.location.path}`
-                  : "No storage location"}
+                  : "No secret store is configured"}
               </p>
               {review.previousLocation && changedLocation(review.previousLocation, review.location) && (
                 <Notice>
@@ -815,7 +815,7 @@ function AttemptProgress({ attempt, vendor, onDismiss }: { attempt: string; vend
 const locationLabel = (location?: SecretLocation) =>
   location
     ? `${location.store} · ${location.namespace} · ${location.path} · ${location.management === "external" ? "managed externally" : "managed by Sanoma"}`
-    : "no storage location";
+    : "no secret store configured";
 const changedLocation = (before: SecretLocation, after?: SecretLocation) =>
   !after || (["store", "namespace", "path", "management"] as const).some((key) => before[key] !== after[key]);
 

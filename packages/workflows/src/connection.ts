@@ -437,7 +437,7 @@ export class ConnectionRegistry {
       if (!declaration || (row?.rule && row.owner !== actor)) continue;
       const method = this.catalog.methods.get(declaration.vendor)?.[declaration.method];
       if (!method) continue;
-      const credential = "default" in declaration ? declaration.credentials.$secret : row?.credential;
+      const credential = "credentials" in declaration ? declaration.credentials.$secret : row?.credential;
       const location = credential && this.secrets ? this.secrets.location(credential) : undefined;
       const storageProblem = this.storeProblem(method, location);
       cards.push({
