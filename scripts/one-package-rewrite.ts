@@ -4,7 +4,7 @@
  * again changes nothing.
  *
  * - A file still under an old package directory (one the branch added) moves to its new one.
- * - A relative path (a quoted string, a link target, a word of a script) that reached a moved file,
+ * - A relative path (a quoted string or a word of a script; in Markdown, a link's target) that reached a moved file,
  *   or that a moved file used to reach something, points there from where the file is now.
  * - Each `package.json` that depended on a folded package depends on `sanoma` in its place, in the same
  *   field (`workspace:*` in this workspace).
@@ -156,12 +156,14 @@ function rewrite(file: string): void {
   const before = readFileSync(file, "utf8");
   let text = before;
   if (posix.basename(file) === "package.json") text = dependencies(text);
-  // A relative path wherever one starts: a quoted string, a link target, a word of a script.
+  // A relative path wherever one starts in code (a quoted string, a word of a script); in Markdown,
+  // a link's target only, as a path in its prose may be relative to anything.
+  const markdown = file.endsWith(".md");
   text = text.replace(
-    /(^|[\s"'`(=])((?:\.\.?\/)[^\s"'`(),;]*)/gm,
-    (_, lead: string, spec: string) => lead + rebase(spec, file, file.endsWith(".md")),
+    markdown ? /(\]\()(\.\.?\/[^\s)]*)/g : /(^|[\s"'`(=])((?:\.\.?\/)[^\s"'`(),;]*)/gm,
+    (_, lead: string, spec: string) => lead + rebase(spec, file, markdown),
   );
-  if (/--filter[= ]+["']?!@sanoma-ai\/(workflows|app|bridge|testing|dev|connector-better-auth)\b/.test(text)) {
+  if (/--filter[= ]+["']?!@sanoma-ai\/(workflows|app|bridge|testing|dev|connector-better-auth)(?![\w-])/.test(text)) {
     warnings.push(`${file}: a --filter excludes a folded package: drop it, or exclude sanoma`);
   }
   text = renamed(text);
