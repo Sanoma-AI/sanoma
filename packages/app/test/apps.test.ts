@@ -232,9 +232,9 @@ describe("Workflows and Permissions by app", () => {
   it("groups the workflows by their folder, the root's first, with a tab each beside the filters", async () => {
     const { html } = await page("/workflows");
     const tabs = html.match(/<div[^>]*role="tablist"[^>]*aria-label="App"[\s\S]*?<\/div>/)?.[0];
-    expect(tabs).toMatch(/href="\/workflows"[^>]*>All<span[^>]*>12<\/span>/);
+    expect(tabs).toMatch(/href="\/workflows"[^>]*>All<span[^>]*>13<\/span>/);
     // The root holds introduce and the built-ins, follow, the app's actions and the chat among them.
-    expect(tabs).toMatch(/href="\/workflows\?app=\."[^>]*>Yours<span[^>]*>10<\/span>/);
+    expect(tabs).toMatch(/href="\/workflows\?app=\."[^>]*>Yours<span[^>]*>11<\/span>/);
     expect(tabs).toMatch(/href="\/workflows\?app=crm"[^>]*>crm<span[^>]*>1<\/span>/);
     expect(tabs).toMatch(/href="\/workflows\?app=shop"[^>]*>shop<span[^>]*>1<\/span>/);
     expect(html).toMatch(

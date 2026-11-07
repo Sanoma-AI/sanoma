@@ -23,13 +23,19 @@ describe("lintWorkflow", () => {
     expect(lintWorkflow(src)).toEqual([]);
   });
 
-  it.each(["drift", "apply", "call-workflow", "change-workflow", "app-workflows", "follow-workflow", "chat-workflow"])(
-    "passes the built-in %s workflow, which is held to the same rules",
-    (name) => {
-      const path = fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url));
-      expect(lintWorkflow(readFileSync(path, "utf8"), path)).toEqual([]);
-    },
-  );
+  it.each([
+    "drift",
+    "apply",
+    "call-workflow",
+    "change-workflow",
+    "app-workflows",
+    "follow-workflow",
+    "chat-workflow",
+    "import-workflow",
+  ])("passes the built-in %s workflow, which is held to the same rules", (name) => {
+    const path = fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url));
+    expect(lintWorkflow(readFileSync(path, "utf8"), path)).toEqual([]);
+  });
 
   it("refuses imports outside the allowlist, and dynamic imports", () => {
     const problems = messages(`

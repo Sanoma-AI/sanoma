@@ -30,7 +30,7 @@ import { STAGED_FIRST } from "./grid/staged.tsx";
 // page's search (`DataSearch`), which the page reads `list` with.
 
 /** The grid's route, whose search each control writes. */
-export const FROM = "/data/$name";
+export const FROM = "/data/$name/";
 
 /** How long the key's filter waits after a keystroke before it reads the records again. */
 const TYPING_MS = 250;

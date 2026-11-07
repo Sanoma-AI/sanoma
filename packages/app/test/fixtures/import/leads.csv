@@ -1,0 +1,8 @@
+﻿Company,Contact,Stage,Owner,Last touched,Seats,Phone
+Acme,ada@acme.test,In talks,Ada Lovelace,2026-11-01,12,555-0100
+"Globex, Inc.",bo@globex.test,replied,Bo,,,"555 ""main"""
+Initech,cy@initech.test,contacted,cy,,,
+Lost Co,x@lost.test,lost,ada,,,
+Hooli,h@hooli.test,meeting,T. Nguyen,,ten,
+Won Co,w@won.test,won,lead,2026-11-04,,
+,,,,,,

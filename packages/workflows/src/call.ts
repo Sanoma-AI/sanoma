@@ -368,15 +368,19 @@ export function decisionOf(
   return decisions.find((d) => d.kind === "approve") ?? { kind: "allow", ...version };
 }
 
-/** The keys of a batch's denied entries, for its `policy_denied` (`denied`); nothing for any other call. */
+/** The keys of a batch's denied entries and each one's reason, for its `policy_denied` (`denied`, `deniedFor`); nothing for any other call. */
 export function deniedKeys(
   op: Op,
   calls: readonly Call[],
   decisions: readonly RecordedDecision[],
   collections: ReadonlyMap<string, Collection>,
-): { denied?: string[] } {
+): { denied?: string[]; deniedFor?: Record<string, string> } {
   if (!isBatch(op)) return {};
-  return { denied: denialsOf(op, calls, decisions, collections).map(({ key }) => key) };
+  const denials = denialsOf(op, calls, decisions, collections);
+  return {
+    denied: denials.map(({ key }) => key),
+    deniedFor: Object.fromEntries(denials.map(({ key, decision }) => [key, decision.reason])),
+  };
 }
 
 /** `decideEach` for one call. */

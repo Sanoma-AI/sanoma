@@ -7,7 +7,7 @@ import { useActor } from "../actor.ts";
 import type { FieldChange, HistoryEntry } from "../api.ts";
 import { historyQuery, openRecord, runLink } from "../queries.ts";
 import { None, Notice, ToneBadge, When } from "./common.tsx";
-import { FROM, Value } from "./data-grid.tsx";
+import { Value } from "./data-grid.tsx";
 
 // A record's history in its side panel, from the ledger (`getHistory`): one line per write,
 // newest first, "<when> · <who> · <what changed>", and its run. Read as the person asking, whom
@@ -107,7 +107,7 @@ function FieldLine({ change: { field, before, after } }: { change: FieldChange }
 export function HistoryLink({ name, recordKey }: { name: string; recordKey: string }) {
   return (
     <Link
-      to={FROM}
+      to="/data/$name"
       params={{ name }}
       search={openRecord(recordKey)}
       title="Its history, from the ledger"

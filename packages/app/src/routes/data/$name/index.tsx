@@ -3,6 +3,7 @@ import { errorMessage, personsOf } from "@sanoma-ai/workflows/shared";
 import { hashKey, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, type ShouldBlockFn, useBlocker } from "@tanstack/react-router";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
@@ -10,23 +11,15 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { cn } from "#/lib/utils.ts";
-import { useActor } from "../../actor.ts";
-import type { UntypedApi } from "../../api-client.ts";
-import {
-  ButtonLink,
-  CardHeading,
-  CrumbHeader,
-  Notice,
-  pageTitle,
-  toastIfHeld,
-  UsedBy,
-} from "../../components/common.tsx";
-import { GridFilters } from "../../components/data-grid.tsx";
-import { recordsView } from "../../components/grid/collection.ts";
-import { DataGrid } from "../../components/grid/grid.tsx";
-import { STAGED_FIRST } from "../../components/grid/staged.tsx";
-import { RecordForm } from "../../components/record-form.tsx";
-import { RecordHistory } from "../../components/record-history.tsx";
+import { useActor } from "../../../actor.ts";
+import type { UntypedApi } from "../../../api-client.ts";
+import { ButtonLink, CardHeading, CrumbHeader, Notice, toastIfHeld, UsedBy } from "../../../components/common.tsx";
+import { GridFilters } from "../../../components/data-grid.tsx";
+import { recordsView } from "../../../components/grid/collection.ts";
+import { DataGrid } from "../../../components/grid/grid.tsx";
+import { STAGED_FIRST } from "../../../components/grid/staged.tsx";
+import { RecordForm } from "../../../components/record-form.tsx";
+import { RecordHistory } from "../../../components/record-history.tsx";
 import {
   api,
   closeRecord,
@@ -38,39 +31,35 @@ import {
   listQueryOf,
   recordsQuery,
   usedBy,
-} from "../../queries.ts";
+} from "../../../queries.ts";
 
 /** No records view yet: nothing staged to be told of. */
 const unstaged = () => () => {};
 
-export const Route = createFileRoute("/data/$name")({
+export const Route = createFileRoute("/data/$name/")({
   validateSearch: DataSearch,
   // The grid's width is the window's: a collection may have many fields.
   staticData: { wide: true },
   // What `list` is asked: opening a record in the form reads no records again.
   loaderDeps: ({ search: { order, limit, key, where } }) => ({ order, limit, key, where }),
-  // The page reads the config and the records from the query client; the loader returns only its
-  // name, the collection's title. The records are read as the person asking: while the server
-  // renders (the loopback login's cookie), here, so the page arrives with them; in the browser,
-  // by the page, which keeps the rows on screen while a filter's are read, waits for a name, and
-  // reads nothing for a link's preload. A refusal is the page's to show, not the loader's. The
-  // open record's history the same way: on the server, from the search the request came with.
+  // The page reads the config and the records from the query client (the layout found the
+  // collection). The records are read as the person asking: while the server renders (the
+  // loopback login's cookie), here, so the page arrives with them; in the browser, by the page,
+  // which keeps the rows on screen while a filter's are read, waits for a name, and reads nothing
+  // for a link's preload. A refusal is the page's to show, not the loader's. The open record's
+  // history the same way: on the server, from the search the request came with.
   loader: async ({ context: { queryClient }, params, deps, location }) => {
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const collection = collectionNamed(params.name)(config);
-    if (!collection) throw notFound();
-    if (import.meta.env.SSR) {
+    if (collection && import.meta.env.SSR) {
       const { record } = location.search as DataSearch;
       await Promise.all([
         queryClient.prefetchQuery(recordsQuery(collection.name, listQueryOf(collection, deps))),
         record !== undefined && queryClient.prefetchQuery(historyQuery(collection.name, record)),
       ]);
     }
-    return { crumb: collection.title ?? collection.name };
   },
-  head: ({ loaderData, params }) => pageTitle(loaderData?.crumb ?? params.name),
   component: CollectionPage,
-  notFoundComponent: () => <Notice variant="destructive">No collection {Route.useParams().name}.</Notice>,
 });
 
 /**
@@ -152,12 +141,20 @@ function CollectionPage() {
     <>
       <CrumbHeader
         action={
-          <ButtonLink>
-            <Link to="." search={(prev) => ({ ...closeRecord(prev), new: true })} resetScroll={false}>
-              <PlusIcon aria-hidden="true" data-icon="inline-start" />
-              Add record
-            </Link>
-          </ButtonLink>
+          <div className="flex gap-2">
+            <ButtonLink variant="outline">
+              <Link to="/data/$name/import" params={{ name }}>
+                <UploadSimpleIcon aria-hidden="true" data-icon="inline-start" />
+                Import
+              </Link>
+            </ButtonLink>
+            <ButtonLink>
+              <Link to="." search={(prev) => ({ ...closeRecord(prev), new: true })} resetScroll={false}>
+                <PlusIcon aria-hidden="true" data-icon="inline-start" />
+                Add record
+              </Link>
+            </ButtonLink>
+          </div>
         }
       >
         <code className="text-muted-foreground">data.{name}</code>
