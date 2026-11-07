@@ -132,9 +132,13 @@ describe("a direct call", () => {
   });
 
   const records = async () =>
-    (await db.select({ record: ledger.record }).from(ledger).where(like(ledger.runId, "direct:%"))).map(
-      (r) => r.record,
-    );
+    (
+      await db
+        .select({ record: ledger.record })
+        .from(ledger)
+        .where(like(ledger.runId, "direct:%"))
+        .orderBy(asc(ledger.runId), asc(ledger.seq), asc(ledger.n))
+    ).map((r) => r.record);
   const rows = async () =>
     db
       .select({ key: data.key, record: data.record, updatedBy: data.updatedBy })
