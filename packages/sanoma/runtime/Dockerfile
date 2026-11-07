@@ -6,7 +6,7 @@
 # (SANOMA_SOURCE_KEY) when set, installs it against the store and runs `sanoma worker` on PORT
 # (`/healthz`, `/wake`, the app bundle), or with the command `serve`, `sanoma serve`. A host passes
 # those, and the bootstrap secrets (SANOMA_DATABASE_URL, SANOMA_SECRETS_KEY, SANOMA_WAKEUP_TOKEN),
-# as environment variables.
+# as environment variables, or with the command `identity`, the identity service (entrypoint.sh).
 #
 #   docker build --build-arg PACKAGES="$(node scripts/runtime-packages.ts)" -t sanoma-runtime packages/sanoma/runtime
 #
@@ -70,12 +70,13 @@ ENV pnpm_config_store_dir=/pnpm/store \
 RUN mkdir /pnpm && chown node:node /pnpm
 USER node
 # The store, from a template project of this release (`node scripts/runtime-packages.ts`: from npm,
-# which the release fills before it builds the image), resolved as a company's is.
+# which the release fills before it builds the image), resolved as a company's is. The project stays:
+# its node_modules is symlinks into the store, and its `sanoma` is what the command `identity` runs.
 ARG PACKAGES=sanoma
-RUN mkdir /tmp/template && cd /tmp/template && echo '{"private":true}' > package.json \
+RUN mkdir /pnpm/template && cd /pnpm/template && echo '{"private":true}' > package.json \
  && printf 'minimumReleaseAgeExclude:\n  - sanoma\n  - "@sanoma-ai/*"\n' > pnpm-workspace.yaml \
  && pnpm add $PACKAGES \
- && cd / && rm -rf /tmp/template "$HOME/.cache/pnpm"
+ && rm -rf "$HOME/.cache/pnpm"
 # At start: a package whose dependencies differ from the template's is copied out of the store,
 # faster than a hard link into a lower layer, which overlayfs copies up anyway; and the lockfile
 # is trusted, its release ages checked when the company resolved it, not again per entry online.
@@ -91,7 +92,8 @@ ENV SANOMA_BRIDGE_BIN=/usr/local/bin/provider-bridge \
     PORT=3000
 WORKDIR /home/node
 EXPOSE 3000
+# The worker's /healthz, else the identity service's /health (Cloud Run reserves paths ending in z).
 HEALTHCHECK --interval=10s --timeout=10s --start-period=300s \
-  CMD node -e "fetch('http://127.0.0.1:' + process.env.PORT + '/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+  CMD node -e "const at = 'http://127.0.0.1:' + process.env.PORT; fetch(at + '/healthz').then((r) => r.ok || fetch(at + '/health').then((h) => h.ok)).then((ok) => process.exit(ok ? 0 : 1), () => process.exit(1))"
 ENTRYPOINT ["/usr/local/bin/sanoma-runtime"]
 CMD ["worker"]

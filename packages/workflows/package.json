@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/workflows",
-  "version": "0.11.19",
+  "version": "0.11.20",
   "description": "Business processes as TypeScript functions, run durably on DBOS",
   "keywords": [
     "approvals",
@@ -125,6 +125,7 @@
     "oxfmt": "^0.72.0",
     "pg": "^8.23.1",
     "randexp": "^0.5.3",
+    "srvx": "^0.11.22",
     "zod-schema-faker": "^2.1.2"
   },
   "devDependencies": {
@@ -133,7 +134,6 @@
     "drizzle-kit": "0.31.11",
     "esbuild": "0.28.2",
     "msw": "^3.0.3",
-    "srvx": "^0.11.22",
     "ws": "8.22.0",
     "zod": "^4.6.5"
   },

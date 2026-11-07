@@ -240,6 +240,6 @@ To try the SSH path by hand, without registering a key: `docker run --rm -e SANO
 
 ### Standalone identity service
 
-`sanoma identity` runs the trusted runtime or provisioning broker from explicit host configuration, without loading company files or starting a workflow worker. It creates no database or schema. See [Cloud identity deployment](../workflows/CLOUD-IDENTITY.md#standalone-identity-service) for required variables, separate reader/audit roles, HTTPS ingress and readiness checks.
+`sanoma identity` runs the trusted runtime or provisioning broker from explicit host configuration, without loading company files or starting a workflow worker. It creates no database or schema. See [Cloud identity deployment](../workflows/CLOUD-IDENTITY.md#standalone-identity-service) for required variables, separate reader/audit roles, HTTPS ingress and readiness checks. The runtime image runs it with the command `identity` and no checkout; see [Deploying the issuers](../workflows/CLOUD-IDENTITY.md#deploying-the-issuers).
 
 Status: early (0.x). License: FSL-1.1-ALv2.

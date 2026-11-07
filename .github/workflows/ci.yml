@@ -103,3 +103,5 @@ jobs:
       # Its store from the packages npm has now: a PR's own versions are not public until the release.
       - name: Build the runtime image (not pushed)
         run: docker build --build-arg PACKAGES="$(node scripts/runtime-packages.ts --public)" -t sanoma-runtime packages/sanoma/runtime
+      - name: The identity command runs
+        run: docker run --rm sanoma-runtime identity --help | grep '^  sanoma identity '

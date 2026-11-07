@@ -277,9 +277,11 @@ The liveness route uses `/health`: [Cloud Run reserves some paths ending in `z`]
 
 Trusted programmatic composition may call `startIdentityService(options)` from `@sanoma-ai/workflows/identity-service`, returning `{ url, stop }`. Its default host is loopback; the caller owns shutdown. The serving package does not load company code.
 
-The product's [identity Dockerfile](../sanoma/identity/Dockerfile) installs a specified published `sanoma` version and runs `sanoma identity` as a non-root user. Build it only after that version is published, tag the result immutably and deploy by digest. Database credentials and mode configuration enter at deployment, not image build. Neither the service tests nor building the image substitutes for live deployment verification.
+### Deploying the issuers
 
-The published runtime image, `ghcr.io/sanoma-ai/runtime`, does not run the identity service. Its entrypoint accepts only `worker` and `serve`, requires a company checkout (`SANOMA_REVISION`), and has no `sanoma` command on its `PATH`. Cloud Run also deploys only from Artifact Registry or Docker Hub, so push the identity image to Artifact Registry (or pull ghcr.io through an Artifact Registry remote repository). A `gcp.cloudRunService` declaration for the provisioning mode then needs:
+The published [runtime image](../sanoma/README.md#hosting-it-yourself), `ghcr.io/sanoma-ai/runtime:<sanoma version>`, runs the service with the command `identity` (from `sanoma` 0.11.21): it checks out no company and runs that release's `sanoma identity` as the non-root `node` user. Cloud Run deploys public GitHub Container Registry images as they are ([Cloud Run: supported container registries](https://docs.cloud.google.com/run/docs/deploying#images), page updated 2026-10-30), so a Cloud Run v2 service names that image directly, with no Artifact Registry copy; the release never replaces a version's tag, and Cloud Run records the digest it resolved in each revision. Google recommends an Artifact Registry remote repository in front of GitHub Container Registry for higher availability; later, if pulls prove unreliable.
+
+Each mode is its own Cloud Run v2 service, under its own attached service account. A `gcp.cloudRunService` declaration for the provisioning mode:
 
 ```ts
 import { gcp } from "@sanoma-ai/connector-gcp/resources";
@@ -301,7 +303,8 @@ export const provisioningIssuer = gcp.cloudRunService(
       service_account: "identity-issuer@example-project.iam.gserviceaccount.com",
       containers: [
         {
-          image: "us-central1-docker.pkg.dev/example-project/sanoma/identity@sha256:<digest>",
+          image: "ghcr.io/sanoma-ai/runtime:0.11.21",
+          args: ["identity"],
           ports: { container_port: 8080 },
           env: [
             { name: "SANOMA_IDENTITY_MODE", value: "provisioning" },
@@ -327,4 +330,6 @@ export const provisioningIssuer = gcp.cloudRunService(
 );
 ```
 
-Cloud Run sets `PORT`; the image defaults `SANOMA_IDENTITY_HOST` to `0.0.0.0`. The two database URLs are Secret Manager secrets of the service's project, read by its attached account at start: they are the service's host configuration, so the declaration names them and never holds their values. Runtime mode is the same service with `SANOMA_IDENTITY_MODE: "runtime"`, without the three provisioning settings, under its own attached account, databases and secrets.
+Runtime mode is the same service with `SANOMA_IDENTITY_MODE: "runtime"`, without the three provisioning settings, under its own attached account, databases and secrets. Cloud Run sets `PORT` to the container port; elsewhere the image's `PORT` is 3000 unless the host sets it. The two database URLs are Secret Manager secrets of the service's project, read by its attached account at start.
+
+These [settings](#standalone-identity-service) are the service's own host configuration, its bootstrap, never a company's environment: no company config, connector page or secret store holds them, and a company's runtime never receives them. The declaration names the secrets, never their values. Neither the service tests nor the image's CI check substitutes for live deployment verification.
