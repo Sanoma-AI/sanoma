@@ -6,7 +6,8 @@
 # (SANOMA_SOURCE_KEY) when set, installs it against the store and runs `sanoma worker` on PORT
 # (`/healthz`, `/wake`, the app bundle), or with the command `serve`, `sanoma serve`. A host passes
 # those, and the bootstrap secrets (SANOMA_DATABASE_URL, SANOMA_SECRETS_KEY, SANOMA_WAKEUP_TOKEN),
-# as environment variables.
+# as environment variables. With the command `identity` it checks nothing out and runs this
+# release's `sanoma identity` from the identity service's own settings (SANOMA_IDENTITY_*).
 #
 #   docker build --build-arg PACKAGES="$(node scripts/runtime-packages.ts)" -t sanoma-runtime packages/sanoma/runtime
 #
@@ -70,12 +71,13 @@ ENV pnpm_config_store_dir=/pnpm/store \
 RUN mkdir /pnpm && chown node:node /pnpm
 USER node
 # The store, from a template project of this release (`node scripts/runtime-packages.ts`: from npm,
-# which the release fills before it builds the image), resolved as a company's is.
+# which the release fills before it builds the image), resolved as a company's is. The project stays:
+# its node_modules is symlinks into the store, and its `sanoma` is what the command `identity` runs.
 ARG PACKAGES=sanoma
-RUN mkdir /tmp/template && cd /tmp/template && echo '{"private":true}' > package.json \
+RUN mkdir /pnpm/template && cd /pnpm/template && echo '{"private":true}' > package.json \
  && printf 'minimumReleaseAgeExclude:\n  - sanoma\n  - "@sanoma-ai/*"\n' > pnpm-workspace.yaml \
  && pnpm add $PACKAGES \
- && cd / && rm -rf /tmp/template "$HOME/.cache/pnpm"
+ && rm -rf "$HOME/.cache/pnpm"
 # At start: a package whose dependencies differ from the template's is copied out of the store,
 # faster than a hard link into a lower layer, which overlayfs copies up anyway; and the lockfile
 # is trusted, its release ages checked when the company resolved it, not again per entry online.

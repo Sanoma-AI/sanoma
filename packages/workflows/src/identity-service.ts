@@ -139,7 +139,8 @@ export async function startIdentityService(options: IdentityServiceOptions): Pro
         res.end('{"error":"invalid_request"}');
         return;
       }
-      if (req.url === "/health" && (req.method === "GET" || req.method === "HEAD")) {
+      // `/healthz` too, for the runtime image's Docker health check; Cloud Run may intercept it, so its probe uses `/health`.
+      if ((req.url === "/health" || req.url === "/healthz") && (req.method === "GET" || req.method === "HEAD")) {
         res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
         res.end("ok\n");
         return;

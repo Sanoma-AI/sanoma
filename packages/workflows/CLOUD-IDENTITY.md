@@ -253,7 +253,7 @@ This establishes the Google trust path, not a deployed provisioning broker or pr
 | `SANOMA_IDENTITY_AUDIT_DATABASE_URL` | Required protected audit-writer connection string.                                                                  |
 | `SANOMA_IDENTITY_HOST`               | Listening address, default `0.0.0.0` for the command.                                                               |
 | `SANOMA_IDENTITY_CONCURRENCY`        | Maximum in-flight broker requests, default `32`, allowed `1`–`256`; excess requests receive 429 with a retry delay. |
-| `PORT`                               | Listening port, default `8080`.                                                                                     |
+| `PORT`                               | Listening port, default `8080`; `3000` in the runtime image, and Cloud Run sets it to the container port.           |
 | `SANOMA_IDENTITY_SOURCE_ACCOUNT`     | Provisioning only: fixed source service-account email.                                                              |
 | `SANOMA_IDENTITY_SOURCE_SUBJECT`     | Provisioning only: its immutable numeric Google `uniqueId`.                                                         |
 | `SANOMA_IDENTITY_AUDIENCE`           | Provisioning only: exact WIF provider audience.                                                                     |
@@ -273,13 +273,15 @@ Create the login and deliver its authentication separately. Neither serving role
 
 Audit rows contain fixed issuance metadata: result, deployment, company, environment, service account, generation and expiry. They contain no tokens, bearer hashes, authorization headers or arbitrary request fields. Audit failure prevents token delivery and returns a sanitized error; recovery never switches identities.
 
-The liveness route uses `/health`: [Cloud Run reserves some paths ending in `z`](https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths), so `/healthz` may be intercepted before it reaches the service. GET or HEAD `/health` and the launcher's `ready` event mean the process is listening. They do **not** prove current Google issuance, continuing database/audit availability, provider renewal or managed-store readiness. Before declaring a company ready, verify its deployed runtime can write and read a credential under its own key/database identity. The two-company, preview/production, renewal, cold-start, outage and recovery checks remain #532 gates.
+The liveness route uses `/health`: [Cloud Run reserves some paths ending in `z`](https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths), so `/healthz` may be intercepted before it reaches the service; the service answers it too, for the runtime image's Docker health check. GET or HEAD `/health` and the launcher's `ready` event mean the process is listening. They do **not** prove current Google issuance, continuing database/audit availability, provider renewal or managed-store readiness. Before declaring a company ready, verify its deployed runtime can write and read a credential under its own key/database identity. The two-company, preview/production, renewal, cold-start, outage and recovery checks remain #532 gates.
 
 Trusted programmatic composition may call `startIdentityService(options)` from `@sanoma-ai/workflows/identity-service`, returning `{ url, stop }`. Its default host is loopback; the caller owns shutdown. The serving package does not load company code.
 
-The product's [identity Dockerfile](../sanoma/identity/Dockerfile) installs a specified published `sanoma` version and runs `sanoma identity` as a non-root user. Build it only after that version is published, tag the result immutably and deploy by digest. Database credentials and mode configuration enter at deployment, not image build. Neither the service tests nor building the image substitutes for live deployment verification.
+### Deploying the issuers
 
-The published runtime image, `ghcr.io/sanoma-ai/runtime`, does not run the identity service. Its entrypoint accepts only `worker` and `serve`, requires a company checkout (`SANOMA_REVISION`), and has no `sanoma` command on its `PATH`. Cloud Run also deploys only from Artifact Registry or Docker Hub, so push the identity image to Artifact Registry (or pull ghcr.io through an Artifact Registry remote repository). A `gcp.cloudRunService` declaration for the provisioning mode then needs:
+The published [runtime image](../sanoma/README.md#hosting-it-yourself), `ghcr.io/sanoma-ai/runtime:<sanoma version>`, runs the service with the command `identity` (from `sanoma` 0.11.21): it checks out no company and runs that release's `sanoma identity` as the non-root `node` user. Cloud Run deploys public GitHub Container Registry images as they are ([Cloud Run: supported container registries](https://docs.cloud.google.com/run/docs/deploying#images), page updated 2026-10-30), so a Cloud Run v2 service names that image directly, with no Artifact Registry copy; the release never replaces a version's tag, and Cloud Run records the digest it resolved in each revision. Google recommends an Artifact Registry remote repository in front of GitHub Container Registry for higher availability; later, if pulls prove unreliable.
+
+A `gcp.cloudRunService` declaration for the provisioning mode:
 
 ```ts
 import { gcp } from "@sanoma-ai/connector-gcp/resources";
@@ -301,7 +303,8 @@ export const provisioningIssuer = gcp.cloudRunService(
       service_account: "identity-issuer@example-project.iam.gserviceaccount.com",
       containers: [
         {
-          image: "us-central1-docker.pkg.dev/example-project/sanoma/identity@sha256:<digest>",
+          image: "ghcr.io/sanoma-ai/runtime:0.11.21",
+          args: ["identity"],
           ports: { container_port: 8080 },
           env: [
             { name: "SANOMA_IDENTITY_MODE", value: "provisioning" },
@@ -327,4 +330,4 @@ export const provisioningIssuer = gcp.cloudRunService(
 );
 ```
 
-Cloud Run sets `PORT`; the image defaults `SANOMA_IDENTITY_HOST` to `0.0.0.0`. The two database URLs are Secret Manager secrets of the service's project, read by its attached account at start: they are the service's host configuration, so the declaration names them and never holds their values. Runtime mode is the same service with `SANOMA_IDENTITY_MODE: "runtime"`, without the three provisioning settings, under its own attached account, databases and secrets.
+Runtime mode is a second service like it, with `SANOMA_IDENTITY_MODE: "runtime"` and without the three provisioning settings. The two database URLs are Secret Manager secrets of the service's project, read by its attached account at start: the declaration names them, never their values. Neither the service tests nor the image's CI check substitutes for live deployment verification.
