@@ -8,8 +8,8 @@
 
 import { randomBytes } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { checkDatabase, databaseCheckConfig } from "@sanoma-ai/testing/database";
-import { type CallContext, memorySecrets, SanomaClient } from "@sanoma-ai/workflows";
+import { checkDatabase, databaseCheckConfig } from "sanoma/testing/database";
+import { type CallContext, memorySecrets, SanomaClient } from "sanoma/workflows";
 import { project } from "../src/connector.ts";
 import { neonDriver } from "../src/driver.ts";
 

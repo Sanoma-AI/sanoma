@@ -1,11 +1,11 @@
-import { defaultBridge, type BridgeError, type ProviderClient } from "@sanoma-ai/bridge";
+import { defaultBridge, type BridgeError, type ProviderClient } from "sanoma/internal/bridge";
 import {
   AuthenticationError,
   authenticationCredentials,
   DriverError,
   type CallContext,
   type Driver,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { accountOf, federationCredentials, type gcpAuthentication, type GcpIdentity } from "./authentication.ts";
 import { gcpTf, references } from "./connector.ts";
 import { constrain, retainKeys } from "./constraints.ts";

@@ -1,0 +1,284 @@
+import { type CallContext, type Driver, DriverError, memorySecrets, type Secrets } from "sanoma/workflows";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { z } from "zod";
+import { readPins } from "sanoma/internal/bridge";
+import { fixturesDir } from "sanoma/internal/bridge/fake";
+import { BridgeError } from "../src/bridge.ts";
+import { resourcePath, tfConnector } from "../src/connector.ts";
+import { tfFake } from "../src/tffake.ts";
+import type { TfResourceType, TfShape } from "../src/tfschema/types.ts";
+import { changeReplay } from "./change-replay.ts";
+
+const provider = { ...readPins()["hashicorp/null"]!, protocol: 5 };
+
+/** `null_resource`, as `resources.gen.ts` would declare it: a provider id, and `triggers`, whose change replaces it. */
+const null_resource: TfResourceType = {
+  typeName: "null_resource",
+  schemaVersion: 0,
+  schema: z.object({ id: z.string().nullish(), triggers: z.record(z.string(), z.string()).nullish() }),
+  fields: { immutable: ["triggers"], vendorOwned: ["id"], writeOnly: [] },
+  shape: { attributes: ["id", "triggers"] },
+};
+
+/** The `id`s the recorded applies gave the objects they made. */
+const FIRST = "7464986431894282090";
+const SECOND = "1619236683285190585";
+
+const connector = (writeOnly?: string[]) =>
+  tfConnector({
+    vendor: "nulls",
+    provider,
+    types: { thing: { tf: null_resource, title: "Thing", writable: true, ...(writeOnly && { writeOnly }) } },
+    info: { package: "@sanoma-ai/connector-nulls" },
+  });
+
+let seq = 0;
+const stored = () => memorySecrets({ TRIGGER: "1" });
+const call = (driver: Driver, op: string, input: unknown, secrets: Secrets = memorySecrets()): Promise<any> =>
+  driver.ops[op]!(input, { idempotencyKey: `run:${++seq}`, runId: "run", opId: `nulls.${op}`, attempt: 1, secrets });
+
+describe("a writable type's change operations, over hashicorp/null's recorded plans and applies", () => {
+  let bridge: ReturnType<typeof changeReplay>;
+  let driver: Driver;
+  const methods = () => bridge.calls.map((c) => c.action ?? c.method).filter((m) => m !== "configure" && m !== "close");
+  beforeEach(() => {
+    bridge = changeReplay(fixturesDir, provider);
+    driver = connector().driver(bridge, () => ({}));
+  });
+
+  it("lists plan, create, update and delete beside read and import, and only on a writable type", () => {
+    const { resources, connector: ops } = connector();
+    expect(Object.keys(resources.thing.ops).toSorted()).toEqual([
+      "create",
+      "delete",
+      "import",
+      "plan",
+      "read",
+      "update",
+    ]);
+    const thing = ops.thing;
+    expect(thing.create).toMatchObject({ effect: "write", idempotent: false });
+    expect(thing.delete).toMatchObject({ effect: "write", idempotent: true });
+    expect(thing.plan).toMatchObject({ effect: "read", idempotent: true });
+    expect(thing.create!.target!({ desired: {} })).toBe("new:nulls.thing");
+    expect(thing.plan!.target!({ desired: {} })).toBe("new:nulls.thing");
+    expect(thing.update!.target!({ id: FIRST, desired: {} })).toBe(FIRST);
+    const readOnly = tfConnector({
+      vendor: "nulls",
+      provider,
+      types: { thing: { tf: null_resource, title: "Thing" } },
+      info: { package: "@sanoma-ai/connector-nulls" },
+    });
+    expect(Object.keys(readOnly.resources.thing.ops).toSorted()).toEqual(["import", "read"]);
+    // @ts-expect-error A read-only provider resource exposes no mutations.
+    expect(readOnly.connector.thing.create).toBeUndefined();
+    // @ts-expect-error The resource constructor preserves the same boundary.
+    expect(readOnly.resources.thing.ops.delete).toBeUndefined();
+
+    const mixed = tfConnector({
+      vendor: "nulls",
+      provider,
+      info: { package: "@sanoma-ai/connector-nulls" },
+      types: {
+        writable: { tf: null_resource, title: "Writable", writable: true },
+        readonly: { tf: null_resource, title: "Read only", writable: false },
+        defaulted: { tf: null_resource, title: "Default" },
+      },
+    });
+    expect(mixed.connector.writable.create).toMatchObject({ effect: "write" });
+    expect(mixed.resources.writable.ops.update).toBeDefined();
+    // @ts-expect-error An explicit false keeps change operations out of the public type.
+    expect(mixed.connector.readonly.delete).toBeUndefined();
+    // @ts-expect-error Omitting writable keeps change operations out too, beside a writable sibling.
+    expect(mixed.connector.defaulted.plan).toBeUndefined();
+    const fake = tfFake(mixed);
+    expectTypeOf<Parameters<typeof fake.failNext>[0]>()
+      .extract<"nulls.writable.create">()
+      .toEqualTypeOf<"nulls.writable.create">();
+    expectTypeOf<Parameters<typeof fake.failNext>[0]>().extract<"nulls.readonly.delete">().toBeNever();
+  });
+
+  it("plans a create, with what is known only after it", async () => {
+    const plan = await call(driver, "thing.plan", { desired: { triggers: { v: "1" } } });
+    expect(plan).toEqual({
+      action: "create",
+      planned: { id: null, triggers: { v: "1" } },
+      unknown: ["id"],
+      replace: [],
+    });
+    expect(methods()).toEqual(["create"]);
+  });
+
+  it("creates, updates in place when nothing changed, replaces, and deletes", async () => {
+    const created = await call(driver, "thing.create", { desired: { triggers: { v: "1" } } });
+    expect(created).toEqual({ id: FIRST, state: { id: FIRST, triggers: { v: "1" } }, handle: "0:" });
+    expect(methods()).toEqual(["create", "apply"]);
+
+    const same = await call(driver, "thing.update", { ...created, desired: { triggers: { v: "1" } } });
+    expect(same).toEqual(created);
+
+    const planned = await call(driver, "thing.plan", { ...created, desired: { triggers: { v: "2" } } });
+    const replace = { action: "replace", replace: ["triggers"] };
+    expect(planned).toEqual({ ...replace, planned: { id: null, triggers: { v: "2" } }, unknown: ["id"] });
+
+    bridge.calls.length = 0;
+    const replaced = await call(driver, "thing.update", {
+      ...created,
+      desired: { triggers: { v: "2" } },
+      expect: replace,
+    });
+    // A replace is a new object: a delete of the old one, then a create of the plan's new one.
+    expect(replaced).toEqual({ id: SECOND, state: { id: SECOND, triggers: { v: "2" } }, handle: "0:" });
+    expect(methods()).toEqual(["read", "replace", "apply", "apply"]);
+
+    bridge.calls.length = 0;
+    expect(await call(driver, "thing.delete", replaced)).toEqual({ id: SECOND, gone: true });
+    expect(methods()).toEqual(["read", "delete", "apply"]);
+    // Gone already: nothing to plan or apply.
+    bridge.calls.length = 0;
+    expect(await call(driver, "thing.delete", replaced)).toEqual({ id: SECOND, gone: true });
+    expect(methods()).toEqual(["read"]);
+    expect(await call(driver, "thing.plan", { ...replaced })).toEqual({ action: "none", unknown: [], replace: [] });
+  });
+
+  it("does not replay a partial replace when its provider session disappears", async () => {
+    const created = await call(driver, "thing.create", { desired: { triggers: { v: "1" } } });
+    const { apply } = bridge;
+    let applies = 0;
+    bridge.apply = async (...args) => {
+      // The delete succeeded; losing the session must not replay this mutation.
+      if (++applies === 2) throw new BridgeError("failed_precondition", "hashicorp/null 3.3.2 is not configured");
+      return apply(...args);
+    };
+    bridge.calls.length = 0;
+    await expect(call(driver, "thing.update", { ...created, desired: { triggers: { v: "2" } } })).rejects.toMatchObject(
+      { vendorCode: "failed_precondition" },
+    );
+    expect(applies).toBe(2);
+    expect(methods()).toEqual(["read", "replace", "apply"]);
+  });
+
+  it("refuses an update whose fresh plan is not the one expected, changing nothing", async () => {
+    const created = await call(driver, "thing.create", { desired: { triggers: { v: "1" } } });
+    bridge.calls.length = 0;
+    const update = call(driver, "thing.update", {
+      ...created,
+      desired: { triggers: { v: "2" } },
+      expect: { action: "update", replace: [] },
+    });
+    await expect(update).rejects.toBeInstanceOf(DriverError);
+    await expect(update).rejects.toMatchObject({ vendorCode: "plan_changed", retryable: false });
+    expect(methods()).toEqual(["read", "replace"]);
+  });
+
+  it("refuses to update an object that is gone", async () => {
+    const created = await call(driver, "thing.create", { desired: { triggers: { v: "1" } } });
+    const replaced = await call(driver, "thing.update", { ...created, desired: { triggers: { v: "2" } } });
+    await call(driver, "thing.delete", replaced);
+    await expect(
+      call(driver, "thing.update", { ...replaced, desired: { triggers: { v: "2" } } }),
+    ).rejects.toMatchObject({
+      vendorCode: "gone",
+    });
+  });
+
+  describe("a secret in desired, at a field the type marks write-only though the provider does not", () => {
+    beforeEach(() => {
+      driver = connector(["triggers"]).driver(bridge, () => ({}));
+    });
+
+    it("reaches the provider resolved, and no output", async () => {
+      const desired = { triggers: { v: { $secret: "TRIGGER" } } };
+      const plan = await call(driver, "thing.plan", { desired }, stored());
+      expect(plan).toEqual({ action: "create", planned: { id: null }, unknown: ["id"], replace: [] });
+      const created = await call(driver, "thing.create", { desired }, stored());
+      expect(created).toEqual({ id: FIRST, state: { id: FIRST, triggers: null }, handle: "0:" });
+      const read = await call(driver, "thing.read", created);
+      expect(read).toEqual({ id: FIRST, gone: false, state: { id: FIRST, triggers: null }, handle: "0:" });
+      expect(JSON.stringify([plan, created, read])).not.toContain('"v"');
+    });
+
+    it("fails for good when the secret is not stored", async () => {
+      const create = call(driver, "thing.create", { desired: { triggers: { v: { $secret: "TRIGGER" } } } });
+      await expect(create).rejects.toMatchObject({ retryable: false, message: expect.stringContaining("TRIGGER") });
+      expect(bridge.calls.filter((c) => c.method === "plan")).toEqual([]);
+    });
+  });
+});
+
+describe("resourcePath", () => {
+  const shape: TfShape = {
+    attributes: ["id", "tags"],
+    blocks: {
+      reviews: { nesting: "list", one: true, shape: { attributes: ["count"] } },
+      rules: { nesting: "list", shape: { attributes: ["name"] } },
+    },
+  };
+
+  it("drops the index of a block of one item, and keeps a list's and a map's keys as segments", () => {
+    expect(resourcePath(shape, "id")).toBe("id");
+    expect(resourcePath(shape, "reviews[0].count")).toBe("reviews.count");
+    expect(resourcePath(shape, "rules[2].name")).toBe("rules.2.name");
+    expect(resourcePath(shape, 'tags["env"]')).toBe("tags.env");
+    expect(resourcePath(shape, 'tags["a.\\"b"]')).toBe('tags.a."b');
+  });
+});
+
+it("passes each named connection's current authentication to its own provider session", async () => {
+  const bridge = changeReplay(fixturesDir, provider);
+  const configured = vi.spyOn(bridge, "configure");
+  const config = vi.fn<(ctx: CallContext) => Record<string, unknown>>((ctx) => ({
+    token: ctx.authentication!.credentials,
+  }));
+  const driver = connector().driver(bridge, config, undefined, undefined, { authentication: ["token"] });
+  const invoke = (id: string, revision: string, token: string) =>
+    driver.ops["thing.plan"]!(
+      { desired: { triggers: { v: "1" } } },
+      {
+        idempotencyKey: id,
+        runId: "run",
+        opId: "nulls.thing.plan",
+        attempt: 1,
+        secrets: memorySecrets(),
+        connection: { id, vendor: "nulls", method: "token", account: id, scopes: [], revision, definition: "v1" },
+        authentication: { method: "token", kind: "api-key", credentialVersion: revision, credentials: token },
+      },
+    );
+  await Promise.all([
+    invoke("support", "v1", "synthetic-old"),
+    invoke("sales", "v1", "synthetic-sales"),
+    invoke("support", "v2", "synthetic-new"),
+  ]);
+  expect(configured.mock.calls.map(([, json]) => JSON.parse(json).token).toSorted()).toEqual([
+    "synthetic-new",
+    "synthetic-old",
+    "synthetic-sales",
+  ]);
+  expect(new Set(configured.mock.calls.map(([ref]) => ref.sessionId)).size).toBe(3);
+  expect(bridge.calls.filter((c) => c.method === "close")).toHaveLength(3);
+  expect(driver.authentication).toEqual(["token"]);
+  const unsupported = connector().driver(bridge, config);
+  config.mockClear();
+  await expect(
+    unsupported.ops["thing.plan"]!(
+      {},
+      {
+        idempotencyKey: "x",
+        runId: "run",
+        opId: "nulls.thing.plan",
+        attempt: 1,
+        secrets: memorySecrets(),
+        connection: {
+          id: "support",
+          vendor: "nulls",
+          method: "token",
+          account: "support",
+          scopes: [],
+          revision: "v1",
+          definition: "v1",
+        },
+      },
+    ),
+  ).rejects.toThrow("does not support");
+  expect(config).not.toHaveBeenCalled();
+});

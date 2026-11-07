@@ -1,5 +1,5 @@
-import { tfConnector } from "@sanoma-ai/bridge/connector";
-import { type Connector, defineConnector, type OpSpec, vendorInfo } from "@sanoma-ai/workflows";
+import { tfConnector } from "sanoma/internal/bridge/connector";
+import { type Connector, defineConnector, type OpSpec, vendorInfo } from "sanoma/workflows";
 import { z } from "zod";
 import {
   github_branch_protection,

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { memorySecrets, type CallContext } from "@sanoma-ai/workflows";
+import { memorySecrets, type CallContext } from "sanoma/workflows";
 import { expect, it, vi } from "vitest";
 import { container, host } from "../src/connector.ts";
 import { containerOps, type CloudflareApi } from "../src/ops.ts";

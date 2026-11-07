@@ -1,22 +1,20 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, realpathSync, watch } from "node:fs";
-import { findPackageJSON } from "node:module";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, watch } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { createInterface } from "node:readline";
-import { pathToFileURL } from "node:url";
 import { system32 } from "./windows.ts";
 
 /*
  * Dev mode: when the repo's `sanoma` or a `@sanoma-ai/*` package resolves into a sanoma checkout (a
  * `pnpm link`), or `SANOMA_DEV_REPO` is set, `sanoma` runs the `watch` script of each package it
- * reaches in the checkout and restarts `sanoma serve` when one's `dist/` changes.
+ * reaches in the checkout and restarts `sanoma serve` when one's build (`buildDirs`) changes.
  */
 
 /** Whether a path is inside some `node_modules` directory. */
 const installed = (path: string) => path.split(sep).includes("node_modules");
 
 export interface LinkedPackage {
-  /** The npm name, such as `@sanoma-ai/workflows`. */
+  /** The npm name, such as `sanoma`. */
   name: string;
   /** Where it really is: its directory in the checkout. */
   dir: string;
@@ -25,9 +23,7 @@ export interface LinkedPackage {
 /**
  * The packages dev mode builds: `node_modules/sanoma` and every package under
  * `node_modules/@sanoma-ai/` whose real path is outside any `node_modules` (the ones a `pnpm link`
- * points into a checkout), then, when there is one, each core package (`corePackages`) that
- * resolves into the checkout through them, such as `sanoma`'s own dependencies when `sanoma` alone
- * is linked. Nothing when nothing is linked, wherever an installed package's dependencies resolve.
+ * points into a checkout). Nothing when nothing is linked.
  */
 export function linkedPackages(cwd: string): LinkedPackage[] {
   const modules = join(cwd, "node_modules");
@@ -42,53 +38,22 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
     const dir = realpathSync(path);
     if (!installed(dir)) linked.push({ name, dir });
   }
-  if (!linked.length) return linked;
-  for (const core of corePackages(cwd)) {
-    if (!installed(core.dir) && !linked.some((p) => p.name === core.name)) linked.push(core);
-  }
   return linked;
 }
 
-/** The packages a `sanoma` process loads besides the connectors. */
-const CORE = ["sanoma", "@sanoma-ai/workflows", "@sanoma-ai/app", "@sanoma-ai/bridge"];
+/** The parts of `sanoma` a running company never loads (the test helpers, `sanoma dev`): not watched. */
+const NOT_RUN = new Set(["testing/dist", "dev/dist"]);
 
 /**
- * Where `sanoma`, `@sanoma-ai/workflows`, `@sanoma-ai/app` and `@sanoma-ai/bridge` really are, those
- * Node finds: each from the repo's root, else from where `sanoma` really is (where pnpm puts
- * sanoma's own dependencies, `@sanoma-ai/app` among them, or the checkout's workspace links).
+ * Where a package's build writes, which dev mode watches: each `dist` its `files` ships (`sanoma`'s
+ * own and each of its parts', `workflows/dist`, `app/dist`, …, but `NOT_RUN`), else its `dist/`.
  */
-function corePackages(cwd: string): LinkedPackage[] {
-  const sanoma = findPackage("sanoma", cwd);
-  const found: LinkedPackage[] = [];
-  for (const name of CORE) {
-    const dir =
-      name === "sanoma"
-        ? sanoma
-        : (findPackage(name, cwd) ?? (sanoma === undefined ? undefined : findPackage(name, sanoma)));
-    if (dir !== undefined) found.push({ name, dir });
-  }
-  return found;
-}
-
-/**
- * Of the core packages (`corePackages`), those installed (from a tarball or a registry) while
- * another of them resolves into a checkout: a partial link, under which two copies of a package
- * run in one process. Empty when none is linked, or all are.
- */
-export function partialLink(cwd: string): string[] {
-  const core = corePackages(cwd);
-  return core.some((p) => !installed(p.dir)) ? core.filter((p) => installed(p.dir)).map((p) => p.name) : [];
-}
-
-/** The real directory of package `name` as Node resolves it from the directory `from`, if it does. */
-function findPackage(name: string, from: string): string | undefined {
-  try {
-    const manifest = findPackageJSON(name, pathToFileURL(join(from, "/")));
-    return manifest === undefined ? undefined : realpathSync(dirname(manifest));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") return undefined;
-    throw err;
-  }
+export function buildDirs({ dir }: LinkedPackage): string[] {
+  const { files = [] } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { files?: string[] };
+  const dirs = files
+    .filter((file) => (file === "dist" || file.endsWith("/dist")) && !NOT_RUN.has(file))
+    .map((file) => join(dir, file));
+  return dirs.length ? dirs : [join(dir, "dist")];
 }
 
 /**

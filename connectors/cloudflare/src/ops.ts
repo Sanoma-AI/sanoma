@@ -11,9 +11,9 @@ import {
   retryableStatus,
   WAKE_PATH,
   type WakeupRegistration,
-} from "@sanoma-ai/workflows";
-import { domainsOf, domainsText, hostnameUrl, siteAtHostname } from "@sanoma-ai/workflows/shared";
-import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
+} from "sanoma/workflows";
+import { domainsOf, domainsText, hostnameUrl, siteAtHostname } from "sanoma/workflows/shared";
+import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "sanoma/workflows/wakeup-service";
 import { alarm, container, type host } from "./connector.ts";
 import { refused } from "./errors.ts";
 import { accountPinned } from "./registry.ts";
@@ -487,31 +487,33 @@ export interface ContainerOptions {
  * data file leaves out; its port is the image's. A create and an update are one upsert, a deploy
  * at revision R in three steps, each with its own wait, so a visitor is answered throughout:
  *
- * 1. Build first: the app bundle at R (`appBundle`), asked of the Worker's object, which starts its
- *    container when it is stopped and passes the ask on to the worker running there. The deployed
- *    Worker's container, still at R-1, builds it when it runs the declared image and can (not
- *    stale); else R's own does: the Worker at R is uploaded first, serving visitors the app
- *    deployed meanwhile (`serving`), and asked once that version is live.
+ * 1. The database and the bundle at R first: the Worker at R is uploaded serving visitors the app
+ *    deployed (`serving`), and once that version is live the app bundle at R (`appBundle`) is
+ *    asked of its object, which drains a worker at another revision or image and starts the
+ *    container at R. R's worker prepares the database (R's migrations) at its start, before its
+ *    port answers, then builds the bundle. The database moves before the app: the app on the
+ *    Worker never migrates (`checkPreparedOnly`) and refuses a database without its migrations,
+ *    while a database a newer release migrated serves the app deployed. So never the deployed
+ *    container's build: R's app would go live over R-1's database.
  * 2. One upload: the Worker at R, the bundle's modules under `app/`, its assets through an upload
  *    session, every binding (the text that says what it runs, the secrets, the database as a
  *    Hyperdrive config, the assets, the object's namespace and its container's image), and its
  *    version tagged with R, which a plan compares with the revision. The visitors' next request
  *    runs it.
- * 3. Restart last: once the upload is live, the object, asked for its health with `start`, drains
- *    a worker at another revision or image and starts the container at R (`instance.js`), and the
- *    wait ends once it answers there. An update whose plan is none (the upload made, the restart
- *    not seen: a deploy that died in its wait, or the restart of the worker that ran it) makes this
- *    step alone.
+ * 3. The restart confirmed last: once the upload is live, the object, asked for its health with
+ *    `start`, keeps the container already at R (`instance.js`), and the wait ends once it answers
+ *    there. An update whose plan is none (the upload made, the restart not seen: a deploy that
+ *    died in its wait, or the restart of the worker that ran it) makes this step alone.
  *
- * After each upload, before the object is asked, `live` waits until that version answers, by
- * the id the upload answered with: an upload reaches every location over a while. Before them, as Wrangler orders it: the image copied
- * and pinned, then prepared, the Hyperdrive config made or set again, and on a create the Worker
- * uploaded without an app (`no-app.js`, the migration on its first upload), its workers.dev URL
- * turned on and its application made, then uploaded once more so its object learns the
- * application. A domain declared before and no longer is detached before the first upload of R's
- * bindings, and a missing one attached after the upload with the app. The instance token
- * (`SANOMA_WAKEUP_TOKEN`), which the bundle and the restart are asked with, is the declared one,
- * else the stored one, minted when none is, and always bound.
+ * After each upload, before the object is asked, `live` waits until that version answers, by the
+ * id the upload answered with: an upload reaches every location over a while. Before them, as
+ * Wrangler orders it: the image copied and pinned, then prepared, the Hyperdrive config made or set
+ * again, and on a create the Worker uploaded without an app (`no-app.js`, the migration on its
+ * first upload), its workers.dev URL turned on and its application made, then uploaded once more
+ * so its object learns the application. A domain declared before and no longer is detached before
+ * the first upload of R's bindings, and a missing one attached after the upload with the app. The
+ * instance token (`SANOMA_WAKEUP_TOKEN`), which the bundle and the restart are asked with, is the
+ * declared one, else the stored one, minted when none is, and always bound.
  */
 export function containerOps(
   api: () => CloudflareApi,
@@ -795,24 +797,20 @@ export function containerOps(
         modules: [...entry, ...app],
       };
     };
-    // A domain declared before and no longer is detached while the bindings still record it, before
-    // the first upload of R's, and a missing one attached once the upload with the app records it:
-    // whatever fails in between, none is left attached and unrecorded, and the next apply attaches
-    // what is still missing. Once: the list is emptied.
-    const gone = attached.filter((d) => before.has(d.hostname) && !hostnames.has(d.hostname));
-    const detach = async () => {
-      for (const domain of gone.splice(0)) await cf.detachDomain(domain.id);
-    };
-    /** The version of the Worker at R this put uploaded before its bundle, whose object starts R's container. */
-    let first: string | undefined;
+    /**
+     * Uploads the Worker at R serving the app deployed (`serving`): its version's id. A domain
+     * declared before and no longer is detached first, while the bindings still record it, and a
+     * missing one attached once the upload with the app records it: whatever fails in between,
+     * none is left attached and unrecorded, and the next apply attaches what is still missing.
+     */
     const uploadServing = async () => {
-      await detach();
-      first = await cf.upload(script, await serving());
-      return first;
+      for (const domain of attached) {
+        if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+      }
+      return cf.upload(script, await serving());
     };
-    if (!current) {
-      first = await cf.upload(script, { ...bare, migrations: MIGRATION });
-    }
+    /** The version of the Worker at R this put uploads before its bundle, whose object starts R's container. */
+    let deployment = current ? undefined : await cf.upload(script, { ...bare, migrations: MIGRATION });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
     if (!app) {
@@ -824,27 +822,16 @@ export function containerOps(
       // the application exists: without this upload every start answers "There is no container
       // application assigned to this Durable Object namespace", for good (found live 2026-10-29;
       // a Worker deployed again after the application started at once).
-      await uploadServing();
+      deployment = await uploadServing();
     }
     const at = { script, url, token };
-    const polling = { startTimeoutMs, pollMs };
-    // 1. Build first: by the deployed Worker's container when it runs the declared image and can
-    // (another token, a Worker without the route, a revision whose worker ends: stale); else by
-    // R's, which the Worker at R starts, serving visitors the app deployed meanwhile, once that
-    // version answers: until then an earlier one may.
-    const deployed =
-      first || textOf(current?.bindings).get(TEXT.image) !== image
-        ? undefined
-        : await appBundle(cf, { ...at, revision }, polling);
-    const builtAtR = async () => {
-      const deployment = first ?? (await uploadServing());
-      await live(cf, at, deployment);
-      return appBundle(cf, { ...at, revision, deployment }, polling);
-    };
-    const bundle = deployed && !("stale" in deployed) ? deployed : await builtAtR();
+    // 1. The database and the bundle at R first, by R's container, which the Worker at R starts once
+    // that version answers (until then an earlier one may), visitors served the app deployed meanwhile.
+    deployment ??= await uploadServing();
+    await live(cf, at, deployment);
+    const bundle = await appBundle(cf, { ...at, revision, deployment }, { startTimeoutMs, pollMs });
     const jwt = bundle.assets.length ? await uploadAssets(cf, script, bundle.assets) : undefined;
     // 2. One upload, its version tagged with the app's revision.
-    await detach();
     const last: Upload = {
       ...worker,
       bindings: withApp(jwt),
@@ -857,7 +844,7 @@ export function containerOps(
     const version = await cf.upload(script, last);
     for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
     await live(cf, at, version);
-    // 3. Restart last.
+    // 3. The restart confirmed last.
     await restarted(cf, at, revision, configurationRevision);
     const state: ContainerState = {
       id: app.id,
@@ -988,13 +975,22 @@ const failed = ({ where, status, own }: Answer, advice?: string) =>
 
 const NO_TOKEN = `add ${WAKEUP_TOKEN} to the host's secrets (secret("${WAKEUP_TOKEN}", { generate: true })) and apply the host`;
 
+/** Where `register` reaches the host, beside the token in the same store: this alarm's host, never an earlier one's. */
+const storeHost = async (secrets: CallContext["secrets"], host: string) => {
+  const stored = await secrets.get(HOST_URL);
+  if (stored === host) return;
+  if (stored !== undefined) await secrets.delete(HOST_URL);
+  await secrets.ensure(HOST_URL, () => host);
+};
+
 /**
  * `cloudflare.alarm`'s operations and `alarm.register` over `api().send`: the host's own Worker's
  * wake route (`/__sanoma/wake`), each request with the company's `SANOMA_WAKEUP_TOKEN`, read from
  * the secret the alarm's `token` names (`tokenName`; `register` reads the default). `create`
- * mints and stores the token when none is, and the host's URL as `SANOMA_HOST_URL`. `register`
- * sends to the host's URL from the environment, `SANOMA_HOST_URL`, which the Worker sets in the
- * container's; off the host, from the stored one.
+ * mints and stores the token when none is, and, for the default token's alarm, the host's URL as
+ * `SANOMA_HOST_URL` (replacing an earlier host's); a plan that finds another URL stored, or none,
+ * is an update that stores it again. `register` sends to the stored URL, on the host and off it:
+ * a connector reads no fact from the process environment.
  */
 export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
   const route = async (host: string, method: string, token: string, body?: unknown): Promise<Answer> => {
@@ -1054,6 +1050,9 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     if (!state) return { action: "create", planned, unknown, replace: [] };
     // The alarm is the host's object's: a new host is a new alarm.
     if (planned.host !== state.host) return { action: "replace", planned, unknown, replace: ["host"] };
+    // An alarm applied before `register` read only the store, or replaced while an earlier host's URL stayed
+    // there (the environment hid both), stores its host's URL again.
+    if ((await call.secrets.get(HOST_URL)) !== state.host) return { action: "update", planned: state, ...NONE };
     return { action: "none", planned: state, ...NONE };
   };
 
@@ -1076,18 +1075,21 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
         const advice = own ?? "apply the host again";
         throw refused(`alarm.create: the host's ${WAKEUP_TOKEN} is not the stored ${name}: ${advice}`, "token");
       }
-      // Only for a register made off the host (a test's, a kit's): on it, the Worker's binding comes first.
-      await secrets.ensure(HOST_URL, () => host);
+      // Only for the default token, which `register` sends: a workflow's alarm for another host, under a token of
+      // its own, must not move the company's registrations there.
+      if (name === WAKEUP_TOKEN) await storeHost(secrets, host);
       return { id: host, state };
     },
     update: async (
       { id, state: known, desired }: { id: string; state?: Record<string, unknown>; desired: Record<string, unknown> },
       call: CallContext,
     ) => {
-      const { state } = await readWith(id, tokenName(desired, known), call);
+      const name = tokenName(desired, known);
+      const { state } = await readWith(id, name, call);
       if (!state || hostUrl(desired.host) !== state.host) {
         throw refused(`alarm.update: a new host is a new alarm`, "plan_changed");
       }
+      if (name === WAKEUP_TOKEN) await storeHost(call.secrets, state.host);
       return { id, state };
     },
     delete: async ({ id, state }: { id: string; state?: Record<string, unknown> }, { secrets }: CallContext) => {
@@ -1099,13 +1101,9 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     register: async (registration: WakeupRegistration, call: CallContext) => {
       const token = await call.secrets.get(WAKEUP_TOKEN);
       if (!token) throw refused(`alarm.register: ${WAKEUP_TOKEN} is not set: apply the alarm, which mints it`);
-      // On the host, the Worker's binding is in the environment; off it, only a stored one names the host.
-      const host = process.env[HOST_URL] || (await call.secrets.get(HOST_URL));
-      if (!host) {
-        throw refused(
-          `alarm.register: ${HOST_URL} is set neither in the environment (the Worker sets it on the host) nor among the stored credentials (apply the alarm, which stores it)`,
-        );
-      }
+      // From the store the token is in, which `alarm.create` writes both to: never the process environment.
+      const host = await call.secrets.get(HOST_URL);
+      if (!host) throw refused(`alarm.register: ${HOST_URL} is not stored: apply the alarm, which stores it`);
       const answer = await route(hostUrl(host), "PUT", token, registration);
       if (answer.status === 204) return {};
       throw failed(answer, answer.status === 404 && answer.own ? NO_TOKEN : undefined);

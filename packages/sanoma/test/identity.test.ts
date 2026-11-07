@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { Pool } from "pg";
-import { CLOUD_IDENTITY_SQL } from "@sanoma-ai/workflows/cloud-identity";
-import { CLOUD_IDENTITY_AUDIT_SQL } from "@sanoma-ai/workflows/identity-service";
+import { CLOUD_IDENTITY_SQL } from "sanoma/workflows/cloud-identity";
+import { CLOUD_IDENTITY_AUDIT_SQL } from "sanoma/workflows/identity-service";
 import { ensureBuilt, runCli, serving } from "./fixture.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "sanoma-identity-command-"));

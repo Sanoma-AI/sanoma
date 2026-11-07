@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-resend
 
-[Resend Broadcasts API](https://resend.com/docs/api-reference/broadcasts) and [one-email send](https://resend.com/docs/api-reference/emails/send-email) operations for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows), and the [sending domain](#sending-domain) they send from, as a resource a data file declares.
+[Resend Broadcasts API](https://resend.com/docs/api-reference/broadcasts) and [one-email send](https://resend.com/docs/api-reference/emails/send-email) operations for [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md), and the [sending domain](#sending-domain) they send from, as a resource a data file declares.
 
 ## Usage
 
@@ -16,7 +16,7 @@ npm install @sanoma-ai/connector-resend
 
 ```ts
 import { resend } from "@sanoma-ai/connector-resend";
-import { defineWorkflow } from "@sanoma-ai/workflows";
+import { defineWorkflow } from "sanoma/workflows";
 
 defineWorkflow({
   // ...
@@ -51,7 +51,7 @@ defineWorkflow({
 
 ## Sending domain
 
-`resend.domain`, from `@sanoma-ai/connector-resend/resources`, is a domain Resend sends from, which a data file declares. Its `dns_records` are the records the domain's zone must hold, in the shape `dnsRecord` (from `@sanoma-ai/workflows`) gives them, so a zone's record set can take them whole, as `cloudflare.records` (in `@sanoma-ai/connector-cloudflare`) does through `from: "dns_records"`:
+`resend.domain`, from `@sanoma-ai/connector-resend/resources`, is a domain Resend sends from, which a data file declares. Its `dns_records` are the records the domain's zone must hold, in the shape `dnsRecord` (from `sanoma/workflows`) gives them, so a zone's record set can take them whole, as `cloudflare.records` (in `@sanoma-ai/connector-cloudflare`) does through `from: "dns_records"`:
 
 ```ts
 // resources/mail.ts
@@ -88,7 +88,7 @@ The logo the app shows beside these operations is Resend's lettermark from its [
 
 ## Driver
 
-`@sanoma-ai/connector-resend/driver` calls Resend. The `resend` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma-ai/connector-resend/driver` calls Resend. The `resend` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
 import { resend } from "@sanoma-ai/connector-resend";
@@ -110,7 +110,7 @@ It reads this on every call, never when the config loads:
 | ---------------- | ------------------------------------------------------------------------------------------------ |
 | `RESEND_API_KEY` | A Resend API key: a full-access one for [sending domains](#sending-domain), else sending access. |
 
-When the key is unset, a call fails, not retryable, naming it; so does a `broadcast.create` or `emails.send` with no `from`. The driver declares the key in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma-ai/workflows#credentials)): the worker starts without the key, warning, and the app's connector page shows its status and lets you set it.
+When the key is unset, a call fails, not retryable, naming it; so does a `broadcast.create` or `emails.send` with no `from`. The driver declares the key in its `env` ([Credentials](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#credentials)): the worker starts without the key, warning, and the app's connector page shows its status and lets you set it.
 
 ### Idempotency
 
@@ -126,7 +126,7 @@ Broadcasts are on the free Marketing plan (1,000 contacts, 3 segments, 3 domains
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Resend's recorded replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/resend` needs no account. Live, they create broadcasts and send one to a test segment, and send emails to Resend's test inbox, `delivered@resend.dev`:
+`test/driver.test.ts` replays Resend's recorded replies (`test/fixtures`) with [`sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/resend` needs no account. Live, they create broadcasts and send one to a test segment, and send emails to Resend's test inbox, `delivered@resend.dev`:
 
 ```sh
 SANOMA_LIVE=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM="Test <test@your-domain>" pnpm vitest run connectors/resend
@@ -144,7 +144,7 @@ It checks what the reference leaves open: whether Resend names a subdomain's rec
 
 ## Steps and features
 
-The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#steps-a-connector-ships) (`resendSteps`, attached with `withSetup`), which a company's scenario can use beside the generic steps and other connectors' ones:
+The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#steps-a-connector-ships) (`resendSteps`, attached with `withSetup`), which a company's scenario can use beside the generic steps and other connectors' ones:
 
 | Keyword | Step                                    | What it does                                                                                                       |
 | ------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -154,14 +154,14 @@ The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/
 | Then    | `the Resend broadcast {string} is sent` | The broadcast with that subject, seeded or created by the run, was sent                                            |
 | Then    | `a Resend email to {string} is sent`    | The run sent an email to that address, alone or in its list                                                        |
 
-`features/broadcast.feature` creates and sends a broadcast, `features/emails.feature` sends an email, and `features/domain.feature` creates, reads, imports, plans and deletes a sending domain, with these steps and the generic ones for an operation's own test, on the fake and on Resend's replies (`create-and-send.json`, `send-an-email.json`, and the domain's, written from the reference): `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-connectors-own-features). A scenario tagged `@fake-only` has no recording. The package ships `features/`.
+`features/broadcast.feature` creates and sends a broadcast, `features/emails.feature` sends an email, and `features/domain.feature` creates, reads, imports, plans and deletes a sending domain, with these steps and the generic ones for an operation's own test, on the fake and on Resend's replies (`create-and-send.json`, `send-an-email.json`, and the domain's, written from the reference): `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md#a-connectors-own-features). A scenario tagged `@fake-only` has no recording. The package ships `features/`.
 
 ## Testing
 
 `@sanoma-ai/connector-resend/fake` is an in-memory Resend that emails nobody, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.broadcasts`, `state.emails` (the emails sent, by id), `state.domains` (the sending domains, by id, as Resend gives them) and `calls`.
 
 ```ts
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { resend } from "@sanoma-ai/connector-resend";
 import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 
@@ -187,11 +187,11 @@ A domain it makes has a DKIM key made from its id, an MX record `feedback-smtp.<
 
 `fake.reset()` empties it between tests. Pass `{ calls }` with one array to several fakes to see their calls in one order.
 
-[`@sanoma-ai/testing`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md) (in the sanoma repository, not published) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
+[`sanoma/testing`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md) (in the sanoma repository, not published) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
 
 ## Changes
 
-- 0.6.0: `RESEND_FROM` is retired: `from` is required in `broadcast.create` and `emails.send`, a send with none is refused (by the driver and the fake alike) whatever the environment holds, and the driver declares only `RESEND_API_KEY`. Sign-in codes are sent from the config's `login.from` (`@sanoma-ai/workflows` 0.11.0).
-- 0.5.0: the resource type `resend.domain`. `RESEND_FROM` is deprecated: it still stands in for a missing `from`, warning once, and retires once `login.from` exists (sanoma#531), so pass `from`. It needs `@sanoma-ai/workflows` 0.10.5 or later, for `from` references.
+- 0.6.0: `RESEND_FROM` is retired: `from` is required in `broadcast.create` and `emails.send`, a send with none is refused (by the driver and the fake alike) whatever the environment holds, and the driver declares only `RESEND_API_KEY`. Sign-in codes are sent from the config's `login.from` (`sanoma/workflows` 0.11.0).
+- 0.5.0: the resource type `resend.domain`. `RESEND_FROM` is deprecated: it still stands in for a missing `from`, warning once, and retires once `login.from` exists (sanoma#531), so pass `from`. It needs `sanoma/workflows` 0.10.5 or later, for `from` references.
 
 License: FSL-1.1-ALv2.

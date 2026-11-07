@@ -1,0 +1,1060 @@
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { spawnSync } from "node:child_process";
+import { request as httpRequest } from "node:http";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildApp, sitesOf, writeSiteFiles } from "sanoma/app/build";
+import { testDatabaseUrl } from "sanoma/testing";
+import {
+  defineConfig,
+  defineConnector,
+  SanomaClient,
+  startWorker,
+  VISITOR_DENIED,
+  type Worker,
+  withSetup,
+} from "sanoma/workflows";
+import { describeConfig, writeApi } from "sanoma/workflows/describe";
+import { executablePath, launch } from "puppeteer-core";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
+import { type App, startApp } from "../src/index.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
+import { barGroups, barLink, barTile } from "./bar-helpers.ts";
+import { loginContexts } from "./fixtures/company-sites/login.ts";
+import fixture from "./fixtures/company-sites/sanoma.config.ts";
+
+// Needs Postgres (`pnpm db:up`) and sanoma built (the server bundle imports the runtime from its
+// dist/: `ensureSanomaBuilt`). The one test in a browser needs Google Chrome, or `CHROME_PATH` naming
+// a Chrome or Chromium binary, and skips without either.
+const appDir = fileURLToPath(new URL("..", import.meta.url));
+const fixtureDir = fileURLToPath(new URL("./fixtures/company-sites/", import.meta.url));
+const config = defineConfig({ ...fixture, databaseUrl: testDatabaseUrl("sites_build") });
+
+// A company's install has no NODE_PATH, which pnpm's vitest shim sets to its hoisted packages:
+// Tailwind would find `tailwindcss` there, where a company's build does not.
+delete process.env.NODE_PATH;
+
+const repos: string[] = [];
+afterAll(() => {
+  for (const repo of repos) rmSync(repo, { recursive: true, force: true });
+});
+
+/**
+ * A copy of the fixture company, outside this checkout, with `files` written over it. Its
+ * `node_modules` holds `sanoma` alone, as a company's install does: this checkout's, whose
+ * dependencies are linked beside it.
+ */
+function company(files: Record<string, string> = {}): string {
+  const repo = mkdtempSync(join(tmpdir(), "sanoma-sites-"));
+  repos.push(repo);
+  cpSync(fixtureDir, repo, { recursive: true });
+  mkdirSync(join(repo, "node_modules"));
+  symlinkSync(join(appDir, ".."), join(repo, "node_modules", "sanoma"));
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(repo, path)), { recursive: true });
+    writeFileSync(join(repo, path), text);
+  }
+  return repo;
+}
+
+/** Every entry under `dir`, not following links, with its modification time: what a build must leave as it was. */
+const entries = (dir: string) =>
+  readdirSync(dir, { recursive: true, withFileTypes: true })
+    .map((entry) => join(entry.parentPath, entry.name))
+    .map((path) => `${path} ${lstatSync(path).mtimeMs}`)
+    .toSorted();
+
+/** A site page at `path` that imports `line`, and shows `shown`. */
+const sitePage = (
+  path: string,
+  line: string,
+  shown: string,
+) => `import { createFileRoute } from "@tanstack/react-router";
+${line}
+
+export const Route = createFileRoute("${path}")({ component: () => <div>{${shown}}</div> });
+`;
+
+/**
+ * A site page that starts hello for `who` and reads a refusal without a cast, with `errorBodyOf`
+ * and `ApiError` from sanoma/site, branching on `code`.
+ */
+const starting = (who: string, code: string) => `import { createFileRoute } from "@tanstack/react-router";
+import { api, ApiError, errorBodyOf, type ErrorResponse } from "sanoma/site";
+
+async function start(): Promise<string> {
+  try {
+    return (await api.hello.start({ who: ${who} })).runId;
+  } catch (err) {
+    const body: ErrorResponse | undefined = errorBodyOf(err);
+    if (body?.code === "${code}") return \`waiting in \${body.runId}\`;
+    if (err instanceof ApiError && err.status === 403) return err.body.error;
+    throw err;
+  }
+}
+
+export const Route = createFileRoute("/sites/hello/styled")({ loader: start, component: () => <div /> });
+`;
+
+/**
+ * A request to the app with `host` as its Host, which fetch does not let a caller set, and so with
+ * no need for `*.localhost` to resolve (it does not on every Linux).
+ */
+function rawGet(
+  url: string,
+  host: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
+  const { hostname, port, pathname, search } = new URL(url);
+  return new Promise((done, fail) => {
+    httpRequest(
+      { host: hostname, port, path: pathname + search, method: init.method, headers: { ...init.headers, host } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () =>
+          done({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString() }),
+        );
+      },
+    )
+      .on("error", fail)
+      .end(init.body);
+  });
+}
+
+/** What a browser says of a server function's request from its own page, which Start's CSRF check asks for. */
+const SAME_ORIGIN = { "sec-fetch-site": "same-origin" };
+
+/** The id of the server function `name` in a build, from its server entry's table of them. */
+function serverFnId(distDir: string, name: string): string {
+  const server = readFileSync(join(distDir, "server", "server.js"), "utf8");
+  const id = new RegExp(`"([0-9a-f]{64})": \\{\\s*functionName: "${name}_createServerFn_handler"`).exec(server)?.[1];
+  if (!id) throw new Error(`no server function ${name} in ${distDir}`);
+  return id;
+}
+
+/** The opening tag of the link around the first `text`. */
+function linkTag(html: string, text: string) {
+  const start = html.lastIndexOf("<a ", html.indexOf(text));
+  return start < 0 ? undefined : html.slice(start, html.indexOf(">", start) + 1);
+}
+
+/** The page's canonical URL. */
+const canonical = (html: string) => /<link rel="canonical" href="([^"]+)"/.exec(html)?.[1];
+
+/** The page's region or section under the heading `title`, up to the next heading, or the page's end. */
+function sectionAfter(html: string, title: string) {
+  const start = html.search(new RegExp(`<h[23][^>]*>${title}</h[23]>`));
+  if (start < 0) return "";
+  const next = html.slice(start + 1).search(/<h[1-6][ >]|<script/);
+  return next < 0 ? html.slice(start) : html.slice(start, start + 1 + next);
+}
+
+/**
+ * A class only a site uses, put together here so that Tailwind, scanning this package for the
+ * package's own build, does not find it in this file.
+ */
+const siteClass = ["tracking", "[0.37em]"].join("-");
+
+/**
+ * `/sites/hello/styled`: the site's class, and `hidden`, which the app's bar overrides with
+ * `md:flex`; its `sites/hello/style.css` linked from its head.
+ */
+const styledPage = `import { createFileRoute } from "@tanstack/react-router";
+import css from "../style.css?url";
+
+export const Route = createFileRoute("/sites/hello/styled")({
+  head: () => ({ links: [{ rel: "stylesheet", href: css }] }),
+  component: () => <span className="${siteClass} hidden bg-hello" />,
+});
+`;
+
+/** The hrefs of the stylesheets a page links. */
+const stylesheets = (html: string) =>
+  [...html.matchAll(/<link\b[^>]*>/g)]
+    .map(([tag]) => tag)
+    .filter((tag) => tag.includes('rel="stylesheet"'))
+    .map((tag) => tag.match(/href="([^"]+)"/)![1]!);
+
+describe("a company's app with its sites", () => {
+  // The fixture has no .gitignore, and nor has its copy: nothing tells Tailwind to skip `.sanoma/`.
+  const repo = company({
+    // A site's own stylesheet, the README's recipe with the kit and a token of its own and one of
+    // the kit's in its colours, linked by the page using its classes.
+    "sites/hello/style.css": [
+      "@layer theme, base, components, utilities;",
+      '@import "tailwindcss/theme" layer(theme);',
+      '@import "tailwindcss/utilities" layer(utilities.hello) source("./");',
+      '@import "sanoma/ui.css";',
+      "@theme { --color-hello: oklch(0.6 0.2 30); }",
+      '[data-site="hello"] { --primary: red; }',
+    ].join("\n"),
+    "sites/hello/routes/styled.tsx": styledPage,
+    "sites/hello/routes/missing.tsx": sitePage(
+      "/sites/hello/missing",
+      'import { RunForm } from "sanoma/site";',
+      '<RunForm workflow="missing" />',
+    ),
+    // A post with no translation, which sites/intl shows in English in French too.
+    "content/posts/untranslated.md": [
+      "---",
+      "title: Only in English",
+      "description: Not translated.",
+      "publishedAt: 2026-10-02",
+      "---",
+      "",
+      "Words only in English.",
+    ].join("\n"),
+    // A post only in French: no page in English, so its French page links to no other language.
+    "content/posts/only-fr.fr.md": ["---", "title: Seulement en français", "---", "", "Des mots."].join("\n"),
+  });
+  // And sanoma, which the company's node_modules links to: its own source, the app's and its node_modules.
+  const untouched = {
+    src: join(appDir, "src"),
+    modules: join(appDir, "..", "node_modules"),
+    sanoma: join(appDir, "..", "src"),
+  };
+  const before = { src: [] as string[], modules: [] as string[], sanoma: [] as string[] };
+  let result: { distDir: string; built: boolean };
+  let worker: Worker;
+  let app: App;
+
+  beforeAll(async () => {
+    // Built first, under its lock: no other test's build writes under `modules` while this looks.
+    ensureSanomaBuilt();
+    before.src = entries(untouched.src);
+    before.modules = entries(untouched.modules);
+    before.sanoma = entries(untouched.sanoma);
+    result = await buildApp(repo);
+    worker = await startWorker(config);
+    app = await startApp(config, { port: 0, distDir: result.distDir });
+  });
+
+  afterAll(async () => {
+    await app?.close();
+    await worker?.stop();
+  });
+
+  it("builds into .sanoma/app with the sites in the route tree, writing nothing in the app or under node_modules", () => {
+    expect(result.built).toBe(true);
+    expect(result.distDir).toMatch(/[/\\]\.sanoma[/\\]app[/\\]build[/\\][0-9a-f]{16}$/);
+    expect(existsSync(join(result.distDir, "server", "server.js"))).toBe(true);
+    const tree = readFileSync(join(dirname(dirname(result.distDir)), "routeTree.gen.ts"), "utf8");
+    expect(tree).toContain("id: '/sites/hello/'");
+    expect(tree).toContain("id: '/workflows'");
+    expect(entries(untouched.src)).toEqual(before.src);
+    expect(entries(untouched.modules)).toEqual(before.modules);
+    expect(entries(untouched.sanoma)).toEqual(before.sanoma);
+    expect(readdirSync(join(repo, "node_modules"))).toEqual(["sanoma"]);
+    // The route generator's temporary files, too, are under .sanoma/app, not in the cwd.
+    expect(existsSync(join(repo, ".sanoma", "app", "tmp"))).toBe(true);
+  });
+
+  it("serves a site's page inside the app's shell, and the app's own pages", async () => {
+    const site = await fetch(new URL("/sites/hello/", app.url));
+    expect(site.status).toBe(200);
+    const html = (await site.text()).replaceAll("<!-- -->", "");
+    expect(html).toContain("The hello site");
+    expect(html).toContain("Hello from the hello site");
+    // The app's bar and chat column beside it: a tile per site, in one group (the root's: the
+    // fixture has no apps) between Inbox and Workflows and Setup, each to its home, this one's lit.
+    expect(barGroups(html)).toEqual([
+      [
+        ["/inbox", "Inbox"],
+        ["/workflows", "Workflows"],
+      ],
+      [
+        ["/sites/hello", "Hello desk"],
+        ["/sites/intl", "Intl"],
+        ["/sites/members", "Members"],
+      ],
+      [
+        ["/data", "Data"],
+        ["/people", "People"],
+        ["/hosting", "Hosting"],
+        ["/connectors", "Connectors"],
+        ["/apps", "Apps"],
+        ["/permissions", "Permissions"],
+      ],
+    ]);
+    expect(barLink(html, "/sites/hello")).toContain('aria-current="page"');
+    expect(barLink(html, "/sites/members")).not.toContain("aria-current");
+    // Lit on the site's other pages too.
+    const styled = (await (await fetch(new URL("/sites/hello/styled", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(barLink(styled, "/sites/hello")).toContain('aria-current="page"');
+    expect(html).toContain('<aside id="chat" aria-label="Chat"');
+    const workflows = await fetch(new URL("/workflows", app.url));
+    expect(workflows.status).toBe(200);
+    expect(await workflows.text()).toContain("Say hello");
+  });
+
+  it("serves a site's RunForm: the workflow's fields under a link to its page, live only, or a notice naming a workflow the config lacks", async () => {
+    const site = await fetch(new URL("/sites/hello/run", app.url));
+    expect(site.status).toBe(200);
+    const html = (await site.text()).replaceAll("<!-- -->", "");
+    // The hello workflow's input, `{ who: string }`, as one required text field.
+    expect(html).toMatch(/<label[^>]*for="field-who"[^>]*>who<span[^>]*>\*<\/span>/);
+    expect(html).toMatch(/<input[^>]*id="field-who"[^>]*type="text"/);
+    expect(linkTag(html, "Say hello")).toContain('href="/workflows/hello"');
+    expect(html).toContain("Start run");
+    expect(html).not.toContain("Sandbox");
+    const missing = (await (await fetch(new URL("/sites/hello/missing", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(missing).toContain("This company has no workflow named “missing”.");
+    expect(missing).not.toContain('id="field-');
+  });
+
+  it("starts a run from a site's RunForm and links to it there, while the app's New run opens the run's page; keeps the app's utilities over a site's", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    const browser = await launch({ executablePath: chrome, headless: true });
+    let client: SanomaClient | undefined;
+    try {
+      client = await SanomaClient.connect(config);
+      const page = await browser.newPage();
+      // A desktop window, where New run floats over the graph.
+      await page.setViewport({ width: 1440, height: 900 });
+      // The name the app asks for once, kept in the browser, sent with every change.
+      await page.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "tester"));
+      // The site's `hidden`, in a layer inside the app's utilities, leaves the bar's `md:flex`.
+      // A string, run in the page: this file is typed for Node, without the DOM's globals.
+      await page.goto(new URL("/sites/hello/styled", app.url).href, { waitUntil: "networkidle0" });
+      const bar = `getComputedStyle(document.querySelector('nav[aria-label="Sections"]').parentElement).display`;
+      expect(await page.evaluate(bar)).toBe("flex");
+      // The site's tile draws the Lucide icon its site.ts names, in the browser as on the server;
+      // another site, which names none, keeps the default for its kind.
+      await page.waitForSelector('nav a[href="/sites/hello"] svg.lucide-life-buoy');
+      expect(await page.$('nav a[href="/sites/members"] svg.lucide')).toBeNull();
+
+      const site = new URL("/sites/hello/run", app.url).href;
+      await page.goto(site, { waitUntil: "networkidle0" });
+      await page.type("#field-who", "Ada");
+      await page.click('main button[type="submit"]');
+      const link = await page.waitForSelector('a[href^="/workflows/hello/runs/"]::-p-text(Open the run)');
+      const runId = (await link!.evaluate((a) => a.getAttribute("href")!)).split("/").at(-1)!;
+      expect(page.url()).toBe(site);
+      expect(await client.result(runId)).toEqual({ greeting: "hello Ada" });
+      expect(await client.run(runId)).toMatchObject({ workflow: "hello", startedBy: { id: "tester" } });
+
+      await page.goto(new URL("/workflows/hello?new=true", app.url).href, { waitUntil: "networkidle0" });
+      await page.type("#field-who", "Grace");
+      await page.click('main button[type="submit"]');
+      // A string, run in the page: this file is typed for Node, without the DOM's `location`.
+      await page.waitForFunction(String.raw`/^\/workflows\/hello\/runs\/[^/]+$/.test(location.pathname)`);
+    } finally {
+      await client?.close();
+      await browser.close();
+    }
+  });
+
+  it("renders a page whose loader calls api as the person asking: the loopback login's header, else its cookie", async () => {
+    const client = await SanomaClient.connect(config);
+    try {
+      /** What /sites/hello/started's loader answered, and who started the run it started. */
+      const started = async (headers: Record<string, string>) => {
+        const html = (await (await fetch(new URL("/sites/hello/started", app.url), { headers })).text()).replaceAll(
+          "<!-- -->",
+          "",
+        );
+        const said = html.match(/<p>((?:Started|Refused:) [^<]+)<\/p>/)?.[1];
+        const runId = said?.match(/^Started (.+)$/)?.[1];
+        return { said, by: runId && (await client.run(runId))?.startedBy };
+      };
+      const cookie = `${ACTOR_COOKIE}=${encodeURIComponent("Ada Lovelace")}`;
+      expect(await started({ cookie })).toEqual({
+        said: expect.stringMatching(/^Started /),
+        by: { id: "Ada Lovelace" },
+      });
+      expect((await started({ cookie, [ACTOR_HEADER]: "grace" })).by).toEqual({ id: "grace" });
+      expect(await started({})).toEqual({ said: "Refused: invalid_input", by: undefined });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("lists the sites on the Sites page, each with its pages and where it is public, reached from Data's header", async () => {
+    const html = (await (await fetch(new URL("/sites", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(html).toMatch(/<h1[^>]*>Sites<span[^>]*>3<\/span><\/h1>/);
+    /** A site's row in the table, by its title. */
+    const row = (title: string) =>
+      html.match(new RegExp(`<tr[^>]*>(?:(?!</tr>)[\\s\\S])*>${title}</a>(?:(?!</tr>)[\\s\\S])*</tr>`))?.[0] ?? "";
+    const hello = row("Hello desk");
+    // Its title linking to its home (a typed path has no trailing slash), its folder.
+    expect(linkTag(hello, "Hello desk")).toContain('href="/sites/hello"');
+    expect(hello).toContain(">sites/hello</code>");
+    // Its pages, its home first.
+    const pages = [
+      ...(hello.match(/<ul aria-label="Hello desk&#x27;s pages"[^>]*>([\s\S]*?)<\/ul>/)?.[1] ?? "").matchAll(
+        /<a [^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g,
+      ),
+    ].map(([, href, label]) => [href, label]);
+    expect(pages[0]).toEqual(["/sites/hello", "Home"]);
+    expect(pages).toContainEqual(["/sites/hello/styled", "/styled"]);
+    // Public, though the server cannot know at what address on this machine (the browser can).
+    expect(hello).toMatch(/<td[^>]*><span[^>]*>Public<\/span><\/td>/);
+    expect(row("Members")).toContain(">sites/members</code>");
+    // A site in two languages: its pages in its default, and its languages, the default first.
+    const intl = row("Intl");
+    expect(linkTag(intl, "Intl")).toContain('href="/sites/intl"');
+    expect(intl).toMatch(
+      /<ul aria-label="Languages"[^>]*><li><code>en<\/code><span[^>]*> default<\/span><\/li><li><code>fr<\/code><\/li><\/ul>/,
+    );
+    expect(hello).toMatch(/<td[^>]*><span[^>]*>One<\/span><\/td>/);
+    // No tile in the bar for this page: Data's header leads here, and Data is lit here.
+    expect(barLink(html, "/sites")).toBeUndefined();
+    expect(barLink(html, "/data")).toContain('data-active="true"');
+    const data = (await (await fetch(new URL("/data", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(linkTag(data, ">Sites</a>")).toContain('href="/sites"');
+  });
+
+  it("gives a site's `sanoma/site` imports the app's one router and React", async () => {
+    // Each copy's markers, counted in the browser's bundle: as many as a build with no sites has.
+    const router = "__TSR_ROUTER__";
+    const markers = [router, "react.transitional.element", "react.portal"];
+    const count = (distDir: string) => {
+      const dir = join(distDir, "client", "assets");
+      const code = readdirSync(dir)
+        .filter((file) => file.endsWith(".js"))
+        .map((file) => readFileSync(join(dir, file), "utf8"))
+        .join("\n");
+      return Object.fromEntries(markers.map((marker) => [marker, code.split(marker).length - 1]));
+    };
+    const bare = company();
+    rmSync(join(bare, "sites"), { recursive: true });
+    const withoutSites = count((await buildApp(bare)).distDir);
+    expect(withoutSites[router]).toBe(1);
+    expect(count(result.distDir)).toEqual(withoutSites);
+  });
+
+  it("bundles only the Lucide icons the sites name, and draws a site's on the server", async () => {
+    const html = await (await fetch(new URL("/sites/hello", app.url))).text();
+    expect(barTile(html, "/sites/hello")).toContain("lucide-life-buoy");
+    expect(barTile(html, "/sites/members")).not.toContain("lucide");
+    // Lucide's icons, each its data in a module of its own, which a lazy import by name would make
+    // a chunk each: only the one a site names is in the browser's bundle.
+    const client = join(result.distDir, "client", "assets");
+    const icons = readdirSync(client)
+      .filter((file) => file.endsWith(".js"))
+      .flatMap((file) => [
+        ...readFileSync(join(client, file), "utf8").matchAll(/name:["`]([a-z0-9-]+)["`],size:24,node:/g),
+      ])
+      .map(([, name]) => name);
+    expect(icons).toEqual(["life-buoy"]);
+  });
+
+  it("imports the runtime by URL from the server bundle, and keeps it out of the browser's", () => {
+    const server = join(result.distDir, "server");
+    // Every import that is not relative is Node's or a file URL: nothing from the company's install.
+    const imported = readdirSync(server, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".js"))
+      .flatMap((file) => [
+        ...readFileSync(join(server, file), "utf8").matchAll(/^(?:import|export)\b[^"'\n]*?["']([^"']+)["']/gm),
+      ])
+      .map(([, specifier]) => specifier!)
+      .filter((specifier) => !specifier.startsWith("."));
+    expect(imported.some((specifier) => specifier.startsWith("node:"))).toBe(true);
+    expect(imported.filter((specifier) => !/^(node:|file:\/\/)|^module$/.test(specifier))).toEqual([]);
+    expect(imported.some((specifier) => /^file:.*\/workflows\/dist\/index\.js$/.test(specifier))).toBe(true);
+    const client = join(result.distDir, "client", "assets");
+    // Tailwind finds a site's classes from the repo, the root.
+    const css = readdirSync(client).filter((f) => f.endsWith(".css"));
+    expect(css.some((f) => readFileSync(join(client, f), "utf8").includes("letter-spacing:.37em"))).toBe(true);
+    for (const file of readdirSync(client).filter((f) => f.endsWith(".js"))) {
+      const code = readFileSync(join(client, file), "utf8");
+      expect(code, file).not.toMatch(/DBOSClient|systemDatabaseUrl|@cucumber|faker|pg-protocol|pg-pool|pg_notify/);
+    }
+  });
+
+  it("links a site's own stylesheet, Tailwind's theme and utilities with the site's classes, every stylesheet the server links is one the build wrote, and stylesheet.json names the kit's", async () => {
+    const html = await (await fetch(new URL("/sites/hello/styled", app.url))).text();
+    const hrefs = stylesheets(html);
+    // The app's and the site's: the server's render and the client's build agree on each file's
+    // hash, so the first paint is styled.
+    expect(hrefs).toHaveLength(2);
+    const css = hrefs.map((href) => {
+      const file = join(result.distDir, "client", href);
+      expect(existsSync(file), href).toBe(true);
+      return readFileSync(file, "utf8");
+    });
+    const site = css.find((text) => !text.includes("--bar-width"));
+    expect(site).toContain("letter-spacing:.37em");
+    // In a layer inside the app's utilities, which the app's own win over.
+    expect(site).toMatch(/@layer utilities\.hello\{[^]*\.hidden\{display:none\}/);
+    // The kit's (sanoma/ui.css): its classes and variants, with the site's own token beside its
+    // tokens, and its colour for one of them; never all of preflight.
+    // Minification may combine identical fallback declarations into a selector list.
+    expect(
+      [...site!.matchAll(/([^{}]+)\{([^{}]*)\}/g)].some(
+        ([, selectors, declarations]) =>
+          selectors!.split(",").includes(".bg-primary") &&
+          declarations!.split(";").includes("background-color:var(--primary)"),
+      ),
+    ).toBe(true);
+    expect(site).toMatch(/\.data-open\\:[\w-]+:where\(\[data-state=open\]\)/);
+    expect(site).toMatch(/\.bg-hello\{background-color:var\(--color-hello\)\}/);
+    expect(site).toMatch(/\[data-site=hello\]\{--primary:red\}/);
+    expect(site).not.toContain("tab-size");
+    // The kit's, named so for the login's own pages, though the site's file is `style-<hash>.css` too.
+    const kit = hrefs.find((_, i) => css[i]!.includes("--bar-width"));
+    expect(hrefs.every((href) => /^\/assets\/style-[\w-]+\.css$/.test(href))).toBe(true);
+    expect(JSON.parse(readFileSync(join(result.distDir, "stylesheet.json"), "utf8"))).toBe(kit);
+  });
+
+  it("renders content from content/: the list and a post's HTML, from a chunk of its own, and never a draft", async () => {
+    const list = await fetch(new URL("/sites/hello/posts/", app.url));
+    expect(list.status).toBe(200);
+    const html = (await list.text()).replaceAll("<!-- -->", "");
+    expect(linkTag(html, "Hello, content")).toContain('href="/sites/hello/posts/hello"');
+    expect(html).toContain("The first post, from content/posts.");
+    const post = (await (await fetch(new URL("/sites/hello/posts/hello", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(post).toContain("<h1>Hello, content</h1>");
+    expect(post).toMatch(/<article class="prose"><p>A post from <strong>content\/<\/strong>, rendered at build\.<\/p>/);
+    expect(post).toContain("<td>Free</td>");
+    // A draft is in no page and no file the browser is sent.
+    expect(html).not.toContain("Not yet");
+    expect((await fetch(new URL("/sites/hello/posts/draft", app.url))).status).toBe(404);
+    const client = join(result.distDir, "client");
+    const files = readdirSync(client, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
+    const holding = (text: string) =>
+      files.filter((entry) => readFileSync(join(entry.parentPath, entry.name), "utf8").includes(text));
+    expect(holding("unpublished-draft-words")).toEqual([]);
+    // The posts are one chunk, which only content's import loads.
+    expect(holding("rendered at build").map((entry) => entry.name)).toEqual([expect.stringMatching(/content.*\.js$/)]);
+  });
+
+  /** `path` on the app, as `host` (on the app's port) asks for it. */
+  const at = (path: string, host: string, init?: Parameters<typeof rawGet>[2]) =>
+    rawGet(new URL(path, app.url).href, `${host}:${new URL(app.url).port}`, init);
+
+  it("serves a public site at the root of <name>.localhost: its own document, with no app stylesheet, chrome or cookie", async () => {
+    const home = await at("/", "hello.localhost");
+    expect(home.status).toBe(200);
+    const html = home.body.replaceAll("<!-- -->", "");
+    expect(html).toMatch(
+      /^<!DOCTYPE html><html lang="en" data-site="hello" data-origin="http:\/\/hello\.localhost:\d+">/,
+    );
+    expect(html).toContain("Hello from the hello site");
+    expect(html).not.toContain('aria-label="Sections"');
+    expect(html).not.toContain('id="chat"');
+    expect(html).not.toMatch(/<link[^>]*rel="stylesheet"/);
+    expect(home.headers["set-cookie"]).toBeUndefined();
+    // Its links are to its pages at the root, and its other pages answer there.
+    expect(linkTag(html, "Greet someone")).toContain('href="/run"');
+    expect((await at("/posts/hello", "hello.localhost")).body).toContain("<h1>Hello, content</h1>");
+    expect(app.sites).toEqual({
+      hello: `http://hello.localhost:${new URL(app.url).port}`,
+      intl: `http://intl.localhost:${new URL(app.url).port}`,
+      members: `http://members.localhost:${new URL(app.url).port}`,
+    });
+  });
+
+  it("serves a public site in each of its languages: the default at the root, the others under their prefix, with lang and hreflang", async () => {
+    const origin = `http://intl.localhost:${new URL(app.url).port}`;
+    /** What the page at `path` on intl.localhost says of its language. */
+    const page = async (path: string) => {
+      const { status, body } = await at(path, "intl.localhost");
+      const html = body.replaceAll("<!-- -->", "");
+      return {
+        status,
+        html,
+        lang: html.match(/^<!DOCTYPE html><html lang="([^"]+)"/)?.[1],
+        title: html.match(/<title>([^<]*)<\/title>/)?.[1],
+        h1: html.match(/<h1>([^<]*)<\/h1>/)?.[1],
+        alternates: [...html.matchAll(/<link rel="alternate" hrefLang="([^"]+)" href="([^"]+)"\/>/g)].map(
+          ([, lang, href]) => [lang, href],
+        ),
+        switcher: [
+          ...(html.match(/<nav aria-label="Language">(.*?)<\/nav>/)?.[1] ?? "").matchAll(/href="([^"]+)"/g),
+        ].map(([, href]) => href),
+      };
+    };
+    // The default language, at the root, with no prefix; its strings, its posts and their links.
+    const home = await page("/");
+    expect(home).toMatchObject({
+      status: 200,
+      lang: "en",
+      title: "Welcome to the intl site",
+      h1: "Welcome to the intl site",
+    });
+    expect(home.alternates).toEqual([
+      ["en", `${origin}/`],
+      ["fr", `${origin}/fr`],
+      ["x-default", `${origin}/`],
+    ]);
+    expect(home.switcher).toEqual(["/", "/fr"]);
+    expect(linkTag(home.html, "Read “Hello, content”")).toContain('href="/posts/hello"');
+    // French under /fr: the site's own strings, its links kept in French, a translated post's French.
+    const fr = await page("/fr");
+    expect(fr).toMatchObject({
+      status: 200,
+      lang: "fr",
+      title: "Bienvenue sur le site intl",
+      h1: "Bienvenue sur le site intl",
+    });
+    expect(fr.html).toContain("<p>locale: fr</p>");
+    expect(linkTag(fr.html, "Lire « Bonjour, contenu »")).toContain('href="/fr/posts/hello"');
+    expect(linkTag(fr.html, "Lire « Only in English »")).toContain('href="/fr/posts/untranslated"');
+    const post = await page("/fr/posts/hello");
+    expect(post).toMatchObject({ status: 200, lang: "fr", title: "Bonjour, contenu", h1: "Bonjour, contenu" });
+    expect(post.html).toContain("Un billet de <strong>content/</strong>, traduit.");
+    expect(post.alternates).toEqual([
+      ["en", `${origin}/posts/hello`],
+      ["fr", `${origin}/fr/posts/hello`],
+      ["x-default", `${origin}/posts/hello`],
+    ]);
+    expect((await page("/posts/hello")).h1).toBe("Hello, content");
+    // A post with no translation: the default's, in French pages.
+    const fallback = await page("/fr/posts/untranslated");
+    expect(fallback).toMatchObject({ status: 200, lang: "fr", h1: "Only in English" });
+    // A post only in French: its page there links to no other language, as the sitemap lists it.
+    const onlyFr = await page("/fr/posts/only-fr");
+    expect(onlyFr).toMatchObject({ status: 200, lang: "fr", h1: "Seulement en français" });
+    expect(onlyFr.alternates).toEqual([]);
+    expect(onlyFr.switcher).toEqual(["/fr/posts/only-fr"]);
+    expect((await page("/posts/only-fr")).status).toBe(404);
+    // A language the site lacks, and the default's prefix, are no page.
+    for (const path of ["/de", "/en", "/en/posts/hello", "/fr/posts/nope"]) {
+      const lost = await page(path);
+      expect(lost.status, path).toBe(404);
+      expect(lost.title, path).toBe("Page not found");
+    }
+    // A translation is not a post of its own: a page reading content with no language never lists it.
+    expect((await at("/posts", "hello.localhost")).body).not.toContain("Bonjour, contenu");
+    // On the app's host, the same pages under /sites/intl, with no hreflang, in the app's English document.
+    const inApp = (await (await fetch(new URL("/sites/intl/fr/posts/hello", app.url))).text()).replaceAll(
+      "<!-- -->",
+      "",
+    );
+    expect(inApp).toMatch(/^<!DOCTYPE html><html lang="en"/);
+    expect(inApp).toContain("<h1>Bonjour, contenu</h1>");
+    expect(inApp).not.toContain('rel="alternate"');
+    expect(inApp).toContain('<a href="/sites/intl/posts/hello" hrefLang="en">en</a>');
+  });
+
+  it("answers robots.txt and a sitemap of the site's pages and published posts on its host, which no crawler may index, and gives a page its absolute URL", async () => {
+    const origin = `http://hello.localhost:${new URL(app.url).port}`;
+    const robots = await at("/robots.txt", "hello.localhost");
+    expect([robots.status, robots.headers["content-type"], robots.body]).toEqual([
+      200,
+      "text/plain; charset=utf-8",
+      `User-agent: *\nDisallow:\n\nSitemap: ${origin}/sitemap.xml\n`,
+    ]);
+    const sitemap = await at("/sitemap.xml", "hello.localhost");
+    expect(sitemap.headers["content-type"]).toBe("application/xml; charset=utf-8");
+    // The pages and the posts as the app's snapshot reads them, from the config's root: this copy's
+    // for these (the fixture has neither its posts nor its pages).
+    const copy = await startApp(defineConfig({ ...config, root: repo }), { port: 0, distDir: result.distDir });
+    try {
+      const port = new URL(copy.url).port;
+      const of = async (host: string) => (await rawGet(new URL("/sitemap.xml", copy.url).href, `${host}:${port}`)).body;
+      // Each page with no parameter, and a post's page per published post: never the draft.
+      const hello = `http://hello.localhost:${port}`;
+      expect([...(await of("hello.localhost")).matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, loc]) => loc)).toEqual(
+        ["/", "/leads", "/missing", "/posts", "/posts/hello", "/posts/untranslated", "/run", "/started", "/styled"].map(
+          (path) => new URL(path, hello).toString(),
+        ),
+      );
+      // A site with languages: each page once per language, the default unprefixed, with its URL in
+      // each it is in; a post in French where it has a translation or a `<slug>.md` (here, both).
+      const intl = `http://intl.localhost:${port}`;
+      const urls = [...(await of("intl.localhost")).matchAll(/<url>(.*?)<\/url>/g)].map(([, url]) => [
+        url!.match(/<loc>([^<]+)<\/loc>/)![1],
+        [...url!.matchAll(/hreflang="([^"]+)" href="([^"]+)"/g)].map(([, lang, href]) => `${lang} ${href}`),
+      ]);
+      const languages = (en: string, fr: string) => [`en ${intl}${en}`, `fr ${intl}${fr}`, `x-default ${intl}${en}`];
+      expect(urls).toEqual([
+        [`${intl}/`, languages("/", "/fr")],
+        [`${intl}/fr`, languages("/", "/fr")],
+        [`${intl}/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
+        [`${intl}/fr/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
+        [`${intl}/fr/posts/only-fr`, []],
+        [`${intl}/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
+        [`${intl}/fr/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
+      ]);
+    } finally {
+      await copy.close();
+    }
+    // Not its domain: no response there is to be indexed, its pages' neither.
+    const home = await at("/", "hello.localhost");
+    for (const answer of [robots, sitemap, home]) {
+      expect(answer.headers["x-robots-tag"]).toBe("noindex");
+    }
+    expect((await at("/sitemap.xml", "hello.localhost", { method: "HEAD" })).body).toBe("");
+    // A post's canonical link and Open Graph tags: at the host's root there, under /sites/hello on the app's.
+    const post = (await at("/posts/hello", "hello.localhost")).body;
+    expect(post).toContain(`<link rel="canonical" href="${origin}/posts/hello"/>`);
+    expect(post).toContain(`<meta property="og:url" content="${origin}/posts/hello"/>`);
+    expect(post).toContain(`<meta property="og:image" content="${origin}/og.png"/>`);
+    expect(post).toMatch(new RegExp(`<html [^>]*data-origin="${origin}"`));
+    // Behind a proxy that ends TLS, in the scheme it says the request came in.
+    const proxied = await at("/posts/hello", "hello.localhost", { headers: { "x-forwarded-proto": "https" } });
+    expect(proxied.body).toContain(`<link rel="canonical" href="${origin.replace("http:", "https:")}/posts/hello"/>`);
+    const inApp = await (await fetch(new URL("/sites/hello/posts/hello", app.url))).text();
+    expect(inApp).toContain(`<link rel="canonical" href="${app.url}/sites/hello/posts/hello"/>`);
+    // An index route's: no trailing slash, but on the home.
+    const indexes = await Promise.all([
+      at("/posts", "hello.localhost").then(({ body }) => body),
+      ...["/sites/hello/posts", "/sites/hello"].map(async (path) => (await fetch(new URL(path, app.url))).text()),
+    ]);
+    expect([home.body, ...indexes].map(canonical)).toEqual([
+      `${origin}/`,
+      `${origin}/posts`,
+      `${app.url}/sites/hello/posts`,
+      `${app.url}/sites/hello`,
+    ]);
+    // The app's host is not a site's: no robots of its own.
+    expect((await fetch(new URL("/robots.txt", app.url))).headers.get("x-robots-tag")).toBeNull();
+  });
+
+  it("answers a path no page has, or a post that is not there, on a public host with a plain page titled so, in a document reset for the site", async () => {
+    // No margin, in a layer ahead of every stylesheet, so below the site's; no color-scheme: the site's to say.
+    const styled = (await at("/styled", "hello.localhost")).body;
+    const reset = styled.search(/<style[^>]*>@layer sanoma\{body\{margin:0\}\}<\/style>/);
+    expect(reset).toBeGreaterThan(0);
+    expect(reset).toBeLessThan(styled.search(/<link[^>]*rel="stylesheet"/));
+    expect(styled).not.toContain('name="color-scheme"');
+    for (const path of ["/nope", "/posts/draft"]) {
+      const lost = await at(path, "hello.localhost");
+      expect(lost.status, path).toBe(404);
+      const html = lost.body.replaceAll("<!-- -->", "");
+      expect(html.match(/<title>[^<]*<\/title>/g), path).toEqual(["<title>Page not found</title>"]);
+      expect(html, path).toContain("<h1>Page not found</h1>");
+      expect(html, path).not.toContain("data-slot=");
+    }
+  });
+
+  it("answers a public host's request for the app's pages, routes, a staff login's routes or a staff server function with a 404", async () => {
+    for (const path of ["/workflows", "/sites/hello", "/setup/github/manifest", "/auth/invite", "/auth/loopback"]) {
+      expect((await at(path, "hello.localhost")).status, path).toBe(404);
+    }
+    expect((await at("/", "hello.localhost", { method: "PUT" })).status).toBe(405);
+    // The config, a read on the app's host; on the public host not there, nor is any change.
+    const getConfig = `/_serverFn/${serverFnId(result.distDir, "getConfig")}`;
+    expect((await at(getConfig, "127.0.0.1", { headers: SAME_ORIGIN })).status).toBe(200);
+    // A read that is not there is the router's not-found, as for any read that finds nothing.
+    const read = await at(getConfig, "hello.localhost", { headers: SAME_ORIGIN });
+    expect(read.body).toContain('"isNotFound"');
+    expect(read.body).not.toContain("hello");
+    const startRun = `/_serverFn/${serverFnId(result.distDir, "startRunFn")}`;
+    expect((await at(startRun, "hello.localhost", { method: "POST", headers: SAME_ORIGIN })).status).toBe(404);
+  });
+
+  it("runs a public page's loader as anonymous whatever the staff login's cookie or header says, and as the visitor its login verifies", async () => {
+    const client = await SanomaClient.connect(config);
+    try {
+      /** What the `started` page on `host` answered, and who started the run it started. */
+      const started = async (host: string, headers: Record<string, string> = {}) => {
+        const html = (await at("/started", host, { headers })).body.replaceAll("<!-- -->", "");
+        const said = html.match(/<p>((?:Started|Refused:) [^<]+)<\/p>/)?.[1];
+        const runId = said?.match(/^Started (.+)$/)?.[1];
+        return { said, by: runId && (await client.run(runId))?.startedBy };
+      };
+      const anonymous = { said: expect.stringMatching(/^Started /), by: { id: "anonymous" } };
+      // The fixture's policy permits anonymous to start hello.
+      expect(await started("hello.localhost", { cookie: `${ACTOR_COOKIE}=ada`, [ACTOR_HEADER]: "ada" })).toEqual(
+        anonymous,
+      );
+      expect(await started("members.localhost")).toEqual(anonymous);
+      // And no permit names the visitors.
+      expect(await started("members.localhost", { cookie: "x-fixture-visitor=ada" })).toEqual({
+        said: `Refused: workflow:hello was denied by policy: ${VISITOR_DENIED}`,
+        by: undefined,
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("says who is on a public page: the visitor its login verifies, with its sign-out, or nobody", async () => {
+    const getActor = `/_serverFn/${serverFnId(result.distDir, "getActor")}`;
+    const visitor = await at(getActor, "members.localhost", {
+      headers: { ...SAME_ORIGIN, cookie: "x-fixture-visitor=ada" },
+    });
+    expect(visitor.status).toBe(200);
+    expect(visitor.body).toContain('"visitor:fixture-login:ada"');
+    expect(visitor.body).toContain('"visitors"');
+    expect(visitor.body).toContain('"/auth/fixture-login/sign-out"');
+    const nobody = await at(getActor, "hello.localhost", {
+      headers: { ...SAME_ORIGIN, cookie: `${ACTOR_COOKIE}=ada` },
+    });
+    expect(nobody.status).toBe(200);
+    expect(nobody.body).not.toContain("anonymous");
+    expect(nobody.body).not.toContain("ada");
+    // The login's own routes, and its sign-out, on its site's host alone.
+    const signOut = await at("/auth/fixture-login/sign-out", "members.localhost", { method: "POST" });
+    expect([signOut.status, signOut.headers["set-cookie"]]).toEqual([204, ["x-fixture-visitor=; Max-Age=0; Path=/"]]);
+    expect((await at("/auth/fixture-login/sign-out", "hello.localhost", { method: "POST" })).status).toBe(404);
+    expect(loginContexts[0]).toMatchObject({
+      origins: ["http://members.localhost:*"],
+      // Its own key, from SANOMA_SECRETS_KEY for "login fixture-login".
+      key: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    // The client's own pool, which the half runs on: one connection answers.
+    const { rows } = await (await loginContexts[0]!.database()).query<{ one: number }>("SELECT 1 AS one");
+    expect(rows).toEqual([{ one: 1 }]);
+  });
+
+  it("serves a public site at its domain too and links to it from the Sites page, but no domain of a site that is not public", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const domains = { hello: "hello.example", members: "members.example", leads: "leads.example" };
+    const second = await startApp(config, { port: 0, distDir: result.distDir, domains });
+    try {
+      const home = await rawGet(new URL("/", second.url).href, "hello.example");
+      expect(home.body).toContain('data-site="hello"');
+      expect((await rawGet(new URL("/", second.url).href, "leads.example")).status).toBe(403);
+      expect(warn).toHaveBeenCalledWith(
+        "sanoma app: the domain leads.example names sites/leads, which is not a public site: not served",
+      );
+      // There a crawler may index it, and its URLs are the domain's, on <name>.localhost too.
+      const robots = await rawGet(new URL("/robots.txt", second.url).href, "hello.example");
+      expect(robots.body).toBe("User-agent: *\nDisallow:\n\nSitemap: https://hello.example/sitemap.xml\n");
+      expect(robots.headers["x-robots-tag"]).toBeUndefined();
+      const sitemap = await rawGet(new URL("/sitemap.xml", second.url).href, "hello.example");
+      expect(sitemap.body).toContain("<url><loc>https://hello.example/posts/hello</loc></url>");
+      const local = `hello.localhost:${new URL(second.url).port}`;
+      const post = await rawGet(new URL("/posts/hello", second.url).href, local);
+      expect(post.body).toContain('<link rel="canonical" href="https://hello.example/posts/hello"/>');
+      expect(post.headers["x-robots-tag"]).toBe("noindex");
+      // The site's own address and its sitemap, on the app's Sites page.
+      const sites = (await (await fetch(new URL("/sites", second.url))).text()).replaceAll("<!-- -->", "");
+      expect(sites).toMatch(/<a [^>]*href="https:\/\/hello\.example\/"[^>]*target="_blank"[^>]*>hello\.example<svg/);
+      expect(sites).toMatch(/<a [^>]*href="https:\/\/hello\.example\/sitemap\.xml"[^>]*>Sitemap<\/a>/);
+      expect(loginContexts.at(-1)?.origins).toEqual(["http://members.localhost:*", "https://members.example"]);
+    } finally {
+      warn.mockRestore();
+      await second.close();
+    }
+  });
+
+  it("serves a public site whose site.ts has a problem, or whose login fails to start, on no host", async () => {
+    const broken = company({
+      "sites/hello/site.ts":
+        'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true, login: "nope" });\n',
+    });
+    const failing = withSetup(defineConnector("fixture-login", {}), {
+      login: () => {
+        throw new Error("no secret");
+      },
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const third = await startApp(defineConfig({ ...config, root: broken, connectors: [failing] }), {
+      port: 0,
+      distDir: result.distDir,
+      // Another site's host: one site per host.
+      domains: { members: "hello.localhost" },
+    });
+    try {
+      // sites/intl, which has no problem and no login, alone.
+      expect(Object.keys(third.sites)).toEqual(["intl"]);
+      for (const host of ["hello.localhost", "members.localhost"]) {
+        expect((await rawGet(new URL("/", third.url).href, host)).status, host).toBe(503);
+      }
+      expect(warn).toHaveBeenCalledWith(
+        "sanoma app: sites/hello/site.ts has a problem: the site is served on no host until it is fixed",
+      );
+      expect(warn).toHaveBeenCalledWith(
+        "sanoma app: hello.localhost is another public site's host: sites/members is not served there",
+      );
+      expect(error).toHaveBeenCalledWith(
+        "sanoma app: sites/members's login (fixture-login) could not start, so the site is not served: no secret",
+      );
+      // The app itself answers.
+      expect((await fetch(new URL("/workflows", third.url))).status).toBe(200);
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+      await third.close();
+    }
+  });
+
+  it("reuses a build of the same sites, and builds again when a site changes", async () => {
+    expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
+    writeFileSync(join(repo, "sites", "hello", "routes", "about.tsx"), sitePage("/sites/hello/about", "", '"About"'));
+    const changed = await buildApp(repo);
+    expect(changed.built).toBe(true);
+    expect(changed.distDir).not.toBe(result.distDir);
+    // The first is still there, for an app that serves it.
+    expect(existsSync(join(result.distDir, "server", "server.js"))).toBe(true);
+    // Back to the first sites, the first build and its route tree, which the sites' tsc reads.
+    const tree = join(repo, ".sanoma", "app", "routeTree.gen.ts");
+    expect(readFileSync(tree, "utf8")).toContain("/sites/hello/about");
+    rmSync(join(repo, "sites", "hello", "routes", "about.tsx"));
+    expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
+    expect(readFileSync(tree, "utf8")).not.toContain("/sites/hello/about");
+    // And when content changes.
+    const post = join(repo, "content", "posts", "hello.md");
+    const text = readFileSync(post, "utf8");
+    writeFileSync(post, text.replace("rendered at build", "edited"));
+    expect((await buildApp(repo)).built).toBe(true);
+    writeFileSync(post, text);
+    expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
+  });
+
+  it("lists under a workflow's Used by the site's pages that call it, each linking to its page, and a component's file", async () => {
+    const html = (await (await fetch(new URL("/workflows/hello", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(html).toMatch(/<h3[^>]*>Used by<\/h3>/);
+    const usedBy = sectionAfter(html, "Used by");
+    for (const [page, via] of [
+      ["/sites/hello/run", "RunForm"],
+      ["/sites/hello/started", "api"],
+    ]) {
+      expect(linkTag(usedBy, `${page}</code>`)).toContain(`href="${page}"`);
+      expect(usedBy).toMatch(new RegExp(`Hello desk<code[^>]*>${page}</code>.*?through ${via}<`));
+    }
+    // A component's file, which is no one page, unlinked (first, as its file sorts first); the page
+    // that reads leads, which calls no workflow, is not listed.
+    expect(usedBy).toMatch(/Hello desk<code[^>]*>sites\/hello\/components\/greet\.tsx<\/code>.*?through api</);
+    expect(usedBy.indexOf("greet.tsx")).toBeLessThan(usedBy.indexOf("<a "));
+    expect(usedBy).not.toContain("/sites/hello/leads");
+  });
+
+  it("lists under a collection's Used by the site's page that reads it, linking to the page", async () => {
+    const html = (await (await fetch(new URL("/data/leads", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(html).toContain(">Used by</h2>");
+    const usedBy = sectionAfter(html, "Used by");
+    expect(usedBy).toMatch(/Hello desk<code[^>]*>\/sites\/hello\/leads<\/code>.*?through api</);
+    expect(linkTag(usedBy, "/sites/hello/leads</code>")).toContain('href="/sites/hello/leads"');
+    // No workflow uses leads, and the pages that call only hello are not listed.
+    expect(usedBy).not.toContain("/workflows/");
+    expect(usedBy).not.toContain("/sites/hello/run");
+  });
+
+  it("type-checks a site's links against the app's pages and the sites', refuses a path that is neither, and types a refusal", async () => {
+    // The tsc a company runs: sanoma's.
+    const sanoma = createRequire(join(realpathSync(join(repo, "node_modules", "sanoma")), "package.json"));
+    const tsc = join(dirname(sanoma.resolve("typescript/package.json")), "bin", "tsc");
+    const check = () =>
+      spawnSync(process.execPath, [tsc, "-p", "sites/tsconfig.json", "--pretty", "false"], {
+        cwd: repo,
+        encoding: "utf8",
+      });
+    // The fixture's links: to /workflows, an app page, and back to the site's home.
+    expect(check()).toMatchObject({ status: 0, stdout: "" });
+    writeFileSync(
+      join(repo, "sites", "hello", "routes", "styled.tsx"),
+      sitePage("/sites/hello/styled", 'import { Link } from "sanoma/site";', '<Link to="/sites/nope">Nope</Link>'),
+    );
+    const refused = check();
+    expect(refused.status).not.toBe(0);
+    expect(refused.stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS\d+: [^\n]*"\/sites\/nope"/);
+    // `api` is untyped until .sanoma/api.ts types it (the fixture's started.tsx, above), as the
+    // generated file does: through Register, with the types sanoma/site re-exports.
+    expect((await writeApi(repo, describeConfig(config))).wrote).toBe(true);
+    // A start, and its refusal read without a cast; then input and a code the runtime does not take.
+    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), starting('"Ada"', "approval_pending"));
+    expect(check()).toMatchObject({ status: 0, stdout: "" });
+    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), starting("1", "approval_pendng"));
+    const { stdout } = check();
+    expect(stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS2322: [^\n]*'number'/m);
+    expect(stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS2367: [^\n]*"approval_pendng"/m);
+  });
+});
+
+describe("the sites' generated files", () => {
+  it("are the fixture's committed ones, and the tsconfig the sites extend is written when it changes", () => {
+    const repo = company();
+    rmSync(join(repo, "sites", "__virtual.ts"));
+    rmSync(join(repo, "sites", "tsconfig.json"));
+    writeSiteFiles(repo);
+    for (const file of ["__virtual.ts", "tsconfig.json"]) {
+      expect(readFileSync(join(repo, "sites", file), "utf8"), file).toBe(
+        readFileSync(join(fixtureDir, "sites", file), "utf8"),
+      );
+    }
+    const tsconfig = JSON.parse(readFileSync(join(repo, ".sanoma", "app", "tsconfig.json"), "utf8"));
+    expect(tsconfig.extends).toBe(join(appDir, "tsconfig.site.json"));
+    expect(tsconfig.include).toContain("../api.ts");
+    expect(tsconfig.include).toContain("../content.ts");
+    // The content's types, drafts among them.
+    expect(readFileSync(join(repo, ".sanoma", "content.ts"), "utf8")).toContain(
+      "posts: ContentKind<{ title: string; description: string; draft?: boolean; publishedAt?: string }>;",
+    );
+    // Written again unchanged, nothing is rewritten: a dev server would reload every page.
+    const written = [
+      join(repo, "sites", "__virtual.ts"),
+      join(repo, ".sanoma", "app", "tsconfig.json"),
+      join(repo, ".sanoma", "content.ts"),
+    ];
+    const mtimes = written.map((file) => lstatSync(file).mtimeMs);
+    writeSiteFiles(repo);
+    expect(written.map((file) => lstatSync(file).mtimeMs)).toEqual(mtimes);
+  });
+});
+
+describe("a build that fails, or leaves a site out", () => {
+  it.each([
+    ["the runtime", '"sanoma/workflows"'],
+    ["the runtime through sanoma", '"sanoma"'],
+    ["the app's Node entry", '"sanoma/app"'],
+    ["a server entry outside the runtime's folder", '"sanoma/secrets"'],
+  ])("refuses a site that imports %s", async (_, from) => {
+    const repo = company({
+      "sites/hello/routes/index.tsx": sitePage("/sites/hello/", `import * as runtime from ${from};`, "String(runtime)"),
+    });
+    await expect(buildApp(repo)).rejects.toThrow(/Import denied in client environment/);
+  });
+
+  it("builds a site whose site.ts has no default export, named by its folder, and whose stylesheet imports all of Tailwind", async () => {
+    const repo = company({
+      "sites/hello/site.ts": "export const title = 'Not this';\n",
+      // From the app's install, preflight and all.
+      "sites/hello/style.css": '@import "tailwindcss";\n',
+      "sites/hello/routes/styled.tsx": styledPage,
+    });
+    expect((await buildApp(repo)).built).toBe(true);
+  });
+
+  it("refuses a site that imports a .server.ts file", async () => {
+    const repo = company({
+      "sites/hello/secret.server.ts": 'export const secret = () => "s";\n',
+      "sites/hello/routes/index.tsx": sitePage(
+        "/sites/hello/",
+        'import { secret } from "../secret.server.ts";',
+        "secret()",
+      ),
+    });
+    await expect(buildApp(repo)).rejects.toThrow(/Import denied in client environment/);
+    // Nothing left half built.
+    const builds = join(repo, ".sanoma", "app", "build");
+    expect(existsSync(builds) ? readdirSync(builds) : []).toEqual([]);
+  });
+
+  it("names the path two pages claim, and their files", async () => {
+    const repo = company({
+      "sites/hello/routes/(again)/index.tsx": sitePage("/sites/hello/(again)/", "", '"Again"'),
+    });
+    await expect(buildApp(repo)).rejects.toThrow(
+      "More than one page claims /sites/hello/: sites/hello/routes/index.tsx, sites/hello/routes/(again)/index.tsx",
+    );
+  });
+
+  it("reports a folder whose name is not a URL segment, and does not mount it", async () => {
+    const repo = company({
+      "sites/Not_A_Segment/routes/index.tsx": sitePage("/sites/Not_A_Segment/", "", '"Refused"'),
+    });
+    expect(sitesOf(repo)).toEqual({ sites: ["hello", "intl", "members"], refused: ["sites/Not_A_Segment"] });
+    const lines: string[] = [];
+    const { distDir } = await buildApp(repo, { log: (line) => lines.push(line) });
+    expect(lines).toContain(
+      "sites/Not_A_Segment is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)",
+    );
+    const tree = readFileSync(join(dirname(dirname(distDir)), "routeTree.gen.ts"), "utf8");
+    expect(tree).toContain("id: '/sites/hello/'");
+    expect(tree).not.toContain("Not_A_Segment");
+  });
+});

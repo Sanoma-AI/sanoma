@@ -1,5 +1,5 @@
-import { tfConnector } from "@sanoma-ai/bridge/connector";
-import { vendorInfo } from "@sanoma-ai/workflows";
+import { tfConnector } from "sanoma/internal/bridge/connector";
+import { vendorInfo } from "sanoma/workflows";
 import {
   provider,
   google_cloud_run_v2_service,

@@ -1,0 +1,188 @@
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { fakeBluesky } from "@sanoma-ai/connector-bluesky/fake";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+import { resend } from "@sanoma-ai/connector-resend";
+import { fakeResend } from "@sanoma-ai/connector-resend/fake";
+import { testDatabaseUrl } from "sanoma/testing";
+import { type TestApp, useTestApp } from "sanoma/testing/harness";
+import type { Fake, FakeCall, FakeOptions } from "sanoma/workflows/fake";
+import { escapeIdentifier, Pool } from "pg";
+import { afterAll, beforeAll, beforeEach } from "vitest";
+import {
+  type Connector,
+  jsonlLedger,
+  type LedgerRecord,
+  type SanomaClient,
+  type SanomaConfig,
+  withSetup,
+} from "../src/index.ts";
+import { VENDOR } from "../src/op.ts";
+import announce from "./fixtures/announce.ts";
+
+/**
+ * A company root of its own for a test file: a fresh directory with `files` (a path under the root
+ * and its text, such as `policies/policy.cedar` and `resources/people.ts`), over a copy of `from`
+ * when given; removed after the file's tests. The policy is the root's Cedar files, so a test
+ * that needs one writes it here.
+ */
+export function rootWith(files: Record<string, string>, from?: string): string {
+  const root = mkdtempSync(join(tmpdir(), "sanoma-root-"));
+  if (from !== undefined) cpSync(from, root, { recursive: true });
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  }
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  return root;
+}
+
+/** A people file declaring `alice` alone, for a root's `resources/people.ts`. */
+/** The built-ins every config has after `change`, in that order: `follow`, then the app's actions (`app-workflows.ts`). */
+export const AFTER_CHANGE = ["follow", "adopt", "patch", "go-live", "go-live-host", "connect-existing", "chat"];
+
+export const ALICE = `import { sanoma } from "sanoma/resources";
+
+export const alice = sanoma.person({ id: "alice" });
+`;
+
+/** A data file declaring one `testhost.app` (`fakeHost`'s) built from the repository at `url`: `resources/infra.ts#app`. */
+export const testhostInfra = (url: string) =>
+  [
+    'import { testhost } from "@sanoma-ai/testing-host/resources";',
+    "",
+    `export const app = testhost.app({ name: "company", source: ${JSON.stringify(url)}, ref: "main", port: 0 });`,
+    "",
+  ].join("\n");
+
+/**
+ * `testDatabaseUrl(suffix)`, its database dropped before the file's workers start: for a test
+ * whose runs, left waiting (a draft's `change:<id>`, a sleeping run), the next run of the file
+ * would otherwise find.
+ */
+export function freshDatabase(suffix: string): string {
+  const url = testDatabaseUrl(suffix);
+  beforeAll(async () => {
+    const server = new URL(url);
+    server.pathname = "/postgres";
+    const admin = new Pool({ connectionString: server.toString() });
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(new URL(url).pathname.slice(1))} WITH (FORCE)`);
+    } finally {
+      await admin.end();
+    }
+  });
+  return url;
+}
+
+export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error("timed out waiting");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+export const inSeconds = (s: number) => new Date(Date.now() + s * 1000).toISOString();
+
+/** A run's records by type, an operation call's with its operation: what the tests compare the order of. */
+export const types = (records: LedgerRecord[]) =>
+  records.map((r) => (r.type === "op.called" ? `${r.type} ${r.op}` : r.type));
+
+/** What the promise rejects with; it fails the test by resolving. */
+export const failure = (p: Promise<unknown>) =>
+  p.then(
+    () => {
+      throw new Error("expected the run to fail");
+    },
+    (e: unknown) => e,
+  );
+
+/** The connector with nothing attached: no driver, and no fake. */
+export const withoutSetup = <C extends Connector<any, any>>(connector: C): C => ({
+  ...connector,
+  [VENDOR]: { ...connector[VENDOR], setup: {} },
+});
+
+/** A fake vendor's maker, such as `fakeGhost`. */
+type MakeFake = (options: FakeOptions) => Fake<any, any>;
+
+/** Another vendor a test adds: its connector, and the maker of its fake. */
+export type Extra = readonly [Connector<any, any>, MakeFake];
+
+/**
+ * The fakes the announce workflow calls, and the `extra` ones a test adds, all logging into one
+ * list so the order across vendors shows. `connectors` are their connectors with each fake's
+ * driver swapped in (`withSetup`), so live runs call these very fakes, and each keeps the maker of
+ * its package's fake, so each sandbox run calls a fake of its own. A test swaps a driver with
+ * `withSetup(connector, { driver })` over them.
+ */
+export function marketingFakes({ extra = [] }: { extra?: readonly Extra[] } = {}) {
+  const calls: FakeCall[] = [];
+  const blog = fakeGhost({ calls });
+  const email = fakeResend({ calls });
+  const social = fakeBluesky({ calls });
+  const pairs: (readonly [Connector<any, any>, Fake<any, any>])[] = [
+    [ghost, blog],
+    [resend, email],
+    [bluesky, social],
+    ...extra.map(([connector, make]) => [connector, make({ calls })] as const),
+  ];
+  return {
+    calls,
+    ghost: blog,
+    resend: email,
+    bluesky: social,
+    connectors: pairs.map(([connector, fake]) => withSetup(connector, { driver: () => fake.driver })),
+    reset: () => pairs.forEach(([, fake]) => fake.reset()),
+  };
+}
+
+export type Vendors = ReturnType<typeof marketingFakes>;
+
+export type App = TestApp & {
+  readonly vendors: Vendors;
+  /** Operation ids the fake vendors were called with, in order. */
+  ops(): string[];
+};
+
+/**
+ * `useTestApp` on the announce workflow and the marketing fakes, which `overrides` may replace,
+ * for one `describe`, on a database of its own, `testDatabaseUrl(name)`: tests are kept apart by
+ * database, and the app keeps its default name. The fakes, and the `extra` ones, reset before
+ * each test; the ledger is on disk so it outlives a restart the way it would across processes.
+ */
+export function useApp(
+  name: string,
+  overrides: (vendors: Vendors) => Partial<SanomaConfig> = () => ({}),
+  { extra }: { extra?: readonly Extra[] } = {},
+): App {
+  const vendors = marketingFakes({ extra });
+  const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${name}-`));
+  // Registered before useTestApp's, so it runs after the worker stops (after hooks run in reverse).
+  afterAll(() => rmSync(ledgerDir, { recursive: true, force: true }));
+  const app = useTestApp(
+    {
+      workflows: [announce],
+      // Live runs on these fakes; each sandbox run on its own, from the packages' makers.
+      connectors: vendors.connectors,
+      ledger: jsonlLedger(ledgerDir),
+      ...overrides(vendors),
+    },
+    { databaseUrl: testDatabaseUrl(name) },
+  );
+  beforeEach(() => vendors.reset());
+  // Object.assign keeps the getters; a spread would read them before beforeAll.
+  return Object.assign(app, { vendors, ops: () => vendors.calls.map((c) => c.op) });
+}
+
+/** True once the run has `count` approvals and exactly one of them is pending. */
+export const pending =
+  (client: () => SanomaClient, runId: string, count = 1) =>
+  async () => {
+    const approvals = await client().approvals(runId);
+    return approvals.filter((a) => a.status === "pending").length === 1 && approvals.length === count;
+  };

@@ -10,7 +10,7 @@ import {
   runnerScript,
   type SandboxBackend,
   type SandboxContext,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { agent37Api, type Agent37Api, type Instance, isCode } from "./api.ts";
 import { wanted } from "./connector.ts";
 

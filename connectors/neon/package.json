@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-neon",
-  "version": "0.2.3",
+  "version": "0.11.21",
   "description": "Neon serverless Postgres for Sanoma: a project as the company's database, which pauses and branches",
   "keywords": [
     "connector",
@@ -63,13 +63,12 @@
     "@neon/sdk": "7.8.0"
   },
   "devDependencies": {
-    "@sanoma-ai/testing": "workspace:*",
-    "@sanoma-ai/workflows": "workspace:*",
     "msw": "^3.0.3",
+    "sanoma": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/workflows": "workspace:^",
+    "sanoma": "workspace:*",
     "zod": "^4"
   },
   "engines": {

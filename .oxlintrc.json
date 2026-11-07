@@ -19,10 +19,10 @@
       }
     ]
   },
-  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist", "**/generated", "packages/bridge/src/gen"],
+  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist", "**/generated", "packages/sanoma/bridge/src/gen"],
   "overrides": [
     {
-      "files": ["packages/app/src/components/ui/**"],
+      "files": ["packages/sanoma/app/src/components/ui/**"],
       "rules": {
         "eslint/no-shadow": "off",
         "eslint/no-underscore-dangle": "off"

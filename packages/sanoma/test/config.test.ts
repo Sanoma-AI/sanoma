@@ -1,16 +1,20 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { resolveConfig } from "@sanoma-ai/workflows";
+import { fileURLToPath } from "node:url";
+import { resolveConfig } from "sanoma/workflows";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, UsageError } from "../src/config.ts";
+import { UsageError } from "sanoma/workflows/shared";
+import { loadConfig } from "../src/config.ts";
 
 let dir = "";
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-/** A company in a fresh directory: its files by path. */
+/** A company in a fresh directory: its files by path, and this checkout's `sanoma` installed. */
 function company(files: Record<string, string>): string {
   dir = mkdtempSync(join(tmpdir(), "sanoma-config-"));
+  mkdirSync(join(dir, "node_modules"));
+  symlinkSync(fileURLToPath(new URL("..", import.meta.url)), join(dir, "node_modules/sanoma"));
   for (const [path, source] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), source);

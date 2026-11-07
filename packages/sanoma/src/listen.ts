@@ -1,7 +1,7 @@
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { IngressRoute } from "@sanoma-ai/app";
-import { errorMessage } from "@sanoma-ai/workflows";
+import type { IngressRoute } from "sanoma/app";
+import { errorMessage } from "sanoma/workflows";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 
 // A plain Node server over a few machine routes, through srvx's Node adapters, as the app's: what

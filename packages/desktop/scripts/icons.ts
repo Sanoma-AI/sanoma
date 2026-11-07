@@ -11,8 +11,8 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const icons = fileURLToPath(new URL("../icons/", import.meta.url));
-const large = readFileSync(new URL("../../app/src/icon.svg", import.meta.url), "utf8");
-const small = readFileSync(new URL("../../app/src/icon-small.svg", import.meta.url), "utf8");
+const large = readFileSync(new URL("../../sanoma/app/src/icon.svg", import.meta.url), "utf8");
+const small = readFileSync(new URL("../../sanoma/app/src/icon-small.svg", import.meta.url), "utf8");
 // In a square this size or under, icon.svg's fine strokes break up.
 const SMALL_SQUARE = 52;
 

@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { invoicesOps } from "./connector.ts";
 import { invoicesDriver } from "./driver.ts";
 import { fakeInvoices } from "./fake.ts";

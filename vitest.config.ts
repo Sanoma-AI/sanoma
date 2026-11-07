@@ -1,12 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { defaultServerConditions } from "vite";
 import { defineConfig } from "vitest/config";
+
+/** The condition packages/sanoma/package.json's `exports` name each entry's source under. */
+const SOURCE = "sanoma-source";
 
 const src = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
   resolve: {
-    // Run tests against source, not dist/. Keep in sync with `paths` in tsconfig.json.
+    // The workspace's other packages from source. Keep in sync with `paths` in tsconfig.json.
     alias: [
       { find: /^@sanoma-ai\/invoices\/pdf-contract$/, replacement: src("./packages/invoices/src/render-contract.ts") },
       { find: /^@sanoma-ai\/invoices\/pdf$/, replacement: src("./packages/invoices/src/pdf.tsx") },
@@ -15,34 +19,22 @@ export default defineConfig({
       { find: /^@sanoma-ai\/invoices$/, replacement: src("./packages/invoices/src/index.ts") },
       { find: /^@sanoma-ai\/invoices\/examples$/, replacement: src("./packages/invoices/src/examples.ts") },
       {
-        find: /^@sanoma-ai\/workflows\/(cloud-identity|identity-service|kms-secrets|data|describe|description|fake|plugin|shared|scenario|scenarios|wakeup-service)$/,
-        replacement: src("./packages/workflows/src/$1.ts"),
-      },
-      { find: /^@sanoma-ai\/workflows\/resources$/, replacement: src("./packages/workflows/src/constructors.ts") },
-      { find: /^@sanoma-ai\/workflows\/db$/, replacement: src("./packages/workflows/src/db/index.ts") },
-      {
-        find: /^@sanoma-ai\/testing\/(database|features|harness|host|replay|sandbox|scenarios|wakeup)$/,
-        replacement: src("./packages/testing/src/$1.ts"),
-      },
-      { find: /^@sanoma-ai\/bridge\/(connector|fake|tfschema)$/, replacement: src("./packages/bridge/src/$1.ts") },
-      { find: /^@sanoma-ai\/app\/build$/, replacement: src("./packages/app/src/build.ts") },
-      { find: /^@sanoma-ai\/app\/steps$/, replacement: src("./packages/app/src/steps/index.ts") },
-      { find: /^@sanoma-ai\/(workflows|testing|app|bridge)$/, replacement: src("./packages/$1/src/index.ts") },
-      {
         find: /^@sanoma-ai\/connector-([a-z0-9-]+)\/(driver|fake|resources|remote|vault)$/,
         replacement: src("./connectors/$1/src/$2.ts"),
       },
       { find: /^@sanoma-ai\/connector-([a-z0-9-]+)$/, replacement: src("./connectors/$1/src/index.ts") },
-      { find: /^sanoma$/, replacement: src("./packages/sanoma/src/index.ts") },
-      { find: /^sanoma\/resources$/, replacement: src("./packages/sanoma/src/resources.ts") },
-      { find: /^sanoma\/secrets$/, replacement: src("./packages/sanoma/src/secrets.ts") },
-      { find: /^(sanoma|@sanoma-ai\/app)\/site$/, replacement: src("./packages/app/src/site.ts") },
-      { find: /^sanoma\/(data|claims)$/, replacement: src("./packages/sanoma/src/$1.ts") },
-      { find: /^(sanoma|@sanoma-ai\/app)\/ui$/, replacement: src("./packages/app/src/ui.ts") },
     ],
   },
+  // `sanoma` and its subpaths from source, as in tsconfig.json: the tests run as Vite's server code, so its
+  // default server conditions and this one.
+  ssr: { resolve: { conditions: [SOURCE, ...defaultServerConditions] } },
   test: {
-    include: ["packages/*/test/**/*.test.ts", "connectors/*/test/**/*.test.ts", "scripts/*.test.ts"],
+    include: [
+      "packages/*/test/**/*.test.ts",
+      "packages/sanoma/*/test/**/*.test.ts",
+      "connectors/*/test/**/*.test.ts",
+      "scripts/*.test.ts",
+    ],
     testTimeout: 60_000,
     hookTimeout: 60_000,
     // Four files at once peak near 60 connections; docker-compose.yml leaves room for several gates.

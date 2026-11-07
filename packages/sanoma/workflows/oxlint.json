@@ -1,0 +1,117 @@
+{
+  "overrides": [
+    {
+      "files": ["workflows/**", "apps/*/workflows/**"],
+      "jsPlugins": ["./dist/plugin.js"],
+      "rules": {
+        "sanoma/date": "error",
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "fetch",
+            "message": "A workflow must call vendors through ctx, so the policy sees every call: use a connector operation listed in `uses`."
+          },
+          {
+            "name": "WebSocket",
+            "message": "A workflow must call vendors through ctx, so the policy sees every call: use a connector operation listed in `uses`."
+          },
+          {
+            "name": "XMLHttpRequest",
+            "message": "A workflow must call vendors through ctx, so the policy sees every call: use a connector operation listed in `uses`."
+          },
+          { "name": "setTimeout", "message": "Workflows are replayed: use `ctx.sleep`." },
+          { "name": "setInterval", "message": "Workflows are replayed: use `ctx.sleep` in a loop." },
+          { "name": "setImmediate", "message": "Workflows are replayed: use `ctx.sleep`." },
+          { "name": "queueMicrotask", "message": "Workflows are replayed: await the work directly." },
+          { "name": "performance", "message": "Workflows are replayed: use `await ctx.now()`." },
+          {
+            "name": "process",
+            "message": "Workflows are replayed: pass configuration as workflow input; drivers read the environment."
+          },
+          { "name": "crypto", "message": "Workflows are replayed: derive ids from `ctx.runId`." },
+          {
+            "name": "require",
+            "message": "Import from `sanoma/workflows`, a `@sanoma-ai/connector-*` package, zod or a file in this directory."
+          },
+          { "name": "eval", "message": "Not allowed in a workflow." },
+          { "name": "Function", "message": "Not allowed in a workflow." },
+          {
+            "name": "globalThis",
+            "message": "Reaching globals through globalThis would bypass these rules: use `ctx`."
+          },
+          { "name": "global", "message": "Reaching globals through global would bypass these rules: use `ctx`." }
+        ],
+        "no-restricted-properties": [
+          "error",
+          {
+            "object": "Math",
+            "property": "random",
+            "message": "Workflows are replayed: derive values from `ctx.runId` or the input."
+          },
+          {
+            "object": "Promise",
+            "property": "all",
+            "message": "Calls through ctx run one at a time; declare a fan-out with `ctx.all([...])` so the ledger and the graph show it."
+          },
+          {
+            "object": "Promise",
+            "property": "allSettled",
+            "message": "Calls through ctx run one at a time; declare a fan-out with `ctx.all([...])` so the ledger and the graph show it."
+          },
+          {
+            "object": "Promise",
+            "property": "race",
+            "message": "Calls through ctx run one at a time, so nothing races: pick one call, or sleep and then check."
+          },
+          {
+            "object": "Promise",
+            "property": "any",
+            "message": "Calls through ctx run one at a time, so nothing races: pick one call, or sleep and then check."
+          }
+        ],
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "sanoma/testing",
+                "message": "Fakes and test helpers belong in tests. A workflow must call vendors through ctx, so the policy sees every call."
+              },
+              {
+                "name": "sanoma/app",
+                "message": "The app starts runs and decides approvals: a workflow could approve itself."
+              },
+              {
+                "name": "sanoma/workflows",
+                "allowImportNames": ["defineWorkflow", "mayDecide", "errorCode", "sanoma", "z"],
+                "allowTypeImports": true,
+                "message": "A workflow imports only these and types from sanoma/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "@sanoma-ai/connector-*/fake",
+                  "@sanoma-ai/connector-*/driver",
+                  "@sanoma-ai/connector-*/remote",
+                  "@sanoma-ai/connector-*/vault",
+                  "sanoma/workflows/describe",
+                  "sanoma/workflows/fake",
+                  "sanoma/workflows/plugin",
+                  "sanoma/workflows/scenario",
+                  "sanoma/workflows/scenarios",
+                  "sanoma/workflows/cloud-identity",
+                  "sanoma/workflows/identity-service",
+                  "sanoma/secrets",
+                  "sanoma/workflows/wakeup-service",
+                  "sanoma/workflows/db"
+                ],
+                "message": "A workflow must call vendors through ctx, so the policy sees every call: import the connector itself, `@sanoma-ai/connector-<vendor>`."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

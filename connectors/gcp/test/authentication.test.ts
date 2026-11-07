@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { defineConnection, encodeCredentials, verifyAuthentication } from "@sanoma-ai/workflows";
-import { secret } from "@sanoma-ai/workflows/resources";
+import { defineConnection, encodeCredentials, verifyAuthentication } from "sanoma/workflows";
+import { secret } from "sanoma/resources";
 import { accountOf, checkIdentity, gcpAuthentication, type GcpIdentity } from "../src/authentication.ts";
 import { gcp, gcpWithIdentity } from "../src/index.ts";
 
@@ -123,6 +123,7 @@ it("declares a connection with a stored credential, never one without", () => {
       account: accountOf(identity),
     }),
   ).toMatchObject({ $connection: "gcp/provisioning", credentials: { $secret: "GCP_PROVISIONING_AUTH" } });
+  // @ts-expect-error untyped callers are refused at run time too
   expect(() => defineConnection(gcp, { name: "provisioning", method: "workloadIdentity" })).toThrow(
     "Credentials must match the authentication method",
   );

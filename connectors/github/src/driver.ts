@@ -1,5 +1,5 @@
-import { defaultBridge, type ProviderClient } from "@sanoma-ai/bridge";
-import { type CallContext, type Driver, DriverError, defineDriver, retryableStatus } from "@sanoma-ai/workflows";
+import { defaultBridge, type ProviderClient } from "sanoma/internal/bridge";
+import { type CallContext, type Driver, DriverError, defineDriver, retryableStatus } from "sanoma/workflows";
 import { z } from "zod";
 import { Account, githubApp, githubTf, keyText } from "./connector.ts";
 import { owned } from "./owner.ts";

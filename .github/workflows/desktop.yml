@@ -8,7 +8,7 @@ on:
     paths: &paths
       - packages/desktop/**
       # Sanoma's mark, which the start screen and the app icons draw.
-      - packages/app/src/icon*.svg
+      - packages/sanoma/app/src/icon*.svg
       # What New Company runs first: the launcher's process code and the template, whose `engines` the
       # shipped Node must satisfy. Not the whole workspace it installs, or these jobs would run on most pull requests.
       - packages/sanoma/src/cli.ts
@@ -88,7 +88,7 @@ jobs:
       - run: >-
           pnpm -r --workspace-concurrency=1
           --filter "sanoma..." --filter "@sanoma-ai/connector-anthropic..." --filter "@sanoma-ai/connector-ghost..."
-          --filter "!@sanoma-ai/postgres-*" --filter "!@sanoma-ai/bridge-*" --filter "!@sanoma-ai/testing"
+          --filter "!@sanoma-ai/postgres-*" --filter "!@sanoma-ai/bridge-*"
           exec pnpm pack --pack-destination "$RUNNER_TEMP/packages"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

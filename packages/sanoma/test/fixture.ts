@@ -1,33 +1,59 @@
 import { spawn, type SpawnOptions } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt as ensure, waitFor } from "@sanoma-ai/testing";
+// Relative, not `sanoma/testing`: scripts/readme-shots imports this with Node before anything is built.
+import { ensureBuilt as ensure, waitFor } from "../testing/src/build.ts";
 
 /** The repo's root. */
 export const repo = fileURLToPath(new URL("../../../", import.meta.url));
 
+/** This package, and its manifest. */
+const sanoma = join(repo, "packages/sanoma");
+const manifest = JSON.parse(readFileSync(join(sanoma, "package.json"), "utf8")) as {
+  exports: Record<string, string | { "sanoma-source"?: string; default: string }>;
+  files: string[];
+  dependencies: Record<string, string>;
+};
+
 /** This package's `src/cli.ts`, which the tests run with Node as a company repo would run the bin. */
-export const cli = join(repo, "packages/sanoma/src/cli.ts");
+export const cli = join(sanoma, "src/cli.ts");
 
 /**
- * The packages a fixture copy loads through its `node_modules`, each as a published package would
- * be: by its `exports`, from `dist/` (and `sanoma`'s generated `oxlint.json`). `ensureBuilt`
- * builds each whose outputs are missing or older than its source, in dependency order.
+ * `sanoma` built, as a fixture copy loads it through its `node_modules`: each entry of its `exports`
+ * from `dist/`, its generated `oxlint.json` and the app's own build. `pnpm run build` when one is
+ * missing or the package's source changed since: each part's `src/` and `tsconfig.build.json`, the
+ * app's `vite.config.ts`, the runtime's `oxlint.json`, `package.json` and `scripts/`. Every test that
+ * loads a build calls this, under its one lock.
  */
-const BUILT: [dir: string, outputs: string[]][] = [
-  ["packages/workflows", ["dist/index.js"]],
-  ["packages/bridge", ["dist/index.js"]],
-  ["connectors/ghost", ["dist/index.js"]],
-  ["connectors/anthropic", ["dist/index.js"]],
-  ["connectors/docker", ["dist/index.js"]],
-  ["packages/app", ["dist/server/server.js"]],
-  ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"]],
-];
+export function ensureSanomaBuilt(): void {
+  const entries = Object.values(manifest.exports).flatMap((entry) =>
+    typeof entry === "object" && entry.default.includes("/dist/") ? [entry.default] : [],
+  );
+  ensure(
+    sanoma,
+    [...entries, "oxlint.json", "app/dist/server/server.js"],
+    ["pnpm", "run", "build"],
+    [
+      "package.json",
+      "scripts/**",
+      "src/**",
+      "*/src/**",
+      "tsconfig.build.json",
+      "*/tsconfig.build.json",
+      "app/vite.config.ts",
+      "workflows/oxlint.json",
+    ],
+  );
+}
 
+/** `sanoma` and the connectors a fixture copy installs, built (`ensureSanomaBuilt`). */
 export function ensureBuilt(): void {
-  for (const [dir, outputs] of BUILT) ensure(join(repo, dir), outputs, ["pnpm", "run", "build"]);
+  ensureSanomaBuilt();
+  for (const name of ["ghost", "anthropic", "docker"]) {
+    ensure(join(repo, "connectors", name), ["dist/index.js"], ["pnpm", "run", "build"]);
+  }
 }
 
 const allow = { answer: "allow" };
@@ -53,13 +79,18 @@ export const FIXTURE_GRID = {
   ops: [
     "sanoma.apps.list",
     "sanoma.connection.activate",
+    "sanoma.connection.authorize",
     "sanoma.connection.bind",
     "sanoma.connection.configure",
     "sanoma.connection.create",
     "sanoma.connection.disconnect",
     "sanoma.connection.prepare",
+    "sanoma.connection.refresh",
+    "sanoma.connection.revoke",
     "sanoma.connection.test",
     "sanoma.run.inspect",
+    "sanoma.storeMigration.cancel",
+    "sanoma.storeMigration.plan",
   ].map((id) => ({ id, cells: [allow, allow] })),
 };
 
@@ -75,15 +106,20 @@ export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", 
   const modules = join(dir, "node_modules");
   linkConnector(dir, "ghost");
 
-  const sanoma = join(repo, "packages/sanoma");
-  const manifest = JSON.parse(readFileSync(join(sanoma, "package.json"), "utf8")) as {
-    files: string[];
-    dependencies: Record<string, string>;
-  };
   const store = join(modules, ".pnpm/sanoma/node_modules");
-  for (const file of ["package.json", ...manifest.files]) {
+  for (const file of manifest.files.filter((entry) => !entry.startsWith("!"))) {
     cpSync(join(sanoma, file), join(store, "sanoma", file), { recursive: true });
   }
+  // Without the condition naming each entry's source: the tests' Vite resolves every import with it, a
+  // company's install never does.
+  const exports = Object.fromEntries(
+    Object.entries(manifest.exports).map(([key, entry]) => {
+      if (typeof entry === "string") return [key, entry];
+      const { "sanoma-source": _, ...built } = entry;
+      return [key, built];
+    }),
+  );
+  writeFileSync(join(store, "sanoma/package.json"), JSON.stringify({ ...manifest, exports }, null, 2));
   for (const name of Object.keys(manifest.dependencies)) link(join(sanoma, "node_modules", name), join(store, name));
   symlinkSync(join(store, "sanoma"), join(modules, "sanoma"));
   return dir;

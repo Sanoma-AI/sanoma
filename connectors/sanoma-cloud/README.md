@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-sanoma-cloud
 
-Sanoma Cloud for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): the company's database and host in Sanoma's own accounts, for a company with no database or hosting account of its own, declared in its repository like any other database and host. The driver is a client of sanoma-ops's `cloud-*` workflows over the public api of www.sanoma.work, with the company's Cloud token.
+Sanoma Cloud for [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md): the company's database and host in Sanoma's own accounts, for a company with no database or hosting account of its own, declared in its repository like any other database and host. The driver is a client of sanoma-ops's `cloud-*` workflows over the public api of www.sanoma.work, with the company's Cloud token.
 
 ## Usage
 
@@ -41,7 +41,7 @@ One company is one slug, its address `<slug>.sanoma.work`, and both declarations
 | `name`   | Optional: the company's slug (above). It cannot change.                                                                      |
 | `region` | Optional: `us-east` (the Cloud's default), `us-west`, `eu-central`, `eu-west` or `ap-southeast` (`REGIONS`). It cannot move. |
 
-Its state adds what the Cloud sets: `id` (the database's id there) and `healthy`. It meets the [`Database` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#databases): it pauses (a Neon compute in the Cloud's organization) and does not branch yet. Its `storeUrl` stores nothing and says so: the Cloud binds the URL to the host, and a laptop never needs it.
+Its state adds what the Cloud sets: `id` (the database's id there) and `healthy`. It meets the [`Database` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#databases): it pauses (a Neon compute in the Cloud's organization) and does not branch yet. Its `storeUrl` stores nothing and says so: the Cloud binds the URL to the host, and a laptop never needs it.
 
 ### `cloud.host`
 
@@ -54,7 +54,7 @@ Its state adds what the Cloud sets: `id` (the database's id there) and `healthy`
 | `ref`      | Optional override of the derived branch. Apply resolves the branch to the commit it runs (`revision`, which a data file may not declare), so a merge deploys it. |
 | `domains`  | Deprecated: declare `hostname`. The company's address as `app`.                                                                                                  |
 
-Its state adds `revision`, `url` and `healthy`. It meets the [`Host` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#hosts) as a host that binds its own bootstrap (`bindsBootstrap`, so it takes no `secrets`): it stops when quiet and starts on the next request, its URL is public, it runs the Cloud's runtime image rather than building from git, and it has no fixed egress. A deploy moves it to another revision; another `source`, `ref`, `hostname`, `domains` or `name` plans a replace, which `update` refuses: delete it and declare it again.
+Its state adds `revision`, `url` and `healthy`. It meets the [`Host` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#hosts) as a host that binds its own bootstrap (`bindsBootstrap`, so it takes no `secrets`): it stops when quiet and starts on the next request, its URL is public, it runs the Cloud's runtime image rather than building from git, and it has no fixed egress. A deploy moves it to another revision; another `source`, `ref`, `hostname`, `domains` or `name` plans a replace, which `update` refuses: delete it and declare it again.
 
 | Operation                                     | Effect  | What it does                                                                                                                |
 | --------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |

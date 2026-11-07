@@ -1,4 +1,4 @@
-import { authenticationCredentials, defineDriver, DriverError, errorMessage } from "@sanoma-ai/workflows";
+import { authenticationCredentials, defineDriver, DriverError, errorMessage } from "sanoma/workflows";
 import type { NeonApiErrorKind, NeonErrorUnion } from "@neon/sdk";
 import type { Client, RawResult } from "@neon/sdk/raw";
 import { z } from "zod";

@@ -1,5 +1,5 @@
-import { loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
-import { type Driver, memorySecrets } from "@sanoma-ai/workflows";
+import { loadReplies, stateBridge } from "sanoma/internal/bridge/fake";
+import { type CallAuthentication, type Driver, memorySecrets } from "sanoma/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { supabaseDriver } from "../src/driver.ts";
 import { fakeSupabase } from "../src/fake.ts";
@@ -9,22 +9,35 @@ import { provider } from "../src/resources.gen.ts";
 const fixtures = new URL("../testdata/", import.meta.url);
 const REF = "sanomatestprojectref";
 
+/** A pasted personal access token's connection, as the runtime hands it to each call. */
+const pasted: CallAuthentication = {
+  method: "accessToken",
+  kind: "api-key",
+  credentialVersion: "fixture",
+  credentials: { accessToken: "sbp_placeholder" },
+};
+
 let seq = 0;
-/** Calls one of a driver's operations the way the runtime does. */
-const call = (driver: Driver, op: string, input: unknown): Promise<any> =>
+/** Calls one of a driver's operations the way the runtime does, with the connection's token. */
+const call = (
+  driver: Driver,
+  op: string,
+  input: unknown,
+  authentication: CallAuthentication | null = pasted,
+): Promise<any> =>
   driver.ops[op]!(input, {
     idempotencyKey: `run:${++seq}`,
     runId: "run",
     opId: `supabase.${op}`,
     attempt: 1,
     secrets: memorySecrets(),
+    ...(authentication && { authentication }),
   });
 
 describe("supabaseDriver", () => {
   let bridge: ReturnType<typeof stateBridge>;
   const calls = () => bridge.calls.map(({ method, typeName, id }) => [method, typeName, id]);
   beforeEach(() => {
-    vi.stubEnv("SUPABASE_ACCESS_TOKEN", "sbp_placeholder");
     bridge = stateBridge(loadReplies(fixtures, provider));
   });
 
@@ -72,19 +85,40 @@ describe("supabaseDriver", () => {
     ).toEqual({ id: "sanomamissingproject", gone: true });
   });
 
-  it("fails, not retryable, without SUPABASE_ACCESS_TOKEN", async () => {
-    vi.stubEnv("SUPABASE_ACCESS_TOKEN", "");
-    const err = await call(supabaseDriver({ bridge }), "project.read", { id: REF }).catch((e: unknown) => e);
-    expect(err).toMatchObject({ message: "supabase: SUPABASE_ACCESS_TOKEN is not set", retryable: false });
+  it("configures the provider with an OAuth grant's access token", async () => {
+    const configure = vi.spyOn(bridge, "configure");
+    await call(
+      supabaseDriver({ bridge }),
+      "project.import",
+      { id: REF },
+      {
+        method: "oauth",
+        kind: "oauth2",
+        credentialVersion: "fixture",
+        credentials: { accessToken: "sbp_oauth_placeholder", tokenType: "bearer" },
+      },
+    );
+    expect(configure).toHaveBeenCalledWith(
+      expect.anything(),
+      JSON.stringify({ access_token: "sbp_oauth_placeholder", endpoint: null }),
+    );
+  });
+
+  it("refuses, before the provider starts, a call without a connection's token: never the environment", async () => {
+    vi.stubEnv("SUPABASE_ACCESS_TOKEN", "sbp_from_the_environment");
+    await expect(call(supabaseDriver({ bridge }), "project.read", { id: REF }, null)).rejects.toMatchObject({
+      code: "unsupported",
+    });
     expect(calls()).toEqual([]);
   });
 
-  it("reads through the process's default bridge when given none, and declares the token's variable", () => {
+  it("reads through the process's default bridge when given none, and takes no environment variable", () => {
     const driver = supabaseDriver();
-    expect(Object.keys(driver.env!.shape)).toEqual(["SUPABASE_ACCESS_TOKEN"]);
-    expect(driver.env!.shape.SUPABASE_ACCESS_TOKEN!.safeParse(undefined).success).toBe(false);
+    expect(driver.env).toBeUndefined();
+    expect(driver.authentication).toEqual(["oauth", "accessToken"]);
     expect(Object.keys(driver.ops).toSorted()).toEqual([
       "database.storeUrl",
+      "organization.list",
       "pooler.get",
       "project.create",
       "project.delete",
@@ -99,7 +133,6 @@ describe("supabaseDriver", () => {
 
 describe("fakeSupabase", () => {
   it("returns a renamed project, as if someone renamed it in the dashboard", async () => {
-    vi.stubEnv("SUPABASE_ACCESS_TOKEN", "");
     const fake = fakeSupabase();
     const before = await call(fake.driver, "project.import", { id: REF });
     fake.override("project", REF, { name: "renamed" });

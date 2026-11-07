@@ -1,4 +1,4 @@
-import { defineSteps, type Expect, type Op } from "@sanoma-ai/workflows";
+import { defineSteps, type Expect, type Op } from "sanoma/workflows";
 import { exaOps } from "./connector.ts";
 
 const { search, answer } = exaOps.web;

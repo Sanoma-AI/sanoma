@@ -1,5 +1,5 @@
 /* The shell's own pages: the start screen (index.html) and a company's page (company.html). On the
- * app's paper, type and pine (packages/app/src/ui.css), so that the page becomes the app in place. */
+ * app's paper, type and pine (packages/sanoma/app/src/ui.css), so that the page becomes the app in place. */
 @import "@fontsource-variable/ibm-plex-sans";
 @import "@fontsource-variable/fraunces";
 @import "@fontsource/ibm-plex-mono/400.css";
@@ -97,7 +97,7 @@ p {
   flex-direction: column;
   gap: 4px;
 }
-/* Sanoma's mark, the app's drawing (packages/app/src/icon-small.svg). */
+/* Sanoma's mark, the app's drawing (packages/sanoma/app/src/icon-small.svg). */
 .mark {
   width: 36px;
   height: 36px;

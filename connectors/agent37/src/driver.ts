@@ -1,4 +1,4 @@
-import { defineDriver, DriverError } from "@sanoma-ai/workflows";
+import { defineDriver, DriverError } from "sanoma/workflows";
 import { z } from "zod";
 import { agent37Api } from "./api.ts";
 import { KEY } from "./backend.ts";

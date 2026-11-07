@@ -1,5 +1,5 @@
-import { tfFake, type TfFakeOptions, type TfFakeState } from "@sanoma-ai/bridge/fake";
-import type { Driver } from "@sanoma-ai/workflows";
+import { tfFake, type TfFakeOptions, type TfFakeState } from "sanoma/internal/bridge/fake";
+import type { Driver } from "sanoma/workflows";
 import { supabaseOps, supabaseTf } from "./connector.ts";
 import { apiError, type ManagementApi, withManagement } from "./management.ts";
 
@@ -21,6 +21,11 @@ function fakeApi(state: FakeSupabaseState): ManagementApi {
     return found;
   };
   return {
+    // The organizations of its projects, else one of its own: a token of the fake reaches them all.
+    organizations: async () => {
+      const ids = [...new Set(projects().map((p) => String(p.organization_id)))];
+      return (ids.length ? ids : ["sanoma-test-org"]).map((id) => ({ id, name: id }));
+    },
     projects: async () =>
       projects().map((p) => ({ id: String(p.id), name: String(p.name), organization_id: String(p.organization_id) })),
     pooler: async (ref) => {
@@ -58,7 +63,19 @@ export function fakeSupabase(options: FakeSupabaseOptions = {}) {
     {
       ...supabaseTf,
       connector: supabaseOps,
-      driver: (...args): Driver => withManagement(supabaseTf.driver(...args), () => fakeApi(state)),
+      driver: (...args): Driver => {
+        const driver = withManagement(supabaseTf.driver(...args), () => fakeApi(state));
+        // A connection's account is the fake's own: its calls go on without the connection's token.
+        return {
+          ...driver,
+          ops: Object.fromEntries(
+            Object.entries(driver.ops).map(([op, run]) => [
+              op,
+              (input, call) => run(input, { ...call, connection: undefined, authentication: undefined }),
+            ]),
+          ),
+        };
+      },
     },
     { fixtures, ...options },
   );

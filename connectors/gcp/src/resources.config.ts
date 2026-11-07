@@ -1,4 +1,4 @@
-import type { ResourcesConfig } from "@sanoma-ai/bridge/tfschema";
+import type { ResourcesConfig } from "sanoma/internal/bridge/tfschema";
 
 export default {
   provider: "hashicorp/google",

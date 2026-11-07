@@ -1,12 +1,5 @@
-import {
-  compareDeclared,
-  defineConnector,
-  defineResource,
-  dnsRecord,
-  DriverError,
-  vendorInfo,
-} from "@sanoma-ai/workflows";
-import { DOMAIN_NAME } from "@sanoma-ai/workflows/shared";
+import { compareDeclared, defineConnector, defineResource, dnsRecord, DriverError, vendorInfo } from "sanoma/workflows";
+import { DOMAIN_NAME } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 /** The regions Resend sends from (https://resend.com/docs/api-reference/domains/create-domain). */

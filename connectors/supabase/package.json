@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-supabase",
-  "version": "0.4.12",
+  "version": "0.11.21",
   "description": "Supabase projects for Sanoma, through the OpenTofu provider and the Management API",
   "keywords": [
     "connector",
@@ -60,7 +60,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "generate": "node ../../packages/bridge/src/tfschema/cli.ts src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
+    "generate": "node --conditions=sanoma-source ../../packages/sanoma/src/cli.ts tfschema src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
     "prepack": "pnpm run clean && pnpm run build",
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
@@ -69,15 +69,13 @@
     "pg": "^8.23.1"
   },
   "devDependencies": {
-    "@sanoma-ai/bridge": "workspace:*",
-    "@sanoma-ai/workflows": "workspace:*",
     "@types/pg": "^8.23.1",
     "msw": "^3.0.3",
+    "sanoma": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/bridge": "workspace:^",
-    "@sanoma-ai/workflows": "workspace:^",
+    "sanoma": "workspace:*",
     "zod": "^4"
   },
   "engines": {

@@ -6,7 +6,7 @@ import {
   defineResource,
   type OpSpec,
   vendorInfo,
-} from "@sanoma-ai/workflows";
+} from "sanoma/workflows";
 import { z } from "zod";
 
 /*

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { type FixtureError, tfFake, type TfFakeOptions, type TfFakeState } from "@sanoma-ai/bridge/fake";
-import { DriverError } from "@sanoma-ai/workflows";
+import { type FixtureError, tfFake, type TfFakeOptions, type TfFakeState } from "sanoma/internal/bridge/fake";
+import { DriverError } from "sanoma/workflows";
 import type { z } from "zod";
-import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { githubApp, githubTf } from "./connector.ts";
 import { branchPath, failed } from "./rest.ts";
 import { owned } from "./owner.ts";
@@ -172,7 +172,7 @@ export function fakeGithubApp(options: FakeOptions = {}) {
 }
 
 /**
- * A GitHub that answers as the provider did when its replies were recorded (`@sanoma-ai/bridge`'s
+ * A GitHub that answers as the provider did when its replies were recorded (`sanoma/internal/bridge`'s
  * `testdata/replies`), through the real driver over a bridge of those replies: `import` and
  * `read` return the recorded repositories (`Sanoma-AI/sanoma`, `Sanoma-AI/provider-bridge`), and
  * `branch_protection` on `provider-bridge:main` fails as it did (the branch is unprotected).

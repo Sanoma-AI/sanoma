@@ -1,4 +1,4 @@
-import { startWakeupService } from "@sanoma-ai/workflows/wakeup-service";
+import { startWakeupService } from "sanoma/workflows/wakeup-service";
 import { type Listening, listenRoutes } from "./listen.ts";
 
 // `sanoma wakeup`: the wakeup service alone, over a plain Node server: its routes and `/healthz`.

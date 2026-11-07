@@ -1,4 +1,4 @@
-import { defineDriver, DriverError, retryableStatus } from "@sanoma-ai/workflows";
+import { defineDriver, DriverError, retryableStatus } from "sanoma/workflows";
 import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
 import { cloudflareOps, host } from "./connector.ts";

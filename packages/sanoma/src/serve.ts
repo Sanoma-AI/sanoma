@@ -2,9 +2,9 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AppOptions, type IngressRoute, staffLogin, startApp } from "@sanoma-ai/app";
-import { appSteps } from "@sanoma-ai/app/steps";
-import { betterAuthStaffLogin, prepareBetterAuthStaff } from "@sanoma-ai/connector-better-auth";
+import { type AppOptions, type IngressRoute, staffLogin, startApp } from "sanoma/app";
+import { appSteps } from "sanoma/app/steps";
+import { betterAuthStaffLogin, prepareBetterAuthStaff } from "sanoma/better-auth";
 import {
   deploymentKey,
   errorMessage,
@@ -16,12 +16,11 @@ import {
   SanomaClient,
   type SanomaConfig,
   superviseWorker,
-} from "@sanoma-ai/workflows";
-import { describeConfig, readPeople, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
-import { domainsOf } from "@sanoma-ai/workflows/shared";
-import type { WakeupService } from "@sanoma-ai/workflows/wakeup-service";
-import { UsageError } from "./config.ts";
-import { runtimeFrom, siteBuild } from "./sites.ts";
+} from "sanoma/workflows";
+import { describeConfig, readPeople, schemaOf, writeGenerated } from "sanoma/workflows/describe";
+import { domainsOf, UsageError } from "sanoma/workflows/shared";
+import type { WakeupService } from "sanoma/workflows/wakeup-service";
+import { siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
 
 export interface Stoppable {
@@ -140,7 +139,7 @@ async function appSites(
   if (sites.length && !hot) {
     if (dev) log(`SANOMA_APP_HOST=${dev} is not this machine: the sites are built, not served hot`);
     log(`building the app with ${named}`);
-    const { distDir, built } = await build.buildApp(root, { log, runtimeFrom: runtimeFrom() });
+    const { distDir, built } = await build.buildApp(root, { log });
     if (!built) log("app build up to date");
     return { distDir };
   }
@@ -284,7 +283,7 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
   try {
     if (config.wakeup === true) {
       const { databaseUrl } = serveOptions.resolved ?? resolveConfig(config);
-      const { startWakeupService } = await import("@sanoma-ai/workflows/wakeup-service");
+      const { startWakeupService } = await import("sanoma/workflows/wakeup-service");
       wakeup = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
     }
     app = await served(config, { ...options, onWrite: () => void supervised.resume() }, [

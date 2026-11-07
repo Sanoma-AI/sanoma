@@ -1,6 +1,6 @@
 import { GoogleAuth } from "google-auth-library";
 import { z } from "zod";
-import { AuthenticationError, defineAuthentication } from "@sanoma-ai/workflows";
+import { AuthenticationError, defineAuthentication, type StoredAuthentication } from "sanoma/workflows";
 
 /**
  * The provisioning identity, declared in code: who the connection provisions as and where its
@@ -82,7 +82,7 @@ export const accountOf = (identity: GcpIdentity) =>
   `${identity.serviceAccount}/${identity.project}/${identity.projectNumber}`;
 
 /** The `workloadIdentity` method: a stored bearer, verified by federating once as the identity. */
-export function gcpAuthentication(identity?: GcpIdentity) {
+export function gcpAuthentication(identity?: GcpIdentity): StoredAuthentication<typeof bundle> {
   return defineAuthentication({
     kind: "api-key",
     version: 1,

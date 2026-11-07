@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { type Browser, executablePath, launch } from "puppeteer-core";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { copyFixture, ensureBuilt, linkConnector, runCli, serving } from "./fixture.ts";
@@ -108,7 +108,7 @@ describe("sanoma check with sites", () => {
     writeFileSync(
       join(dir, "sites/hello/routes/runtime.tsx"),
       `import { createFileRoute } from "@tanstack/react-router";
-import * as runtime from "@sanoma-ai/workflows";
+import * as runtime from "sanoma/workflows";
 
 export const Route = createFileRoute("/sites/hello/runtime")({ component: () => <p>{String(runtime)}</p> });
 `,
@@ -174,7 +174,7 @@ export const host = docker.container({
     );
     expect(problems).toContainEqual(
       expect.stringMatching(
-        /^sites\/hello\/routes\/runtime\.tsx:4:\d+: Import denied in client environment: "@sanoma-ai\/workflows"$/,
+        /^sites\/hello\/routes\/runtime\.tsx:4:\d+: Import denied in client environment: "sanoma\/workflows"$/,
       ),
     );
     expect(problems).toContain(

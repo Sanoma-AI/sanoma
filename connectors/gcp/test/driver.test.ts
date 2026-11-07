@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
-import { BridgeError } from "@sanoma-ai/bridge";
-import { stateBridge } from "@sanoma-ai/bridge/fake";
-import { memorySecrets, type CallContext, type Driver } from "@sanoma-ai/workflows";
+import { BridgeError } from "sanoma/internal/bridge";
+import { stateBridge } from "sanoma/internal/bridge/fake";
+import { memorySecrets, type CallContext, type Driver } from "sanoma/workflows";
 import { gcpDriver } from "../src/driver.ts";
 import { gcpTf } from "../src/connector.ts";
 import { fakeGcp } from "../src/fake.ts";
@@ -215,10 +215,7 @@ it("refuses absent identities, stale account bindings and cross-project resource
   for (const [authentication, code] of [
     [{ method: "workloadIdentity", kind: "api-key" as const }, "invalid_value"],
     [{ method: "workloadIdentity", kind: "api-key" as const, credentials: { bearer: "short" } }, "invalid_value"],
-    [
-      { method: "workloadIdentity", kind: "workload-identity" as const, credentials: { bearer: bearerOf(a) } },
-      "unsupported",
-    ],
+    [{ method: "workloadIdentity", kind: "fields" as const, credentials: { bearer: bearerOf(a) } }, "unsupported"],
   ] as const)
     await expect(
       invoke(driver, "keyRing.read", { id: ring() }, { ...context(a), authentication }),

@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import { live, replay } from "@sanoma-ai/testing/replay";
-import { type Driver, memorySecrets, type Secrets } from "@sanoma-ai/workflows";
+import { live, replay } from "sanoma/testing/replay";
+import { type Driver, memorySecrets, type Secrets } from "sanoma/workflows";
 import { beforeEach, describe, expect, it } from "vitest";
-import { changeReplay } from "../../../packages/bridge/test/change-replay.ts";
+import { changeReplay } from "../../../packages/sanoma/bridge/test/change-replay.ts";
 import { supabaseDriver } from "../src/driver.ts";
 import { provider } from "../src/resources.gen.ts";
 import { REF, replayOptions } from "./replay.ts";
@@ -22,6 +22,7 @@ const createdProject = (() => {
 })();
 
 let seq = 0;
+/** Calls an operation as the runtime does, with a pasted token's connection: the replay's token, or the live one. */
 const call = (driver: Driver, op: string, input: unknown, secrets: Secrets = memorySecrets()): Promise<any> =>
   driver.ops[op]!(input, {
     idempotencyKey: `run:${++seq}`,
@@ -29,6 +30,12 @@ const call = (driver: Driver, op: string, input: unknown, secrets: Secrets = mem
     opId: `supabase.${op}`,
     attempt: 1,
     secrets,
+    authentication: {
+      method: "accessToken",
+      kind: "api-key",
+      credentialVersion: "test",
+      credentials: { accessToken: process.env.SUPABASE_ACCESS_TOKEN },
+    },
   });
 
 describe("the Management API operations", () => {
@@ -44,6 +51,13 @@ describe("the Management API operations", () => {
     });
     // Compared, not printed: a failure must not show a live token.
     expect(sent[0]!.headers.get("authorization") === `Bearer ${process.env.SUPABASE_ACCESS_TOKEN}`).toBe(true);
+  });
+
+  it("lists the organizations the token reaches, by id and name", async () => {
+    play("organizations");
+    expect(await call(driver, "organization.list", {})).toEqual({
+      organizations: expect.arrayContaining([{ id: expect.any(String), name: expect.any(String) }]),
+    });
   });
 
   it("reads the database's and the pooler's health, healthy only when each is", async () => {

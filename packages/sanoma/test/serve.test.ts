@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UsageError } from "../src/config.ts";
+import { UsageError } from "sanoma/workflows/shared";
 import { appOptions, parseDomains, wakeRoute } from "../src/serve.ts";
 
 /** Sets these variables for the test, and unsets the other launcher variables appOptions reads. */

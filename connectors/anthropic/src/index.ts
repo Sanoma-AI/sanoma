@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma-ai/workflows";
+import { withSetup } from "sanoma/workflows";
 import { anthropicOps } from "./connector.ts";
 import { anthropicDriver } from "./driver.ts";
 import { anthropicModel } from "./model.ts";

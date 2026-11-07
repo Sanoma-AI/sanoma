@@ -1,4 +1,4 @@
-import { defineDriver } from "@sanoma-ai/workflows";
+import { defineDriver } from "sanoma/workflows";
 import { invoicesOps } from "./connector.ts";
 import { generate } from "./generate.ts";
 

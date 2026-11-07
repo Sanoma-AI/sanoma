@@ -1,8 +1,8 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { resolveConfig } from "@sanoma-ai/workflows";
+import { testDatabaseUrl } from "sanoma/testing";
+import { resolveConfig } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { check } from "../src/check.ts";
 import { type Loaded, loadConfig } from "../src/config.ts";
@@ -75,7 +75,7 @@ describe("check", () => {
       expect.stringMatching(
         /^resources\/shop\.ts:1:23: error TS2307: Cannot find module '@sanoma-ai\/connector-ghost\/resources'/,
       ),
-      // oxlint: the unused import, and Date from @sanoma-ai/workflows's rules.
+      // oxlint: the unused import, and Date from sanoma/workflows's rules.
       expect.stringMatching(/^workflows\/hello\.ts:16:10: Identifier 'readFileSync' is imported but never used/),
       expect.stringMatching(
         /^workflows\/hello\.ts:17:18: Workflows are replayed, so a workflow reads the clock with `await ctx\.now\(\)`/,
@@ -134,7 +134,7 @@ export default defineWorkflow({
   }, 180_000);
 
   it("passes a company of apps: each app's workflows, collections, policies and scenarios, named by its folder", async () => {
-    const own = copyFixture(fileURLToPath(new URL("../../workflows/test/fixtures/company-apps/", import.meta.url)));
+    const own = copyFixture(fileURLToPath(new URL("../workflows/test/fixtures/company-apps/", import.meta.url)));
     try {
       const loaded = await loadIn(own);
       expect(loaded.config.workflows?.map((w) => w.name)).toEqual(["introduce", "crm.follow-up", "shop.follow-up"]);

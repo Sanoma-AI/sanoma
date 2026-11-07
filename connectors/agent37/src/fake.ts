@@ -1,4 +1,4 @@
-import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { agent37Ops } from "./connector.ts";
 import { instanceOperations } from "./operations.ts";
 

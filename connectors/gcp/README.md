@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-gcp
 
-Google Cloud KMS, IAM and Cloud Run provisioning through the pinned `hashicorp/google` **8.7.0** OpenTofu provider and isolated [bridge sessions](../../packages/bridge/README.md). This connector provisions infrastructure; it does not store credentials or supply the managed Cloud runtime's identity broker ([D1, #492](https://github.com/Sanoma-AI/sanoma/issues/492)).
+Google Cloud KMS, IAM and Cloud Run provisioning through the pinned `hashicorp/google` **8.7.0** OpenTofu provider and isolated [bridge sessions](../../packages/sanoma/bridge/README.md). This connector provisions infrastructure; it does not store credentials or supply the managed Cloud runtime's identity broker ([D1, #492](https://github.com/Sanoma-AI/sanoma/issues/492)).
 
 The Google Cloud logo is the [official homepage asset](https://www.gstatic.com/cgc/google-cloud-logo-fullcolor.svg). Provider schema provenance and its verified download pin are recorded in `testdata/`; the provider binary is downloaded separately by the bridge.
 
@@ -26,7 +26,7 @@ Each declaration is named by its provider import ID, built from its declared fie
 
 ## Deployment identity
 
-A live call provisions as one identity, declared in code with `gcpWithIdentity`: the project, its number, the provisioning service account, the workload identity provider's audience and the [provisioning identity service](../../packages/workflows/CLOUD-IDENTITY.md#provisioning-identity-from-a-non-google-host)'s `/identity` endpoint. None of these is secret. The one secret is the provisioning bearer that the identity service enrolled for this control plane. It is the connection's stored credential, entered on the Google Cloud connector page like an API key, and never an environment variable.
+A live call provisions as one identity, declared in code with `gcpWithIdentity`: the project, its number, the provisioning service account, the workload identity provider's audience and the [provisioning identity service](../../packages/sanoma/workflows/CLOUD-IDENTITY.md#provisioning-identity-from-a-non-google-host)'s `/identity` endpoint. None of these is secret. The one secret is the provisioning bearer that the identity service enrolled for this control plane. It is the connection's stored credential, entered on the Google Cloud connector page like an API key, and never an environment variable.
 
 ```ts
 // sanoma.config.ts
@@ -66,10 +66,10 @@ A running provider session holds the bearer it started with while it renews from
 
 Sanoma cannot provision the trust it provisions through, so an administrator sets up the first identity by hand, with an existing authorized administration path:
 
-1. Create the project, enable billing and the IAM, IAM Credentials, STS, KMS and Cloud Run APIs. This connector has no project, billing or API-enablement resource.
-2. Create the three service accounts the [provisioning identity service](../../packages/workflows/CLOUD-IDENTITY.md#provisioning-identity-from-a-non-google-host) separates: the issuer's attached account, the source account it mints OIDC tokens for, and the provisioning account. Grant the issuer `iam.serviceAccounts.getOpenIdToken` on the source account only.
+1. Create the project, enable billing and the IAM, IAM Credentials, STS, KMS and Cloud Run APIs. This connector has no project, billing or API-enablement resource ([#698](https://github.com/Sanoma-AI/sanoma/issues/698)).
+2. Create the three service accounts the [provisioning identity service](../../packages/sanoma/workflows/CLOUD-IDENTITY.md#provisioning-identity-from-a-non-google-host) separates: the issuer's attached account, the source account it mints OIDC tokens for, and the provisioning account. Grant the issuer `iam.serviceAccounts.getOpenIdToken` on the source account only.
 3. Create the workload identity pool and an OIDC provider for issuer `https://accounts.google.com`, mapping `google.subject` from `assertion.sub` with a condition on the source account's numeric `uniqueId` and the audience. Grant that principal `roles/iam.workloadIdentityUser` on the provisioning account. Grant the provisioning account only the KMS and IAM administration its declarations need.
-4. Install the enrollment and audit schemas, deploy the identity service in `provisioning` mode, and enroll the control plane's first bearer: `createDeploymentCredential()` from `@sanoma-ai/workflows/cloud-identity` returns `{ credential, hash }`; insert the hash with administrative authority and keep the credential only until the next step.
+4. Install the enrollment and audit schemas, deploy the identity service in `provisioning` mode, and enroll the control plane's first bearer: `createDeploymentCredential()` from `sanoma/workflows/cloud-identity` returns `{ credential, hash }`; insert the hash with administrative authority and keep the credential only until the next step. An operation for this enrollment and its rotation is [#701](https://github.com/Sanoma-AI/sanoma/issues/701).
 5. Paste the credential into **Connect** on the Google Cloud connector page for the `provisioning` connection.
 
 Once that trust works, declare these objects in a data file and let apply manage them: a first apply binds the existing ones by their import IDs instead of creating them again. The connector requires a nonempty OIDC trust condition on every `workloadIdentityProvider`; it does not infer the right condition for you.

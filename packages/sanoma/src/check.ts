@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { type CheckResult, errorMessage } from "@sanoma-ai/workflows";
+import { type CheckResult, errorMessage } from "sanoma/workflows";
 import {
   type ConfigDescription,
   crossAppImports,
@@ -12,11 +12,11 @@ import {
   readPeople,
   schemaOf,
   writeGenerated,
-} from "@sanoma-ai/workflows/describe";
-import { problemLine, warningLine } from "@sanoma-ai/workflows/shared";
-import { runScenarios } from "@sanoma-ai/workflows/scenarios";
+} from "sanoma/workflows/describe";
+import { problemLine, warningLine } from "sanoma/workflows/shared";
+import { runScenarios } from "sanoma/workflows/scenarios";
 import type { Loaded } from "./config.ts";
-import { runtimeFrom, siteBuild } from "./sites.ts";
+import { siteBuild } from "./sites.ts";
 
 export interface CheckOptions {
   /** The Postgres the scenarios' worker runs on, answering already: a database of its own, never the config's. */
@@ -111,13 +111,13 @@ export async function check(
  * type), so it runs once there is one.
  */
 async function checkSites(
-  build: typeof import("@sanoma-ai/app/build"),
+  build: typeof import("sanoma/app/build"),
   sites: string[],
   root: string,
   log: (line: string) => void,
 ): Promise<{ typed: string[]; built: string[] }> {
   log(`build ${sites.join(" ")}`);
-  const built = await build.buildApp(root, { runtimeFrom: runtimeFrom() }).then(
+  const built = await build.buildApp(root).then(
     () => [],
     (err: unknown) => buildProblems(errorMessage(err), log),
   );
@@ -131,10 +131,10 @@ async function checkSites(
  * (`NodeOnlyImport`, the first the build met); any other failure as `buildProblems` says it.
  */
 async function checkBundle(config: Loaded["config"], root: string, log: (line: string) => void): Promise<string[]> {
-  const { buildAppBundle, NodeOnlyImport } = await import("@sanoma-ai/app/bundle");
+  const { buildAppBundle, NodeOnlyImport } = await import("sanoma/app/bundle");
   log("build the app bundle");
   try {
-    await buildAppBundle(root, { config, runtimeFrom: runtimeFrom() });
+    await buildAppBundle(root, { config });
     return [];
   } catch (err) {
     if (err instanceof NodeOnlyImport) return [err.message];

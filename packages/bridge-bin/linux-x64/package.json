@@ -33,7 +33,7 @@
     "access": "public"
   },
   "scripts": {
-    "prepack": "node ../../bridge/scripts/download-bridge.ts --platform linux-x64 --out bin/provider-bridge --licenses licenses",
+    "prepack": "node ../../sanoma/bridge/scripts/download-bridge.ts --platform linux-x64 --out bin/provider-bridge --licenses licenses",
     "postpack": "rm -rf bin licenses"
   }
 }
