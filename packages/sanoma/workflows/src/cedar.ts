@@ -279,29 +279,31 @@ export function cedarPolicy(
   const hasPermits = Object.keys(permits).length > 0;
   const directory = directoryOf(people);
 
-  let prepared: { cedar: CedarWasm; schema: CedarSchemaJson; set: string; permitsSet: string } | undefined;
+  let prepared: { cedar: CedarWasm; schema: CedarSchemaJson; set: string; permitsSet: string } | Error | undefined;
   /**
    * Cedar with the schema and both policy sets parsed, on the first question: a process that asks
    * none (a Worker's isolate serving a page or the sign-in) never builds the schema or has Cedar
-   * parse it, the most of its first request's work.
+   * parse it, the most of its first request's work. Policies Cedar refuses are refused once, then
+   * on every question with the same error.
    */
   const prepare = () => {
-    if (prepared) return prepared;
-    const cedar = cedarWasm();
-    const schema = schemaOf(resolved, people);
-    // Cedar caches both per thread, by name: one for these policies over this schema, and its permits.
-    const set = `sanoma-${hash({ staticPolicies, schema })}`;
-    const permitsSet = `${set}-permits`;
-    for (const answer of [
-      cedar.preparsePolicySet(set, { staticPolicies }),
-      cedar.preparsePolicySet(permitsSet, { staticPolicies: permits }),
-      cedar.preparseSchema(set, schema),
-    ]) {
-      if (answer.type === "failure") {
-        throw new Error(`The Cedar policies do not parse: ${answer.errors.map(messageOf).join("; ")}`);
-      }
+    if (!prepared) {
+      const cedar = cedarWasm();
+      const schema = schemaOf(resolved, people);
+      // Cedar caches both per thread, by name: one for these policies over this schema, and its permits.
+      const set = `sanoma-${hash({ staticPolicies, schema })}`;
+      const permitsSet = `${set}-permits`;
+      const errors = [
+        cedar.preparsePolicySet(set, { staticPolicies }),
+        cedar.preparsePolicySet(permitsSet, { staticPolicies: permits }),
+        cedar.preparseSchema(set, schema),
+      ].flatMap((answer) => (answer.type === "failure" ? answer.errors : []));
+      prepared = errors.length
+        ? new Error(`The Cedar policies do not parse: ${errors.map(messageOf).join("; ")}`)
+        : { cedar, schema, set, permitsSet };
     }
-    return (prepared = { cedar, schema, set, permitsSet });
+    if (prepared instanceof Error) throw prepared;
+    return prepared;
   };
 
   /**
@@ -316,9 +318,6 @@ export function cedarPolicy(
     return { refusing: refusing?.p, holds };
   };
 
-  /** The entity type `action` acts on, as the schema has it. */
-  const appliesTo = (action: string) => prepare().schema[NAMESPACE]?.actions[action]?.appliesTo?.resourceTypes?.[0];
-
   /**
    * What `request` is about: a workflow start on its `Workflow`; an operation on its target, in its
    * collection for `data`; one on an entity type with attributes (a merge's `Change`) with those `entity` gives.
@@ -332,7 +331,8 @@ export function cedarPolicy(
   ) => {
     const { schema } = prepare();
     const entities = directory.entities(principal);
-    const on = appliesTo(action);
+    // The entity type `action` acts on, as the schema has it.
+    const on = schema[NAMESPACE]?.actions[action]?.appliesTo?.resourceTypes?.[0];
     const shape = on === undefined ? undefined : shapeOf(schema, on);
     let resource;
     if (action.startsWith(WORKFLOW_ACTION)) {
