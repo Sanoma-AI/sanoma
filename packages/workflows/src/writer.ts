@@ -154,11 +154,13 @@ export async function renameFields(
       if (!property.shorthand) end = property.key.end;
     } else {
       if (computed(property.value)) throw computedAt(path);
-      // With the comma between it and the next field, or the one before it when it is the last.
+      // With the comma between it and the next field, the one before it when it is the last, or
+      // its own trailing comma when it is the only one.
       const at = object.properties.indexOf(property);
       const next = object.properties[at + 1];
       if (next) end = next.start;
       else if (at > 0) start = object.properties[at - 1].end;
+      else end += /^\s*,?/.exec(text.slice(end))![0].length;
     }
     text = text.slice(0, start) + replacement + text.slice(end);
   }

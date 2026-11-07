@@ -24,6 +24,7 @@ import {
   renameFields,
   setFields,
 } from "@sanoma-ai/workflows/describe";
+import { TableChangePlan } from "../components/grid/plan.ts";
 
 // A data file's change from the app's own pages, in the worker (the built-ins `adopt` and
 // `patch`): Adopt (a drifted field's value at the vendor) and a form's Save, each written into the
@@ -94,7 +95,8 @@ async function written(step: AppStepContext, file: string, text: string, message
  * `rename` names (`renameFields`), as the run's actor, and lands it.
  * With a repository that drafts and has a remote a connector's remote half is for, it is a change:
  * the file written in a draft of its own (`ui-<id>`), committed there, and the change opened for
- * review (`SanomaClient.openChange`, carrying `plan` when `at` is a collection's, for its review), whose
+ * review (`SanomaClient.openChange`, carrying `plan` when it is the plan of the collection at `at`,
+ * each change to a field it edits, for its review), whose
  * run holds a change to the rules for `admin`; the change's run id. Otherwise the file is written
  * in the checkout and committed as Adopt does, but a change to the rules (a people file) only by
  * someone in `admin`: `not_approver` for anyone else, since nothing would review it. Refused
@@ -113,11 +115,20 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
     ...description.apps.map((a) => a.at),
   ].some((known) => known?.file === at.file && known.export === at.export);
   if (!named) throw new SanomaError("invalid_input", `${at.file}#${at.export} is not a declaration`);
-  // A plan is a column change's, so it goes on the change only with a collection's declaration.
-  const planned =
-    plan !== undefined &&
-    description.collections.some((c) => c.declared?.at.file === at.file && c.declared.at.export === at.export);
   const paths = [...Object.keys(fields), ...Object.keys(rename)];
+  // A plan is a column change's: it goes on the change only as the plan of this collection's
+  // declaration, each of its changes to a field this patch edits, so the review says what merges.
+  const collection = description.collections.find(
+    (c) => c.declared?.at.file === at.file && c.declared.at.export === at.export,
+  );
+  const parsed = TableChangePlan.safeParse(plan).data;
+  const planned =
+    parsed?.collection === collection?.name &&
+    parsed?.changes.every((change) =>
+      paths.includes(
+        `fields.${change.kind === "rename" ? change.from : change.kind === "convert" ? change.key : change.field}`,
+      ),
+    );
   const message = `Change ${paths.join(", ")} of ${at.export === "default" ? at.file : at.export}`;
   /**
    * The file under `dir` as it is, and with the fields set and renamed; refused, saying why, when

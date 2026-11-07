@@ -119,7 +119,9 @@ describe("planOf", () => {
   it("renames a column as its own change, never a removal and an addition", () => {
     const plan = planOf(outbound, rows, { kind: "rename", from: "lastTouched", to: "lastContact" });
     expect(plan.changes).toEqual([{ kind: "rename", from: "lastTouched", to: "lastContact" }]);
-    expect(happens(plan)).toBe("lastTouched is called lastContact from now on. All 4 records keep their values.");
+    expect(happens(plan)).toBe(
+      "lastTouched is called lastContact from now on. All 4 records keep their values under lastTouched until the table change lands, so lastContact shows empty in them.",
+    );
     expect(declarationEdit(outbound.fields, { kind: "rename", from: "lastTouched", to: "lastContact" })).toEqual({
       fields: {},
       rename: { "fields.lastTouched": "lastContact" },
@@ -201,7 +203,7 @@ describe("TableChangeReview", () => {
     expect(cards(html)).toEqual([
       ["Couldn't apply this change", "Nothing changed"],
       ["Add priority", "Safe"],
-      ["Rename lastTouched to lastContact", "Safe"],
+      ["Rename lastTouched to lastContact", "Needs the data moved"],
       ["Change contact from text to a number", "Needs a decision"],
       ["Remove seats", "Keeps the data"],
     ]);
@@ -215,7 +217,7 @@ describe("TableChangeReview", () => {
     expect(html).toContain("and 12 records more");
     expect(html).toContain("Convert the rest and leave these 15 empty");
     expect(html).toContain("Keep contact as text while someone fixes them in the grid");
-    expect(html).toContain("All 288 values are kept.");
+    expect(html).toContain("The values in 288 records are kept.");
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Try on a copy<\/button>/);
     expect(html).toContain('href="/runs/change%3Aui-1234abcd"');
     // A run under way has nothing to say it could not apply.

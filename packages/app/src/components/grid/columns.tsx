@@ -337,7 +337,9 @@ export function ColumnPanel({
             <p className="text-sm text-muted-foreground">It stays optional.</p>
           )}
           <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 px-3 py-2.5" role="status">
-            <span className="text-xs text-muted-foreground">What will happen</span>
+            <span className="text-xs text-muted-foreground">
+              What will happen, over the records on screen (the review counts every one)
+            </span>
             <span className="text-sm">{unchanged ? "Nothing changes." : plan ? happens(plan) : problem}</span>
             {plan && !unchanged && fileOnly(plan) && <span className="text-xs text-muted-foreground">{FILE_ONLY}</span>}
           </div>

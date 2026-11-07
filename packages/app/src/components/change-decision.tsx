@@ -49,7 +49,7 @@ export function ChangeDecision({ change, verbs = PUBLISH_VERBS }: { change: Chan
         <CardFooter className="flex-wrap gap-2">
           <ApprovalDecision run={run} approval={publish} verbs={verbs} />
           <p className="w-full text-sm text-muted-foreground">
-            {verbs === PUBLISH_VERBS ? "Rejecting" : verbs.reject} closes the change.
+            {verbs === PUBLISH_VERBS ? "Rejecting" : `Choosing ${verbs.reject}`} closes the change.
           </p>
         </CardFooter>
       )}

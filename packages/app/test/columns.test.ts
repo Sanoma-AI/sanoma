@@ -154,7 +154,7 @@ describe("a collection's columns", () => {
     expect(html).toContain("<h2>Add priority</h2>");
     expect(html).toContain("All 2 records show it empty.");
     expect(html).toContain("Approve and apply");
-    expect(html).toContain("Send back closes the change.");
+    expect(html).toContain("Choosing Send back closes the change.");
     await testApp.client.changeEvent(id, { kind: "close", by: "ada" }, { by: { id: "ada" } });
   });
 

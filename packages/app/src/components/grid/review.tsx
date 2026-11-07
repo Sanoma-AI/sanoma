@@ -11,6 +11,7 @@ import type { Verbs } from "../approval.tsx";
 import { CardHeading, ToneBadge } from "../kit.tsx";
 import {
   allRecords,
+  renamed,
   diffLines,
   FILE_ONLY,
   fileOnly,
@@ -128,8 +129,8 @@ function WontConvert({
         ))}
       </fieldset>
       <p className="text-xs text-muted-foreground">
-        Your choice goes with Approve and apply once the table change lands; until then the original text stays as it
-        is.
+        Your choice isn't sent yet: it goes with Approve and apply once the table change lands. Until then these keep
+        the text they hold.
       </p>
     </>
   );
@@ -155,12 +156,19 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
         </ChangeCard>
       );
     }
-    case "rename":
+    case "rename": {
+      // Until the table change lands, the records' values stay under the old name.
+      const moves = !plan.sql.length && plan.rows > 0;
       return (
-        <ChangeCard title={`Rename ${change.from} to ${change.to}`} tone="ok" said="Safe">
-          <p>{all} keep their values under the new name.</p>
+        <ChangeCard
+          title={`Rename ${change.from} to ${change.to}`}
+          tone={moves ? "waiting" : "ok"}
+          said={moves ? "Needs the data moved" : "Safe"}
+        >
+          <p>{renamed(plan, change)}</p>
         </ChangeCard>
       );
+    }
     case "retype":
     case "convert": {
       const to = change.kind === "retype" ? change.to : change.type;
@@ -205,7 +213,9 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
         <ChangeCard title={`Remove ${change.field}`} tone="ok" said="Keeps the data">
           <p>
             It leaves the grid and the forms.{" "}
-            {change.filled === 0 ? "No record has a value in it." : `All ${change.filled} values are kept.`}
+            {change.filled === 0
+              ? "No record has a value in it."
+              : `The values in ${plural(change.filled, "record")} are kept.`}
           </p>
         </ChangeCard>
       );

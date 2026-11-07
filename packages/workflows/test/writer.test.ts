@@ -240,6 +240,13 @@ describe("renameFields", () => {
       "Cannot change fields.seats: the declaration has no fields.seats",
     );
   });
+
+  it("removes an object's only field with its trailing comma", async () => {
+    const text = 'export const leads = {\n  key: "company",\n  fields: {\n    company: "text",\n  },\n};\n';
+    expect(await renameFields(text, "leads", { "fields.company": null }, options)).toBe(
+      'export const leads = {\n  key: "company",\n  fields: {},\n};\n',
+    );
+  });
 });
 
 describe("renderDataFile", () => {

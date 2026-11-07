@@ -296,8 +296,18 @@ const TYPE_WORDS = {
 } as const;
 const OR = new Intl.ListFormat("en", { type: "disjunction" });
 
-/** A plan's records as a sentence's subject: "The record", "All 12 records". */
-export const allRecords = (plan: TableChangePlan) => (plan.rows === 1 ? "The record" : `All ${plan.rows} records`);
+/** A plan's records as a sentence's subject: "No records", "The record", "All 12 records". */
+export const allRecords = ({ rows }: TableChangePlan) =>
+  rows === 0 ? "No records" : rows === 1 ? "The record" : `All ${rows} records`;
+
+/**
+ * A rename's records, said: until the runtime plans the table change (no SQL), each keeps its
+ * value under the old name, so the new one shows empty.
+ */
+export const renamed = (plan: TableChangePlan, { from, to }: { from: string; to: string }) =>
+  plan.sql.length || plan.rows === 0
+    ? `${allRecords(plan)} keep their values.`
+    : `${allRecords(plan)} keep their values under ${from} until the table change lands, so ${to} shows empty in them.`;
 
 /**
  * How many records, in words: `lib/utils.ts`'s `plural`, which this file cannot import, since
@@ -315,7 +325,7 @@ export function happens(plan: TableChangePlan): string {
         ? `${plan.collection} gains a required ${change.field} column. ${all} show it empty, and each needs a value before it saves again.`
         : `${plan.collection} gains a ${change.field} column. ${all} show it empty, and nothing else changes.`;
     case "rename":
-      return `${change.from} is called ${change.to} from now on. ${all} keep their values.`;
+      return `${change.from} is called ${change.to} from now on. ${renamed(plan, change)}`;
     case "retype":
     case "convert": {
       const to = change.kind === "retype" ? change.to : change.type;
