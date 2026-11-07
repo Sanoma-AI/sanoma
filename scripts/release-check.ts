@@ -10,15 +10,15 @@
  *   ranges. An exact pin (`workspace:*`, as `sanoma` pins the runtime) never does, nor a `^` peer range
  *   after a 0.x minor bump. Counts the ones that will pin those in turn.
  * - A package at a version other than `sanoma`'s: every published package but the binaries
- *   (`@sanoma-ai/bridge-*`, `@sanoma-ai/postgres-*`, which follow the binary they download) is released
- *   with sanoma, at its version, so one of them changed is a new version for them all.
+ *   (a package published with `os`, which follows the binary it downloads) is released with sanoma, at
+ *   its version, so one of them changed is a new version for them all.
  *
  * Prints each `name@version` the release will publish, one per line. `release.yml` runs it before
  * publishing; `node scripts/release-check.ts` by hand.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join, posix, relative, sep } from "node:path";
 import semver from "semver";
 import { workspacePackages } from "./runtime-packages.ts";
 
@@ -82,12 +82,41 @@ const packedFrom = (text: string, dir: string, root: string): string[] =>
     .filter((path) => !path.startsWith(dir + sep))
     .map((path) => relative(root, path));
 
+/**
+ * What a package is built from, as git pathspecs under its directory: each entry of its `files` git
+ * tracks, shipped as it is, and for one it does not, a build's output (`dist`, `workflows/dist`,
+ * `oxlint.json`), the `src/` beside it and the files beside it (its build's configuration), and the
+ * files its `build` script names (`scripts/oxlint.ts`). Never its tests, nor anything else it does not
+ * ship. A negated entry only leaves out what is shipped, never what a build reads, so none is followed.
+ * Without `files`, npm ships the whole directory.
+ */
+function sourcesOf(text: string, dir: string, root: string): string[] {
+  const { files, scripts } = JSON.parse(text) as { files?: string[]; scripts?: { build?: string } };
+  if (!files) return [dir];
+  const tracked = (spec: string) => run("git", ["ls-files", "--", spec], root).trim() !== "";
+  const at = (path: string) => (path.includes("*") ? `:(glob)${join(dir, path)}` : join(dir, path));
+  const built = String(scripts?.build ?? "")
+    .split(/\s+/)
+    .filter((word) => existsSync(join(dir, word)) && statSync(join(dir, word)).isFile())
+    .map((word) => join(dir, word));
+  return [
+    ...files
+      .filter((entry) => !entry.startsWith("!"))
+      .flatMap((entry) => {
+        if (tracked(at(entry))) return [at(entry)];
+        const beside = posix.dirname(entry) === "." ? dir : join(dir, posix.dirname(entry));
+        return [join(beside, "src"), `:(glob)${beside}/*`];
+      }),
+    ...built,
+  ];
+}
+
 /** Scripts' code, one after another: a comment's edit (a moved path in it) changes nothing they do. */
 const codeOf = (files: { text: string }[]) => files.map(({ text }) => text.replace(/^\s*\/\/.*\n/gm, "")).join("\0");
 
 /**
  * The commits since the one that last set this package's version, or removed its `private`, that touch
- * what it is built from: its directory (not `test/` or an `AGENTS.md`), its `package.json` when more than
+ * what it is built from: what it ships and what builds that (`sourcesOf`; never an `AGENTS.md`), its `package.json` when more than
  * its `devDependencies` and pack-time scripts differ, and the files outside it that its `prepack` names
  * when their code differs from then (wherever they were: a moved file is no change). Historical commits
  * alone do not require a bump when the effective inputs match the version-setting commit (for example,
@@ -117,8 +146,7 @@ export function changedSince(pkg: Manifest, root = process.cwd()): string[] {
     .filter((path) => existsSync(join(root, path)))
     .map((path) => ({ path, text: readFileSync(join(root, path), "utf8") }));
   const specs = [
-    pkg.path,
-    `:(exclude)${join(pkg.path, "test")}`,
+    ...sourcesOf(now, pkg.path, root),
     `:(exclude,glob)${pkg.path}/**/AGENTS.md`,
     ...(shipped(now) === shipped(before) ? [`:(exclude)${manifest}`] : []),
     ...(codeOf(was) === codeOf(is) ? [] : [...was, ...is].map(({ path }) => path)),
@@ -128,9 +156,6 @@ export function changedSince(pkg: Manifest, root = process.cwd()): string[] {
     .split("\n")
     .filter(Boolean);
 }
-
-/** The platform binaries, which follow the binary they download, not sanoma's version. */
-const BINARY = /^@sanoma-ai\/(bridge|postgres)-/;
 
 /** The problems with releasing these packages, and each `name@version` the release will publish. */
 export function releaseCheck(
@@ -145,7 +170,8 @@ export function releaseCheck(
   const bump = (pkg: Manifest) => next.set(pkg.name, semver.inc(pkg.version, "patch")!);
   const sanoma = packages.find((pkg) => pkg.name === "sanoma");
   /** Released together, at sanoma's version: one of them changed is a new version for them all. */
-  const lockstep = packages.filter((pkg) => !BINARY.test(pkg.name));
+  // Not the platform binaries (published with `os`), which follow the binary they download.
+  const lockstep = packages.filter((pkg) => !pkg.publishConfig?.os);
   const bumpLockstep = () => lockstep.filter((pkg) => !next.has(pkg.name)).forEach(bump);
   const changes: string[] = [];
   for (const pkg of packages) {
