@@ -15,6 +15,7 @@ import {
   defineConnector,
   defineDriver,
   memorySecretStore,
+  resolveConfig,
   SanomaClient,
   type SanomaConfig,
   type SecretStore,
@@ -223,6 +224,11 @@ const settled = (client: SanomaClient, runId: string) =>
   );
 
 describe("OAuth consent", () => {
+  it("adds the built-in connect workflow only to a config with a connection that consents by OAuth", () => {
+    expect(resolveConfig(config()).workflows.has("connect")).toBe(true);
+    expect(resolveConfig({ ...config(), connections: [] }).workflows.has("connect")).toBe(false);
+  });
+
   it("connects through consent, a callback and the worker's exchange, and calls with the stored grant", async () => {
     const store = memorySecretStore();
     await withRuntime(async (client) => {
