@@ -41,6 +41,7 @@ import {
   renewalState,
 } from "./renewal.ts";
 import { RENEWAL_AGENT } from "./shared.ts";
+import { writesPaused } from "./credentials.ts";
 
 /** Serializable account reference; vendor literal prevents cross-connector selection in typed calls. */
 export interface ConnectionRef<V extends string = string> {
@@ -744,16 +745,47 @@ export class ConnectionRegistry {
     return snapshot({ ...row, revision: next, status: "connected" });
   }
 
+  /** `at`: the same binding as it was in another store (a move's source), for `rebindMoved`. */
   private bindingFingerprint(
     declaration: ConnectionDefinition | ConnectionRule,
     method: Authentication,
     credential?: string | null,
+    at?: { store: string; namespace: string },
   ): string {
     const name = credential ?? ("credentials" in declaration ? declaration.credentials?.$secret : undefined);
-    const location = name ? this.secrets?.location(name) : undefined;
+    const bound = name ? this.secrets?.location(name) : undefined;
+    const location = bound && at && bound.namespace !== "" ? { ...bound, ...at } : bound;
     return createHash("sha256")
       .update(JSON.stringify({ contract: fingerprint(declaration, method), location }))
       .digest("hex");
+  }
+
+  /**
+   * After a store move's cutover, on the code that selects its destination: each connection bound
+   * to its credentials' path in the move's source (`from`) is bound to the same path here, its
+   * revision kept. Metadata only; a connection bound otherwise is left as it is. Answers their ids.
+   */
+  async rebindMoved(from: { store: string; namespace: string }): Promise<string[]> {
+    const db = await this.db();
+    const rebound: string[] = [];
+    for (const row of await db.select().from(connections)) {
+      const declaration = row.rule ? this.catalog.rules.get(row.rule) : this.catalog.definitions.get(row.id);
+      const method = declaration && this.catalog.methods.get(declaration.vendor)?.[declaration.method];
+      if (!declaration || !method) continue;
+      const moved = this.bindingFingerprint(declaration, method, row.credential, from);
+      const here = this.bindingFingerprint(declaration, method, row.credential);
+      if (row.definition !== moved || moved === here) continue;
+      const [updated] = await db
+        .update(connections)
+        .set({
+          definition: here,
+          location: row.credential && this.secrets ? this.secrets.location(row.credential) : null,
+        })
+        .where(and(eq(connections.id, row.id), eq(connections.definition, moved)))
+        .returning({ id: connections.id });
+      if (updated) rebound.push(updated.id);
+    }
+    return rebound;
   }
 
   /** Why `method` cannot keep its credentials at `location` (`authenticationStoreProblem`); none without a store or a location. */
@@ -970,6 +1002,12 @@ export class ConnectionRegistry {
           if (!client) throw new AuthenticationError("unsupported");
           const application = await this.application(client);
           if (!(await this.renewals.sending(selected.id, holder))) throw new AuthenticationError("unavailable");
+          // A move between stores has paused writes where the grant lives: its successor could not
+          // be kept, so the refresh token is not spent. Asked after `sending`, which a move's transfer
+          // waits out before it pauses them (`store-move.ts`); the grant still valid serves meanwhile.
+          const at = secrets.location(credential);
+          if (await writesPaused(await this.own(), at.store, at.namespace))
+            throw new AuthenticationError("unavailable");
           sent = true;
           const grant = await refreshGrant(method.oauth, application, decodeCredentials(method, current.value));
           const value = encodeCredentials(method, grant);

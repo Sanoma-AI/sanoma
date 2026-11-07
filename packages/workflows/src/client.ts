@@ -45,6 +45,7 @@ import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
+import { readStoreMoves, type StoreMove } from "./store-move.ts";
 import {
   type AppBehind,
   dbosClient,
@@ -1344,6 +1345,12 @@ export class SanomaClient {
       ready: !problem,
       ...(problem && { problem }),
     };
+  }
+
+  /** The latest moves of the secrets between stores, newest first, with each secret's receipt: names, versions' progress and sizes, never a value. */
+  async storeMoves(options: { actor: Principal | string }): Promise<StoreMove[]> {
+    await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    return readStoreMoves(await this.database.db());
   }
 
   /** Secure intake endpoint, never a workflow operation. Only its metadata-only prepare gate

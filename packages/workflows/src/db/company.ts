@@ -18,6 +18,7 @@ import type { RenewalOutcome } from "../renewal.ts";
 import type { LedgerRecord } from "../ledger.ts";
 import type { RunCheck } from "../scenario.ts";
 import type { SecretLocation } from "../secret-store.ts";
+import type { MoveItemAction, MoveItemKind, MoveItemState, MovePhase } from "../store-move.ts";
 
 // The runtime's tables in a company's database, beside DBOS's: what `prepareDatabase` makes and
 // every store reads. Column names are the property names in snake_case (`casing` in `db.ts` and
@@ -269,4 +270,62 @@ export const runChecks = pgTable(
     checkedAt: when().notNull().defaultNow(),
   },
   (t) => [check("sanoma_run_checks_one_answer", sql`(${t.checks} IS NULL) <> (${t.error} IS NULL)`)],
+);
+
+/**
+ * A move of the company's secrets from one store to another (`store-move.ts`, the built-in
+ * `migrate-store`), by its run's id: the two stores by id and namespace, its phase, and whether
+ * the source is fenced (`fenced`: writes there are refused, `configuredSecrets`), from its
+ * transfer until it is cancelled or a later move cuts back over to that store. Metadata only.
+ */
+export const secretMoves = pgTable(
+  "sanoma_secret_moves",
+  {
+    id: text().primaryKey(),
+    /** The `secrets.stores` name the destination had when the move began. */
+    destinationName: text().notNull(),
+    sourceStore: text().notNull(),
+    sourceNamespace: text().notNull(),
+    destinationStore: text().notNull(),
+    destinationNamespace: text().notNull(),
+    phase: text().$type<MovePhase>().notNull(),
+    fenced: boolean().notNull().default(false),
+    retainHours: integer().notNull(),
+    startedBy: text().notNull(),
+    createdAt: when().notNull().defaultNow(),
+    updatedAt: when()
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => sql`now()`),
+    cutoverAt: when(),
+    retainUntil: when(),
+    retiredAt: when(),
+  },
+  (t) => [index("sanoma_secret_moves_source").on(t.sourceStore, t.sourceNamespace)],
+);
+
+/**
+ * Each secret a move carries, by its logical name: where it is at both ends, what kind of value
+ * it holds and its size, and the receipts: the source's version copied and the destination's
+ * version written. Never a value, a hash of one or a provider message.
+ */
+export const secretMoveItems = pgTable(
+  "sanoma_secret_move_items",
+  {
+    moveId: text().notNull(),
+    name: text().notNull(),
+    kind: text().$type<MoveItemKind>().notNull(),
+    management: text().$type<"sanoma" | "external">().notNull(),
+    sourcePath: text().notNull(),
+    destinationPath: text().notNull(),
+    bytes: integer(),
+    /** What the move does with it: copy it, or leave it (external, bound outside the store, missing). */
+    action: text().$type<MoveItemAction>().notNull(),
+    /** The connections whose grant needs consent again at the destination, and why. */
+    reauthorize: text().$type<"client_changed" | "client_missing">(),
+    sourceVersion: text(),
+    destinationVersion: text(),
+    state: text().$type<MoveItemState>().notNull().default("pending"),
+  },
+  (t) => [primaryKey({ columns: [t.moveId, t.name] })],
 );

@@ -36,7 +36,8 @@ describe("secret store contract", () => {
     expect(() => new SecretAccess({ store: factory }, store)).toThrow("invalid_configuration");
     const database = vi.fn<() => Promise<Db>>();
     const bound = configuredSecrets({ store: factory }, database);
-    expect(bound.store).toBe(store);
+    // The factory's store, behind the move's write fence (which reads the database only on a write).
+    expect(bound.store).toMatchObject({ id: store.id, capabilities: store.capabilities });
     expect(create).toHaveBeenCalledWith({ database });
     expect(database).not.toHaveBeenCalled();
   });

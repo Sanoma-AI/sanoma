@@ -370,6 +370,8 @@ export const ConfigDescriptionSchema = z.strictObject({
         z.string(),
         z.strictObject({ path: z.string(), management: z.enum(["sanoma", "external"]), store: z.string() }),
       ),
+      /** The other stores a move may take the secrets to or retire them from (`secrets.stores`), by name. */
+      stores: z.record(z.string(), z.strictObject({ store: z.string(), namespace: z.string() })).optional(),
     })
     .optional(),
   connections: z

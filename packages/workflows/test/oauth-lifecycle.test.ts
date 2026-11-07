@@ -13,6 +13,7 @@ import {
   connectionSetups,
   credentials,
   ledger,
+  secretMoves,
 } from "../src/db/company.ts";
 import { workflowStatus } from "../src/db/dbos.ts";
 import {
@@ -433,6 +434,38 @@ describe("OAuth renewal", () => {
     failing("ECONNRESET");
     await expect(read(client)).rejects.toMatchObject({ cause: { problem: "uncertain" } });
     expect((await card(client)).status).toBe("uncertain");
+  }, 60_000);
+
+  it("fails a renewal closed while a store move has paused writes, keeping the valid grant, and renews once it lets go", async () => {
+    provider.expiresIn = 60;
+    await connect();
+    const client = await processOf();
+    // A move's transfer under way from the built-in store's namespace: its fence, as `transfer` sets it.
+    const move = `migrate-store:${randomUUID()}`;
+    await (await pool.db()).insert(secretMoves).values({
+      id: move,
+      destinationName: "elsewhere",
+      sourceStore: "postgres",
+      sourceNamespace: "default",
+      destinationStore: "memory",
+      destinationNamespace: "default",
+      phase: "transferring",
+      fenced: true,
+      retainHours: 0,
+      startedBy: "alice",
+    });
+    try {
+      // No refresh token spent with nowhere to keep its successor: the access token, still valid, serves.
+      expect(await read(client)).toEqual({ thing: "of org-1" });
+      expect(refreshed).toHaveLength(0);
+      expect(await card(client)).toMatchObject({ status: "connected", renewal: { outcome: "unavailable" } });
+      expect(await renewalRow()).toMatchObject({ holder: null, sentAt: null });
+    } finally {
+      await (await pool.db()).delete(secretMoves).where(eq(secretMoves.id, move));
+    }
+    expect(await read(client)).toEqual({ thing: "of org-1" });
+    expect(refreshed).toHaveLength(1);
+    expect(await card(client)).toMatchObject({ status: "connected", renewal: { outcome: "refreshed" } });
   }, 60_000);
 
   it("rotates the refresh token, and treats a refused one as revoked with nothing more scheduled", async () => {

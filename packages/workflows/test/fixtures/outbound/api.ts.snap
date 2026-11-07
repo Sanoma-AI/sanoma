@@ -267,6 +267,25 @@ interface CompanyApi {
         runId: string;
       }, unknown>;
     };
+    storeMigration: {
+      /**
+       * Abandon a move before its cutover: writes at the source resume; copies already made stay inactive at the destination
+       *
+       * `sanoma.storeMigration.cancel`, a write.
+       */
+      cancel: OpFn<{
+        move: string;
+      }, unknown>;
+      /**
+       * Plan moving the secrets Sanoma knows (connections, OAuth applications, bindings, data files' secrets) from the selected store to another in `secrets.stores`: names, paths, versions, sizes and kinds, never a value
+       *
+       * `sanoma.storeMigration.plan`, a read.
+       */
+      plan: OpFn<{
+        to: string;
+        names?: string[];
+      }, unknown>;
+    };
   };
   /** The company's collections. */
   data: {

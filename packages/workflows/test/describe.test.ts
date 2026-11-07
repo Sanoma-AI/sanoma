@@ -127,6 +127,13 @@ describe("describeConfig", () => {
       "sanoma.secret.delete",
       "sanoma.secret.generate",
       "sanoma.secretStore.prepare",
+      "sanoma.storeMigration.cancel",
+      "sanoma.storeMigration.cutover",
+      "sanoma.storeMigration.plan",
+      "sanoma.storeMigration.prepare",
+      "sanoma.storeMigration.retire",
+      "sanoma.storeMigration.transfer",
+      "sanoma.storeMigration.verify",
       "sanoma.token.mint",
       "sanoma.token.revoke",
     ]);

@@ -13,7 +13,9 @@ import {
   DRAFT_ID,
   errorMessage,
   groupNamesOf,
+  MIGRATE_STORE_WORKFLOW,
   type PeopleResource,
+  STORE_MOVE_DIRECT,
 } from "./shared.ts";
 import {
   type CheckResult,
@@ -122,7 +124,8 @@ export const changeOps = defineConnector("sanoma", {
 
 /**
  * The built-in workflow that alone may call `op`, what the operation does and what to do instead:
- * `change` for `sanoma.change.*`, `connect` for `sanoma.connection.exchange`; undefined for any other. `resolveConfig` refuses a workflow that
+ * `change` for `sanoma.change.*`, `connect` for `sanoma.connection.exchange`, `migrate-store` for
+ * `sanoma.storeMigration.*` but its plan and cancel; undefined for any other. `resolveConfig` refuses a workflow that
  * uses one, and a run's call of one outside its workflow fails. A resource type's change
  * operations are not reserved: any workflow may call them for an object no data file declares,
  * and the call refuses a declared one (`refuseDeclared` in `call.ts`), which only apply changes.
@@ -137,6 +140,17 @@ export function reservedFor(op: {
   }
   if (op.vendor === "sanoma" && op.resource === "connection" && op.name === "exchange") {
     return { workflow: CONNECT_WORKFLOW, does: "exchanges an OAuth code", instead: "connect the account in the app" };
+  }
+  if (
+    op.vendor === "sanoma" &&
+    op.resource === "storeMigration" &&
+    !STORE_MOVE_DIRECT.has(`sanoma.${op.resource}.${op.name}`)
+  ) {
+    return {
+      workflow: MIGRATE_STORE_WORKFLOW,
+      does: "moves the company's secrets between stores",
+      instead: "start a move from the Secret storage panel",
+    };
   }
   return undefined;
 }
