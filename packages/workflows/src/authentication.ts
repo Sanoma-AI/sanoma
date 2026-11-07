@@ -11,12 +11,6 @@ export interface AuthenticationIdentity {
   expiresAt?: number;
 }
 
-/** Server-selected account reference for deployment-bound workload identity resolution. */
-export interface AuthenticationContext {
-  readonly connectionId: string;
-  readonly vendor: string;
-}
-
 export type AuthenticationProblem =
   | "missing"
   | "expired"
@@ -63,14 +57,11 @@ export function authenticationProblem(error: unknown): AuthenticationProblem | u
 /** Shared by credential intake and execution; unknown provider failures never imply revocation. */
 export async function verifyAuthentication(
   method: Authentication,
-  credentials?: unknown,
-  context?: AuthenticationContext,
+  credentials: unknown,
 ): Promise<AuthenticationIdentity> {
   if (!method.verify) throw new AuthenticationError("unsupported");
   try {
-    const identity = await (method.kind === "workload-identity"
-      ? method.verify(context)
-      : (method.verify as (credentials: unknown) => Promise<AuthenticationIdentity>)(credentials));
+    const identity = await (method.verify as (credentials: unknown) => Promise<AuthenticationIdentity>)(credentials);
     if (
       typeof identity?.account !== "string" ||
       !identity.account.trim() ||
@@ -160,10 +151,7 @@ export interface OAuthFlow {
 }
 
 /** Credential schemas and lifecycle are owned by authentication, never by the store provider. */
-export type Authentication<S extends z.ZodType = z.ZodType> =
-  | StoredAuthentication<S>
-  | OAuthAuthentication
-  | WorkloadAuthentication;
+export type Authentication<S extends z.ZodType = z.ZodType> = StoredAuthentication<S> | OAuthAuthentication;
 
 /** A bundle a person enters (a key, fields, a signing key), kept in the store as one value. */
 export interface StoredAuthentication<S extends z.ZodType = z.ZodType> {
@@ -173,16 +161,6 @@ export interface StoredAuthentication<S extends z.ZodType = z.ZodType> {
   storage: { writable: boolean; maxBytes: number; conditionalWrites: boolean };
   oauth?: never;
   verify?(credentials: z.output<S>): Promise<AuthenticationIdentity>;
-}
-
-/** The deployment's own identity: no stored bundle. */
-export interface WorkloadAuthentication {
-  kind: "workload-identity";
-  storage?: never;
-  version?: never;
-  schema?: never;
-  oauth?: never;
-  verify?(context?: AuthenticationContext): Promise<AuthenticationIdentity>;
 }
 
 /** An `oauth2` method: its bundle is always `oauthGrant`, written by the runtime's exchange. */
@@ -215,7 +193,6 @@ const endpoint = (value: unknown) => {
 
 export function defineAuthentication(definition: Omit<OAuthAuthentication, "schema">): OAuthAuthentication;
 export function defineAuthentication<S extends z.ZodType>(definition: StoredAuthentication<S>): StoredAuthentication<S>;
-export function defineAuthentication(definition: WorkloadAuthentication): WorkloadAuthentication;
 export function defineAuthentication(definition: Authentication): Authentication;
 export function defineAuthentication(definition: Authentication | Omit<OAuthAuthentication, "schema">): Authentication {
   if (
@@ -223,11 +200,6 @@ export function defineAuthentication(definition: Authentication | Omit<OAuthAuth
     ("revoke" in definition && definition.revoke !== undefined && typeof definition.revoke !== "function")
   )
     throw new SecretStoreError("invalid_configuration");
-  if (definition.kind === "workload-identity") {
-    if (definition.storage !== undefined || definition.schema !== undefined || definition.version !== undefined)
-      throw new SecretStoreError("invalid_configuration");
-    return Object.freeze({ ...definition });
-  }
   const { storage, oauth } = definition;
   const schema = definition.kind === "oauth2" ? oauthGrant : definition.schema;
   if (
@@ -283,11 +255,7 @@ export function authenticationCredentials<A extends Authentication<any>>(
   definition: A,
   call: CallContext,
 ): A extends { schema: infer S extends z.ZodType } ? z.output<S> : never {
-  if (
-    definition.kind === "workload-identity" ||
-    call.authentication?.method !== method ||
-    call.authentication.kind !== definition.kind
-  )
+  if (call.authentication?.method !== method || call.authentication.kind !== definition.kind)
     throw new SecretStoreError("unsupported");
   try {
     return definition.schema.parse(call.authentication.credentials) as never;
@@ -305,7 +273,6 @@ export function authenticationStoreProblem(
   store: SecretStoreCapabilities,
   management: "sanoma" | "external",
 ): AuthenticationStoreProblem | undefined {
-  if (auth.kind === "workload-identity") return undefined;
   if (auth.storage.maxBytes > store.maxBytes) return "too_large";
   if (auth.storage.writable && (management === "external" || !store.writable)) return "read_only";
   if (auth.storage.conditionalWrites && store.conditionalWrites === "none") return "unsupported";
@@ -324,7 +291,6 @@ export function checkAuthenticationStore(
 
 /** Serialized only at the trusted store boundary, never returned by an operation to a workflow. */
 export function encodeCredentials<S extends z.ZodType>(auth: Authentication<S>, value: z.input<S>): string {
-  if (auth.kind === "workload-identity") throw new SecretStoreError("unsupported");
   try {
     const parsed = auth.schema.safeParse(value);
     if (!parsed.success) throw new SecretStoreError("invalid_value");
@@ -338,7 +304,6 @@ export function encodeCredentials<S extends z.ZodType>(auth: Authentication<S>, 
 }
 
 export function decodeCredentials<S extends z.ZodType>(auth: Authentication<S>, encoded: string): z.output<S> {
-  if (auth.kind === "workload-identity") throw new SecretStoreError("unsupported");
   try {
     if (Buffer.byteLength(encoded) > auth.storage.maxBytes) throw new SecretStoreError("too_large");
     const bundle = JSON.parse(encoded);

@@ -240,7 +240,7 @@ Google-issued OIDC tokens last up to **one hour**. A ten-minute final impersonat
 
 An isolated live check in `sanoma-513217` verified Google-issued OIDC tokens, STS exchange, scoped impersonation and rejection of another subject and target. The observed OIDC lifetime was 3,600 seconds. Temporary federation and service accounts were removed. Local tests cover both broker routes and Google’s URL-source exchange using synthetic transports.
 
-This establishes the Google trust path, not a deployed provisioning broker or provider renewal through that broker. Deploying the separate issuer/enrollment/audit boundary, rotating the stored provisioning bearer, and proving renewal and revocation through the actual host remain [#532](https://github.com/Sanoma-AI/sanoma/issues/532).
+This establishes the Google trust path, not a deployed provisioning broker or provider renewal through that broker. Deploying the separate issuer/enrollment/audit boundary and proving renewal and revocation through the actual host remain [#532](https://github.com/Sanoma-AI/sanoma/issues/532); enrolling and rotating the stored provisioning bearer is by hand until [#701](https://github.com/Sanoma-AI/sanoma/issues/701).
 
 ## Standalone identity service
 

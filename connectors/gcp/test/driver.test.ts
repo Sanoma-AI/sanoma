@@ -215,10 +215,7 @@ it("refuses absent identities, stale account bindings and cross-project resource
   for (const [authentication, code] of [
     [{ method: "workloadIdentity", kind: "api-key" as const }, "invalid_value"],
     [{ method: "workloadIdentity", kind: "api-key" as const, credentials: { bearer: "short" } }, "invalid_value"],
-    [
-      { method: "workloadIdentity", kind: "workload-identity" as const, credentials: { bearer: bearerOf(a) } },
-      "unsupported",
-    ],
+    [{ method: "workloadIdentity", kind: "fields" as const, credentials: { bearer: bearerOf(a) } }, "unsupported"],
   ] as const)
     await expect(
       invoke(driver, "keyRing.read", { id: ring() }, { ...context(a), authentication }),

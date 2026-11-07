@@ -18,7 +18,6 @@ import {
   SecretStoreError,
   startWorker,
   withSetup,
-  type AuthenticationContext,
 } from "../src/index.ts";
 import { secret } from "../src/secret.ts";
 import { lazyDb } from "../src/db.ts";
@@ -92,58 +91,6 @@ beforeAll(async () => {
 });
 
 describe("secure connection setup", () => {
-  it("passes server-selected workload identities through intake, activation and authorized calls without secret storage", async () => {
-    const seen: AuthenticationContext[] = [];
-    const workload = withSetup(ops, {
-      authentication: {
-        identity: defineAuthentication({
-          kind: "workload-identity",
-          async verify(context) {
-            if (!context) throw new AuthenticationError("missing");
-            seen.push(context);
-            return { account: `verified:${context.connectionId}`, scopes: [] };
-          },
-        }),
-      },
-      driver: () =>
-        defineDriver(
-          ops,
-          {
-            message: { read: async (_input, call) => ({ account: call.connection!.account }) },
-          },
-          { authentication: ["identity"] },
-        ),
-    });
-    const named = ["production", "development"].map((name) => defineConnection(workload, { name, method: "identity" }));
-    const store = memorySecretStore();
-    const read = vi.spyOn(store, "read");
-    const write = vi.spyOn(store, "write");
-    const client = await SanomaClient.connect({
-      ...config(),
-      connectors: [workload],
-      connections: named,
-      connectionRules: [],
-      secrets: { store },
-    });
-    try {
-      for (const connection of named) {
-        const preview = await client.previewConnection({ connection }, undefined, { actor: "alice", id: randomUUID() });
-        expect(preview.account).toBe(`verified:${connection.$connection}`);
-        await client.connectConnection(preview, undefined, { actor: "alice" });
-        expect(await client.call("inbox.message.read", {}, { actor: "alice", connection })).toEqual({
-          account: `verified:${connection.$connection}`,
-        });
-        expect(seen.splice(0)).toEqual(
-          Array.from({ length: 4 }, () => ({ vendor: "inbox", connectionId: connection.$connection })),
-        );
-      }
-      expect(read).not.toHaveBeenCalled();
-      expect(write).not.toHaveBeenCalled();
-    } finally {
-      await client.close();
-    }
-  });
-
   it("refuses non-conditional managed writes before intake or pausing a connected account", async () => {
     const cfg = config();
     const original = await SanomaClient.connect(cfg);
