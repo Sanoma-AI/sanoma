@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -26,6 +26,25 @@ describe("ensureBuilt", () => {
     const script = `import(${JSON.stringify(module)}).then((m) => m.ensureBuilt(${JSON.stringify(pkg)}, ["out"], ${JSON.stringify(build)}))`;
     await Promise.all([1, 2, 3].map(() => run(process.execPath, ["-e", script])));
     expect(builds()).toBe(1);
+  });
+
+  it("builds when any output is older than a source, and marks one the build left as it was built", () => {
+    // Two parts' outputs, the second older than the source; the build rewrites only the first, as
+    // `tsc -b` leaves a project it finds up to date.
+    const touchFirst = ["sh", "-c", "echo built >> builds; touch first"] as const;
+    const old = new Date(Date.now() - 60_000);
+    writeFileSync(join(pkg, "first"), "");
+    writeFileSync(join(pkg, "second"), "");
+    utimesSync(join(pkg, "second"), old, old);
+    utimesSync(join(pkg, "src/index.ts"), new Date(Date.now() - 30_000), new Date(Date.now() - 30_000));
+    ensureBuilt(pkg, ["first", "second"], touchFirst);
+    expect(builds()).toBe(1);
+    ensureBuilt(pkg, ["first", "second"], touchFirst);
+    expect(builds()).toBe(1);
+    const later = new Date(Date.now() + 5_000);
+    utimesSync(join(pkg, "src/index.ts"), later, later);
+    ensureBuilt(pkg, ["first", "second"], touchFirst);
+    expect(builds()).toBe(2);
   });
 
   it("takes over the lock of a build that was killed", () => {

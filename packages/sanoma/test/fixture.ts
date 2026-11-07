@@ -23,8 +23,9 @@ export const cli = join(sanoma, "src/cli.ts");
 /**
  * `sanoma` built, as a fixture copy loads it through its `node_modules`: each entry of its `exports`
  * from `dist/`, its generated `oxlint.json` and the app's own build. `pnpm run build` when one is
- * missing or the package's source (each part's `src/`, the runtime's `oxlint.json`, `package.json` and
- * `scripts/`) changed since. Every test that loads a build calls this, under its one lock.
+ * missing or the package's source changed since: each part's `src/` and `tsconfig.build.json`, the
+ * app's `vite.config.ts`, the runtime's `oxlint.json`, `package.json` and `scripts/`. Every test that
+ * loads a build calls this, under its one lock.
  */
 export function ensureSanomaBuilt(): void {
   const entries = Object.values(manifest.exports).flatMap((entry) =>
@@ -34,7 +35,16 @@ export function ensureSanomaBuilt(): void {
     sanoma,
     [...entries, "oxlint.json", "app/dist/server/server.js"],
     ["pnpm", "run", "build"],
-    ["package.json", "scripts/**", "src/**", "*/src/**", "workflows/oxlint.json"],
+    [
+      "package.json",
+      "scripts/**",
+      "src/**",
+      "*/src/**",
+      "tsconfig.build.json",
+      "*/tsconfig.build.json",
+      "app/vite.config.ts",
+      "workflows/oxlint.json",
+    ],
   );
 }
 

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, globSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -52,10 +52,11 @@ export const buildLock = (pkgDir: string): string =>
 
 /**
  * Runs `build` (a command and its arguments) in `pkgDir` when one of `outputs` (paths in it) is
- * missing, or the newest of them is older than a file `sources` matches (globs in it; by default,
- * everything under its `src/`): for tests of what a package ships, from its `dist/`. The newest, as a
- * build that finds some outputs up to date (`tsc -b`) leaves them as they were. Test files run at
- * once, so each looks under a lock: one builds, and the rest wait and find it built.
+ * missing or older than a file `sources` matches (globs in it; by default, everything under its
+ * `src/`): for tests of what a package ships, from its `dist/`. A build leaves an output it finds up
+ * to date as it was (`tsc -b`), so once it succeeds every output older than its start is marked built
+ * then. Test files run at once, so each looks under a lock: one builds, and the rest wait and find it
+ * built.
  */
 export function ensureBuilt(
   pkgDir: string,
@@ -66,11 +67,13 @@ export function ensureBuilt(
   withLock(buildLock(pkgDir), () => {
     const mtime = (path: string) => statSync(join(pkgDir, path)).mtimeMs;
     const changed = Math.max(...globSync(sources, { cwd: pkgDir }).map(mtime));
-    const stale =
-      outputs.some((output) => !existsSync(join(pkgDir, output))) || Math.max(...outputs.map(mtime)) < changed;
+    const stale = outputs.some((output) => !existsSync(join(pkgDir, output)) || mtime(output) < changed);
+    if (!stale) return;
+    const start = new Date();
     // Not the tests' NODE_ENV (vitest's `test`): a build under it writes React's development build.
     const { NODE_ENV: _, ...env } = process.env;
-    if (stale) execFileSync(build[0], build.slice(1), { cwd: pkgDir, env, stdio: "inherit" });
+    execFileSync(build[0], build.slice(1), { cwd: pkgDir, env, stdio: "inherit" });
+    for (const output of outputs) if (mtime(output) < start.getTime()) utimesSync(join(pkgDir, output), start, start);
   });
 }
 
