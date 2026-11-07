@@ -22,8 +22,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import type { Browser } from "puppeteer-core";
-import { ensureBuilt } from "../../packages/sanoma/test/fixture.ts";
-import { waitFor } from "../../packages/sanoma/testing/src/build.ts";
+import { ensureSanomaBuilt } from "../../packages/sanoma/test/fixture.ts";
+import { ensureBuilt, waitFor } from "../../packages/sanoma/testing/src/build.ts";
 import type { SanomaConfig } from "../../packages/sanoma/workflows/src/index.ts";
 import { launchChrome, recordDemo, ServerFailure, steadyStills, still } from "./capture.ts";
 
@@ -105,7 +105,9 @@ for (const signal of SIGNALS) {
 try {
   if (!stillsDir && !hasFfmpeg()) fail("ffmpeg is not on PATH; it makes demo.gif (brew install ffmpeg)");
   say("building sanoma and the connectors the preview loads, when stale");
-  ensureBuilt();
+  // What the preview loads, each from its dist/ (as a company repo would): sanoma, then Ghost.
+  ensureSanomaBuilt();
+  ensureBuilt(join(repo, "connectors/ghost"), ["dist/index.js", "dist/fake.js"], ["pnpm", "run", "build"]);
   // Loaded once built: sanoma/testing's index imports sanoma/workflows from its dist/.
   const { testDatabaseUrl } = await import("../../packages/sanoma/testing/src/index.ts");
   // `SANOMA_TEST_DATABASE_URL`'s name plus `_readme_shots`: a worktree's own when that is set per worktree.
