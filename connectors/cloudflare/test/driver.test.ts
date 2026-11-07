@@ -1230,6 +1230,25 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(await call.secrets.get("SANOMA_HOST_URL")).toBe(URL_OF);
     });
 
+    it("plans an unchanged alarm as an update while the store lacks its host's URL or holds another, which the update stores", async () => {
+      const held = { host: URL_OF, at: null, rang: null, healthy: true };
+      play("alarm-heal", [
+        wake(200, { at: null }),
+        wake(200, { at: null }),
+        wake(200, { at: null }),
+        wake(200, { at: null }),
+      ]);
+      const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, SANOMA_HOST_URL: "https://elsewhere.example.workers.dev" });
+      const input = { id: URL_OF, state: held, desired: { host: URL_OF } };
+      expect(await op("alarm.plan", input, call)).toMatchObject({ action: "update", planned: held });
+      expect(await op("alarm.update", input, call)).toEqual({ id: URL_OF, state: held });
+      expect(await call.secrets.get("SANOMA_HOST_URL")).toBe(URL_OF);
+      expect(await op("alarm.plan", input, call)).toMatchObject({ action: "none" });
+      expect(await op("alarm.plan", input, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN }))).toMatchObject({
+        action: "update",
+      });
+    });
+
     it("keeps the company's host's URL when it creates another host's alarm, under a token of its own", async () => {
       const company = "https://company.example.workers.dev";
       const call = callWith({ SANOMA_HOST_URL: company, CLOUD_ACME_WAKEUP_TOKEN: TOKEN });
