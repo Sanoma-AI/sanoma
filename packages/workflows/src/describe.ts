@@ -277,6 +277,12 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
           },
         ]),
       ),
+      stores: Object.fromEntries(
+        Object.entries(resolved.secrets.stores ?? {}).map(([name, entry]) => [
+          name,
+          { store: entry.store?.id ?? "postgres", namespace: entry.namespace ?? "default" },
+        ]),
+      ),
     },
     connections: [...resolved.connections.catalog.definitions.values()].map((d) => ({
       id: d.$connection,

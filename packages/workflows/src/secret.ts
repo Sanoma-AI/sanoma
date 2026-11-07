@@ -124,6 +124,17 @@ export async function resolveSecrets<T>(value: T, secrets: Secrets): Promise<Res
   return (await resolve(value)) as Resolved<T>;
 }
 
+/** The names of the secret markers in `value`, at any depth, each once. */
+export function secretNamesIn(value: unknown): string[] {
+  const names = new Set<string>();
+  const walk = (v: unknown): void => {
+    if (isSecret(v)) names.add(v.$secret);
+    else if (typeof v === "object" && v !== null) Object.values(v).forEach(walk);
+  };
+  walk(value);
+  return [...names];
+}
+
 /** A secrets store in memory, for fakes, sandbox runs and tests. */
 export function memorySecrets(initial: Record<string, string> = {}): Secrets {
   const values = new Map(Object.entries(initial));

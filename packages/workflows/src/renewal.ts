@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, gt, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, notExists, sql } from "drizzle-orm";
 import type { AuthenticationProblem, OAuthFlow, OAuthGrant } from "./authentication.ts";
 import type { Db } from "./db.ts";
-import { connectionRenewals, connections } from "./db/company.ts";
+import { connectionRenewals, connections, secretMoves } from "./db/company.ts";
 import type { DeadlineRegistry } from "./deadlines.ts";
 import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
@@ -100,18 +100,26 @@ export class ConnectionRenewals {
     });
   }
 
-  /** Marks the lease's request as about to be sent: false when the lease lapsed (and so may be another's). */
-  async sending(id: string, holder: string): Promise<boolean> {
+  /**
+   * Marks the lease's request as about to be sent, its `LEASE_MS` counted from now: false when the
+   * lease lapsed (and so may be another's), or when a store move has paused writes where the grant
+   * lives (`at`, see `writesPaused`), so its successor could not be kept. A move's transfer locks
+   * these rows while it pauses them and waits out a request already sent (`store-move.ts`).
+   */
+  async sending(id: string, holder: string, at: { store: string; namespace: string }): Promise<boolean> {
     const [marked] = await (
       await this.db()
     )
       .update(connectionRenewals)
-      .set({ sentAt: sql`now()` })
+      .set({ sentAt: sql`now()`, leaseUntil: sql`now() + make_interval(secs => ${LEASE_MS / 1000})` })
       .where(
         and(
           eq(connectionRenewals.connectionId, id),
           eq(connectionRenewals.holder, holder),
           gt(connectionRenewals.leaseUntil, sql`now()`),
+          notExists(
+            sql`(SELECT 1 FROM ${secretMoves} WHERE ${secretMoves.sourceStore} = ${at.store} AND ${secretMoves.sourceNamespace} = ${at.namespace} AND ${secretMoves.fenced})`,
+          ),
         ),
       )
       .returning({ id: connectionRenewals.connectionId });

@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "./db.ts";
-import { credentials } from "./db/company.ts";
+import { credentials, secretMoves } from "./db/company.ts";
 import {
   SecretAccess,
   SecretStoreError,
@@ -10,6 +10,7 @@ import {
   type SecretAddress,
   type SecretConfiguration,
   type SecretStore,
+  type SecretStoreEntry,
   type SecretValue,
 } from "./secret-store.ts";
 import { deploymentKey } from "./deployment-key.ts";
@@ -111,10 +112,18 @@ export function postgresSecretStore(db: () => Promise<Db>): SecretStore {
   };
 }
 
-export function configuredSecrets(config: SecretConfiguration, db: () => Promise<Db>): SecretAccess {
-  checkSecretConfiguration(config);
-  const selected = config.store;
-  if (!selected || !isSecretStoreFactory(selected)) return new SecretAccess(config, postgresSecretStore(db));
+/**
+ * A store entry opened on the runtime's database: the built-in store when it names none, a
+ * factory's adapter bound to `db` (closed by `close`), or the caller's own instance (never closed
+ * here). Construction errors are sanitized: they may carry a provider's bootstrap diagnostics.
+ */
+export function openStore(
+  entry: SecretStoreEntry,
+  db: () => Promise<Db>,
+): { store: SecretStore; close(): Promise<void> } {
+  const selected = entry.store;
+  if (!selected) return { store: postgresSecretStore(db), close: async () => {} };
+  if (!isSecretStoreFactory(selected)) return { store: selected, close: async () => {} };
   try {
     const store = selected.create({ database: db });
     checkSecretConfiguration({ store });
@@ -127,14 +136,54 @@ export function configuredSecrets(config: SecretConfiguration, db: () => Promise
       )
     )
       throw new SecretStoreError("invalid_configuration");
-    return new SecretAccess(
-      { ...config, store },
-      postgresSecretStore(db),
-      undefined,
-      () => store.close?.() ?? Promise.resolve(),
-    );
+    return { store, close: async () => store.close?.() };
   } catch {
-    // Config construction may otherwise leak a provider's bootstrap/database diagnostics.
     throw new SecretStoreError("invalid_configuration");
   }
+}
+
+/**
+ * True while a move is taking values from `store`'s `namespace` (`sanoma_secret_moves.fenced`,
+ * from its transfer until it is cancelled or another move cuts back over to it): writes and
+ * deletes there are refused. An OAuth renewal asks first, before it spends a refresh token.
+ */
+export async function writesPaused(database: Db, store: string, namespace: string): Promise<boolean> {
+  const [moving] = await database
+    .select({ id: secretMoves.id })
+    .from(secretMoves)
+    .where(
+      and(eq(secretMoves.sourceStore, store), eq(secretMoves.sourceNamespace, namespace), eq(secretMoves.fenced, true)),
+    )
+    .limit(1);
+  return moving !== undefined;
+}
+
+/**
+ * Refuses a write or delete where writes are paused (`writesPaused`): one writer, the move, while
+ * values move, and none at the old store after its cutover. Reads pass.
+ */
+function fenced(store: SecretStore, db: () => Promise<Db>): SecretStore {
+  const open = async ({ namespace }: SecretAddress) => {
+    if (await writesPaused(await db(), store.id, namespace)) throw new SecretStoreError("read_only");
+  };
+  return {
+    id: store.id,
+    capabilities: store.capabilities,
+    validate: (namespace) => store.validate(namespace),
+    read: (address) => store.read(address),
+    async write(address, value, options) {
+      await open(address);
+      return store.write(address, value, options);
+    },
+    async delete(address, options) {
+      await open(address);
+      return store.delete(address, options);
+    },
+  };
+}
+
+export function configuredSecrets(config: SecretConfiguration, db: () => Promise<Db>): SecretAccess {
+  checkSecretConfiguration(config);
+  const { store, close } = openStore(config, db);
+  return new SecretAccess({ ...config, store: fenced(store, db) }, store, undefined, close);
 }

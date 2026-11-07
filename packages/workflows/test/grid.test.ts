@@ -131,6 +131,8 @@ describe("permissionsGrid", () => {
         "sanoma.connection.revoke",
         "sanoma.connection.test",
         "sanoma.run.inspect",
+        "sanoma.storeMigration.cancel",
+        "sanoma.storeMigration.plan",
       ].map((id) => ({
         id,
         cells: [...Array.from({ length: 3 }, () => ({ answer: "allow" })), ...visitorDenied],
@@ -187,6 +189,8 @@ describe("permissionsGrid", () => {
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
 
+      [...allowed, ...visitorDenied],
+      [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],

@@ -70,6 +70,7 @@
   },
   "devDependencies": {
     "@sanoma-ai/bridge": "workspace:*",
+    "@sanoma-ai/testing": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
     "@types/pg": "^8.23.1",
     "msw": "^3.0.3",

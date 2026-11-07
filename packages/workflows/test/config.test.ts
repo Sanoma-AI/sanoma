@@ -203,6 +203,13 @@ describe("a change's operations, built in", () => {
       "sanoma.invite.mint",
       "sanoma.token.mint",
       "sanoma.token.revoke",
+      "sanoma.storeMigration.plan",
+      "sanoma.storeMigration.prepare",
+      "sanoma.storeMigration.transfer",
+      "sanoma.storeMigration.verify",
+      "sanoma.storeMigration.cutover",
+      "sanoma.storeMigration.retire",
+      "sanoma.storeMigration.cancel",
     ]);
     expect(ids.map((id) => resolved.ops.get(id)!.effect)).toEqual(["write", "write", "write", "write"]);
     expect(resolved.ops.get("sanoma.change.merge")!.target!({ id: "c1" })).toBe("change:c1");

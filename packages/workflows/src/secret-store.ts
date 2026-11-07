@@ -90,13 +90,21 @@ export type SecretBinding =
     }
   | { bootstrap: DeploymentKeyName; management?: "external"; env?: never; path?: never; host?: never };
 
-export interface SecretConfiguration {
-  /** Omitted: built-in encrypted Postgres, supplied by the runtime. */
+/** A store and namespace, as `SecretConfiguration` selects one: the built-in store when `store` is omitted, `default` without `namespace`. */
+export interface SecretStoreEntry {
   store?: SecretStore | SecretStoreFactory;
-  /** Defaults to `default`. Choose a distinct namespace and identity for each deployment. */
   namespace?: string;
+}
+
+export interface SecretConfiguration extends SecretStoreEntry {
   /** Names without a binding resolve to the same name in this namespace. */
   bindings?: Readonly<Record<string, SecretBinding>>;
+  /**
+   * Other stores this deployment reaches, by a name of yours: a move's destination before its
+   * cutover, the store it left after, until its copies are retired. Never read or written but by
+   * a move (`migrate-store`); the runtime reads and writes the selected store alone.
+   */
+  stores?: Readonly<Record<string, SecretStoreEntry>>;
 }
 
 export interface SecretLocation {
@@ -116,7 +124,8 @@ const errorCodes = new Set<string>([
   "too_large",
   "invalid_value",
 ]);
-const storeError = (error: unknown): error is SecretStoreError =>
+/** A store's error by its name and code, from any copy of this package. */
+export const storeError = (error: unknown): error is SecretStoreError =>
   typeof error === "object" &&
   error !== null &&
   (error as SecretStoreError).name === "SecretStoreError" &&
@@ -141,27 +150,39 @@ const nonempty = (value: unknown): value is string =>
 const invalid = () => {
   throw new SecretStoreError("invalid_configuration");
 };
+/** A store's id, and a name in `secrets.stores`. */
+export const STORE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
+function checkStoreEntry(entry: SecretStoreEntry): void {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) invalid();
+  if (entry.namespace !== undefined && !nonempty(entry.namespace)) invalid();
+  if (entry.store === undefined) return;
+  const s = entry.store;
+  const c = s?.capabilities;
+  if (
+    !nonempty(s?.id) ||
+    !STORE_NAME.test(s.id) ||
+    !c ||
+    typeof c.writable !== "boolean" ||
+    !Number.isSafeInteger(c.maxBytes) ||
+    c.maxBytes < 1 ||
+    !["atomic", "coordinated", "none"].includes(c.conditionalWrites) ||
+    !["destroy", "soft-delete", "unsupported"].includes(c.deletion) ||
+    !["read", "watch"].includes(c.changeDetection) ||
+    (isSecretStoreFactory(s)
+      ? typeof s.create !== "function"
+      : [s.validate, s.read, s.write, s.delete].some((fn) => typeof fn !== "function"))
+  )
+    invalid();
+}
 export function checkSecretConfiguration(config: SecretConfiguration): void {
   if (!config || typeof config !== "object" || Array.isArray(config)) invalid();
-  if (config.namespace !== undefined && !nonempty(config.namespace)) invalid();
-  if (config.store !== undefined) {
-    const s = config.store;
-    const c = s?.capabilities;
-    if (
-      !nonempty(s?.id) ||
-      !/^[a-z][a-z0-9-]{0,63}$/.test(s.id) ||
-      !c ||
-      typeof c.writable !== "boolean" ||
-      !Number.isSafeInteger(c.maxBytes) ||
-      c.maxBytes < 1 ||
-      !["atomic", "coordinated", "none"].includes(c.conditionalWrites) ||
-      !["destroy", "soft-delete", "unsupported"].includes(c.deletion) ||
-      !["read", "watch"].includes(c.changeDetection) ||
-      (isSecretStoreFactory(s)
-        ? typeof s.create !== "function"
-        : [s.validate, s.read, s.write, s.delete].some((fn) => typeof fn !== "function"))
-    )
-      invalid();
+  checkStoreEntry(config);
+  if (config.stores !== undefined) {
+    if (!config.stores || typeof config.stores !== "object" || Array.isArray(config.stores)) invalid();
+    for (const [name, entry] of Object.entries(config.stores)) {
+      if (!STORE_NAME.test(name)) invalid();
+      checkStoreEntry(entry);
+    }
   }
   if (
     config.bindings !== undefined &&

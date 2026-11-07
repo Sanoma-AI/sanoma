@@ -430,6 +430,8 @@ describe("the built-in drift workflow in a config", () => {
           "sanoma.connection.revoke",
           "sanoma.connection.test",
           "sanoma.run.inspect",
+          "sanoma.storeMigration.cancel",
+          "sanoma.storeMigration.plan",
         ],
       },
       { name: "change", builtin: true },

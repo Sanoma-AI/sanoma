@@ -6,7 +6,7 @@ import {
   type IdentityProvisioning,
   type IdentityProvisioningDatabase,
 } from "./identity-provisioning.ts";
-import { secretsForInput } from "./secret.ts";
+import { secretNamesIn, secretsForInput } from "./secret.ts";
 import { isRunControlError } from "./errors.ts";
 import type { CallAuthentication } from "./authentication.ts";
 import { currentRun } from "./run.ts";
@@ -37,6 +37,8 @@ import { followSteps } from "./follow-steps.ts";
 import { followWorkflow } from "./follow-workflow.ts";
 import { importWorkflow } from "./import-workflow.ts";
 import { connectWorkflow } from "./connect-workflow.ts";
+import { storeMoveDriver, storeMoveOps } from "./store-move.ts";
+import { migrateStoreWorkflow } from "./store-move-workflow.ts";
 import {
   type Collection,
   collectionsConnector,
@@ -82,6 +84,7 @@ import {
   FOLLOW_WORKFLOW,
   IMPORT_WORKFLOW,
   CONNECT_WORKFLOW,
+  MIGRATE_STORE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
@@ -439,6 +442,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     connectionOps,
     appsListOps,
     sanoma,
+    storeMoveOps,
     ...(hostTyped ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
@@ -446,6 +450,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   checkDatabaseOps(types, ops);
   checkFromRefs(types);
   const driversByVendor = new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
+  const connectors = connectorsOf(config);
+  // The types the data files may declare: the vendors' and the people's, whose resources are left out.
+  const declarable = resourceTypesOf(connectors);
   const remotes = new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers(
     [
@@ -457,6 +464,22 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
         tokens: tokenStore(() => connectionStore.db()),
         identities: identityProvisioning.store,
         inspect: inspectRun(() => connectionStore.db(), appName),
+      }),
+      storeMoveDriver({
+        config: config.secrets ?? {},
+        secrets: storedSecrets,
+        registry: connections,
+        db: () => connectionStore.db(),
+        // No root (a bundle, a test's config): no data files to hold secrets.
+        declared: async () => {
+          if (root === undefined) return { names: [], problems: [] };
+          const { loadDataFiles } = await import("./resources.ts");
+          const files = loadDataFiles(root, connectors, declarable);
+          return {
+            names: secretNamesIn(files.resources),
+            problems: files.problems.map((p) => (p.file ? `${p.file}: ${p.message}` : p.message)),
+          };
+        },
       }),
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
@@ -482,9 +505,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     names.set(wf.name, wf);
   }
   // Built-in: checking the resources the data files declare against their vendors, and applying them.
-  const connectors = connectorsOf(config);
-  // The types the data files may declare: the vendors' and the people's, whose resources are left out.
-  const declarable = resourceTypesOf(connectors);
   const read = (options: ReadOptions = {}) =>
     readDeclared(root, connectors, declarable, types, connections, {
       ...options,
@@ -525,6 +545,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     )
   )
     names.set(CONNECT_WORKFLOW, connectWorkflow());
+  // Built-in: a move of the secrets to another store, when the config names other stores.
+  if (Object.keys(config.secrets?.stores ?? {}).length) names.set(MIGRATE_STORE_WORKFLOW, migrateStoreWorkflow());
   const declaredObjects = () => readDeclaredObjects(root, connectors, declarable);
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);

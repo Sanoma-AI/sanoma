@@ -43,6 +43,13 @@
       "when": 1794029000836,
       "tag": "0005_connection_renewals",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794032805471,
+      "tag": "0006_secret_moves",
+      "breakpoints": true
     }
   ]
 }

@@ -552,6 +552,8 @@ describe("the built-in call workflow in a config", () => {
       "sanoma.connection.revoke",
       "sanoma.connection.test",
       "sanoma.run.inspect",
+      "sanoma.storeMigration.cancel",
+      "sanoma.storeMigration.plan",
     ]);
     expect(description.ops.filter((op) => op.direct).map((op) => op.id)).toEqual(entry?.ops);
     expect(description.ops.find((op) => op.id === "acme.customer.rename")).toMatchObject({ direct: false });
@@ -577,6 +579,8 @@ describe("the built-in call workflow in a config", () => {
       "sanoma.connection.revoke",
       "sanoma.connection.test",
       "sanoma.run.inspect",
+      "sanoma.storeMigration.cancel",
+      "sanoma.storeMigration.plan",
     ]);
     const named = defineWorkflow({
       name: "call",

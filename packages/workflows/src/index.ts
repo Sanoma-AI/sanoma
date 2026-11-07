@@ -356,6 +356,7 @@ export {
   type SecretConfiguration,
   type SecretLocation,
   type SecretStore,
+  type SecretStoreEntry,
   type SecretStoreFactory,
   type SecretStoreCapabilities,
   type SecretStoreErrorCode,
@@ -388,6 +389,16 @@ export type { RenewalOutcome, RenewalState } from "./renewal.ts";
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
 
 export { postgresSecretStore } from "./credentials.ts";
+export {
+  storeMoveOps,
+  type MoveItemAction,
+  type MoveItemKind,
+  type MoveItemState,
+  type MovePhase,
+  type StoreMove,
+  type StoreMovePlan,
+} from "./store-move.ts";
+export { MigrateStoreInput } from "./store-move-workflow.ts";
 export { deploymentKey, keyBytes, signingKeyFor } from "./deployment-key.ts";
 
 export {

@@ -203,6 +203,10 @@ export const disconnectConnectionFn = createServerFn(CHANGE)
   .validator(validate(DisconnectConnectionRequest))
   .handler(({ data, context }) => disconnectConnection(context.app, context.principal, data));
 
+/** The latest moves of the secrets between stores, with each secret's receipt and never a value. */
+export const getStoreMoves = createServerFn(READ)
+  .middleware([withPrincipal])
+  .handler(({ context }) => context.app.client.storeMoves({ actor: context.principal }));
 export const setCredentialFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(SetCredentialRequest))

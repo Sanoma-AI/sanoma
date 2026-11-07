@@ -36,6 +36,7 @@ import {
 import { configQuery, connectionsQuery, runLink } from "../queries.ts";
 import { secureFields, secureInput } from "../form/secure-fields.ts";
 import { ItemHeading, Notice, Region, ToneBadge, When } from "./common.tsx";
+import { StoreMoves } from "./store-move.tsx";
 
 /** Where an OAuth callback sent the person back to: the attempt to follow, or why it ended. */
 export interface CallbackOutcome {
@@ -164,6 +165,7 @@ export function SecretStorage() {
   const query = useQuery({ ...connectionsQuery(), queryKey: ["connections", actor ?? ""], enabled: !!actor });
   const selected = config.secrets;
   if (!selected) return null;
+  const stores = selected.stores ?? {};
   return (
     <Region title="Secret storage">
       <p>
@@ -171,7 +173,9 @@ export function SecretStorage() {
       </p>
       <p className="text-sm text-muted-foreground">
         The store, namespace and bindings come from your company’s code. Change them there to select another provider.
-        Moving existing values requires an explicit transfer.
+        {Object.keys(stores).length > 0
+          ? " To take the values along, move them to one of the other stores it names first."
+          : " To take the values along, name the new store under secrets.stores and move them."}
       </p>
       {query.data && (
         <p>
@@ -195,6 +199,7 @@ export function SecretStorage() {
         </ul>
       )}
       {!actor && <Notice>Sign in to check store access.</Notice>}
+      {actor && Object.keys(stores).length > 0 && <StoreMoves actor={actor} stores={stores} />}
       {selected.store === "postgres" && (
         <p className="text-sm text-muted-foreground">
           The built-in store encrypts credentials in your database. Local setup creates its protection key

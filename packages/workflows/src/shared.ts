@@ -358,6 +358,22 @@ export const FOLLOW_WORKFLOW = "follow";
  */
 export const CONNECT_WORKFLOW = "connect";
 
+/**
+ * A move of the company's secrets from the selected store to another in `secrets.stores`, run by
+ * the worker (`store-move-workflow.ts`): plan, prepare, transfer, verify, cutover and retire, one
+ * run per move, its id the move's. Registered when a config names other stores.
+ */
+export const MIGRATE_STORE_WORKFLOW = "migrate-store";
+
+/** A move's phases while it is under way: one at a time, its source paused for writes, cancellable. */
+export const ACTIVE_MOVE_PHASES = ["prepared", "transferring", "verified"] as const;
+
+/** A move's operations a person may call outside its run (`isDirect`): its plan, and cancelling it before its cutover. */
+export const STORE_MOVE_DIRECT: ReadonlySet<string> = new Set([
+  "sanoma.storeMigration.plan",
+  "sanoma.storeMigration.cancel",
+]);
+
 /** Where a vendor sends the person back after consent: the app's route, `/connect/<vendor>/callback`. */
 export const connectionCallbackPath = (vendor: string) => `/connect/${encodeURIComponent(vendor)}/callback`;
 
@@ -387,7 +403,7 @@ export const IMPORT_WORKFLOW = "import";
 /** The `recv` topic a turn's run is told on (`ChatTell`): a stop, a sign-in code, its own turn's end. */
 export const CHAT_TOPIC = "chat:tell";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow, chat, import, connect and the app's actions. */
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow, chat, import, connect, migrate-store and the app's actions. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
@@ -398,6 +414,7 @@ export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   CHAT_WORKFLOW,
   IMPORT_WORKFLOW,
   CONNECT_WORKFLOW,
+  MIGRATE_STORE_WORKFLOW,
   ADOPT_WORKFLOW,
   PATCH_WORKFLOW,
   GO_LIVE_WORKFLOW,

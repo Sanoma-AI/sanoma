@@ -62,6 +62,7 @@ import {
   getPeopleSignIns,
   getSetupStatus,
   getSource,
+  getStoreMoves,
   openChangeFn,
   previewFn,
   callFn,
@@ -265,6 +266,25 @@ export const credentialsQuery = () =>
 
 export const connectionsQuery = () =>
   queryOptions({ queryKey: ["connections"], queryFn: () => getConnections(), staleTime: 5_000 });
+
+/**
+ * The latest moves of the secrets between stores, the actor's to read: again every 2 seconds
+ * while one copies, or for a minute while a started one (`awaiting`: its run's id and when it
+ * started) has yet to record its plan; every 30 while it waits for the switch or through its
+ * rollback window.
+ */
+export const storeMovesQuery = (actor: string, awaiting?: { runId: string; at: number }) =>
+  queryOptions({
+    queryKey: ["store-moves", actor],
+    queryFn: () => getStoreMoves(),
+    refetchInterval: ({ state: { data } }) =>
+      data?.some((move) => move.phase === "prepared" || move.phase === "transferring") ||
+      (awaiting && Date.now() - awaiting.at < 60_000 && !data?.some((move) => move.id === awaiting.runId))
+        ? 2_000
+        : data?.some((move) => move.phase === "verified" || move.phase === "cut_over")
+          ? 30_000
+          : false,
+  });
 
 /** What is connected for going live (the connect page): under the credentials' key, so setting one refreshes both. */
 export const setupStatusQuery = () =>

@@ -63,6 +63,8 @@ export const FIXTURE_GRID = {
     "sanoma.connection.revoke",
     "sanoma.connection.test",
     "sanoma.run.inspect",
+    "sanoma.storeMigration.cancel",
+    "sanoma.storeMigration.plan",
   ].map((id) => ({ id, cells: [allow, allow] })),
 };
 
