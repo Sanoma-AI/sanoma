@@ -292,6 +292,13 @@ export interface ClientOptions {
 }
 
 /** Talks to the runtime from another process (the app, a script), through the shared Postgres. */
+
+/** The direct connection ops that call the provider, so never in a transaction (`sanoma.connection.*`). */
+const PROVIDER_CALLS: ReadonlySet<string> = new Set([
+  "sanoma.connection.test",
+  "sanoma.connection.refresh",
+  "sanoma.connection.revoke",
+]);
 export class SanomaClient {
   private readonly dbos: DBOSClient;
   private readonly config: ResolvedConfig;
@@ -576,7 +583,9 @@ export class SanomaClient {
     const { op, parsed, calls, actor, decisions, context } = call;
     const { runId } = context;
     const { dataStore, collections, ledger } = this.config;
-    const connectionMutation = op.id.startsWith("sanoma.connection.");
+    // A connection op that calls the provider (Test's verify, a renewal, a revocation; each may wait
+    // on a renewal lease too) runs outside a transaction: one held idle that long Postgres ends.
+    const connectionMutation = op.id.startsWith("sanoma.connection.") && !PROVIDER_CALLS.has(op.id);
     const transactionStore = connectionMutation
       ? this.config.connectionStore
       : op.vendor === DATA_VENDOR

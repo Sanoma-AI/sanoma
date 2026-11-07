@@ -162,11 +162,11 @@ export class ConnectionRenewals {
   }
 
   /**
-   * The connected connections whose renewal is due, each taken for `RETRY_MS` (its due time moved
+   * The connected connection whose renewal is due first, taken for `RETRY_MS` (its due time moved
    * on, so another worker's look or this one's next does not take it again while it renews), with
-   * the due time it had.
+   * the due time it had. One at a time, so a renewal is taken only when it is about to be made.
    */
-  async takeDue(): Promise<{ id: string; vendor: string; dueAt: Date }[]> {
+  async takeDue(): Promise<{ id: string; vendor: string; dueAt: Date } | undefined> {
     const taken = await (
       await this.db()
     ).execute<{ id: string; vendor: string; due_at: string }>(sql`
@@ -174,13 +174,16 @@ export class ConnectionRenewals {
         SELECT r.connection_id, r.due_at FROM ${connectionRenewals} r
         JOIN ${connections} c ON c.id = r.connection_id AND c.status = 'connected'
         WHERE r.due_at <= now()
+        ORDER BY r.due_at
+        LIMIT 1
         FOR UPDATE OF r SKIP LOCKED
       )
       UPDATE ${connectionRenewals} r SET due_at = now() + make_interval(secs => ${RETRY_MS / 1000})
       FROM due JOIN ${connections} c ON c.id = due.connection_id
       WHERE r.connection_id = due.connection_id
       RETURNING r.connection_id AS id, c.vendor, due.due_at`);
-    return taken.rows.map((r) => ({ id: r.id, vendor: r.vendor, dueAt: new Date(r.due_at) }));
+    const [row] = taken.rows;
+    return row && { id: row.id, vendor: row.vendor, dueAt: new Date(row.due_at) };
   }
 
   /** The earliest renewal due of a connected connection: the worker's deadline. */
@@ -211,18 +214,23 @@ export interface RenewWhenDue {
  * The worker's renewals: the earliest due one is a deadline source (`addSource`), so a worker that
  * stops when quiet registers it with its wakeup and the next worker renews it; while the worker
  * runs, an unref'd timer looks again at that time (at least every minute, for a grant another
- * process stored), renews what is due, counted busy while it does. `close` ends the looks.
+ * process stored), renews what is due, counted busy while it does. `close` ends the looks, once
+ * the one under way is done: a refresh token sent is never cut off from its write.
  */
-export function renewWhenDue({ renewals, deadlines, renew }: RenewWhenDue): { close(): void } {
+export function renewWhenDue({ renewals, deadlines, renew }: RenewWhenDue): { close(): Promise<void> } {
   let next: Date | undefined;
   let timer: NodeJS.Timeout | undefined;
   let closed = false;
+  let looking: Promise<void> | undefined;
   deadlines.addSource(() => next);
-  const look = async () => {
+  const look = () => (looking = looked().finally(() => (looking = undefined)));
+  const looked = async () => {
     timer = undefined;
     try {
-      for (const due of await renewals.takeDue()) {
-        if (closed) return;
+      for (;;) {
+        // `close` may come while a renewal runs: the next is not taken.
+        const due = closed ? undefined : await renewals.takeDue();
+        if (!due) break;
         await deadlines
           .running(`renewal:${due.id}`, () => renew(due))
           .catch((err: unknown) => warn(`could not renew the connection ${due.id}: ${errorMessage(err)}`));
@@ -238,9 +246,10 @@ export function renewWhenDue({ renewals, deadlines, renew }: RenewWhenDue): { cl
   };
   void look();
   return {
-    close() {
+    async close() {
       closed = true;
       clearTimeout(timer);
+      await looking;
     },
   };
 }

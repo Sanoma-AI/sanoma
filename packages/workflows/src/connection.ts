@@ -953,13 +953,14 @@ export class ConnectionRegistry {
       async ({ holder, abandoned }) => {
         let sent = false;
         try {
-          if (abandoned) throw new AuthenticationError("uncertain");
           const [current, row] = await Promise.all([secrets.read(credential), this.row(selected.id, this.own)]);
           if (!current) throw new AuthenticationError("missing");
+          // Replaced already (the lapsed holder's grant among them, should it have been stored): nothing is uncertain.
           if (replaced(current)) {
             await this.renewals.release(selected.id, holder);
             return current;
           }
+          if (abandoned) throw new AuthenticationError("uncertain");
           if (row?.revision !== selected.revision || row.status !== "connected")
             refuse("The connection changed; start a new call");
           const client = this.declaration(row.id, row.rule)?.client?.$secret;
@@ -976,6 +977,8 @@ export class ConnectionRegistry {
             // The provider issued a grant and the store did not keep it (or another writer moved it).
             throw new AuthenticationError("uncertain");
           }
+          // Stored: a failure past here leaves nothing uncertain.
+          sent = false;
           await this.renewals.release(selected.id, holder, { outcome: "refreshed", dueAt: renewalDueAt(grant) });
           await (
             await this.own()
@@ -1259,8 +1262,9 @@ export class ConnectionRegistry {
     if (!bundle) throw new AuthenticationError("missing");
     try {
       await method.revoke(decodeCredentials(method, bundle.value), application);
-    } catch {
-      throw new AuthenticationError("unavailable");
+    } catch (error) {
+      // The method's own refusal (`unsupported`, `rejected`) as it said it; anything else is not confirmed.
+      throw new AuthenticationError(authenticationProblem(error) ?? "unavailable");
     }
     return this.disconnect(ref, expectedRevision, actor);
   }

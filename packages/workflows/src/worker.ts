@@ -166,7 +166,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const secrets = lazyDb(resolved.databaseUrl, "secrets");
   const storedSecrets = configuredSecrets(resolved.secrets, () => secrets.db());
   let stopRule: { close(): void } | undefined;
-  let renewing: { close(): void } | undefined;
+  let renewing: { close(): Promise<void> } | undefined;
   let stopping: Promise<void> | undefined;
   const horizonMs = options.idleHorizonMs ?? 60_000;
   // The worker's own client, connected by the first step that needs it, for the worker's version: what it starts runs on.
@@ -249,10 +249,11 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       return (stopping ??= (async () => {
         state.stopped = true;
         stopRule?.close();
-        renewing?.close();
         // Each is closed whatever the one before did; the first failure is what stop throws.
         let failed: { error: unknown } | undefined;
         for (const close of [
+          // A renewal under way finishes on the pools it writes to, before they close.
+          async () => renewing?.close(),
           () => DBOS.shutdown(),
           // Once DBOS is down, so a turn's step cut short is recorded nowhere: the next worker settles it.
           async () => shutdown.abort(),

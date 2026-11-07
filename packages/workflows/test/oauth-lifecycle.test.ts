@@ -423,10 +423,10 @@ describe("OAuth renewal", () => {
     const pools = [lazyDb(databaseUrl, "worker-a"), lazyDb(databaseUrl, "worker-b")];
     try {
       const [a, b] = pools.map((p) => new ConnectionRenewals(() => p.db()));
-      const taken = (await Promise.all([a!.takeDue(), b!.takeDue()])).flat();
+      const taken = (await Promise.all([a!.takeDue(), b!.takeDue()])).filter((t) => t !== undefined);
       expect(taken.map((t) => t.id)).toEqual(["acme/main"]);
       // Taken for a while: its due time moved on, so neither takes it again at once.
-      expect(await a!.takeDue()).toEqual([]);
+      expect(await a!.takeDue()).toBeUndefined();
       expect((await a!.nextDue())!.getTime()).toBeGreaterThan(Date.now() + 60_000);
     } finally {
       await Promise.all(pools.map((p) => p.close()));
