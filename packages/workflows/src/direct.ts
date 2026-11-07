@@ -23,5 +23,6 @@ export const isDirect = (
   op.id === "sanoma.connection.prepare" ||
   op.id === "sanoma.connection.configure" ||
   op.id === "sanoma.connection.activate" ||
+  op.id === "sanoma.connection.authorize" ||
   op.id === "sanoma.connection.test" ||
   (op.effect === "read" && op.vendor !== "sanoma" && !isResourceOp(op, types));

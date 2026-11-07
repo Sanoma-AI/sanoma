@@ -701,8 +701,15 @@ describe("storage a method needs, before consent", () => {
   const refreshing = defineAuthentication({
     kind: "oauth2",
     version: 1,
-    schema: z.object({ refreshToken: z.string() }),
     storage: { writable: true, maxBytes: 1024, conditionalWrites: true },
+    oauth: {
+      authorizeUrl: "https://calendar.example.test/authorize",
+      tokenUrl: "https://calendar.example.test/token",
+      scopes: [],
+      pkce: true,
+      clientAuthentication: "client_secret_basic",
+      refresh: "refresh_token",
+    },
     verify: async () => ({ account: "a", scopes: [] }),
   });
   const calendarOps = defineConnector("calendar", {
@@ -716,18 +723,21 @@ describe("storage a method needs, before consent", () => {
     name: "bound",
     method: "oauth",
     credentials: secret("CAL_BOUND"),
+    client: secret("CAL_APP"),
     scopes: [],
   });
   const managed = defineConnection(calendar, {
     name: "managed",
     method: "oauth",
     credentials: secret("CAL"),
+    client: secret("CAL_APP"),
     scopes: [],
   });
   const visitors = defineConnectionRule(calendar, {
     name: "visitors",
     method: "oauth",
     createBy: ["alice"],
+    client: secret("CAL_APP"),
     scopes: [],
   });
   const catalog = connectionCatalog([calendar], [bound, managed], [visitors]);

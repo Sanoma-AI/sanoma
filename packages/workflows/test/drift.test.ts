@@ -420,6 +420,7 @@ describe("the built-in drift workflow in a config", () => {
         ops: [
           "sanoma.apps.list",
           "sanoma.connection.activate",
+          "sanoma.connection.authorize",
           "sanoma.connection.bind",
           "sanoma.connection.configure",
           "sanoma.connection.create",

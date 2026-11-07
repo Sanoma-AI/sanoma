@@ -21,7 +21,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { z } from "zod";
 import type { AppContext } from "../src/context.ts";
-import { goLiveChoices } from "../src/server/go-live.ts";
+import { choose, goLiveChoices } from "../src/server/go-live.ts";
 import { renderInfra } from "../src/steps/go-live.ts";
 import type { AppSnapshot } from "../src/snapshot.ts";
 
@@ -204,6 +204,34 @@ function contextOf(
   } as AppContext & { config: SanomaConfig };
 }
 
+/** Supabase's declared default account, which going live chooses its database with once it is connected. */
+const supabaseInfra = defineConnection(supabase, {
+  name: "infra",
+  method: "accessToken",
+  credentials: secret("SUPABASE_INFRA"),
+  default: true,
+});
+
+/** `app` with Supabase's default account declared and connected, and what going live chooses then, for alice. */
+async function withSupabase(app: AppContext & { config: SanomaConfig }) {
+  const config = { ...app.config, connections: [supabaseInfra] };
+  app.resolved = resolveConfig(config);
+  app.snapshot = snapshotOf(config);
+  app.client.connections = async () => [
+    {
+      id: supabaseInfra.$connection,
+      vendor: "supabase",
+      name: "infra",
+      method: "accessToken",
+      account: "org",
+      scopes: [],
+      requiredScopes: [],
+      status: "connected",
+    },
+  ];
+  return { app, chosen: await choose(app, { id: "alice" }) };
+}
+
 const choices = { owner: "acme", name: "acme-ops", region: "aws-eu-central-1", size: "0.25", port: 8080 };
 /** The choices for a database that takes no size, as the page sends them. */
 const { size: _, ...unsized } = choices;
@@ -375,17 +403,22 @@ describe("going live by contract", () => {
     await expect(renderInfra(connected, { ...choices, host: "docker.container" }, DEPLOY_KEY)).rejects.toMatchObject({
       message: "Going live now runs the company on cloudflare.host, not docker.container: reload the page",
     });
-    const supabaseConnected = contextOf(ALL, { SUPABASE_ACCESS_TOKEN: "sb" });
+    const supabaseConnected = await withSupabase(contextOf(ALL));
     await expect(
-      renderInfra(supabaseConnected, { ...choices, database: "neon.project" }, DEPLOY_KEY),
+      renderInfra(
+        supabaseConnected.app,
+        { ...choices, database: "neon.project" },
+        DEPLOY_KEY,
+        supabaseConnected.chosen,
+      ),
     ).rejects.toMatchObject({
       message: "Going live now keeps the company's records in supabase.project, not neon.project: reload the page",
     });
   });
 
   it("chooses among connected vendors: Supabase's database without Neon's key, Fly's host without Cloudflare's", async () => {
-    const app = contextOf([github, supabase, neon, cloudflare, fly], { SUPABASE_ACCESS_TOKEN: "sb" });
-    const text = await renderInfra(app, { ...unsized, region: "eu-west-1", organization: "org" }, DEPLOY_KEY);
+    const { app, chosen } = await withSupabase(contextOf([github, supabase, neon, cloudflare, fly]));
+    const text = await renderInfra(app, { ...unsized, region: "eu-west-1", organization: "org" }, DEPLOY_KEY, chosen);
     expect(text).toContain("export const store = supabase.project({");
     expect(text).toContain("export const host = fly.app({");
   });

@@ -352,6 +352,16 @@ export const CONNECT_EXISTING_WORKFLOW = "connect-existing";
 export const FOLLOW_WORKFLOW = "follow";
 
 /**
+ * An OAuth connection's exchange, run by the worker (`connect-workflow.ts`): started by the app's
+ * callback as the person who consented (`SanomaClient.receiveConnection`), one run per attempt,
+ * `connect:<attempt>`, given the attempt's opaque id and never its code.
+ */
+export const CONNECT_WORKFLOW = "connect";
+
+/** Where a vendor sends the person back after consent: the app's route, `/connect/<vendor>/callback`. */
+export const connectionCallbackPath = (vendor: string) => `/connect/${encodeURIComponent(vendor)}/callback`;
+
+/**
  * A turn of a person's chat with the operator agent, run by the worker with the app's steps
  * (`chat-workflow.ts`): started by the app as the chat's person (`SanomaClient.startTurn`), one run
  * per message, `chat:<chat>:<message>`.
@@ -377,7 +387,7 @@ export const IMPORT_WORKFLOW = "import";
 /** The `recv` topic a turn's run is told on (`ChatTell`): a stop, a sign-in code, its own turn's end. */
 export const CHAT_TOPIC = "chat:tell";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow, chat, import and the app's actions. */
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow, chat, import, connect and the app's actions. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
@@ -387,6 +397,7 @@ export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   FOLLOW_WORKFLOW,
   CHAT_WORKFLOW,
   IMPORT_WORKFLOW,
+  CONNECT_WORKFLOW,
   ADOPT_WORKFLOW,
   PATCH_WORKFLOW,
   GO_LIVE_WORKFLOW,

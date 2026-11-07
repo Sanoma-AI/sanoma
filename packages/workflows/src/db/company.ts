@@ -12,7 +12,8 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import type { ConnectionHealth, ConnectionStatus } from "../connection.ts";
+import type { ConnectionHealth, ConnectionStatus, ConnectionTarget } from "../connection.ts";
+import type { AttemptOutcome } from "../oauth.ts";
 import type { LedgerRecord } from "../ledger.ts";
 import type { RunCheck } from "../scenario.ts";
 import type { SecretLocation } from "../secret-store.ts";
@@ -187,6 +188,8 @@ export const connectionHealth = pgTable("sanoma_connection_health", {
   credentialVersion: text(),
   externallyRenewed: boolean().notNull(),
   checkedAt: when().notNull().defaultNow(),
+  /** When the verified credential stops working, as its verifier said; null for none given. */
+  expiresAt: when(),
 });
 
 /** The receipts of a connection's setup, one per revision. */
@@ -199,6 +202,30 @@ export const connectionSetups = pgTable(
   },
   (t) => [primaryKey({ columns: [t.connectionId, t.revision] })],
 );
+
+/**
+ * An OAuth consent attempt (`oauth.ts`), from Connect to the exchange: the state's hash and the
+ * PKCE verifier from the start, the authorization code from the callback, each sealed for its
+ * attempt, and both cleared when the exchange takes them, once. Kept outside workflow history,
+ * which is given only `id`; swept once expired.
+ */
+export const connectionAttempts = pgTable("sanoma_connection_attempts", {
+  id: text().primaryKey(),
+  connectionId: text().notNull(),
+  target: jsonb().$type<ConnectionTarget>().notNull(),
+  requestId: text().notNull(),
+  principal: text().notNull(),
+  clientId: text().notNull(),
+  redirectUri: text().notNull(),
+  stateHash: text().notNull(),
+  verifier: text(),
+  code: text(),
+  outcome: text().$type<AttemptOutcome>(),
+  expiresAt: when().notNull(),
+  receivedAt: when(),
+  consumedAt: when(),
+  createdAt: when().notNull().defaultNow(),
+});
 
 /**
  * How far each app taken from a source is behind it, as the worker last checked (`writeAppsBehind`):

@@ -339,19 +339,18 @@ describe("the connect page", () => {
     expect(await setupStatus(ctx)).toEqual({
       githubApp: { slug: KEYS.slug, setBy: "alice", setAt: expect.any(String), missing: [] },
       tokens: [
+        // Supabase's connector declares its own accounts (its connector page): no pasted token here.
         expect.objectContaining({ name: "GITHUB_TOKEN", status: "missing" }),
-        expect.objectContaining({ name: "SUPABASE_ACCESS_TOKEN", status: "missing" }),
       ],
       // The App's client is stored (the callback above): GitHub sign-in on the host.
       signIn: { you: null, sender: null, senderConnected: false, github: true, sites: [] },
     });
     expect((await setupStatus(ctx, { id: "alice" })).signIn.you).toBe("alice@acme.test");
-    await setSetupToken(ctx, { id: "alice" }, { name: "SUPABASE_ACCESS_TOKEN", value: "sbp_madeup" });
-    await expect(setSetupToken(ctx, { id: "alice" }, { name: "STRIPE_SECRET_KEY", value: "sk" })).rejects.toThrow(
-      /not a setup token/,
-    );
+    await setSetupToken(ctx, { id: "alice" }, { name: "GITHUB_TOKEN", value: "ghp_madeup" });
+    for (const name of ["STRIPE_SECRET_KEY", "SUPABASE_ACCESS_TOKEN"])
+      await expect(setSetupToken(ctx, { id: "alice" }, { name, value: "sk" })).rejects.toThrow(/not a setup token/);
     const { tokens } = await setupStatus(ctx);
-    expect(tokens[1]).toMatchObject({ name: "SUPABASE_ACCESS_TOKEN", status: "set", source: "stored", setBy: "alice" });
+    expect(tokens[0]).toMatchObject({ name: "GITHUB_TOKEN", status: "set", source: "stored", setBy: "alice" });
 
     // An old link to /setup/connect goes on to Hosting's Connect page.
     expect((await get("/setup/connect?github=connected")).headers.get("location")).toBe(
@@ -362,11 +361,11 @@ describe("the connect page", () => {
     expect(text).toContain("<code>sanoma-acme</code>");
     expect(text).toContain(`href="https://github.com/apps/sanoma-acme/installations/new"`);
     expect(text).toContain("The GitHub App is created and its keys are stored.");
-    expect(text).toMatch(/<code>SUPABASE_ACCESS_TOKEN<\/code>.*?>set<.*?set by alice/);
-    expect(text).toMatch(/<code>GITHUB_TOKEN<\/code>.*?>missing</);
+    expect(text).toMatch(/<code>GITHUB_TOKEN<\/code>.*?>set<.*?set by alice/);
+    expect(text).not.toContain("SUPABASE_ACCESS_TOKEN");
     // Hosting, in the bar, is lit: going live is its state while nothing is declared to run on.
     expect(barLink(page, "/hosting")).toContain('data-active="true"');
-    for (const value of ["sbp_madeup", KEYS.client_secret, KEYS.webhook_secret, "made-up"]) {
+    for (const value of ["ghp_madeup", KEYS.client_secret, KEYS.webhook_secret, "made-up"]) {
       expect(page).not.toContain(value);
     }
     // A value of ?github= the callback never sends is no outcome: the page without it.
@@ -427,7 +426,7 @@ describe("Connect a wakeup service", () => {
 
   it("is asked for only when the config declares a host, and mints the instance's token beside the account's", async () => {
     // No host type (the config above): no wakeup rows, and its tokens are refused.
-    expect((await setupStatus(ctx)).tokens.map((t) => t.name)).toEqual(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN"]);
+    expect((await setupStatus(ctx)).tokens.map((t) => t.name)).toEqual(["GITHUB_TOKEN"]);
     await expect(
       setSetupToken(ctx, { id: "alice" }, { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: `swa_${"a".repeat(43)}` }),
     ).rejects.toThrow(/not a setup token/);
@@ -440,7 +439,6 @@ describe("Connect a wakeup service", () => {
       const ops: AppContext = { ...ctx, resolved: resolveConfig(declared), client: opsClient };
       expect((await setupStatus(ops)).tokens).toEqual([
         expect.objectContaining({ name: "GITHUB_TOKEN" }),
-        expect.objectContaining({ name: "SUPABASE_ACCESS_TOKEN" }),
         expect.objectContaining({ name: "SANOMA_WAKEUP_URL", optional: true, status: "missing" }),
         expect.objectContaining({ name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", optional: true, status: "missing" }),
       ]);
@@ -467,7 +465,7 @@ describe("Connect a wakeup service", () => {
       expect(renewed).toMatch(/^swi_[\w-]{43}$/);
       expect(renewed).not.toBe(minted!.value);
       await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_WAKEUP_URL", value: "http://127.0.0.1:4100" });
-      expect((await setupStatus(ops)).tokens.slice(2)).toEqual([
+      expect((await setupStatus(ops)).tokens.slice(1)).toEqual([
         expect.objectContaining({ name: "SANOMA_WAKEUP_URL", status: "set" }),
         expect.objectContaining({ name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", status: "set", setBy: "alice" }),
       ]);

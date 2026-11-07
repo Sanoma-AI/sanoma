@@ -1,5 +1,5 @@
 import { tfConnector } from "@sanoma-ai/bridge/connector";
-import { defineConnector, vendorInfo } from "@sanoma-ai/workflows";
+import { databaseUrlSecret, defineConnector, vendorInfo } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { provider, supabase_project } from "./resources.gen.ts";
 
@@ -64,6 +64,8 @@ export const supabaseTf = tfConnector({
 });
 
 const projectRef = z.string().min(1).describe("The project's ref");
+/** The secret the project's declared `database_password` names, which the URL is built with. */
+export const PASSWORD_SECRET = "SUPABASE_DB_PASSWORD";
 const target = ({ ref }: { ref: string }) => ref;
 
 /**
@@ -72,6 +74,15 @@ const target = ({ ref }: { ref: string }) => ref;
  * only the secrets store ever holds.
  */
 const management = defineConnector("supabase", {
+  organization: {
+    list: {
+      effect: "read",
+      idempotent: true,
+      description: "List the organizations the connection's token reaches: one for an OAuth grant",
+      input: z.object({}),
+      output: z.object({ organizations: z.array(z.object({ id: z.string(), name: z.string() })) }),
+    },
+  },
   pooler: {
     get: {
       effect: "read",
@@ -97,6 +108,9 @@ const management = defineConnector("supabase", {
   },
   database: {
     storeUrl: {
+      // The secrets a call as a named connection may reach, which its input names none of: the
+      // password it reads, and the URL it stores.
+      createsSecrets: ({ export: name }: { export: string }) => [PASSWORD_SECRET, databaseUrlSecret(name)],
       effect: "write",
       idempotent: true,
       description:
@@ -116,12 +130,13 @@ const management = defineConnector("supabase", {
 
 /**
  * The Supabase connector's operations: the project type's (`read`, `import`, `plan`, `create`,
- * `update`, `delete`) and the Management API's (`project.health`, `pooler.get`,
- * `database.storeUrl`).
+ * `update`, `delete`) and the Management API's (`organization.list`, `project.health`,
+ * `pooler.get`, `database.storeUrl`).
  */
 export const supabaseOps = {
   ...supabaseTf.connector,
   project: { ...supabaseTf.connector.project, ...management.project },
+  organization: management.organization,
   pooler: management.pooler,
   database: management.database,
 } as SupabaseOps;

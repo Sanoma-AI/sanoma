@@ -5,6 +5,7 @@ import {
   authenticationStoreProblem,
   type AuthenticationStoreProblem,
   decodeCredentials,
+  encodeCredentials,
   defineAuthentication,
   verifyAuthentication,
   AuthenticationError,
@@ -25,6 +26,7 @@ import {
 import { and, eq, getTableColumns, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./db.ts";
 import { connectionHealth, connections, connectionSetups } from "./db/company.ts";
+import { ConnectionAttempts, oauthApplication, requestGrant } from "./oauth.ts";
 
 /** Serializable account reference; vendor literal prevents cross-connector selection in typed calls. */
 export interface ConnectionRef<V extends string = string> {
@@ -36,6 +38,8 @@ export interface ConnectionDefinition<V extends string = string> extends Connect
   readonly name: string;
   readonly method: string;
   readonly credentials?: Secret;
+  /** An `oauth2` method's application credentials (`oauthClient`), which several connections may share. */
+  readonly client?: Secret;
   readonly scopes: readonly string[];
   readonly account?: string;
   readonly default: boolean;
@@ -46,6 +50,8 @@ export interface ConnectionRule<V extends string = string> {
   readonly method: string;
   readonly createBy: readonly (string | { readonly group: string })[];
   readonly scopes: readonly string[];
+  /** An `oauth2` method's application credentials, shared by every account the rule creates. */
+  readonly client?: Secret;
 }
 export interface ConnectionSnapshot {
   id: string;
@@ -102,6 +108,8 @@ export interface ConnectionHealth {
     | "invalid";
   checkedAt: string;
   externallyRenewed: boolean;
+  /** When the credential last verified stops working (ISO 8601), when its verifier says. */
+  expiresAt?: string;
 }
 export interface ConnectionSetup {
   target: ConnectionTarget;
@@ -111,6 +119,8 @@ export interface ConnectionSetup {
   definition: string;
   credential?: string;
   location?: SecretLocation;
+  /** An `oauth2` method's application credentials: the secret's name, never its value. */
+  client?: string;
   expectedRevision: string | null;
   requiredScopes: readonly string[];
   expectedAccount?: string;
@@ -159,6 +169,7 @@ const setupSchema = z.object({
   location: z
     .object({ store: z.string(), namespace: z.string(), path: z.string(), management: z.enum(["sanoma", "external"]) })
     .optional(),
+  client: z.string().optional(),
   expectedRevision: z.string().nullable(),
   requiredScopes: z.array(z.string()),
   expectedAccount: z.string().optional(),
@@ -174,6 +185,8 @@ export function defineConnection<C extends Connector<any, any>>(
     name: string;
     method: string;
     credentials?: Secret;
+    /** For an `oauth2` method: the secret holding the company's OAuth application (`oauthClient`). */
+    client?: Secret;
     scopes?: readonly string[];
     account?: string;
     default?: boolean;
@@ -185,12 +198,14 @@ export function defineConnection<C extends Connector<any, any>>(
   if (!auth) refuse("The connector does not declare this authentication method");
   if (auth.kind === "workload-identity" ? options.credentials !== undefined : !isSecret(options.credentials))
     refuse("Credentials must match the authentication method");
+  checkClient(auth, options.client, options.credentials);
   return Object.freeze({
     $connection: `${vendor}/${options.name}`,
     vendor,
     name: options.name,
     method: options.method,
     ...(options.credentials && { credentials: Object.freeze({ $secret: options.credentials.$secret }) }),
+    ...(options.client && { client: Object.freeze({ $secret: options.client.$secret }) }),
     scopes: Object.freeze([...(options.scopes ?? [])]),
     ...(options.account && { account: options.account }),
     default: options.default ?? false,
@@ -204,6 +219,8 @@ export function defineConnectionRule<C extends Connector<any, any>>(
     method: string;
     createBy: readonly (string | { readonly group: string })[];
     scopes?: readonly string[];
+    /** For an `oauth2` method: the secret holding the company's OAuth application (`oauthClient`). */
+    client?: Secret;
   },
 ): ConnectionRule<C[typeof VENDOR]["id"]> {
   if (
@@ -214,15 +231,25 @@ export function defineConnectionRule<C extends Connector<any, any>>(
     )
   )
     refuse("A connection rule needs a name and allowed creators");
-  if (!setupOf(connector).authentication?.[options.method])
-    refuse("The connector does not declare this authentication method");
+  const auth = setupOf(connector).authentication?.[options.method];
+  if (!auth) refuse("The connector does not declare this authentication method");
+  checkClient(auth, options.client);
   return Object.freeze({
     name: options.name,
     vendor: connector[VENDOR].id,
     method: options.method,
     createBy: Object.freeze(options.createBy.map((x) => (typeof x === "string" ? x : Object.freeze({ ...x })))),
     scopes: Object.freeze([...(options.scopes ?? [])]),
+    ...(options.client && { client: Object.freeze({ $secret: options.client.$secret }) }),
   });
+}
+
+/** An `oauth2` method needs its application's secret, apart from the grant's; no other method takes one. */
+function checkClient(auth: Authentication, client: Secret | undefined, credentials?: Secret): void {
+  if (auth.kind !== "oauth2") {
+    if (client !== undefined) refuse("Only an OAuth method takes application credentials");
+  } else if (!isSecret(client) || client.$secret === credentials?.$secret)
+    refuse("An OAuth connection needs its application's client secret, apart from its grant");
 }
 
 /** Reconstitutes a dynamic reference; authority is checked from the persisted record on every call. */
@@ -266,6 +293,7 @@ export function connectionCatalog(
     const auth = methods.get(d.vendor)![d.method]!;
     if (auth.kind === "workload-identity" ? d.credentials !== undefined : !isSecret(d.credentials))
       refuse("Credentials must match the authentication method");
+    checkClient(auth, d.client, d.credentials);
     if (d.default && defaults.has(d.vendor)) refuse("A connector can have only one explicit default connection");
     if (d.default) defaults.add(d.vendor);
     defined.set(d.$connection, d);
@@ -281,6 +309,7 @@ export function connectionCatalog(
       !r.createBy.length
     )
       refuse("Invalid or duplicate connection rule");
+    checkClient(methods.get(r.vendor)![r.method]!, r.client);
     dynamic.set(id, r);
   }
   return { definitions: defined, rules: dynamic, methods };
@@ -308,12 +337,15 @@ const fingerprint = (declaration: ConnectionDefinition | ConnectionRule, method:
 /** Persists account metadata only. Secret values are handled outside these operations. */
 export class ConnectionRegistry {
   readonly catalog: ConnectionCatalog;
+  /** OAuth consent attempts, on the same database: what the callback and the exchange share. */
+  readonly attempts: ConnectionAttempts;
   private readonly db: () => Promise<Db>;
   private readonly secrets?: SecretAccess;
   constructor(catalog: ConnectionCatalog, db: () => Promise<Db>, secrets?: SecretAccess) {
     this.catalog = catalog;
     this.db = db;
     this.secrets = secrets;
+    this.attempts = new ConnectionAttempts(db);
   }
 
   /** Release runtime-owned storage clients; the caller owns the database connection. */
@@ -336,6 +368,7 @@ export class ConnectionRegistry {
         health: connectionHealth.health,
         checkedAt: connectionHealth.checkedAt,
         externallyRenewed: connectionHealth.externallyRenewed,
+        expiresAt: connectionHealth.expiresAt,
       })
       .from(connections)
       .leftJoin(
@@ -386,6 +419,7 @@ export class ConnectionRegistry {
               state: row.health,
               checkedAt: row.checkedAt.toISOString(),
               externallyRenewed: row.externallyRenewed ?? false,
+              ...(row.expiresAt && { expiresAt: row.expiresAt.toISOString() }),
             },
           }),
       });
@@ -434,6 +468,7 @@ export class ConnectionRegistry {
       method: declaration.method,
       definition: this.bindingFingerprint(declaration, method, credential),
       ...(credential && { credential, ...(this.secrets && { location: this.secrets.location(credential) }) }),
+      ...(declaration.client && { client: declaration.client.$secret }),
       expectedRevision: row?.revision ?? null,
       requiredScopes: declaration.scopes,
       ...("account" in declaration && declaration.account && { expectedAccount: declaration.account }),
@@ -521,6 +556,7 @@ export class ConnectionRegistry {
     state: ConnectionHealth["state"],
     version?: string,
     external = false,
+    expiresAt?: number,
   ): Promise<ConnectionHealth> {
     const db = await this.db();
     const [previous] = await db
@@ -533,6 +569,7 @@ export class ConnectionRegistry {
       version !== undefined &&
       previous.credentialVersion !== version;
     const credentialVersion = version ?? previous?.credentialVersion ?? null;
+    const expires = expiresAt === undefined ? null : new Date(expiresAt);
     const [checked] = await db
       .insert(connectionHealth)
       .select(
@@ -544,6 +581,7 @@ export class ConnectionRegistry {
             credentialVersion: sql<string | null>`${credentialVersion}`.as("credential_version"),
             externallyRenewed: sql<boolean>`${renewed}`.as("externally_renewed"),
             checkedAt: sql<Date>`now()`.as("checked_at"),
+            expiresAt: sql<Date | null>`${expires}::timestamptz`.as("expires_at"),
           })
           .from(connections)
           .where(and(eq(connections.id, id), eq(connections.revision, revision))),
@@ -556,11 +594,17 @@ export class ConnectionRegistry {
           credentialVersion,
           externallyRenewed: renewed,
           checkedAt: sql`now()`,
+          expiresAt: expires,
         },
       })
       .returning({ checkedAt: connectionHealth.checkedAt });
     if (!checked) refuse("The connection changed during the test; reload before testing it again");
-    return { state, checkedAt: checked.checkedAt.toISOString(), externallyRenewed: renewed };
+    return {
+      state,
+      checkedAt: checked.checkedAt.toISOString(),
+      externallyRenewed: renewed,
+      ...(expires && { expiresAt: expires.toISOString() }),
+    };
   }
 
   async test(ref: ConnectionRef, actor: Principal): Promise<ConnectionHealth> {
@@ -578,6 +622,7 @@ export class ConnectionRegistry {
         "connected",
         material.credentialVersion,
         setup.location?.management === "external" || !this.secrets?.store.capabilities.writable,
+        material.expiresAt,
       );
     } catch (error) {
       const code = (error as { code?: string })?.code;
@@ -638,7 +683,7 @@ export class ConnectionRegistry {
       .where(and(eq(connections.id, row.id), eq(connections.revision, revision)))
       .returning({ id: connections.id });
     if (!activated) refuse("The connection changed; review it again before activating");
-    await this.health(row.id, next, "connected", bundle?.version);
+    await this.health(row.id, next, "connected", bundle?.version, false, identity.expiresAt);
     return snapshot({ ...row, revision: next, status: "connected" });
   }
 
@@ -765,7 +810,80 @@ export class ConnectionRegistry {
       throw new AuthenticationError("scope_changed");
     // A disconnect or rebind while verification was in flight revokes this invocation too.
     await this.assertCurrent(selected, actor);
+    if (identity.expiresAt !== undefined) material.expiresAt = identity.expiresAt;
     return material;
+  }
+
+  /**
+   * The `oauth2` exchange, inside the worker's operation boundary: takes the attempt's code once,
+   * posts it with the verifier and the stored application credentials to the token endpoint,
+   * verifies the grant's account against the declaration, reserves a pending revision, and writes
+   * the grant to the selected store with the version it replaces. Returns metadata only. A store
+   * failure after the provider issued the grant leaves the connection `uncertain` (reconnect);
+   * the code is never sent again.
+   */
+  async exchange(
+    target: ConnectionTarget,
+    requestId: string,
+    attempt: string,
+    actor: Principal,
+  ): Promise<{ connection: ConnectionRef; revision: string; account: string; scopes: string[]; expiresAt?: number }> {
+    // Whether the code went to the token endpoint: past that, a failure may leave a grant unkept.
+    let sent = false;
+    try {
+      const setup = await this.setup(target, actor, requestId);
+      const method = this.catalog.methods.get(setup.vendor)![setup.method]!;
+      if (method.kind !== "oauth2" || !setup.client || !setup.credential || !this.secrets)
+        throw new AuthenticationError("unsupported");
+      // Connected, disconnected or reconnected by someone else since consent: not this grant's to replace.
+      if ("connection" in target && (target.connection.revision ?? null) !== setup.expectedRevision)
+        refuse("The connection changed since consent; connect again");
+      const taken = await this.attempts.take(attempt, actor.id, setup.id);
+      const stored = await this.secrets.read(setup.client);
+      if (!stored) throw new AuthenticationError("missing");
+      const client = decodeCredentials(oauthApplication, stored.value);
+      // The application changed since consent: its code was issued to another client.
+      if (client.clientId !== taken.clientId) throw new AuthenticationError("rejected");
+      sent = true;
+      const grant = await requestGrant(method.oauth, client, taken);
+      const identity = await verifyAuthentication(method, grant, { connectionId: setup.id, vendor: setup.vendor });
+      // Refuses another account, or a grant without a required scope, before anything is stored.
+      const selected = await this.configure(
+        target,
+        requestId,
+        setup.expectedRevision,
+        setup.definition,
+        identity.account,
+        [...identity.scopes],
+        actor,
+      );
+      const ref = { vendor: selected.vendor, $connection: selected.id };
+      try {
+        const current = await this.secrets.read(setup.credential);
+        const written = await this.secrets.write(setup.credential, encodeCredentials(method, grant), {
+          expectedVersion: current?.version ?? null,
+          by: actor.id,
+        });
+        await this.recordStoredVersion(selected.id, selected.revision, written.version);
+      } catch {
+        // The provider issued the grant; whether it is stored is not known. Reconnect, never replay.
+        await this.uncertain(ref, selected.revision, actor.id);
+        throw new AuthenticationError("uncertain");
+      }
+      await this.attempts.settle(attempt, actor.id, "exchanged");
+      return {
+        connection: ref,
+        revision: selected.revision,
+        account: identity.account,
+        scopes: [...identity.scopes],
+        ...(identity.expiresAt !== undefined && { expiresAt: identity.expiresAt }),
+      };
+    } catch (error) {
+      // A take that found the code gone (a retried step) or expired ends the attempt so too.
+      const problem = authenticationProblem(error) ?? (sent ? "uncertain" : "unavailable");
+      await this.attempts.settle(attempt, actor.id, problem);
+      throw new AuthenticationError(problem);
+    }
   }
 
   async bind(
@@ -893,6 +1011,10 @@ export class ConnectionRegistry {
   }
 }
 
+/** A setup operation's policy target: the declared connection's id, or the rule's. */
+const setupTarget = (input: { target: ConnectionTarget }) =>
+  "connection" in input.target ? input.target.connection.$connection : input.target.rule;
+
 /** Metadata mutations are access operations, so they are policy-reviewed and audited like other effects. */
 export const connectionOps = defineConnector("sanoma", {
   connection: {
@@ -931,8 +1053,7 @@ export const connectionOps = defineConnector("sanoma", {
         authorization: z.string(),
       }),
       output: setupSchema,
-      target: (input: { target: ConnectionTarget }) =>
-        "connection" in input.target ? input.target.connection.$connection : input.target.rule,
+      target: setupTarget,
     },
     configure: {
       effect: "access",
@@ -945,14 +1066,43 @@ export const connectionOps = defineConnector("sanoma", {
         scopes: z.array(z.string()),
       }),
       output: snapshotSchema,
-      target: (input: { target: ConnectionTarget }) =>
-        "connection" in input.target ? input.target.connection.$connection : input.target.rule,
+      target: setupTarget,
     },
     activate: {
       effect: "access",
       input: z.object({ connection: connectionRefSchema, expectedRevision: z.string() }),
       output: snapshotSchema,
       target: (input: { connection: ConnectionRef }) => input.connection.$connection,
+    },
+    authorize: {
+      effect: "access",
+      description: "Admit an OAuth consent for a connection; the app then makes the attempt outside workflow history",
+      input: z.object({
+        target: connectionTargetSchema,
+        requestId: z.string().min(1),
+        definition: z.string(),
+        redirectUri: z.string().url(),
+        // Whether Connect replaces the stored OAuth application (its client ID and secret), which
+        // every account of the connection or rule shares: in the ledger, and a policy can hold it.
+        replacesApplication: z.boolean(),
+        authorization: z.string(),
+      }),
+      output: setupSchema,
+      target: setupTarget,
+    },
+    exchange: {
+      effect: "access",
+      description:
+        "Exchange an OAuth attempt's code for a grant, stored in the selected store; only the connect workflow calls it",
+      input: z.object({ target: connectionTargetSchema, requestId: z.string().min(1), attempt: z.string().min(1) }),
+      output: z.object({
+        connection: connectionRefSchema,
+        revision: z.string(),
+        account: z.string(),
+        scopes: z.array(z.string()),
+        expiresAt: z.number().optional(),
+      }),
+      target: setupTarget,
     },
     disconnect: {
       effect: "access",
@@ -981,14 +1131,19 @@ export const connectionOps = defineConnector("sanoma", {
 });
 const actor = (call: CallContext) => call.principal ?? refuse("Connection mutation needs an authenticated principal");
 export function connectionDriver(registry: ConnectionRegistry) {
+  // Prepare and authorize admit a setup under policy: the requirements as reviewed, no credential read.
+  const gate = async (
+    input: { target: ConnectionTarget; requestId: string; definition: string },
+    call: CallContext,
+  ): Promise<z.output<typeof setupSchema>> => {
+    const setup = await registry.setup(input.target, actor(call), input.requestId);
+    if (setup.definition !== input.definition) refuse("The connection changed; review its requirements again");
+    return { ...setup, requiredScopes: [...setup.requiredScopes] };
+  };
   return defineDriver(connectionOps, {
     connection: {
       test: (input, call) => registry.test(input.connection, actor(call)),
-      prepare: async (input, call) => {
-        const setup = await registry.setup(input.target, actor(call), input.requestId);
-        if (setup.definition !== input.definition) refuse("The connection changed; review its requirements again");
-        return { ...setup, requiredScopes: [...setup.requiredScopes] };
-      },
+      prepare: gate,
       configure: (input, call) =>
         registry.configure(
           input.target,
@@ -1000,6 +1155,8 @@ export function connectionDriver(registry: ConnectionRegistry) {
           actor(call),
         ),
       activate: (input, call) => registry.activate(input.connection, input.expectedRevision, actor(call)),
+      authorize: gate,
+      exchange: (input, call) => registry.exchange(input.target, input.requestId, input.attempt, actor(call)),
       disconnect: (input, call) => registry.disconnect(input.connection, input.expectedRevision, actor(call).id),
       bind: (input, call) =>
         registry.bind(input.connection, input.account, input.scopes, input.expectedRevision, actor(call).id),

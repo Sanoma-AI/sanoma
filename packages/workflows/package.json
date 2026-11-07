@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/workflows",
-  "version": "0.11.20",
+  "version": "0.11.21",
   "description": "Business processes as TypeScript functions, run durably on DBOS",
   "keywords": [
     "approvals",
@@ -121,6 +121,7 @@
     "crc-32": "^1.2.2",
     "drizzle-orm": "0.45.4",
     "google-auth-library": "^11.3.2",
+    "oauth4webapi": "3.8.8",
     "oxc-parser": "^0.153.0",
     "oxfmt": "^0.72.0",
     "pg": "^8.23.1",

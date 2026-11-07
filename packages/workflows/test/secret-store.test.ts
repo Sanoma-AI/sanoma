@@ -158,14 +158,20 @@ describe("authentication bundles", () => {
   const auth = defineAuthentication({
     kind: "oauth2",
     version: 1,
-    schema: z.object({ access: z.string(), refresh: z.string() }),
     storage: { writable: true, maxBytes: 256, conditionalWrites: true },
+    oauth: {
+      authorizeUrl: "https://oauth.example.test/authorize",
+      tokenUrl: "https://oauth.example.test/token",
+      scopes: [],
+      pkce: true,
+      clientAuthentication: "client_secret_basic",
+    },
   });
   it("encodes one versioned lifecycle unit and validates on retrieval", () => {
-    const value = { access: "access", refresh: "refresh" };
+    const value = { accessToken: "access", tokenType: "bearer", refreshToken: "refresh", expiresAt: 1 };
     expect(decodeCredentials(auth, encodeCredentials(auth, value))).toEqual(value);
     expect(() => decodeCredentials(auth, '{"version":2,"value":{}}')).toThrow("invalid_value");
-    expect(() => decodeCredentials(auth, '{"version":1,"value":{"access":"x"}}')).toThrow("invalid_value");
+    expect(() => decodeCredentials(auth, '{"version":1,"value":{"refreshToken":"x"}}')).toThrow("invalid_value");
   });
   it("does not leak validator or serialization errors", () => {
     const evil = defineAuthentication({

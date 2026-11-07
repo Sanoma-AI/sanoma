@@ -16,17 +16,18 @@ The one resource type is writable: `read` and `import` (effect `read`), and the 
 
 `import` takes `{ id }` and returns the project's `state`; `read` takes a state an earlier call returned, or just `{ id }`, and returns its fresh `state`, or `gone: true`. The change operations are [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources)' contract, through the provider's plan and apply. `create` first lists the projects the token can see and refuses (a `DriverError`, `vendorCode` `exists`, not retryable) when the organization has one of the declared name already: a create retried after Supabase made the project, but before the run recorded it, stops there rather than making a second project, and the error names the project's ref to bind. The provider waits for a new project to be `ACTIVE_HEALTHY` (five minutes at most).
 
-Three more operations call the Management API, each with the project's ref as `target`:
+Four more operations call the Management API, each but the organizations' with the project's ref as `target`:
 
 | Operation                    | Effect  | Input                | Output                                               |
 | ---------------------------- | ------- | -------------------- | ---------------------------------------------------- |
+| `supabase.organization.list` | `read`  | `{}`                 | `{ organizations: [{ id, name }] }`                  |
 | `supabase.pooler.get`        | `read`  | `{ ref }`            | `{ host, port: 5432, user, database }`               |
 | `supabase.project.health`    | `read`  | `{ ref, services? }` | `{ healthy, services: [{ name, healthy, status }] }` |
 | `supabase.database.storeUrl` | `write` | `{ ref, export }`    | `{ secret }`                                         |
 
 `pooler.get` reads the primary database's entry of `GET /v1/projects/{ref}/config/database/pooler`. The provider's project has no host, and the pooler's (`aws-<n>-<region>.pooler.supabase.com`) is not derivable from the region, so it is read per project. The port is always 5432, the session pooler's: DBOS needs `LISTEN`/`NOTIFY`, which the transaction pooler (6543) does not carry, and the direct address is IPv6 only. `project.health` reads `GET /v1/projects/{ref}/health` for `services` (default `["db", "pooler"]`), healthy when every one is.
 
-`database.storeUrl` builds `postgresql://<user>:<password>@<host>:5432/<database>?sslmode=require` from `pooler.get` and the stored secret `SUPABASE_DB_PASSWORD`, and stores it with the secrets store's `ensure` as `SANOMA_DATABASE_URL_<EXPORT>`, `<EXPORT>` the data file's export in upper snake case (`store` → `SANOMA_DATABASE_URL_STORE`). It returns the secret's name only: the URL is never in an output, the ledger or a log. The store only adds secrets, so when the secret holds another URL (the project was replaced, or its password or pooler changed), `storeUrl` fails (`vendorCode` `stale`), naming it: delete the secret, then store it again. A project being deleted (`GOING_DOWN`, `REMOVED`) does not stop a create of its name.
+`database.storeUrl` builds `postgresql://<user>:<password>@<host>:5432/<database>?sslmode=require` from `pooler.get` and the stored secret `SUPABASE_DB_PASSWORD`, and stores it with the secrets store's `ensure` as `SANOMA_DATABASE_URL_<EXPORT>`, `<EXPORT>` the data file's export in upper snake case (`store` → `SANOMA_DATABASE_URL_STORE`). It returns the secret's name only: the URL is never in an output, the ledger or a log. The store only adds secrets, so when the secret holds another URL (the project was replaced, or its password or pooler changed), `storeUrl` fails (`vendorCode` `stale`), naming it: delete the secret, then store it again. A project being deleted (`GOING_DOWN`, `REMOVED`) does not stop a create of its name. A call as a named connection reaches only the secrets its operation is given, so the operation declares both, the password and the URL's secret (`createsSecrets`).
 
 Apply calls two of them after it creates a project (the type's `afterCreate`): `project.health` until the database and pooler are healthy, then `database.storeUrl` with the data file's export, so a host can name the URL as `secret("SANOMA_DATABASE_URL_STORE")`.
 
@@ -68,19 +69,51 @@ export default defineConfig({ workflows, connectors: [supabase], policy });
 
 `./driver` (`supabaseDriver`; `supabaseDriver({ bridge })` reads through a bridge of your own, `timeoutMs` bounds a Management API request, 30 seconds by default) and `./fake` (`fakeSupabase`) are internal entries, for tests.
 
-Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call with the binary `startBridge` finds. It configures the provider on the first call with `{ access_token }`, and again when the token changes, when the provider has exited, or when the bridge has forgotten it.
+Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call with the binary `startBridge` finds. It configures the provider in a session of its own for each call, with `{ access_token }`, the selected connection's token.
 
 The provider answers a project that does not exist (Supabase's 404) with the state it was given, not with none. So `read` always imports, from the ref alone, never refreshing the state it is given, and a project without a `name` is `gone`.
 
-### Environment
+### Accounts
 
-Read on every call, never when the config loads:
+Every call runs as a named connection, declared in code: one marked `default: true`, or one a workflow selects. The driver takes that connection's token on each call and never reads the environment: `SUPABASE_ACCESS_TOKEN` is not read. Going live lists organizations and creates the project as the declared default. There are two methods:
 
-| Variable                | What it is                                                                                                                                  |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SUPABASE_ACCESS_TOKEN` | A Supabase personal access token ([account tokens](https://supabase.com/dashboard/account/tokens)), for the provider and the Management API |
+| Method        | What the person does                                                                                  | Account                        |
+| ------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `oauth`       | Approves access at Supabase (the company's own OAuth application, authorization code with PKCE)       | The organization they choose   |
+| `accessToken` | Pastes a [personal access token](https://supabase.com/dashboard/account/tokens) on the connector page | Every organization of its user |
 
-When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the token to the provider through its config only. The default bridge's binary comes with `@sanoma-ai/bridge` or from `SANOMA_BRIDGE_BIN` (see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#the-binary)), not a credential of the connector; it must trust Supabase's signing key, since the OpenTofu registry serves none for this provider.
+Both verify by `GET /v1/organizations`. The account is the organizations' IDs, sorted and joined with commas. Supabase attests no scopes, so none are claimed.
+
+```ts
+import { supabase } from "@sanoma-ai/connector-supabase";
+import { defineConfig, defineConnection } from "sanoma";
+import { secret } from "sanoma/resources";
+
+const infra = defineConnection(supabase, {
+  name: "infra",
+  method: "oauth",
+  credentials: secret("SUPABASE_INFRA"),
+  client: secret("SUPABASE_OAUTH_APP"),
+  default: true,
+});
+
+export default defineConfig({ workflows, connectors: [supabase], connections: [infra] });
+```
+
+For `accessToken`, leave out `client`.
+
+#### Registering the OAuth application
+
+`oauth` uses an OAuth application your company registers in its own Supabase organization, never Sanoma's. In the [Supabase dashboard](https://supabase.com/dashboard), open the organization's settings, then **OAuth Apps**, and add an application:
+
+- **Redirect URI:** `<the app's origin>/connect/supabase/callback`, such as `https://ops.example.com/connect/supabase/callback`. Register one for each origin the app is reached at, `http://localhost:<port>/connect/supabase/callback` for a local app included.
+- **Scopes:** Supabase takes scopes from the application, not from the request, so this connector sends none. Grant at least Organizations read (verify and `organization.list`), Projects read and write (`project.*`, `project.health`, the create guard) and Database read (`pooler.get`, `database.storeUrl`). Changing them later needs everyone to authorize again (**Reconnect**).
+
+Then on `/connectors/supabase`, **Connect account** asks for the application's client ID and secret. It stores them as the `client` secret, apart from the grant, and opens Supabase's consent in a new tab. The client ID and secret are never environment variables. The authorize endpoint is `https://api.supabase.com/v1/oauth/authorize` and the token endpoint `https://api.supabase.com/v1/oauth/token`, with the client's credentials in HTTP Basic.
+
+A grant expires (Supabase publishes no lifetime). Until renewal ships ([#467](https://github.com/Sanoma-AI/sanoma/issues/467)), an expired grant needs **Reconnect**; the card shows when access expires.
+
+The bridge passes each call's token to the provider through its config only. The default bridge's binary comes with `@sanoma-ai/bridge` or from `SANOMA_BRIDGE_BIN` (see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#the-binary)), not a credential of the connector; it must trust Supabase's signing key, since the OpenTofu registry serves none for this provider.
 
 ### Errors and retries
 

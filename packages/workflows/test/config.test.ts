@@ -185,6 +185,8 @@ describe("a change's operations, built in", () => {
       "sanoma.connection.prepare",
       "sanoma.connection.configure",
       "sanoma.connection.activate",
+      "sanoma.connection.authorize",
+      "sanoma.connection.exchange",
       "sanoma.connection.disconnect",
       "sanoma.connection.bind",
       "sanoma.connection.create",

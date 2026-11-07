@@ -33,7 +33,12 @@ const sb = fakeSupabase();
 const source = localGitSource(root);
 const config = {
   workflows: [],
-  connectors: [withSetup(github, { driver: () => gh.driver }), withSetup(supabase, { driver: () => sb.driver })],
+  // Supabase without its named accounts (`authentication`), which are not what this file tests:
+  // its fake answers every call.
+  connectors: [
+    withSetup(github, { driver: () => gh.driver }),
+    withSetup(supabase, { driver: () => sb.driver, authentication: {} }),
+  ],
   root,
 };
 const test = useTestApp(config, { databaseUrl: testDatabaseUrl("existing"), source, app: appSteps });

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createVerify, generateKeyPairSync } from "node:crypto";
+import { createVerify, generateKeyPairSync, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -16,7 +16,9 @@ import { testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { fakeHost } from "@sanoma-ai/testing/host";
 import {
+  defineConnection,
   isEnded,
+  withSetup,
   memoryLedger,
   openInvite,
   resolveConfig,
@@ -24,6 +26,7 @@ import {
   type SanomaConfig,
 } from "@sanoma-ai/workflows";
 import { loadDataFiles, readLockfile, readResources } from "@sanoma-ai/workflows/describe";
+import { secret } from "@sanoma-ai/workflows/resources";
 import { startWakeupService, type WakeupService } from "@sanoma-ai/workflows/wakeup-service";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -129,6 +132,19 @@ beforeAll(async () => {
 });
 
 const githubFake = fakeGithub();
+const sb = fakeSupabase();
+// The fake, taking the selected connection as the live driver does (it reads no token).
+const supabaseFake = withSetup(supabase, {
+  driver: () => ({ ...sb.driver, authentication: ["accessToken"] }),
+  fake: () => sb,
+});
+/** Supabase's declared default account, which going live lists organizations with and apply creates the project as. */
+const supabaseInfra = defineConnection(supabaseFake, {
+  name: "infra",
+  method: "accessToken",
+  credentials: secret("SUPABASE_INFRA"),
+  default: true,
+});
 const config: SanomaConfig = {
   secrets: {
     bindings: {
@@ -137,7 +153,8 @@ const config: SanomaConfig = {
     },
   },
   workflows: [],
-  connectors: [withFake(github, githubFake), withFake(supabase, fakeSupabase()), host.connector],
+  connectors: [withFake(github, githubFake), supabaseFake, host.connector],
+  connections: [supabaseInfra],
   ledger: memoryLedger(),
   root,
 };
@@ -153,7 +170,6 @@ const api = setupServer(
 /** The secrets going live stores or reads, which the worker loads into this process's environment. */
 const NAMES = [
   "GITHUB_TOKEN",
-  "SUPABASE_ACCESS_TOKEN",
   "SUPABASE_DB_PASSWORD",
   "SANOMA_DATABASE_URL_STORE",
   "SANOMA_GITHUB_APP_ID",
@@ -176,7 +192,14 @@ beforeAll(async () => {
   for (const name of NAMES) vi.stubEnv(name, undefined);
   api.listen({ onUnhandledFrame: "bypass" });
   await app.client.setSecret("GITHUB_TOKEN", "ghp_test-token", { by: "alice" });
-  await app.client.setSecret("SUPABASE_ACCESS_TOKEN", "sbp_test-token", { by: "alice" });
+  // Supabase's account, pasted on its connector page: its verify reads the organizations above.
+  const pasted = { accessToken: "sbp_test-token" };
+  const review = await app.client.previewConnection(
+    { connection: { vendor: "supabase", $connection: supabaseInfra.$connection } },
+    pasted,
+    { actor: "alice", id: randomUUID() },
+  );
+  await app.client.connectConnection(review, pasted, { actor: "alice" });
   const live = await liveSnapshot(app.config, { source });
   ctx = {
     resolved: resolveConfig(app.config),
@@ -242,12 +265,13 @@ const choices = () => ({ owner: "acme", name: "acme-ops", organization: "acme-or
 
 describe("going live", () => {
   it("offers the token's accounts, the database with Supabase's organizations and regions, and the host", async () => {
-    expect(await goLiveChoices(await now())).toMatchObject({
+    expect(await goLiveChoices(await now(), alice)).toMatchObject({
       owners: [
         { login: "acme-dev", kind: "user", via: "token" },
         { login: "acme", kind: "organization", via: "token" },
       ],
-      organizations: [{ id: "acme-org", name: "Acme" }],
+      // The fake's own organization, as its connection lists it.
+      organizations: [{ id: "sanoma-test-org", name: "sanoma-test-org" }],
       database: {
         type: "supabase.project",
         title: "Project",
@@ -576,7 +600,13 @@ describe("going live", () => {
         signedBy.push(verified ? JSON.parse(Buffer.from(body!, "base64url").toString()).iss : "nobody");
         return HttpResponse.json([{ id: 7, account: { login: "acme-labs", type: "Organization" } }]);
       }),
-      http.get("https://api.supabase.com/v1/organizations", () => HttpResponse.json({}, { status: 401 })),
+    );
+    // Supabase's organizations through its connection, which answers 401 this once.
+    const call = app.client.call.bind(app.client);
+    vi.spyOn(app.client, "call").mockImplementation((op, input, options) =>
+      op === "supabase.organization.list"
+        ? Promise.reject(new Error("supabase: GET /v1/organizations answered 401: Unauthorized"))
+        : call(op, input, options),
     );
     await app.client.setSecret("SANOMA_GITHUB_APP_ID", "4242", { by: "alice" });
     await app.client.setSecret(
@@ -591,10 +621,10 @@ describe("going live", () => {
     await db.connect();
     await databaseOn(db).delete(credentials).where(eq(credentials.name, "GITHUB_TOKEN"));
     await db.end();
-    const { owners, organizations, errors } = await goLiveChoices(await now());
+    const { owners, organizations, errors } = await goLiveChoices(await now(), alice);
     expect(owners).toEqual([{ login: "acme-labs", kind: "organization", via: "app" }]);
     expect(signedBy).toEqual(["4242"]);
     expect(organizations).toEqual([]);
-    expect(errors).toEqual(["Supabase's organizations: api.supabase.com answered 401 to /v1/organizations"]);
+    expect(errors).toEqual(["Supabase's organizations: supabase: GET /v1/organizations answered 401: Unauthorized"]);
   });
 });

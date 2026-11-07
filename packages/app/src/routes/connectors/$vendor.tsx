@@ -3,7 +3,8 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
-import type { ScenarioEntry } from "../../api.ts";
+import { z } from "zod";
+import { CALLBACK_ERRORS, type CallbackErrorReason, type ScenarioEntry } from "../../api.ts";
 import {
   CrumbHeader,
   Expandable,
@@ -23,7 +24,18 @@ import { ScenarioErrors } from "../../components/scenario.tsx";
 import { type ScenarioRoles, scenarioRoles } from "../../graph/scenario-graph.ts";
 import { configQuery, connectorNamed, credentialsQuery, scenariosNaming, scenariosQuery } from "../../queries.ts";
 
+/** Where an OAuth callback sends the person back: the attempt to follow on its card, or why none. */
+const ConnectorSearch = z.object({
+  connection: z.string().optional(),
+  attempt: z.string().optional(),
+  error: z
+    .enum(Object.keys(CALLBACK_ERRORS) as [CallbackErrorReason, ...CallbackErrorReason[]])
+    .optional()
+    .catch(undefined),
+});
+
 export const Route = createFileRoute("/connectors/$vendor")({
+  validateSearch: ConnectorSearch,
   // The page reads the config, the scenarios and the credentials from the query client; the
   // loader returns only its name: the connector's title.
   loader: async ({ context: { queryClient }, params }) => {
@@ -45,6 +57,7 @@ export const Route = createFileRoute("/connectors/$vendor")({
 /** One connector: where it lives, its resource types, every operation with its contract and scenarios, and who uses it. */
 function ConnectorPage() {
   const { vendor: id } = Route.useParams();
+  const callback = Route.useSearch();
   const {
     data: { vendor, ops, workflows, resourceTypes },
   } = useSuspenseQuery({ ...configQuery(), select: (config) => connectorNamed(id)(config)! });
@@ -73,7 +86,7 @@ function ConnectorPage() {
       )}
       <ScenarioErrors errors={scenarios.errors} />
       <Credentials vendor={id} />
-      <Connections vendor={id} />
+      <Connections vendor={id} callback={callback} />
       <Region title="Operations">
         {ops.length === 0 ? (
           <None />

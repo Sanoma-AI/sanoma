@@ -121,6 +121,7 @@ describe("permissionsGrid", () => {
       { id: "sanoma.apps.list", cells: [...Array.from({ length: 3 }, () => ({ answer: "allow" })), ...visitorDenied] },
       ...[
         "sanoma.connection.activate",
+        "sanoma.connection.authorize",
         "sanoma.connection.bind",
         "sanoma.connection.configure",
         "sanoma.connection.create",
@@ -184,6 +185,7 @@ describe("permissionsGrid", () => {
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
 
+      [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
