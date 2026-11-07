@@ -681,7 +681,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
         // The version before still answers, then the upload does.
         "GET /__sanoma/health",
         "GET /__sanoma/health",
-        // The version before's 401 is not yet, not stale: def456's container builds it.
+        // The version before's 401 is an earlier version's: def456's container builds it.
         "GET /__sanoma/app-bundle?revision=def456",
         "GET /__sanoma/app-bundle?revision=def456",
         "GET /__sanoma/app-bundle?revision=def456",
@@ -719,6 +719,15 @@ describe.skipIf(live)("cloudflareDriver", () => {
       await expect(op("container.create", { desired })).rejects.toMatchObject({
         retryable: false,
         message: `cloudflare: sanoma-company: no app bundle at abc123: ${error}`,
+      });
+    });
+
+    it("refuses when the version uploaded refuses the instance token, without waiting out the build's time", async () => {
+      const refusing = reply(BUNDLE, 401, { error: "the token is not this instance's SANOMA_WAKEUP_TOKEN" });
+      play("bundle-token", createWith({ ...refusing, headers: CREATED }));
+      await expect(op("container.create", { desired })).rejects.toMatchObject({
+        retryable: false,
+        message: expect.stringContaining("no app bundle at abc123: the token is not this instance's"),
       });
     });
 

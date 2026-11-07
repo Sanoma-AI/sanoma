@@ -108,8 +108,8 @@ interface BundleAsk {
  * gives it: the object starts its container at the revision when it is stopped or runs another,
  * and both it and the worker answer 202 meanwhile. An answer without the version `deployment` is an
  * earlier version's, still answering while the upload reaches every location: asked again,
- * whatever its status. A failed build, a revision the route refuses or a container that ended is a
- * refusal. Any other answer (no answer, an error of Cloudflare's, a body cut off, a workers.dev URL
+ * whatever its status. A failed build, a revision the route refuses, a container that ended or the
+ * version uploaded refusing the ask (any 4xx of its own, such as another token's 401) is a refusal. Any other answer (no answer, an error of Cloudflare's, a body cut off, a workers.dev URL
  * not routed yet) is asked again. Still none after `startTimeoutMs` is a retryable `DriverError`
  * that says what the last ask saw. One ask may take the whole budget: a bundle is large.
  */
@@ -135,8 +135,10 @@ export function appBundle(
       const body = (await res.json().catch(() => undefined)) as { error?: unknown; exit?: unknown } | undefined;
       if (route && res.status === 200 && body !== undefined) return { value: body as unknown as AppBundle };
       const said = typeof body?.error === "string" ? body.error : `${APP_BUNDLE_PATH} answered ${res.status}`;
-      // The worker's own refusal (the build's failure, a revision it refuses), or the container ended.
-      if (typeof body?.exit === "string" || (route && res.status !== 200 && res.status !== 202))
+      // The worker's own refusal (the build's failure, a revision it refuses), the container ended, or
+      // the version uploaded refuses the ask (the token its bindings hold is another): none passes on asking.
+      const own4xx = res.status >= 400 && res.status < 500;
+      if (typeof body?.exit === "string" || own4xx || (route && res.status !== 200 && res.status !== 202))
         throw refused(`${script}: no app bundle at ${revision}: ${said}`);
       return {
         last: res.status === 202 ? (route ? "the worker is building it" : "its container is starting") : said,

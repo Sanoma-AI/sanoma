@@ -809,11 +809,8 @@ export function containerOps(
       }
       return cf.upload(script, await serving());
     };
-    /** The version of the Worker at R this put uploaded before its bundle, whose object starts R's container. */
-    let first: string | undefined;
-    if (!current) {
-      first = await cf.upload(script, { ...bare, migrations: MIGRATION });
-    }
+    /** The version of the Worker at R this put uploads before its bundle, whose object starts R's container. */
+    let deployment = current ? undefined : await cf.upload(script, { ...bare, migrations: MIGRATION });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
     if (!app) {
@@ -825,12 +822,12 @@ export function containerOps(
       // the application exists: without this upload every start answers "There is no container
       // application assigned to this Durable Object namespace", for good (found live 2026-10-29;
       // a Worker deployed again after the application started at once).
-      first = await uploadServing();
+      deployment = await uploadServing();
     }
     const at = { script, url, token };
     // 1. The database and the bundle at R first, by R's container, which the Worker at R starts once
     // that version answers (until then an earlier one may), visitors served the app deployed meanwhile.
-    const deployment = first ?? (await uploadServing());
+    deployment ??= await uploadServing();
     await live(cf, at, deployment);
     const bundle = await appBundle(cf, { ...at, revision, deployment }, { startTimeoutMs, pollMs });
     const jwt = bundle.assets.length ? await uploadAssets(cf, script, bundle.assets) : undefined;

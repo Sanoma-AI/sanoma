@@ -513,7 +513,9 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   /**
    * The revisions whose worker prepared each database, by its URL as a Hyperdrive config gives it:
    * a container's worker makes its revision's migrations at its start, before its port answers,
-   * and a database keeps every migration made (a newer one serves an older app).
+   * and a database keeps every migration made, so an app at any revision prepared there before is
+   * served (by revision, not by the journal's order: an app at a revision no worker started over it
+   * is refused, though its migrations may be there).
    */
   const preparedAt = new Map<string, Set<string>>();
   const started: FakeContainer[] = [];
