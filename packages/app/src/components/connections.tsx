@@ -218,6 +218,17 @@ export function SecretStorage() {
 }
 
 type Method = ConnectionsResponse["methods"][string][string] | undefined;
+
+/** Health and renewal states only a new consent fixes. */
+const RECONNECT: ReadonlySet<string> = new Set(["expired", "revoked", "rejected", "uncertain", "missing"]);
+/** Why a renewal failed, as the card says it: never the provider's words. */
+const RENEWAL_PROBLEMS: Partial<Record<string, string>> = {
+  revoked: "the provider no longer accepts the refresh token",
+  rejected: "the provider refused the renewal",
+  expired: "the grant has no refresh token",
+  unavailable: "the provider could not be reached; it is tried again",
+  uncertain: "the provider may have renewed the grant and it was not stored",
+};
 const canWrite = (store: ConnectionsResponse["store"]) =>
   store.capabilities.writable && store.capabilities.conditionalWrites !== "none";
 
@@ -244,7 +255,15 @@ function ConnectionRow({
   const identity = method?.kind === "workload-identity";
   const unsupportedWrite = !external && !identity && !canWrite(data.store);
   const state = card.status === "connected" ? (card.health?.state ?? "connected") : card.status;
-  async function act(action: "test" | "disconnect") {
+  const renewalProblem = card.renewal?.outcome !== "refreshed" ? card.renewal?.outcome : undefined;
+  // Only a new consent helps: the grant is gone at the provider, or may have been renewed and not kept.
+  const needsReconnect =
+    oauth &&
+    card.status !== "disconnected" &&
+    (card.status === "uncertain" ||
+      RECONNECT.has(state) ||
+      (renewalProblem !== undefined && RECONNECT.has(renewalProblem)));
+  async function act(action: "test" | "disconnect" | "revoke") {
     setBusy(true);
     setError(undefined);
     const requestId = request?.action === action ? request.id : crypto.randomUUID();
@@ -252,7 +271,10 @@ function ConnectionRow({
     const connection = { vendor: card.vendor, $connection: card.id };
     try {
       if (action === "test") await test({ data: { connection, requestId } });
-      else await disconnect({ data: { connection, expectedRevision: card.revision!, requestId } });
+      else
+        await disconnect({
+          data: { connection, expectedRevision: card.revision!, requestId, revoke: action === "revoke" },
+        });
       setRequest(undefined);
       await queryClient.invalidateQueries({ queryKey: ["connections"] });
     } catch (failure) {
@@ -266,7 +288,9 @@ function ConnectionRow({
       <ItemContent>
         <ItemHeading>
           <code>{card.name}</code>
-          <ToneBadge tone={state === "connected" ? "ok" : "off"}>{state.replaceAll("_", " ")}</ToneBadge>
+          <ToneBadge tone={state === "connected" && !needsReconnect ? "ok" : "off"}>
+            {needsReconnect ? "needs reconnect" : state.replaceAll("_", " ")}
+          </ToneBadge>
         </ItemHeading>
         <ItemDescription className="line-clamp-none">
           {card.account ? `Account: ${card.account}` : "No verified account"} · {card.method} ·{" "}
@@ -306,10 +330,27 @@ function ConnectionRow({
             {card.health.expiresAt && (
               <>
                 {" "}
-                · Access expires{" "}
+                · Valid until{" "}
                 <time dateTime={card.health.expiresAt}>{new Date(card.health.expiresAt).toLocaleString()}</time>
               </>
             )}
+          </ItemDescription>
+        )}
+        {card.renewal?.refreshedAt && (
+          <ItemDescription>
+            Renewed <When at={Date.parse(card.renewal.refreshedAt)} />
+            {card.renewal.dueAt && (
+              <>
+                {" "}
+                · Next renewal{" "}
+                <time dateTime={card.renewal.dueAt}>{new Date(card.renewal.dueAt).toLocaleString()}</time>
+              </>
+            )}
+          </ItemDescription>
+        )}
+        {renewalProblem && card.status === "connected" && (
+          <ItemDescription className="line-clamp-none">
+            The last renewal failed: {RENEWAL_PROBLEMS[renewalProblem] ?? renewalProblem.replaceAll("_", " ")}.
           </ItemDescription>
         )}
         {card.storageProblem && (
@@ -320,7 +361,22 @@ function ConnectionRow({
         )}
         {oauth && card.status === "uncertain" && (
           <ItemDescription className="line-clamp-none">
-            The provider may have issued a grant that was not stored. Reconnect to authorize a new one.
+            The provider may have issued or renewed a grant that was not stored, so Sanoma stopped using this account.
+            Reconnect to authorize a new one.
+          </ItemDescription>
+        )}
+        {needsReconnect && card.status !== "uncertain" && (
+          <ItemDescription className="line-clamp-none">
+            The provider no longer accepts this grant. Reconnect to authorize a new one.
+          </ItemDescription>
+        )}
+        {oauth && card.revision && card.status !== "disconnected" && (
+          <ItemDescription className="line-clamp-none">
+            Disconnect deletes the grant Sanoma keeps and leaves the OAuth application for other accounts.
+            {method?.revocable
+              ? " Revoke also asks the provider to end the authorization."
+              : " The provider’s own authorization stays: revoke it in the provider’s settings."}{" "}
+            Calls already sent are not undone.
           </ItemDescription>
         )}
         {attempt && <AttemptProgress attempt={attempt} vendor={card.vendor} onDismiss={() => setAttempt(undefined)} />}
@@ -388,6 +444,11 @@ function ConnectionRow({
         {card.revision && card.status !== "disconnected" && (
           <Button variant="ghost" disabled={busy} onClick={() => void act("disconnect")}>
             Disconnect
+          </Button>
+        )}
+        {oauth && method?.revocable && card.revision && card.status !== "disconnected" && (
+          <Button variant="ghost" disabled={busy} onClick={() => void act("revoke")}>
+            Revoke
           </Button>
         )}
       </ItemActions>

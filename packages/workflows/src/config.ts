@@ -8,6 +8,7 @@ import {
 } from "./identity-provisioning.ts";
 import { secretsForInput } from "./secret.ts";
 import { isRunControlError } from "./errors.ts";
+import type { CallAuthentication } from "./authentication.ts";
 import { currentRun } from "./run.ts";
 import {
   connectionCatalog,
@@ -965,25 +966,42 @@ export function indexDrivers(
         }
         if (!options.connections || !call.principal || !d.authentication?.includes(call.connection.method))
           throw new DriverError("This driver does not support the selected connection", { retryable: false });
-        const authentication = await options.connections.authenticate(call.connection, call.principal.id);
+        const { connections } = options;
+        const selected = call.connection;
+        const principal = call.principal.id;
+        const invoke = async (authentication: CallAuthentication) => {
+          try {
+            return await fn(input, {
+              ...call,
+              connection: structuredClone(selected),
+              authentication,
+              secrets: secretsForInput(input, call.secrets, ops.get(id)!.createsSecrets?.(input)),
+            });
+          } catch (error) {
+            if (isRunControlError(error)) throw error;
+            // SDK exceptions can contain the complete request, including authorization headers.
+            // Drivers may come from another installed copy of this package.
+            const failure = error as { code?: unknown; retryable?: unknown; status?: unknown } | null;
+            const status = failure?.code === "driver_failed" ? failure.status : undefined;
+            throw new DriverError(`${d.vendor} operation failed`, {
+              retryable: failure?.code === "driver_failed" && failure.retryable === true,
+              ...(typeof status === "number" &&
+                Number.isInteger(status) &&
+                status >= 100 &&
+                status <= 599 && { status }),
+            });
+          }
+        };
+        const authentication = await connections.authenticate(selected, principal);
+        // A status the provider answers when it refused the access token before acting renews the
+        // grant (unless another process already did) and calls once more (`OAuthFlow.tokenRejected`).
+        const flow = connections.oauthMethod(selected.vendor, selected.method)?.oauth;
         try {
-          return await fn(input, {
-            ...call,
-            connection: structuredClone(call.connection),
-            authentication,
-            secrets: secretsForInput(input, call.secrets, ops.get(id)!.createsSecrets?.(input)),
-          });
+          return await invoke(authentication);
         } catch (error) {
-          if (isRunControlError(error)) throw error;
-          // SDK exceptions can contain the complete request, including authorization headers.
-          // Drivers may come from another installed copy of this package.
-          const failure = error as { code?: unknown; retryable?: unknown; status?: unknown } | null;
-          const status = failure?.code === "driver_failed" ? failure.status : undefined;
-          throw new DriverError(`${d.vendor} operation failed`, {
-            retryable: failure?.code === "driver_failed" && failure.retryable === true,
-            ...(typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 && { status }),
-          });
+          if (!flow?.refresh || !flow.tokenRejected?.includes((error as DriverError).status ?? 0)) throw error;
         }
+        return invoke(await connections.authenticate(selected, principal, authentication.credentialVersion));
       });
     }
   }

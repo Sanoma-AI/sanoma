@@ -45,7 +45,8 @@ import {
 import type { DatabasePreparation } from "./op.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
-import { approverLabel, errorMessage, WORKFLOW_ACTION } from "./shared.ts";
+import { approverLabel, errorMessage, RENEWAL_AGENT, WORKFLOW_ACTION } from "./shared.ts";
+import { renewWhenDue } from "./renewal.ts";
 
 export interface Worker {
   /**
@@ -165,6 +166,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const secrets = lazyDb(resolved.databaseUrl, "secrets");
   const storedSecrets = configuredSecrets(resolved.secrets, () => secrets.db());
   let stopRule: { close(): void } | undefined;
+  let renewing: { close(): void } | undefined;
   let stopping: Promise<void> | undefined;
   const horizonMs = options.idleHorizonMs ?? 60_000;
   // The worker's own client, connected by the first step that needs it, for the worker's version: what it starts runs on.
@@ -247,6 +249,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       return (stopping ??= (async () => {
         state.stopped = true;
         stopRule?.close();
+        renewing?.close();
         // Each is closed whatever the one before did; the first failure is what stop throws.
         let failed: { error: unknown } | undefined;
         for (const close of [
@@ -326,6 +329,29 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       await applyScheduled(resolved, registered, () => secrets.db());
       // A schedule's next tick is a deadline: a worker that stops when quiet registers it with its wakeup.
       state.deadlines.addSource(() => nextScheduledFire(resolved, new Date()));
+    }
+    // An OAuth grant due for renewal is a deadline, and the renewal agent's call when it comes.
+    const { connections } = resolved;
+    if (connections.renews) {
+      renewing = renewWhenDue({
+        renewals: connections.renewals,
+        deadlines: state.deadlines,
+        renew: async ({ id, vendor, dueAt }) => {
+          const runtime = await state.client();
+          try {
+            await runtime.call(
+              "sanoma.connection.refresh",
+              { connection: { vendor, $connection: id } },
+              { actor: RENEWAL_AGENT, id: `renewal:${id}:${dueAt.toISOString()}` },
+            );
+          } catch (error) {
+            // The policy refuses the agent: no renewal is scheduled again until a call renews the grant.
+            if ((error as { code?: unknown } | null)?.code === "policy_denied")
+              await connections.renewals.unschedule(id);
+            throw error;
+          }
+        },
+      });
     }
     await warnAboutStrandedRuns(resolved);
     // How far each app taken from a source is behind it, fetched in the background: the app reads the table.

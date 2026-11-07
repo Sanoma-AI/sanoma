@@ -104,7 +104,7 @@ export interface CallAuthentication {
 
 /**
  * The grant an `oauth2` method stores for a connection: what the token endpoint answered, as one
- * versioned bundle that the exchange (and, with #467, a refresh) replaces whole. `expiresAt` is
+ * versioned bundle that the exchange and each renewal replace whole. `expiresAt` is
  * Unix time in milliseconds; `scopes` only when the provider's answer named them.
  */
 export const oauthGrant = z.object({
@@ -138,10 +138,18 @@ export interface OAuthFlow {
   /** How the token request authenticates the application: HTTP Basic, or form fields. */
   clientAuthentication: "client_secret_basic" | "client_secret_post";
   /**
-   * How the provider renews a grant: declared for #467, which runs it. Until then an expired grant
-   * is `expired`, and Reconnect obtains a new one.
+   * How the provider renews a grant: with its refresh token (RFC 6749 section 6), near its expiry
+   * and when a call's answer says the access token was rejected (`tokenRejected`). Without it an
+   * expired grant is `expired`, and Reconnect obtains a new one.
    */
   refresh?: "refresh_token";
+  /**
+   * The HTTP statuses the provider's API answers when it refused the access token before acting
+   * on the request (401, for most): a driver failure with one of them renews the grant and calls
+   * the driver once more. Name only statuses that mean the request did nothing, since the call is
+   * repeated; never one a provider also answers after a partial effect.
+   */
+  tokenRejected?: readonly number[];
 }
 
 /** Credential schemas and lifecycle are owned by authentication, never by the store provider. */
@@ -180,6 +188,12 @@ export interface OAuthAuthentication {
   oauth: OAuthFlow;
   /** Establishes the account (and expiry) a grant authorizes, with the provider. */
   verify?(grant: OAuthGrant): Promise<AuthenticationIdentity>;
+  /**
+   * Revokes the grant at the provider, with the company's application (its revocation endpoint,
+   * RFC 7009 or the provider's own shape). Throws when the provider did not confirm it. Without
+   * it the provider cannot be asked from Sanoma: Disconnect removes Sanoma's copy only.
+   */
+  revoke?(grant: OAuthGrant, client: { clientId: string; clientSecret: string }): Promise<void>;
 }
 
 /** An endpoint a flow may name: https, or plain http to this machine (a test's provider). */
@@ -197,7 +211,10 @@ export function defineAuthentication<S extends z.ZodType>(definition: StoredAuth
 export function defineAuthentication(definition: WorkloadAuthentication): WorkloadAuthentication;
 export function defineAuthentication(definition: Authentication): Authentication;
 export function defineAuthentication(definition: Authentication | Omit<OAuthAuthentication, "schema">): Authentication {
-  if (definition.verify !== undefined && typeof definition.verify !== "function")
+  if (
+    (definition.verify !== undefined && typeof definition.verify !== "function") ||
+    ("revoke" in definition && definition.revoke !== undefined && typeof definition.revoke !== "function")
+  )
     throw new SecretStoreError("invalid_configuration");
   if (definition.kind === "workload-identity") {
     if (definition.storage !== undefined || definition.schema !== undefined || definition.version !== undefined)
@@ -226,8 +243,11 @@ export function defineAuthentication(definition: Authentication | Omit<OAuthAuth
         oauth.scopes.some((scope) => typeof scope !== "string" || !scope || /\s/.test(scope)) ||
         typeof oauth.pkce !== "boolean" ||
         !["client_secret_basic", "client_secret_post"].includes(oauth.clientAuthentication) ||
-        (oauth.refresh !== undefined && oauth.refresh !== "refresh_token")
-      : oauth !== undefined)
+        (oauth.refresh !== undefined && oauth.refresh !== "refresh_token") ||
+        (oauth.tokenRejected !== undefined &&
+          (!Array.isArray(oauth.tokenRejected) ||
+            oauth.tokenRejected.some((status) => !Number.isInteger(status) || status < 400 || status > 499)))
+      : oauth !== undefined || "revoke" in definition)
   ) {
     throw new SecretStoreError("invalid_configuration");
   }
@@ -235,7 +255,13 @@ export function defineAuthentication(definition: Authentication | Omit<OAuthAuth
     ...definition,
     schema,
     storage: Object.freeze({ ...storage }),
-    ...(oauth && { oauth: Object.freeze({ ...oauth, scopes: Object.freeze([...oauth.scopes]) }) }),
+    ...(oauth && {
+      oauth: Object.freeze({
+        ...oauth,
+        scopes: Object.freeze([...oauth.scopes]),
+        ...(oauth.tokenRejected && { tokenRejected: Object.freeze([...oauth.tokenRejected]) }),
+      }),
+    }),
   }) as Authentication;
 }
 

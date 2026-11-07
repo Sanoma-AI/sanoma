@@ -207,7 +207,16 @@ export interface ConnectionsResponse {
   rules: { id: string; name: string; vendor: string; method: string; scopes: readonly string[] }[];
   methods: Record<
     string,
-    Record<string, { kind: Authentication["kind"]; verifiable: boolean; schema?: Record<string, unknown> }>
+    Record<
+      string,
+      {
+        kind: Authentication["kind"];
+        verifiable: boolean;
+        schema?: Record<string, unknown>;
+        /** An OAuth method that can revoke its grant at the provider (Revoke). */
+        revocable?: boolean;
+      }
+    >
   >;
   store: Awaited<ReturnType<SanomaClient["secretStoreStatus"]>>;
   bootstrap: {
@@ -289,7 +298,11 @@ export const TestConnectionRequest = z.object({
   requestId: z.string().min(1).max(200),
 });
 export type TestConnectionRequest = z.infer<typeof TestConnectionRequest>;
-export const DisconnectConnectionRequest = TestConnectionRequest.extend({ expectedRevision: z.string().min(1) });
+/** Disconnect, or with `revoke`, revoke the OAuth grant at the provider first (`sanoma.connection.revoke`). */
+export const DisconnectConnectionRequest = TestConnectionRequest.extend({
+  expectedRevision: z.string().min(1),
+  revoke: z.boolean().optional(),
+});
 export type DisconnectConnectionRequest = z.infer<typeof DisconnectConnectionRequest>;
 
 /**

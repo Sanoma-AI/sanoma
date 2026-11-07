@@ -116,6 +116,8 @@ describe("describeConfig", () => {
       "sanoma.connection.disconnect",
       "sanoma.connection.exchange",
       "sanoma.connection.prepare",
+      "sanoma.connection.refresh",
+      "sanoma.connection.revoke",
       "sanoma.connection.test",
       "sanoma.identity.enroll",
       "sanoma.identity.retire",

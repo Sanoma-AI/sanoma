@@ -18,6 +18,8 @@ export const isDirect = (
   op.id === APPS_LIST ||
   op.id === "sanoma.run.inspect" ||
   op.id === "sanoma.connection.disconnect" ||
+  op.id === "sanoma.connection.revoke" ||
+  op.id === "sanoma.connection.refresh" ||
   op.id === "sanoma.connection.bind" ||
   op.id === "sanoma.connection.create" ||
   op.id === "sanoma.connection.prepare" ||

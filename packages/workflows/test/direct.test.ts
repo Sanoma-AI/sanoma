@@ -548,6 +548,8 @@ describe("the built-in call workflow in a config", () => {
       "sanoma.connection.create",
       "sanoma.connection.disconnect",
       "sanoma.connection.prepare",
+      "sanoma.connection.refresh",
+      "sanoma.connection.revoke",
       "sanoma.connection.test",
       "sanoma.run.inspect",
     ]);
@@ -571,6 +573,8 @@ describe("the built-in call workflow in a config", () => {
       "sanoma.connection.create",
       "sanoma.connection.disconnect",
       "sanoma.connection.prepare",
+      "sanoma.connection.refresh",
+      "sanoma.connection.revoke",
       "sanoma.connection.test",
       "sanoma.run.inspect",
     ]);

@@ -517,7 +517,15 @@ export async function connections(
             ),
           ) as Record<string, unknown>;
         }
-        return [name, { kind: method.kind, verifiable: !!method.verify, ...(schema && { schema }) }];
+        return [
+          name,
+          {
+            kind: method.kind,
+            verifiable: !!method.verify,
+            ...(schema && { schema }),
+            ...(method.kind === "oauth2" && { revocable: !!method.revoke }),
+          },
+        ];
       }),
     );
   }
@@ -553,8 +561,13 @@ export const testConnection = (
 export const disconnectConnection = (
   { client }: AppContext,
   actor: Principal,
-  { connection, expectedRevision, requestId }: DisconnectConnectionRequest,
-) => client.call("sanoma.connection.disconnect", { connection, expectedRevision }, { actor, id: requestId });
+  { connection, expectedRevision, requestId, revoke }: DisconnectConnectionRequest,
+) =>
+  client.call(
+    revoke ? "sanoma.connection.revoke" : "sanoma.connection.disconnect",
+    { connection, expectedRevision },
+    { actor, id: requestId },
+  );
 
 /** Stores the variable's value as the actor; refused, with the reason and never the value, as `SanomaClient.setCredential` refuses it. */
 export const setCredential = ({ client }: AppContext, actor: Principal, { name, value }: SetCredentialRequest) =>

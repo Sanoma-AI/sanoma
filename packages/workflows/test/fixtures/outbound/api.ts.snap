@@ -223,6 +223,31 @@ interface CompanyApi {
         definition: string;
         authorization: string;
       }, unknown>;
+      /**
+       * Renew a connected account's OAuth grant with its refresh token, when it is due; the worker's renewal agent calls it
+       *
+       * `sanoma.connection.refresh`, a access.
+       */
+      refresh: OpFn<{
+        connection: {
+          $connection: string;
+          vendor: string;
+          revision?: string;
+        };
+      }, unknown>;
+      /**
+       * Revoke an account's OAuth grant at the provider, then disconnect it and delete the grant; the OAuth application stays
+       *
+       * `sanoma.connection.revoke`, a access.
+       */
+      revoke: OpFn<{
+        connection: {
+          $connection: string;
+          vendor: string;
+          revision?: string;
+        };
+        expectedRevision: string;
+      }, unknown>;
       /** `sanoma.connection.test`, a read. */
       test: OpFn<{
         connection: {

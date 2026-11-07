@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { ConnectionHealth, ConnectionStatus, ConnectionTarget } from "../connection.ts";
 import type { AttemptOutcome } from "../oauth.ts";
+import type { RenewalOutcome } from "../renewal.ts";
 import type { LedgerRecord } from "../ledger.ts";
 import type { RunCheck } from "../scenario.ts";
 import type { SecretLocation } from "../secret-store.ts";
@@ -225,6 +226,22 @@ export const connectionAttempts = pgTable("sanoma_connection_attempts", {
   receivedAt: when(),
   consumedAt: when(),
   createdAt: when().notNull().defaultNow(),
+});
+
+/**
+ * Each OAuth connection's renewal (`renewal.ts`): the lease one process holds while it renews the
+ * grant (`holder`, until `leaseUntil`; `sentAt` once the refresh request may have reached the
+ * provider), when it was last renewed and how that ended, and when the next renewal is due, the
+ * deadline a worker that stops when quiet registers with its wakeup. Metadata only, never a token.
+ */
+export const connectionRenewals = pgTable("sanoma_connection_renewals", {
+  connectionId: text().primaryKey(),
+  holder: text(),
+  leaseUntil: when(),
+  sentAt: when(),
+  refreshedAt: when(),
+  outcome: text().$type<RenewalOutcome>(),
+  dueAt: when(),
 });
 
 /**

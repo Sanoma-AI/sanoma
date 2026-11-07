@@ -63,6 +63,8 @@ describe("the people types", () => {
       "sanoma.change.merge",
       "sanoma.change.close",
       "sanoma.connection.test",
+      "sanoma.connection.refresh",
+      "sanoma.connection.revoke",
       "sanoma.connection.prepare",
       "sanoma.connection.configure",
       "sanoma.connection.activate",

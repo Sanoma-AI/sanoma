@@ -13,6 +13,9 @@ import {
   type AuthenticationProblem,
   type Authentication,
   type CallAuthentication,
+  type OAuthAuthentication,
+  type OAuthGrant,
+  type AuthenticationIdentity,
 } from "./authentication.ts";
 import { type Connector, setupOf, VENDOR, defineConnector, defineDriver, type CallContext } from "./op.ts";
 import { isSecret, type Secret } from "./secret.ts";
@@ -22,11 +25,14 @@ import {
   type SecretAccess,
   type SecretLocation,
   type SecretStoreCapabilities,
+  type SecretValue,
 } from "./secret-store.ts";
 import { and, eq, getTableColumns, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./db.ts";
 import { connectionHealth, connections, connectionSetups } from "./db/company.ts";
-import { ConnectionAttempts, oauthApplication, requestGrant } from "./oauth.ts";
+import { ConnectionAttempts, oauthApplication, type OAuthClient, refreshGrant, requestGrant } from "./oauth.ts";
+import { ConnectionRenewals, LEASE_MS, type Lease, type RenewalState, renewalDue, renewalDueAt } from "./renewal.ts";
+import { RENEWAL_AGENT } from "./shared.ts";
 
 /** Serializable account reference; vendor literal prevents cross-connector selection in typed calls. */
 export interface ConnectionRef<V extends string = string> {
@@ -82,6 +88,8 @@ export interface ConnectionCard {
   updatedBy?: string;
   updatedAt?: string;
   health?: ConnectionHealth;
+  /** An OAuth grant's renewal: when it was last renewed, how that ended, and when the next is due. */
+  renewal?: RenewalState;
   /**
    * Why its credentials cannot be kept where they are bound (`authenticationStoreProblem`), found
    * before anyone consents: `read_only` (the method writes them, a refresh, and the binding or
@@ -110,6 +118,8 @@ export interface ConnectionHealth {
   externallyRenewed: boolean;
   /** When the credential last verified stops working (ISO 8601), when its verifier says. */
   expiresAt?: string;
+  /** When an OAuth grant was last renewed (ISO 8601). */
+  refreshedAt?: string;
 }
 export interface ConnectionSetup {
   target: ConnectionTarget;
@@ -339,13 +349,36 @@ export class ConnectionRegistry {
   readonly catalog: ConnectionCatalog;
   /** OAuth consent attempts, on the same database: what the callback and the exchange share. */
   readonly attempts: ConnectionAttempts;
+  /**
+   * OAuth grants' renewal leases and due times, always on the registry's own database, never a
+   * direct call's transaction (`onDatabase`): another process must see a lease at once, and an
+   * `uncertain` outcome must stay recorded when the call that met it fails.
+   */
+  readonly renewals: ConnectionRenewals;
   private readonly db: () => Promise<Db>;
+  /** The registry's own database, outside any direct call's transaction. */
+  private readonly own: () => Promise<Db>;
   private readonly secrets?: SecretAccess;
-  constructor(catalog: ConnectionCatalog, db: () => Promise<Db>, secrets?: SecretAccess) {
+  constructor(catalog: ConnectionCatalog, db: () => Promise<Db>, secrets?: SecretAccess, own = db) {
     this.catalog = catalog;
     this.db = db;
+    this.own = own;
     this.secrets = secrets;
-    this.attempts = new ConnectionAttempts(db);
+    this.attempts = new ConnectionAttempts(own);
+    this.renewals = new ConnectionRenewals(own);
+  }
+
+  /** True when a declared connection or rule connects by an `oauth2` method that renews its grants: the worker then renews them when due. */
+  get renews(): boolean {
+    return [...this.catalog.definitions.values(), ...this.catalog.rules.values()].some(
+      (c) => this.oauthMethod(c.vendor, c.method)?.oauth.refresh !== undefined,
+    );
+  }
+
+  /** The `oauth2` method `method` of `vendor`; undefined for a method of another kind. */
+  oauthMethod(vendor: string, method: string): OAuthAuthentication | undefined {
+    const found = this.catalog.methods.get(vendor)?.[method];
+    return found?.kind === "oauth2" ? found : undefined;
   }
 
   /** Release runtime-owned storage clients; the caller owns the database connection. */
@@ -355,7 +388,7 @@ export class ConnectionRegistry {
 
   /** A direct metadata write uses the same transaction as its default ledger record. */
   onDatabase(db: Db): ConnectionRegistry {
-    return new ConnectionRegistry(this.catalog, async () => db, this.secrets);
+    return new ConnectionRegistry(this.catalog, async () => db, this.secrets, this.own);
   }
 
   /** Safe card data only. Listing does not read credential values or contact a vendor. */
@@ -376,6 +409,7 @@ export class ConnectionRegistry {
         and(eq(connections.id, connectionHealth.connectionId), eq(connections.revision, connectionHealth.revision)),
       )
       .where(or(isNull(connections.owner), eq(connections.owner, actor)));
+    const renewals = await this.renewals.states();
     const found = new Map(rows.map((r) => [r.id, r]));
     const ids = new Set([...this.catalog.definitions.keys(), ...rows.filter((r) => r.rule).map((r) => r.id)]);
     const cards: ConnectionCard[] = [];
@@ -413,6 +447,7 @@ export class ConnectionRegistry {
         ...(row?.updatedBy && { updatedBy: row.updatedBy }),
         ...(row?.updatedAt && { updatedAt: row.updatedAt.toISOString() }),
         ...(storageProblem && { storageProblem }),
+        ...(row && method.kind === "oauth2" && renewals.has(id) && { renewal: renewals.get(id)! }),
         ...(row?.health &&
           row.checkedAt && {
             health: {
@@ -608,6 +643,14 @@ export class ConnectionRegistry {
   }
 
   async test(ref: ConnectionRef, actor: Principal): Promise<ConnectionHealth> {
+    const health = await this.check(ref, actor);
+    const refreshedAt = this.oauthMethod(ref.vendor, (await this.row(ref.$connection))?.method ?? "")
+      ? (await this.renewals.states()).get(ref.$connection)?.refreshedAt
+      : undefined;
+    return refreshedAt ? { ...health, refreshedAt } : health;
+  }
+
+  private async check(ref: ConnectionRef, actor: Principal): Promise<ConnectionHealth> {
     const setup = await this.setup({ connection: ref }, actor, "test");
     const row = await this.row(setup.id);
     if (!row) return { state: "missing", checkedAt: new Date().toISOString(), externallyRenewed: false };
@@ -739,8 +782,8 @@ export class ConnectionRegistry {
     return problems;
   }
 
-  private async row(id: string) {
-    const [row] = await (await this.db()).select().from(connections).where(eq(connections.id, id));
+  private async row(id: string, db = this.db) {
+    const [row] = await (await db()).select().from(connections).where(eq(connections.id, id));
     return row;
   }
 
@@ -788,23 +831,51 @@ export class ConnectionRegistry {
       refuse("The connection changed after authorization; start a new call");
   }
 
-  /** Only called inside an authorized driver boundary. No value escapes into workflow history. */
-  async authenticate(selected: ConnectionSnapshot, actor: string): Promise<CallAuthentication> {
+  /**
+   * Only called inside an authorized driver boundary. No value escapes into workflow history. An
+   * OAuth grant that renews is renewed first when it is due (`renewalDue`), or when `rejected`
+   * names the version a provider just refused (`OAuthFlow.tokenRejected`) and nobody replaced it
+   * since. A due renewal that cannot be made now (`unavailable`) keeps a grant still unexpired.
+   */
+  async authenticate(selected: ConnectionSnapshot, actor: string, rejected?: string): Promise<CallAuthentication> {
     await this.assertCurrent(selected, actor);
     const method = this.catalog.methods.get(selected.vendor)?.[selected.method];
     if (!method?.verify) throw new AuthenticationError("unsupported");
     const material: CallAuthentication = { method: selected.method, kind: method.kind };
     if (method.kind !== "workload-identity") {
       if (!this.secrets || !selected.credentials) throw new SecretStoreError("unavailable");
-      const bundle = await this.secrets.read(selected.credentials.$secret);
+      let bundle = await this.secrets.read(selected.credentials.$secret);
       if (!bundle) throw new AuthenticationError("missing");
       material.credentials = decodeCredentials(method, bundle.value);
+      if (method.kind === "oauth2" && method.oauth.refresh) {
+        const grant = material.credentials as OAuthGrant;
+        if (rejected !== undefined || renewalDue(grant)) {
+          try {
+            bundle = await this.renew(selected, method, actor, rejected);
+            material.credentials = decodeCredentials(method, bundle.value);
+          } catch (error) {
+            const usable = rejected === undefined && grant.expiresAt !== undefined && grant.expiresAt > Date.now();
+            if (!usable || authenticationProblem(error) !== "unavailable") throw error;
+          }
+        }
+      }
       material.credentialVersion = bundle.version;
     }
-    const identity = await verifyAuthentication(method, material.credentials, {
-      connectionId: selected.id,
-      vendor: selected.vendor,
-    });
+    const context = { connectionId: selected.id, vendor: selected.vendor };
+    let identity: AuthenticationIdentity;
+    try {
+      identity = await verifyAuthentication(method, material.credentials, context);
+    } catch (error) {
+      // The verifier's check is a call too: a grant it finds rejected is renewed once, as a driver's would be.
+      if (
+        authenticationProblem(error) !== "rejected" ||
+        method.kind !== "oauth2" ||
+        !method.oauth.refresh ||
+        rejected !== undefined
+      )
+        throw error;
+      return this.authenticate(selected, actor, material.credentialVersion);
+    }
     if (identity.account !== selected.account) throw new AuthenticationError("wrong_account");
     if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(selected.scopes)].toSorted()))
       throw new AuthenticationError("scope_changed");
@@ -812,6 +883,142 @@ export class ConnectionRegistry {
     await this.assertCurrent(selected, actor);
     if (identity.expiresAt !== undefined) material.expiresAt = identity.expiresAt;
     return material;
+  }
+
+  /**
+   * Holds connection `id`'s renewal lease for `body`, which gives it up: while another process
+   * holds it, waits (`waiting`'s answer, once it has one, ends the wait instead), at most a lease's
+   * time and a little more (`unavailable`).
+   */
+  private async leased<T>(id: string, body: (lease: Lease) => Promise<T>, waiting?: () => Promise<T | undefined>) {
+    const until = Date.now() + LEASE_MS + 5_000;
+    for (;;) {
+      const lease = await this.renewals.take(id);
+      if (lease) return body(lease);
+      const settled = await waiting?.();
+      if (settled !== undefined) return settled;
+      if (Date.now() > until) throw new AuthenticationError("unavailable");
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  /**
+   * Marks a connected account whose grant may have been renewed at the provider and not stored
+   * `uncertain`, under a new revision so that no call pinned to the old one goes on: Reconnect.
+   * Only from `revision`, so a reconnect or disconnect since is never undone.
+   */
+  private async renewalUncertain(id: string, revision: string, actor: string): Promise<void> {
+    await (
+      await this.own()
+    )
+      .update(connections)
+      .set({ status: "uncertain", revision: randomUUID(), updatedBy: actor })
+      .where(and(eq(connections.id, id), eq(connections.revision, revision), eq(connections.status, "connected")));
+  }
+
+  /**
+   * The connection's grant renewed with its refresh token (`refreshGrant`), under its lease, and
+   * written with the version it replaces. `rejected`: the version a provider refused, renewed unless
+   * another process replaced it meanwhile; else renewed only when due (`renewalDue`). A lease whose
+   * last holder lapsed after sending, a renewal with no answer, and a renewed grant the store did
+   * not keep leave the connection `uncertain`: a refresh token is never sent twice.
+   */
+  private async renew(
+    selected: ConnectionSnapshot,
+    method: OAuthAuthentication,
+    actor: string,
+    rejected?: string,
+  ): Promise<SecretValue> {
+    const secrets = this.secrets;
+    const credential = selected.credentials?.$secret;
+    const client = this.declarationOf(selected.id, selected.vendor)?.client?.$secret;
+    if (!secrets || !credential || !client) throw new AuthenticationError("unsupported");
+    const replaced = (current: SecretValue | undefined) =>
+      current !== undefined &&
+      (rejected !== undefined ? current.version !== rejected : !renewalDue(decodeCredentials(method, current.value)));
+    return this.leased(
+      selected.id,
+      async ({ holder, abandoned }) => {
+        let sent = false;
+        try {
+          if (abandoned) throw new AuthenticationError("uncertain");
+          const current = await secrets.read(credential);
+          if (!current) throw new AuthenticationError("missing");
+          if (replaced(current)) {
+            await this.renewals.release(selected.id, holder);
+            return current;
+          }
+          const row = await this.row(selected.id, this.own);
+          if (row?.revision !== selected.revision || row.status !== "connected")
+            refuse("The connection changed; start a new call");
+          const app = await secrets.read(client);
+          if (!app) throw new AuthenticationError("missing");
+          const application: OAuthClient = decodeCredentials(oauthApplication, app.value);
+          if (!(await this.renewals.sending(selected.id, holder))) throw new AuthenticationError("unavailable");
+          sent = true;
+          const grant = await refreshGrant(method.oauth, application, decodeCredentials(method, current.value));
+          const value = encodeCredentials(method, grant);
+          let written: SecretValue;
+          try {
+            written = await secrets.write(credential, value, { expectedVersion: current.version, by: actor });
+          } catch {
+            // The provider issued a grant and the store did not keep it (or another writer moved it).
+            throw new AuthenticationError("uncertain");
+          }
+          await this.renewals.release(selected.id, holder, { outcome: "refreshed", dueAt: renewalDueAt(grant) });
+          await (
+            await this.own()
+          )
+            .update(connectionHealth)
+            .set({
+              credentialVersion: written.version,
+              expiresAt: grant.expiresAt === undefined ? null : new Date(grant.expiresAt),
+            })
+            .where(
+              and(eq(connectionHealth.connectionId, selected.id), eq(connectionHealth.revision, selected.revision)),
+            );
+          return { value, version: written.version };
+        } catch (error) {
+          const problem = authenticationProblem(error) ?? (sent ? "uncertain" : undefined);
+          if (problem === "uncertain") await this.renewalUncertain(selected.id, selected.revision, actor);
+          // A refusal for good schedules nothing more; one worth asking again keeps its due time.
+          await this.renewals.release(
+            selected.id,
+            holder,
+            problem ? { outcome: problem, ...(problem !== "unavailable" && { dueAt: null }) } : {},
+          );
+          throw problem ? new AuthenticationError(problem) : error;
+        }
+      },
+      async () => {
+        const current = await secrets.read(credential);
+        return replaced(current) ? current : undefined;
+      },
+    );
+  }
+
+  /**
+   * Renews a connected account's OAuth grant if it is due, as `sanoma.connection.refresh` (the
+   * worker's renewal agent, when its due time comes; or anyone the policy lets): its outcome, and
+   * when the grant now expires. The renewal agent renews any account's; anyone else only the company's or their own.
+   */
+  async refresh(ref: ConnectionRef, actor: Principal): Promise<{ id: string; refreshed: boolean; expiresAt?: number }> {
+    const row = await this.owned(ref, actor.id === RENEWAL_AGENT ? undefined : actor.id);
+    const method = this.oauthMethod(row.vendor, row.method);
+    if (!method?.oauth.refresh || !row.credential || !this.secrets) throw new AuthenticationError("unsupported");
+    if (row.status !== "connected") refuse("The connection is not connected");
+    const before = await this.secrets.read(row.credential);
+    const after = await this.renew(snapshot(row), method, actor.id);
+    const { expiresAt } = decodeCredentials(method, after.value);
+    return { id: row.id, refreshed: after.version !== before?.version, ...(expiresAt !== undefined && { expiresAt }) };
+  }
+
+  /** The declaration a connection's row is of: its rule's, or the declared connection. */
+  private declarationOf(id: string, vendor: string): ConnectionDefinition | ConnectionRule | undefined {
+    const declared = this.catalog.definitions.get(id);
+    if (declared) return declared.vendor === vendor ? declared : undefined;
+    const rule = [...this.catalog.rules.entries()].find(([ruleId]) => id.startsWith(`${ruleId}/`))?.[1];
+    return rule?.vendor === vendor ? rule : undefined;
   }
 
   /**
@@ -858,14 +1065,25 @@ export class ConnectionRegistry {
         actor,
       );
       const ref = { vendor: selected.vendor, $connection: selected.id };
-      try {
-        const current = await this.secrets.read(setup.credential);
-        const written = await this.secrets.write(setup.credential, encodeCredentials(method, grant), {
-          expectedVersion: current?.version ?? null,
-          by: actor.id,
-        });
-        await this.recordStoredVersion(selected.id, selected.revision, written.version);
-      } catch {
+      const secrets = this.secrets;
+      const credential = setup.credential;
+      // Under the renewal lease: a renewal of the grant this one replaces never writes over it.
+      const kept = await this.leased(selected.id, async ({ holder }) => {
+        try {
+          const current = await secrets.read(credential);
+          const written = await secrets.write(credential, encodeCredentials(method, grant), {
+            expectedVersion: current?.version ?? null,
+            by: actor.id,
+          });
+          await this.recordStoredVersion(selected.id, selected.revision, written.version);
+        } catch {
+          await this.renewals.release(selected.id, holder);
+          return false;
+        }
+        await this.renewals.release(selected.id, holder, { fresh: true, dueAt: renewalDueAt(grant) });
+        return true;
+      }).catch(() => false);
+      if (!kept) {
         // The provider issued the grant; whether it is stored is not known. Reconnect, never replay.
         await this.uncertain(ref, selected.revision, actor.id);
         throw new AuthenticationError("uncertain");
@@ -953,11 +1171,8 @@ export class ConnectionRegistry {
     return snapshot(row);
   }
 
-  async disconnect(
-    ref: ConnectionRef,
-    expectedRevision: string,
-    actor: string,
-  ): Promise<{ id: string; revision: string; status: "disconnected" }> {
+  /** A declared connection's row, refused for another principal's (`owner`, unless undefined: anyone's). */
+  private async owned(ref: ConnectionRef, owner: string | undefined) {
     const row = await this.row(ref.$connection);
     if (
       !row ||
@@ -965,8 +1180,23 @@ export class ConnectionRegistry {
       (row.rule ? !this.catalog.rules.has(row.rule) : !this.catalog.definitions.has(row.id))
     )
       refuse("The connection is not declared");
-    if (row.rule && row.owner !== actor)
+    if (row.rule && owner !== undefined && row.owner !== owner)
       throw new SanomaError("policy_denied", "The connection belongs to another principal");
+    return row;
+  }
+
+  /**
+   * Makes the account unusable under a new revision. An OAuth grant Sanoma keeps is deleted with
+   * it, and its renewal forgotten; the OAuth application (`client`), which other accounts may
+   * share, stays. Any other method's value stays where it is, and an externally managed value is
+   * never deleted. Calls already at the provider are not undone.
+   */
+  async disconnect(
+    ref: ConnectionRef,
+    expectedRevision: string,
+    actor: string,
+  ): Promise<{ id: string; revision: string; status: "disconnected" }> {
+    const row = await this.owned(ref, actor);
     const revision = randomUUID();
     const [changed] = await (
       await this.db()
@@ -976,7 +1206,54 @@ export class ConnectionRegistry {
       .where(and(eq(connections.id, row.id), eq(connections.revision, expectedRevision)))
       .returning({ id: connections.id });
     if (!changed) refuse("The connection changed; reload before disconnecting it");
+    if (this.oauthMethod(row.vendor, row.method) && row.credential && this.secrets) {
+      const location = this.secrets.location(row.credential);
+      // A store that cannot delete keeps it, unusable: the account's new revision refuses every call.
+      if (
+        location.management === "sanoma" &&
+        location.namespace !== "" &&
+        this.secrets.store.capabilities.deletion !== "unsupported"
+      ) {
+        await this.renewals.forget(row.id);
+        await this.dropGrant(row.credential, actor);
+      }
+    }
     return { id: row.id, revision, status: "disconnected" };
+  }
+
+  /** Deletes a stored grant, once more should a renewal have replaced it between the read and the delete. */
+  private async dropGrant(credential: string, actor: string): Promise<void> {
+    try {
+      await this.secrets!.delete(credential, { by: actor });
+    } catch (error) {
+      if ((error as { code?: string })?.code !== "conflict") throw error;
+      await this.secrets!.delete(credential, { by: actor });
+    }
+  }
+
+  /**
+   * Revokes an OAuth grant at the provider (the method's `revoke`, with the company's application),
+   * then disconnects the account as `disconnect` does, its grant deleted. `unsupported` for a
+   * method that cannot revoke, and nothing changes when the provider did not confirm (`unavailable`).
+   */
+  async revoke(
+    ref: ConnectionRef,
+    expectedRevision: string,
+    actor: string,
+  ): Promise<{ id: string; revision: string; status: "disconnected" }> {
+    const row = await this.owned(ref, actor);
+    const method = this.oauthMethod(row.vendor, row.method);
+    const client = this.declarationOf(row.id, row.vendor)?.client?.$secret;
+    if (!method?.revoke || !row.credential || !client || !this.secrets) throw new AuthenticationError("unsupported");
+    if (row.revision !== expectedRevision) refuse("The connection changed; reload before revoking it");
+    const [bundle, app] = [await this.secrets.read(row.credential), await this.secrets.read(client)];
+    if (!bundle || !app) throw new AuthenticationError("missing");
+    try {
+      await method.revoke(decodeCredentials(method, bundle.value), decodeCredentials(oauthApplication, app.value));
+    } catch {
+      throw new AuthenticationError("unavailable");
+    }
+    return this.disconnect(ref, expectedRevision, actor);
   }
 
   private async save(row: ConnectionRow, expected: string | null, actor: string): Promise<void> {
@@ -1041,7 +1318,26 @@ export const connectionOps = defineConnector("sanoma", {
         ]),
         checkedAt: z.string(),
         externallyRenewed: z.boolean(),
+        // When the verified credential stops working, and when an OAuth grant was last renewed (ISO 8601).
+        expiresAt: z.string().optional(),
+        refreshedAt: z.string().optional(),
       }),
+      target: (input: { connection: ConnectionRef }) => input.connection.$connection,
+    },
+    refresh: {
+      effect: "access",
+      description:
+        "Renew a connected account's OAuth grant with its refresh token, when it is due; the worker's renewal agent calls it",
+      input: z.object({ connection: connectionRefSchema }),
+      output: z.object({ id: z.string(), refreshed: z.boolean(), expiresAt: z.number().optional() }),
+      target: (input: { connection: ConnectionRef }) => input.connection.$connection,
+    },
+    revoke: {
+      effect: "access",
+      description:
+        "Revoke an account's OAuth grant at the provider, then disconnect it and delete the grant; the OAuth application stays",
+      input: z.object({ connection: connectionRefSchema, expectedRevision: z.string() }),
+      output: z.object({ id: z.string(), revision: z.string(), status: z.literal("disconnected") }),
       target: (input: { connection: ConnectionRef }) => input.connection.$connection,
     },
     prepare: {
@@ -1143,6 +1439,8 @@ export function connectionDriver(registry: ConnectionRegistry) {
   return defineDriver(connectionOps, {
     connection: {
       test: (input, call) => registry.test(input.connection, actor(call)),
+      refresh: (input, call) => registry.refresh(input.connection, actor(call)),
+      revoke: (input, call) => registry.revoke(input.connection, input.expectedRevision, actor(call).id),
       prepare: gate,
       configure: (input, call) =>
         registry.configure(
