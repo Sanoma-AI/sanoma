@@ -2,8 +2,8 @@
 // (`appHandler`) over the snapshot and config the bundle was built with, a client of each
 // request's own on the company's database, the staff's and the sites' sign-ins (Better Auth,
 // composed as the `sanoma` bin composes them on Node) on that client's pool, and the Worker's
-// assets for the client build and the prerendered pages. What needs the checkout is the worker's
-// (`steps/`), not in the bundle.
+// assets for the client build and the sites' public files (a prerendered page is the main
+// module's). What needs the checkout is the worker's (`steps/`), not in the bundle.
 // First: the runtime's registrations (the root and its snapshot, Cedar, DBOS's cron parser), made
 // before any company file evaluates, through the routes too.
 import { root, snapshot } from "virtual:sanoma/app-runtime";
@@ -20,13 +20,7 @@ import { domainsOf } from "sanoma/workflows/shared";
 import { betterAuthStaffLogin } from "sanoma/better-auth";
 import start from "@tanstack/react-start/server-entry";
 import { config } from "virtual:sanoma/app-bundle";
-import {
-  type AppBundleContext,
-  type AppBundleEnv,
-  type AppHost,
-  PRERENDERED,
-  prerenderedAsset,
-} from "../app-bundle.ts";
+import { type AppBundleContext, type AppBundleEnv, type AppHost, PRERENDERED } from "../app-bundle.ts";
 import type { AdmittingLogin } from "../context.ts";
 import { type AppHandler, appHandler } from "../handler.ts";
 import { admitting } from "../login/admission.ts";
@@ -34,6 +28,7 @@ import { publicFront, servedOnceMade, siteLogin } from "../login/public.ts";
 import { staffLogin } from "../login/staff.ts";
 import { plain } from "../server/webhooks.ts";
 import { servedOnWorker } from "../snapshot.ts";
+import { assetAt } from "./assets.ts";
 
 // The runtime, bundled (its registrations made by `virtual:sanoma/app-runtime`), on a database the
 // worker prepares, never this Worker.
@@ -110,7 +105,7 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
       sites,
       domains,
       entry: start,
-      files: (request, site) => assetFor(request, site, env),
+      files: (request) => fileFor(request, env),
     },
     snapshot,
   );
@@ -124,27 +119,16 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
 }
 
 /**
- * A GET's or HEAD's file from the Worker's assets: one of the client build at a path with an
- * extension (a site's public files too; `/assets/*` is the assets' own, never the Worker's), else
- * on a public site's domain the page prerendered there, unless a query, which the page may read,
- * asks otherwise. Undefined when the assets have none.
+ * A GET's or HEAD's file from the Worker's assets, at a path with an extension: the client build's
+ * (`/assets/*` is the assets' own, never the Worker's) or a site's public file. Never the
+ * prerendered pages' own path: a prerendered page is the main module's, answered without the app.
+ * Undefined when the assets have none.
  */
-async function assetFor(request: Request, site: string | undefined, env: AppBundleEnv) {
+async function fileFor(request: Request, env: AppBundleEnv): Promise<Response | undefined> {
   if (request.method !== "GET" && request.method !== "HEAD") return undefined;
-  const url = new URL(request.url);
-  const path = assetPath(url, site);
-  if (path === undefined) return undefined;
-  const asset = await env.ASSETS.fetch(new Request(new URL(path, url), request));
-  if (asset.ok) return asset;
-  await asset.body?.cancel();
-  return undefined;
-}
-
-/** Where in the assets the request's file is: none for the prerendered pages' own path, nor a page with a query. */
-function assetPath(url: URL, site: string | undefined): string | undefined {
-  if (/\.[^/]+$/.test(url.pathname)) return url.pathname.startsWith(`${PRERENDERED}/`) ? undefined : url.pathname;
-  if (site === undefined || url.search) return undefined;
-  return prerenderedAsset(url.hostname, url.pathname);
+  const { pathname } = new URL(request.url);
+  if (!/\.[^/]+$/.test(pathname) || pathname.startsWith(`${PRERENDERED}/`)) return undefined;
+  return assetAt(request, env, pathname);
 }
 
 /** `response`, its body passed on as it streams, then `close` called once it is sent (or failed). */

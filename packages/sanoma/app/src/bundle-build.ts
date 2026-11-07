@@ -131,21 +131,32 @@ const entries = (paths: string[], name: string) =>
  */
 const RUNTIME = "virtual:sanoma/app-runtime";
 
+/** The pages prerendered, by their assets' paths, which the main module answers from the assets without the app. */
+const PRERENDERED_PAGES = "virtual:sanoma/prerendered";
+
 /**
- * `virtual:sanoma/app-runtime`, which `worker/app.ts` imports first, and `virtual:sanoma/app-bundle`,
- * the config as `sanoma` loads it (its file's, with the declaration files joined, `joinDeclarations`).
+ * `virtual:sanoma/app-runtime`, which `worker/app.ts` imports first, `virtual:sanoma/app-bundle`,
+ * the config as `sanoma` loads it (its file's, with the declaration files joined, `joinDeclarations`),
+ * and `virtual:sanoma/prerendered`, the assets' paths of `prerendered`, which `worker/main.ts` imports.
  */
-function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): Plugin {
+function bundleModule(root: string, configFile: string, snapshot: AppSnapshot, prerendered: readonly string[]): Plugin {
   const id = `\0${BUNDLE}`;
   const runtimeId = `\0${RUNTIME}`;
+  const prerenderedId = `\0${PRERENDERED_PAGES}`;
+  const ids = new Map([
+    [BUNDLE, id],
+    [RUNTIME, runtimeId],
+    [PRERENDERED_PAGES, prerenderedId],
+  ]);
   // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
   const fromRuntime = createRequire(manifestFile);
   const cedar = join(dirname(fromRuntime.resolve("@cedar-policy/cedar-wasm/nodejs")), "..", "web");
   return {
     name: "sanoma:app-bundle",
     enforce: "pre",
-    resolveId: (source) => (source === BUNDLE ? id : source === RUNTIME ? runtimeId : undefined),
+    resolveId: (source) => ids.get(source),
     load(loaded) {
+      if (loaded === prerenderedId) return `export const pages = ${JSON.stringify(prerendered)};\n`;
       if (loaded === runtimeId) {
         return [
           'import { useCedarWasm, useRootSnapshot, useTimeMatcher } from "sanoma/workflows";\n',
@@ -175,13 +186,22 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): 
   };
 }
 
-/** The Worker's plugins: the bundle's module, the runtime's version and files, DBOS's optional packages stubbed, Node-only imports refused, and Cloudflare's over the ssr environment. */
-async function bundlePlugins(root: string, configFile: string, snapshot: AppSnapshot): Promise<PluginOption[]> {
+/**
+ * The Worker's plugins: the bundle's modules, the runtime's version and files, DBOS's optional
+ * packages stubbed, Node-only imports refused, the chunks the main module never reaches left out,
+ * and Cloudflare's over the ssr environment.
+ */
+async function bundlePlugins(
+  root: string,
+  configFile: string,
+  snapshot: AppSnapshot,
+  prerendered: readonly string[],
+): Promise<PluginOption[]> {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
   const { src } = appSources();
   const missing = join(pkgDir, "src", "worker", "missing.js");
   return [
-    bundleModule(root, configFile, snapshot),
+    bundleModule(root, configFile, snapshot, prerendered),
     {
       // The runtime imports `sanoma`'s package.json for its version: only that, not its dependencies' names.
       name: "sanoma:runtime-version",
@@ -272,6 +292,27 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
         }
       },
     },
+    {
+      // The upload is what the main module reaches, by static and dynamic imports: a chunk whose
+      // only import went with the code tree-shaking removed (the runtime's `sandbox.ts`, Cucumber
+      // and faker with it, imported by a function the Worker never calls) is still emitted, and
+      // would only be uploaded and compiled for nothing.
+      name: "sanoma:reachable",
+      applyToEnvironment: ssr,
+      generateBundle(_options, bundle) {
+        const reached = new Set<string>();
+        const reach = (name: string) => {
+          const chunk = bundle[name];
+          if (reached.has(name) || chunk?.type !== "chunk") return;
+          reached.add(name);
+          for (const next of [...chunk.imports, ...chunk.dynamicImports]) reach(next);
+        };
+        for (const file of Object.values(bundle)) if (file.type === "chunk" && file.isEntry) reach(file.fileName);
+        for (const file of Object.values(bundle)) {
+          if (file.type === "chunk" && !reached.has(file.fileName)) delete bundle[file.fileName];
+        }
+      },
+    },
     cloudflare({
       viteEnvironment: { name: "ssr" },
       persistState: false,
@@ -343,13 +384,24 @@ const filesIn = (dir: string): string[] =>
 
 const MODULE_TYPES: Record<string, AppBundle["modules"][number]["type"]> = { js: "esm", mjs: "esm", wasm: "wasm" };
 
-/** The pages to prerender: each public site's with no login, on its domain, that no call is made from. */
-function pagesToPrerender(snapshot: AppSnapshot, domains: Readonly<Record<string, string>>) {
+type PageToPrerender = AppBundle["prerendered"][number];
+
+/**
+ * The pages to prerender: each public site's with no login, on its domain, that no call is made
+ * from, as its sitemap lists them, with the published content as it is now.
+ */
+async function pagesOf(snapshot: AppSnapshot, domains: Readonly<Record<string, string>>): Promise<PageToPrerender[]> {
+  const { sitemapEntries } = await import("./seo.ts");
   return snapshot.description.sites.flatMap((site) => {
     const domain = domains[site.name]?.toLowerCase();
     // A site with a login shows each visitor their own pages: nothing of it is prerendered.
     if (!servedOnWorker(site) || site.login !== undefined || !domain) return [];
-    return { site, domain, pages: prerenderedPages(site) };
+    const pages = { ...site, pages: prerenderedPages(site) };
+    return sitemapEntries(pages, `https://${domain}`, snapshot.published).flatMap(({ loc }) => {
+      const path = new URL(loc).pathname;
+      const asset = prerenderedAsset(domain, path);
+      return asset === undefined ? [] : [{ site: site.name, domain, path, asset }];
+    });
   });
 }
 
@@ -440,17 +492,8 @@ async function runOnWorkerd(
   server: string,
   client: string,
   main: string,
-  targets: ReturnType<typeof pagesToPrerender>,
-  published: AppSnapshot["published"],
-): Promise<AppBundle["prerendered"]> {
-  const { sitemapEntries } = await import("./seo.ts");
-  const pages = targets.flatMap(({ site, domain, pages: prerendered }) =>
-    sitemapEntries({ ...site, pages: prerendered }, `https://${domain}`, published).map(({ loc }) => ({
-      site: site.name,
-      domain,
-      path: new URL(loc).pathname,
-    })),
-  );
+  pages: readonly PageToPrerender[],
+): Promise<void> {
   const { unstable_startWorker } = await import("wrangler");
   const dir = mkdtempSync(join(tmpdir(), "sanoma-prerender-"));
   const probe = join(server, PROBE);
@@ -471,7 +514,7 @@ async function runOnWorkerd(
         ],
         assets: { directory: client, binding: "ASSETS", html_handling: "none", not_found_handling: "none" },
         vars: {
-          SANOMA_DOMAINS: domainsText(Object.fromEntries(targets.map(({ site, domain }) => [site.name, domain]))),
+          SANOMA_DOMAINS: domainsText(Object.fromEntries(pages.map(({ site, domain }) => [site, domain]))),
           DATABASE: { connectionString: "postgresql://prerender.invalid/none" },
           // The logins are made with the handler, their keys derived from this; none signs anything a prerendered page holds.
           SANOMA_SIGNING_KEY: randomBytes(32).toString("base64"),
@@ -504,19 +547,14 @@ async function runOnWorkerd(
           `the app on the Cloudflare Worker answered /healthz ${health.response.status}: ${health.text.slice(0, 200)}`,
         );
       }
-      const rendered: AppBundle["prerendered"] = [];
       for (const page of pages) {
         const { response, text: html } = await answer(`https://${page.domain}${page.path}`);
         if (!response.ok)
           throw new Error(`prerendering ${page.site}${page.path} answered ${response.status}: ${html.slice(0, 200)}`);
-        const asset = prerenderedAsset(page.domain, page.path);
-        if (!asset) continue;
-        const file = join(client, ...asset.split("/"));
+        const file = join(client, ...page.asset.split("/"));
         mkdirSync(dirname(file), { recursive: true });
         writeFileSync(file, html);
-        rendered.push({ ...page, asset });
       }
-      return rendered;
     } finally {
       await worker.dispose();
     }
@@ -546,6 +584,7 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
     log?.(`${dir} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
   }
   const snapshot = await appSnapshot(config);
+  const pages = await pagesOf(snapshot, options.domains ?? {});
   const outDir = join(root, ".sanoma", "app", "bundle", `build.${process.pid}.tmp`);
   // Cloudflare's plugin points its own preview at the build through `<root>/.wrangler/deploy`.
   const wrangler = join(root, ".wrangler");
@@ -553,7 +592,15 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
   rmSync(outDir, { recursive: true, force: true });
   const vite = await import("vite");
   const built: InlineConfig = {
-    ...repoConfig(root, await bundlePlugins(root, config.file, snapshot)),
+    ...repoConfig(
+      root,
+      await bundlePlugins(
+        root,
+        config.file,
+        snapshot,
+        pages.map(({ asset }) => asset),
+      ),
+    ),
     build: { outDir, emptyOutDir: true },
     logLevel: "warn",
     customLogger: quietLogger(vite, log),
@@ -567,14 +614,7 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
     const client = join(outDir, "client");
     const server = join(outDir, "server");
     const { main } = JSON.parse(readFileSync(join(server, "wrangler.json"), "utf8")) as { main: string };
-    const prerendered = await runOnWorkerd(
-      root,
-      server,
-      client,
-      main,
-      pagesToPrerender(snapshot, options.domains ?? {}),
-      snapshot.published,
-    );
+    await runOnWorkerd(root, server, client, main, pages);
     return {
       version: snapshot.version,
       mainModule: main,
@@ -601,7 +641,7 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
         }),
       compatibilityDate: COMPATIBILITY_DATE,
       compatibilityFlags: [...COMPATIBILITY_FLAGS],
-      prerendered,
+      prerendered: pages,
     };
   } finally {
     rmSync(outDir, { recursive: true, force: true });

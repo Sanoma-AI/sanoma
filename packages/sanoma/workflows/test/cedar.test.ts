@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,10 +23,12 @@ import {
   loadPolicies,
   memoryLedger,
   SanomaClient,
+  type CedarWasm,
   type PolicyCall,
   policyOpOf,
   readPolicyFiles,
   resolveConfig,
+  useCedarWasm,
   validatePolicies,
   VISITOR_DENIED,
 } from "../src/index.ts";
@@ -407,6 +410,23 @@ describe("cedarPolicy", () => {
       kind: "deny",
       reason: expect.stringMatching(/^The call does not fit the Cedar schema: .*amount/),
     });
+  });
+
+  it("loads Cedar and parses its schema on its first question, not when it is made", async () => {
+    const nodeCedar = createRequire(import.meta.url)("@cedar-policy/cedar-wasm/nodejs") as CedarWasm;
+    let loads = 0;
+    useCedarWasm(() => (loads++, nodeCedar));
+    try {
+      const fresh = cedarPolicy(resolved, loaded.policies, people);
+      expect([fresh.version, loads]).toEqual([policy.version, 0]);
+      expect(await fresh(refundCall(2_000_000, "bo"))).toMatchObject({
+        kind: "approve",
+        approver: { group: "finance" },
+      });
+      expect(loads).toBe(1);
+    } finally {
+      useCedarWasm(() => nodeCedar);
+    }
   });
 
   it("is versioned by its text", () => {

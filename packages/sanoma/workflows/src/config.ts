@@ -738,14 +738,21 @@ function makersOf<K extends keyof ConnectorSetup>(
 
 /**
  * What the runtime reads from `config`'s root that a bundle carries where the files are not
- * (`useRootSnapshot`): the app's name and versions as `resolved` has them, the policy files and
- * the people the data files declare.
+ * (`useRootSnapshot`): the app's name and versions as `resolved` has them, the policy files with
+ * the policies `resolved` checked from them, and the people the data files declare.
  */
 export function readRootSnapshot(config: SanomaConfig, resolved: ResolvedConfig = resolveConfig(config)): RootSnapshot {
   const root = rootOf(config);
   if (root === undefined) throw new Error("A config with no root has no files to carry");
-  const { appName, version, builtInCodes } = resolved;
-  return { appName, version, builtInCodes, policies: readPolicyFiles(root), people: readPeople(root) };
+  const { appName, version, builtInCodes, policies = [], policyProblems: problems } = resolved;
+  return {
+    appName,
+    version,
+    builtInCodes,
+    policies: readPolicyFiles(root),
+    checkedPolicies: { policies, problems },
+    people: readPeople(root),
+  };
 }
 
 /**
