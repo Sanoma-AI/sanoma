@@ -41,12 +41,27 @@ if (journals.length === 0) {
 
 const problems: string[] = [];
 const atBase = new Set(journalsOf(base));
-// A folder renamed or deleted: every database past its migrations would start them over under the new name.
-for (const path of atBase) if (!journals.includes(path)) problems.push(`${path}: a journal on ${base}, and gone`);
+/**
+ * Each journal a move took elsewhere, by its path now: its path on the base. A database knows a
+ * folder by its journal table, not its path, so a moved folder is the same migrations.
+ */
+const movedFrom = new Map(
+  git("diff", "-M", "--name-status", "--diff-filter=R", base, "--")
+    .split("\n")
+    .map((line) => line.split("\t"))
+    .filter(([status, from, to]) => status?.startsWith("R") && JOURNAL.test(from!) && JOURNAL.test(to!))
+    .map(([, from, to]) => [to!, from!]),
+);
+const followed = new Set(movedFrom.values());
+// A folder deleted: every database past its migrations would start them over under another one.
+for (const path of atBase) {
+  if (!journals.includes(path) && !followed.has(path)) problems.push(`${path}: a journal on ${base}, and gone`);
+}
 for (const path of journals) {
-  if (!atBase.has(path)) continue;
+  const was = movedFrom.get(path) ?? path;
+  if (!atBase.has(was)) continue;
   const head: MigrationsJournal = JSON.parse(readFileSync(join(repo, path), "utf8"));
-  const before: MigrationsJournal = JSON.parse(git("show", `${base}:${path}`));
+  const before: MigrationsJournal = JSON.parse(git("show", `${base}:${was}`));
   const known = new Set(before.entries.map((e) => e.tag));
   const newest = Math.max(0, ...before.entries.map((e) => e.when));
   let idx = before.entries.length;
