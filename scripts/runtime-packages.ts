@@ -9,15 +9,19 @@ import { execFile, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs, promisify } from "node:util";
+import type { Manifest } from "./release-check.ts";
 
-const { values } = parseArgs({ options: { public: { type: "boolean" } } });
-
-interface Manifest {
-  name: string;
-  version: string;
-  /** The package's directory, absolute, as `pnpm ls --json` gives it. */
-  path: string;
-  private?: boolean;
+/**
+ * The workspace's public packages, each with its `publishConfig` (which `pnpm ls` leaves out). Here, not in
+ * release-check.ts, which needs `semver`: this runs with no install.
+ */
+export function workspacePackages(): Manifest[] {
+  return (JSON.parse(execFileSync("pnpm", ["-r", "ls", "--depth", "-1", "--json"], { encoding: "utf8" })) as Manifest[])
+    .filter((pkg) => !pkg.private)
+    .map((pkg) => {
+      const { publishConfig } = JSON.parse(readFileSync(join(pkg.path, "package.json"), "utf8")) as Manifest;
+      return { ...pkg, publishConfig };
+    });
 }
 
 /** The version npm has of `name` now, or undefined when it has no such package. */
@@ -32,13 +36,12 @@ async function published(name: string): Promise<string | undefined> {
   }
 }
 
-const workspace = JSON.parse(
-  execFileSync("pnpm", ["ls", "-r", "--depth", "-1", "--json"], { encoding: "utf8" }),
-) as Manifest[];
-const manifests = workspace
-  .filter((pkg) => !pkg.private && !JSON.parse(readFileSync(join(pkg.path, "package.json"), "utf8")).publishConfig?.os)
-  .toSorted((a, b) => a.name.localeCompare(b.name));
-
-// Asked of npm all at once: one request each.
-const versions = await Promise.all(manifests.map(({ name, version }) => (values.public ? published(name) : version)));
-console.log(manifests.flatMap(({ name }, i) => (versions[i] ? [`${name}@${versions[i]}`] : [])).join(" "));
+if (import.meta.main) {
+  const { values } = parseArgs({ options: { public: { type: "boolean" } } });
+  const manifests = workspacePackages()
+    .filter((pkg) => !pkg.publishConfig?.os)
+    .toSorted((a, b) => a.name.localeCompare(b.name));
+  // Asked of npm all at once: one request each.
+  const versions = await Promise.all(manifests.map(({ name, version }) => (values.public ? published(name) : version)));
+  console.log(manifests.flatMap(({ name }, i) => (versions[i] ? [`${name}@${versions[i]}`] : [])).join(" "));
+}

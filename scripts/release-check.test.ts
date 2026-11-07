@@ -75,6 +75,20 @@ describe("changedSince", () => {
     expect(changedSince(pkg, root)).toContain(next);
   });
 
+  it("does not count a moved download script, or a comment edited in it, but counts its code", () => {
+    commit({ "packages/tools/download.ts": "// in tools\nfetch(1)\n" });
+    commit({ "packages/a/package.json": manifest("0.1.1") });
+    pkg = { ...pkg, version: "0.1.1" };
+    git("rm", "-q", "packages/tools/download.ts");
+    const move = commit({
+      "packages/scripts/download.ts": "// in scripts\nfetch(1)\n",
+      "packages/a/package.json": manifest("0.1.1", { scripts: { prepack: "node ../scripts/download.ts" } }),
+    });
+    expect(changedSince(pkg, root)).toEqual([]);
+    const edit = commit({ "packages/scripts/download.ts": "// in scripts\nfetch(2)\n" });
+    expect(changedSince(pkg, root)).toEqual([edit, move]);
+  });
+
   it("ignores source edits that were fully reverted before release", () => {
     commit({ "packages/a/src/index.ts": "2" });
     commit({ "packages/a/src/index.ts": "1" });
@@ -103,7 +117,7 @@ describe("releaseCheck", () => {
     ]);
   });
 
-  it("names a public version whose source changed, and the packages that pin it", () => {
+  it("names a public version of sanoma's whose source changed: one new version for them all", () => {
     const result = releaseCheck(
       [launcher, connector],
       npm([
@@ -114,14 +128,30 @@ describe("releaseCheck", () => {
     );
     expect(result.publish).toEqual([]);
     expect(result.problems).toEqual([
-      "sanoma@0.7.1 is on npm, but a1, b2, c3 and 2 more changed its source since: give it a new version",
-      "@sanoma-ai/connector-ghost@0.7.1 takes sanoma 0.7.1, not 0.7.2: give it a new version too",
+      "sanoma@0.7.1 is on npm, but a1, b2, c3 and 2 more changed its source since: give it and every package released with sanoma a new version",
+    ]);
+  });
+
+  it("names a binary whose source changed, and every package released with sanoma once one pins it", () => {
+    const binary = workspace("@sanoma-ai/bridge-linux-x64", "0.5.0");
+    const result = releaseCheck(
+      [launcher, connector, binary],
+      npm([
+        [launcher.name, { ...launcher, optionalDependencies: { [binary.name]: "0.5.0" } }],
+        [connector.name, published],
+        [binary.name, binary],
+      ]),
+      (p) => (p === binary ? ["a1"] : []),
+    );
+    expect(result.problems).toEqual([
+      "@sanoma-ai/bridge-linux-x64@0.5.0 is on npm, but a1 changed its source since: give it a new version",
+      "sanoma@0.7.1 takes @sanoma-ai/bridge-linux-x64 0.5.0, not 0.5.1: give it a new version too",
     ]);
   });
 
   it("names a package at a version other than sanoma's, but not a binary", () => {
     const stale = workspace("@sanoma-ai/connector-neon", "0.3.0");
-    const binary = { ...workspace("@sanoma-ai/bridge-linux-x64", "0.5.0"), publishConfig: { os: ["linux"] } };
+    const binary = workspace("@sanoma-ai/bridge-linux-x64", "0.5.0");
     const result = releaseCheck(
       [launcher, stale, binary],
       npm([
