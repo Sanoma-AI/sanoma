@@ -1,8 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { type Principal, resolveConfig, type SanomaConfig, type Source } from "sanoma/workflows";
 import { readPeople } from "sanoma/workflows/describe";
@@ -17,6 +16,7 @@ import { appSnapshot } from "../src/snapshot-build.ts";
 import { invitePerson, peopleSignIns } from "../src/server/people.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { pageApi } from "./page-api.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app, as data.test.ts does. People: `/people`, its
 // tabs and table from the people file, a row's declaration form over the list, Save through a
@@ -25,7 +25,6 @@ import { pageApi } from "./page-api.ts";
 // row's Invite link and its card. The tests in a browser need Google Chrome, or `CHROME_PATH`, and
 // skip without either.
 
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 const PEOPLE = "resources/people.ts";
 
 // A root of its own: three people (one admin, one whose name the file computes), an agent acting
@@ -90,7 +89,7 @@ const inviting: LoginProvider = {
 };
 
 beforeAll(async () => {
-  ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+  ensureSanomaBuilt();
   app = await startApp(testApp.config, { port: 0, source });
   inviter = await startApp(testApp.config, { port: 0, source, login: inviting });
 }, 120_000);

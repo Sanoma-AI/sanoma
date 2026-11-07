@@ -2,7 +2,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { defineConfig, memoryLedger, SanomaClient, startWorker, type Worker } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
@@ -10,6 +10,7 @@ import { type App, startApp } from "../src/index.ts";
 import { asApplyPlan, exportName, plannedRows, rebindWords, shortId, STEP_GROUPS } from "../src/lib/apply-plan.ts";
 import { PLAN } from "./fixtures/apply-plan.ts";
 import reviewPlan from "./fixtures/review-plan.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 describe("the change view's words", () => {
   it("tells an apply plan in an approval's details by its shape, as JSON or as itself", () => {
@@ -54,7 +55,6 @@ describe("the change view's words", () => {
 });
 
 describe("the change view in the app", () => {
-  const appDir = fileURLToPath(new URL("..", import.meta.url));
   const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
   // The company's data files, its lockfile also binding a declaration no data file has.
   const root = mkdtempSync(join(tmpdir(), "sanoma-app-plan-"));
@@ -80,7 +80,7 @@ describe("the change view in the app", () => {
   };
 
   beforeAll(async () => {
-    ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+    ensureSanomaBuilt();
     worker = await startWorker(config);
     app = await startApp(config, { port: 0 });
     client = await SanomaClient.connect(config);

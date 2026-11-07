@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import {
   defineAuthentication,
   defineConnection,
@@ -40,6 +39,7 @@ import {
   testConnection,
   validate,
 } from "../src/server/core.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 const authentication = defineAuthentication({
   kind: "fields",
@@ -128,11 +128,7 @@ describe("connection server boundary", () => {
   it("connects two accounts through masked forms and reviews the account before saving", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
-    ensureBuilt(
-      fileURLToPath(new URL("..", import.meta.url)),
-      ["dist/server/server.js"],
-      ["pnpm", "exec", "vite", "build"],
-    );
+    ensureSanomaBuilt();
     const server = await startApp(config, { port: 0 });
     const browser = await launch({ executablePath: chrome, headless: true });
     try {
@@ -181,11 +177,7 @@ describe("connection server boundary", () => {
   it("reviews external credentials without input controls and shows policy refusals for Test and Disconnect", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
-    ensureBuilt(
-      fileURLToPath(new URL("..", import.meta.url)),
-      ["dist/server/server.js"],
-      ["pnpm", "exec", "vite", "build"],
-    );
+    ensureSanomaBuilt();
     const address = { namespace: "default", path: "external/support" };
     const value = await store.write(address, encodeCredentials(authentication, credentials), {
       expectedVersion: null,
@@ -265,11 +257,7 @@ describe("connection server boundary", () => {
   it("offers dynamic-only account creation during onboarding", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
-    ensureBuilt(
-      fileURLToPath(new URL("..", import.meta.url)),
-      ["dist/server/server.js"],
-      ["pnpm", "exec", "vite", "build"],
-    );
+    ensureSanomaBuilt();
     const server = await startApp({ ...config, connections: [] }, { port: 0 });
     const browser = await launch({ executablePath: chrome, headless: true });
     try {

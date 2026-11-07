@@ -2,13 +2,12 @@ import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { github as githubConnector } from "@sanoma-ai/connector-github";
 import { resend } from "@sanoma-ai/connector-resend";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { neon } from "@sanoma-ai/connector-neon";
 import { fakeResend } from "@sanoma-ai/connector-resend/fake";
-import { ensureBuilt, testDatabaseUrl, withFake } from "sanoma/testing";
+import { testDatabaseUrl, withFake } from "sanoma/testing";
 import { fakeHost } from "sanoma/testing/host";
 import {
   defineConfig,
@@ -34,6 +33,7 @@ import { noWakeup } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 import { barLink } from "./bar-helpers.ts";
 import { callApi } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
@@ -43,7 +43,6 @@ import { GITHUB_APP, githubManifest, mintWakeupToken, setSetupToken, setupStatus
 // against a GitHub of msw handlers, the keys stored encrypted, and the status the page shows.
 // Needs Postgres and the built app, as app.test.ts does.
 
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "sanoma-setup-"));
 // Declared, so storing the App's keys admits who asked.
 mkdirSync(join(root, "resources"));
@@ -123,7 +122,7 @@ beforeAll(async () => {
   vi.stubEnv("SANOMA_SIGNING_KEY", KEY);
   for (const name of NAMES) vi.stubEnv(name, "");
   github.listen({ onUnhandledFrame: "bypass" });
-  ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+  ensureSanomaBuilt();
   app = await startApp(config, { port: 0 });
   client = await SanomaClient.connect(config);
   ctx = {

@@ -41,13 +41,18 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
   return linked;
 }
 
+/** The parts of `sanoma` a running company never loads (the test helpers, `sanoma dev`): not watched. */
+const NOT_RUN = new Set(["testing/dist", "dev/dist"]);
+
 /**
  * Where a package's build writes, which dev mode watches: each `dist` its `files` ships (`sanoma`'s
- * own and each of its parts', `workflows/dist`, `app/dist`, …), else its `dist/`.
+ * own and each of its parts', `workflows/dist`, `app/dist`, …, but `NOT_RUN`), else its `dist/`.
  */
 export function buildDirs({ dir }: LinkedPackage): string[] {
   const { files = [] } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { files?: string[] };
-  const dirs = files.filter((file) => file === "dist" || file.endsWith("/dist")).map((file) => join(dir, file));
+  const dirs = files
+    .filter((file) => (file === "dist" || file.endsWith("/dist")) && !NOT_RUN.has(file))
+    .map((file) => join(dir, file));
   return dirs.length ? dirs : [join(dir, "dist")];
 }
 

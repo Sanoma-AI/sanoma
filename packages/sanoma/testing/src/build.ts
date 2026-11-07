@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -52,20 +52,22 @@ export const buildLock = (pkgDir: string): string =>
 
 /**
  * Runs `build` (a command and its arguments) in `pkgDir` when one of `outputs` (paths in it) is
- * missing or older than a file under its `src/`: for tests of what a package ships, from its
- * `dist/`. Test files run at once, so each looks under a lock: one builds, and the rest wait and
- * find it built.
+ * missing, or the newest of them is older than a file `sources` matches (globs in it; by default,
+ * everything under its `src/`): for tests of what a package ships, from its `dist/`. The newest, as a
+ * build that finds some outputs up to date (`tsc -b`) leaves them as they were. Test files run at
+ * once, so each looks under a lock: one builds, and the rest wait and find it built.
  */
-export function ensureBuilt(pkgDir: string, outputs: readonly string[], build: readonly [string, ...string[]]): void {
+export function ensureBuilt(
+  pkgDir: string,
+  outputs: readonly string[],
+  build: readonly [string, ...string[]],
+  sources: readonly string[] = ["src/**"],
+): void {
   withLock(buildLock(pkgDir), () => {
-    const src = join(pkgDir, "src");
-    const changed = Math.max(
-      ...readdirSync(src, { recursive: true, encoding: "utf8" }).map((file) => statSync(join(src, file)).mtimeMs),
-    );
-    const stale = outputs.some((output) => {
-      const file = join(pkgDir, output);
-      return !existsSync(file) || statSync(file).mtimeMs < changed;
-    });
+    const mtime = (path: string) => statSync(join(pkgDir, path)).mtimeMs;
+    const changed = Math.max(...globSync(sources, { cwd: pkgDir }).map(mtime));
+    const stale =
+      outputs.some((output) => !existsSync(join(pkgDir, output))) || Math.max(...outputs.map(mtime)) < changed;
     if (stale) execFileSync(build[0], build.slice(1), { cwd: pkgDir, stdio: "inherit" });
   });
 }

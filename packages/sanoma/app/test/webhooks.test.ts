@@ -1,6 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { ensureBuilt } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeHost, testRepository } from "sanoma/testing/host";
 import { type FollowOutput, memoryLedger, type RemoteEvent, resolveConfig } from "sanoma/workflows";
@@ -12,6 +10,7 @@ import type { AppContext } from "../src/context.ts";
 import { type AppHandler, appHandler } from "../src/handler.ts";
 import { remoteWebhook } from "../src/server/webhooks.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. A git host's webhooks at `POST /webhooks/<vendor>`
 // (`remoteWebhook`), on the fake host of the change workflow's tests, whose deliveries are signed
@@ -21,7 +20,6 @@ import { appSnapshot } from "../src/snapshot-build.ts";
 // secret not stored are refused. On the Node app, and on the portable handler alone, without the
 // checkout, as on the Worker.
 
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 const SECRET = "webhook-secret-value";
 const repo = { owner: "acme", name: "company" };
 
@@ -47,7 +45,7 @@ let portable: AppHandler;
 beforeAll(async () => {
   vi.stubEnv("SANOMA_SECRETS_KEY", randomBytes(32).toString("base64"));
   vi.stubEnv(FAKE_WEBHOOK_SECRET, SECRET);
-  ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+  ensureSanomaBuilt();
   await git.commit();
   app = await startApp(testApp.config, { port: 0, source: source.source });
   const snapshot = await appSnapshot(testApp.config);

@@ -3,35 +3,47 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt as ensure, waitFor } from "sanoma/testing";
+// Relative, not `sanoma/testing`: scripts/readme-shots imports this with Node before anything is built.
+import { ensureBuilt as ensure, waitFor } from "../testing/src/build.ts";
 
 /** The repo's root. */
 export const repo = fileURLToPath(new URL("../../../", import.meta.url));
 
+/** This package, and its manifest. */
+const sanoma = join(repo, "packages/sanoma");
+const manifest = JSON.parse(readFileSync(join(sanoma, "package.json"), "utf8")) as {
+  exports: Record<string, string | { default: string }>;
+  files: string[];
+  dependencies: Record<string, string>;
+};
+
 /** This package's `src/cli.ts`, which the tests run with Node as a company repo would run the bin. */
-export const cli = join(repo, "packages/sanoma/src/cli.ts");
+export const cli = join(sanoma, "src/cli.ts");
 
 /**
- * What a fixture copy loads through its `node_modules`, each as a published package would be: by
- * its `exports`, from `dist/` (and `sanoma`'s generated `oxlint.json`): each part of `sanoma` and
- * the connectors. `ensureBuilt` builds each whose outputs are missing or older than its source, in
- * dependency order, a part with its own build script.
+ * `sanoma` built, as a fixture copy loads it through its `node_modules`: each entry of its `exports`
+ * from `dist/`, its generated `oxlint.json` and the app's own build. `pnpm run build` when one is
+ * missing or the package's source (each part's `src/`, the runtime's `oxlint.json`, `package.json` and
+ * `scripts/`) changed since. Every test that loads a build calls this, under its one lock.
  */
-const BUILT: [dir: string, outputs: string[], script: string][] = [
-  ["packages/sanoma/workflows", ["dist/index.js"], "build:workflows"],
-  ["packages/sanoma/better-auth", ["dist/index.js"], "build:better-auth"],
-  ["packages/sanoma/bridge", ["dist/index.js"], "build:bridge"],
-  ["packages/sanoma/testing", ["dist/index.js"], "build:testing"],
-  ["packages/sanoma/app", ["dist/server/server.js", "dist/index.js"], "build:app"],
-  ["packages/sanoma/dev", ["dist/cli.js"], "build:dev"],
-  ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"], "build:core"],
-  ["connectors/ghost", ["dist/index.js"], "build"],
-  ["connectors/anthropic", ["dist/index.js"], "build"],
-  ["connectors/docker", ["dist/index.js"], "build"],
-];
+export function ensureSanomaBuilt(): void {
+  const entries = Object.values(manifest.exports).flatMap((entry) =>
+    typeof entry === "object" && entry.default.includes("/dist/") ? [entry.default] : [],
+  );
+  ensure(
+    sanoma,
+    [...entries, "oxlint.json", "app/dist/server/server.js"],
+    ["pnpm", "run", "build"],
+    ["package.json", "scripts/**", "src/**", "*/src/**", "workflows/oxlint.json"],
+  );
+}
 
+/** `sanoma` and the connectors a fixture copy installs, built (`ensureSanomaBuilt`). */
 export function ensureBuilt(): void {
-  for (const [dir, outputs, script] of BUILT) ensure(join(repo, dir), outputs, ["pnpm", "run", script]);
+  ensureSanomaBuilt();
+  for (const name of ["ghost", "anthropic", "docker"]) {
+    ensure(join(repo, "connectors", name), ["dist/index.js"], ["pnpm", "run", "build"]);
+  }
 }
 
 const allow = { answer: "allow" };
@@ -84,11 +96,6 @@ export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", 
   const modules = join(dir, "node_modules");
   linkConnector(dir, "ghost");
 
-  const sanoma = join(repo, "packages/sanoma");
-  const manifest = JSON.parse(readFileSync(join(sanoma, "package.json"), "utf8")) as {
-    files: string[];
-    dependencies: Record<string, string>;
-  };
   const store = join(modules, ".pnpm/sanoma/node_modules");
   for (const file of ["package.json", ...manifest.files.filter((entry) => !entry.startsWith("!"))]) {
     cpSync(join(sanoma, file), join(store, "sanoma", file), { recursive: true });

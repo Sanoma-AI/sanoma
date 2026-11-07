@@ -1,13 +1,16 @@
 {
+  // A part of sanoma, built by `tsc -b` after the parts it references, whose declarations it reads.
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.build.tsbuildinfo",
     "noEmit": false,
-    "declaration": true,
+    "composite": true,
     "sourceMap": true,
     "rewriteRelativeImportExtensions": true,
     "paths": {}
   },
-  "include": ["src", "../../../types"]
+  "references": [{ "path": "../workflows/tsconfig.build.json" }],
+  "include": ["src"]
 }

@@ -2,19 +2,9 @@
   // The app, checked on its own. The root tsconfig covers src/index.ts and the tests, for Node.
   "extends": "./tsconfig.site.json",
   "compilerOptions": {
-    // Source, as in the root tsconfig. Keep in sync with its `paths`. (`#/*` is package.json's
-    // `imports`, which TypeScript, Vite and the shadcn CLI all read.)
-    "paths": {
-      "sanoma/workflows": ["../workflows/src/index.ts"],
-      "sanoma/workflows/describe": ["../workflows/src/describe.ts"],
-      "sanoma/workflows/description": ["../workflows/src/description.ts"],
-      "sanoma/resources": ["../workflows/src/constructors.ts"],
-      "sanoma/workflows/scenario": ["../workflows/src/scenario.ts"],
-      "sanoma/workflows/shared": ["../workflows/src/shared.ts"],
-      "sanoma/workflows/wakeup-service": ["../workflows/src/wakeup-service.ts"],
-      "sanoma/workflows/db": ["../workflows/src/db/index.ts"],
-      "sanoma/better-auth": ["../better-auth/src/index.ts"]
-    }
+    // `sanoma/*` from source, as in the root tsconfig. (`#/*` is package.json's `imports`, which
+    // TypeScript, Vite and the shadcn CLI all read.)
+    "customConditions": ["sanoma-source"]
   },
   "include": ["src", "vite.config.ts"]
 }

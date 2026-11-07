@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { resolveConfig, type SanomaConfig } from "sanoma/workflows";
 import { IMPORT_WORKFLOW, type ImportInput, type Saved } from "sanoma/workflows/shared";
@@ -17,6 +17,7 @@ import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { pageApi } from "./page-api.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app (built when missing or older than src/). A
 // sheet imported into a collection: the CSV file read (`readSheet`), its columns matched and its
@@ -36,7 +37,6 @@ const component = async (path: string, name: string) =>
 const MatchColumns = await component("../src/components/import/match.tsx", "MatchColumns");
 const Review = await component("../src/components/import/review.tsx", "Review");
 
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 const csv = readFileSync(new URL("./fixtures/import/leads.csv", import.meta.url), "utf8");
 
 // The outbound fixture with named people and the policy data.test.ts has: it denies a lead
@@ -186,7 +186,7 @@ describe("the Import pages", () => {
   };
 
   beforeAll(async () => {
-    ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+    ensureSanomaBuilt();
     app = await startApp(testApp.config, { port: 0 });
   }, 120_000);
   afterAll(async () => {

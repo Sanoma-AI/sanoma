@@ -13,9 +13,8 @@ import {
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { anthropic } from "@sanoma-ai/connector-anthropic";
-import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeSandbox } from "sanoma/testing/sandbox";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
@@ -185,11 +184,6 @@ let server: Server | undefined;
 
 beforeAll(async () => {
   ensureBuilt();
-  ensureAppBuilt(
-    fileURLToPath(new URL("..", import.meta.url)),
-    ["dist/server/server.js"],
-    ["pnpm", "exec", "vite", "build"],
-  );
   gitIdentity(vi.stubEnv);
   server = standIn();
   await new Promise<void>((done) => server!.listen(0, "127.0.0.1", done));

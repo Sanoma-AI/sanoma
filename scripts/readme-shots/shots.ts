@@ -22,7 +22,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import type { Browser } from "puppeteer-core";
-import { ensureBuilt, waitFor } from "../../packages/sanoma/testing/src/build.ts";
+import { ensureBuilt } from "../../packages/sanoma/test/fixture.ts";
+import { waitFor } from "../../packages/sanoma/testing/src/build.ts";
 import type { SanomaConfig } from "../../packages/sanoma/workflows/src/index.ts";
 import { launchChrome, recordDemo, ServerFailure, steadyStills, still } from "./capture.ts";
 
@@ -30,18 +31,6 @@ type Workflows = typeof import("../../packages/sanoma/workflows/src/index.ts");
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const assets = join(repo, ".github/assets");
-
-// What the preview loads, each from its dist/ (as a company repo would), in dependency order.
-const BUILT: [dir: string, outputs: string[], script: string][] = [
-  ["packages/sanoma/workflows", ["dist/index.js"], "build:workflows"],
-  ["packages/sanoma/better-auth", ["dist/index.js"], "build:better-auth"],
-  ["packages/sanoma/bridge", ["dist/index.js"], "build:bridge"],
-  ["packages/sanoma/testing", ["dist/index.js"], "build:testing"],
-  ["packages/sanoma/app", ["dist/server/server.js"], "build:app"],
-  ["packages/sanoma/dev", ["dist/cli.js"], "build:dev"],
-  ["packages/sanoma", ["dist/cli.js", "dist/index.js"], "build:core"],
-  ["connectors/ghost", ["dist/index.js", "dist/fake.js"], "build"],
-];
 
 // The preview's config: the README's workflow, with Ghost answered by its in-memory fake behind the
 // live connector, so the form still shows Live vendors.
@@ -115,8 +104,8 @@ for (const signal of SIGNALS) {
 
 try {
   if (!stillsDir && !hasFfmpeg()) fail("ffmpeg is not on PATH; it makes demo.gif (brew install ffmpeg)");
-  say("building what is stale (each package or part whose dist/ is older than its src/)");
-  for (const [dir, outputs, script] of BUILT) ensureBuilt(join(repo, dir), outputs, ["pnpm", "run", script]);
+  say("building sanoma and the connectors the preview loads, when stale");
+  ensureBuilt();
   // Loaded once built: sanoma/testing's index imports sanoma/workflows from its dist/.
   const { testDatabaseUrl } = await import("../../packages/sanoma/testing/src/index.ts");
   // `SANOMA_TEST_DATABASE_URL`'s name plus `_readme_shots`: a worktree's own when that is set per worktree.

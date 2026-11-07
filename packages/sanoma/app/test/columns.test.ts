@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { resolveConfig, type SanomaConfig } from "sanoma/workflows";
 import { readPeople } from "sanoma/workflows/describe";
@@ -20,6 +20,7 @@ import { proposeColumnChange } from "../src/server/columns.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { pageOf, PEOPLE, publishOf } from "./fixtures/change.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app, as data.test.ts does. A collection's columns
 // from its grid, on a copy of the outbound fixture with a remote (C5's fake host over a repository
@@ -28,8 +29,6 @@ import { pageOf, PEOPLE, publishOf } from "./fixtures/change.ts";
 // (`proposeColumnChange`: a `patch` run's draft, its data file showing the new column, the change
 // carrying its plan) and that change's review in the table change's words; in Chrome, skipped
 // without it, the menu opening the Rename panel and its What will happen.
-
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 
 const root = mkdtempSync(join(tmpdir(), "sanoma-columns-"));
 cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
@@ -48,7 +47,7 @@ const testApp = useTestApp(config, {
 let app: App;
 
 beforeAll(async () => {
-  ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+  ensureSanomaBuilt();
   app = await startApp(testApp.config, { port: 0, source: repo.source });
   for (const [company, contact] of [
     ["Acme Plumbing", "dana@acme.test"],

@@ -78,9 +78,12 @@ describe("linkedPackages", () => {
 });
 
 describe("buildDirs", () => {
-  it("is each dist a package ships, else its dist", () => {
+  it("is each dist a package ships but the test helpers' and sanoma dev's, else its dist", () => {
     const pkg = temp();
-    writeFileSync(join(pkg, "package.json"), JSON.stringify({ files: ["dist", "app/dist", "app/src", "README.md"] }));
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({ files: ["dist", "app/dist", "app/src", "testing/dist", "dev/dist", "README.md"] }),
+    );
     expect(buildDirs({ name: "sanoma", dir: pkg })).toEqual([join(pkg, "dist"), join(pkg, "app/dist")]);
     writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@sanoma-ai/connector-ghost" }));
     expect(buildDirs({ name: "@sanoma-ai/connector-ghost", dir: pkg })).toEqual([join(pkg, "dist")]);

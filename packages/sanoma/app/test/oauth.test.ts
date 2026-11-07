@@ -2,12 +2,11 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { fileURLToPath } from "node:url";
 import { executablePath, launch } from "puppeteer-core";
 import { Client } from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { z } from "zod";
-import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import {
   AuthenticationError,
   defineAuthentication,
@@ -22,6 +21,7 @@ import {
 import { secret } from "sanoma/resources";
 import { CALLBACK_ERRORS } from "../src/api.ts";
 import { startApp } from "../src/index.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // OAuth consent in the browser: Connect account on the connector page opens the provider in a new
 // tab, the provider (a loopback server here) sends the person back to the app's callback, the
@@ -145,11 +145,7 @@ beforeAll(async () => {
 it("connects an account by consent in a new tab, and says why a callback it did not start failed", async (ctx) => {
   const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
   if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
-  ensureBuilt(
-    fileURLToPath(new URL("..", import.meta.url)),
-    ["dist/server/server.js"],
-    ["pnpm", "exec", "vite", "build"],
-  );
+  ensureSanomaBuilt();
   const worker = await startWorker(config);
   const server = await startApp(config, { port: 0 });
   const browser = await launch({ executablePath: chrome, headless: true });

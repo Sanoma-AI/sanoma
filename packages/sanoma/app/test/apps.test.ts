@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { memoryLedger, type SanomaConfig } from "sanoma/workflows";
 import { APPS_LIST, type AvailableApps } from "sanoma/workflows/shared";
@@ -20,13 +20,13 @@ import { takeAppPrompt, updateAppPrompt } from "../src/lib/apps.ts";
 import { appBehind } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { barLink } from "./bar-helpers.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app (built when stale). The Apps page on the
 // company-apps fixture (crm taken from a source, shop the company's own), GitHub's search mocked
 // with msw; and the chat a page opens with a prompt (New app, Add, Update, New workflow), in Chrome,
 // skipped without it (or `CHROME_PATH`).
 
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 const root = fileURLToPath(new URL("../../workflows/test/fixtures/company-apps/", import.meta.url));
 
 // The fixture's workflows and collections, as the launcher finds them (`loadConfig`).
@@ -59,7 +59,7 @@ let app: App;
 
 beforeAll(async () => {
   github.listen({ onUnhandledFrame: "bypass" });
-  ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+  ensureSanomaBuilt();
   app = await startApp(testApp.config, { port: 0 });
 }, 120_000);
 

@@ -3,10 +3,9 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { anthropic } from "@sanoma-ai/connector-anthropic";
-import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { defineConnector, defineDriver, isEnded, localBackend, SanomaClient, withSetup } from "sanoma/workflows";
 import { createUIMessageStream, customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
@@ -161,11 +160,6 @@ const start = async () =>
 
 beforeAll(async () => {
   ensureBuilt();
-  ensureAppBuilt(
-    fileURLToPath(new URL("..", import.meta.url)),
-    ["dist/server/server.js"],
-    ["pnpm", "exec", "vite", "build"],
-  );
   gitIdentity(vi.stubEnv);
   // No key reaches a vendor from here: the only model is the mock.
   vi.stubEnv("ANTHROPIC_API_KEY", undefined);

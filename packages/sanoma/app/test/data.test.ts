@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { memoryLedger, resolveConfig, SanomaClient, type SanomaConfig } from "sanoma/workflows";
 import { collection } from "sanoma/data";
@@ -16,6 +16,7 @@ import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { callApi, recordHistory, serverFnFailure, validate } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when dist/server/server.js
 // is missing or older than a file under src/. The Data section: `/data`, a collection's grid,
@@ -24,8 +25,6 @@ import { appSnapshot } from "../src/snapshot-build.ts";
 // without either.
 // It reads the grid through its pages, not `queries.ts`: a test importing a module that defines
 // server functions makes TypeScript read Start's `Register` in another order, and lose its types.
-
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 
 // The outbound fixture, copied to a root of its own: its collection, declared in resources/data.ts,
 // with its people and a policy that allows, but denies a lead `lost`, holds one `won` for `lead`,
@@ -71,7 +70,7 @@ const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("app_data") })
 let app: App;
 
 beforeAll(async () => {
-  ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+  ensureSanomaBuilt();
   app = await startApp(testApp.config, { port: 0 });
 }, 120_000);
 

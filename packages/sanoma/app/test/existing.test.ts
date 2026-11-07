@@ -2,12 +2,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { github } from "@sanoma-ai/connector-github";
 import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
-import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { type ConnectExistingInput, type ConnectExistingOutput, withSetup } from "sanoma/workflows";
 import { LOCKFILE, readLockfile } from "sanoma/workflows/describe";
@@ -18,6 +17,7 @@ import { INFRA } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { CONNECT_BRANCH } from "../src/steps/connect.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // Connecting an existing repository or database (/hosting/existing) in a git repository of its
 // own, with and without a remote, on the GitHub and Supabase fakes, as runs of the built-in
@@ -25,7 +25,6 @@ import { CONNECT_BRANCH } from "../src/steps/connect.ts";
 // read, where it is committed, and the apply that only binds, the run's child. Needs Postgres and
 // the built app, as app.test.ts does.
 
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "sanoma-existing-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 const gh = fakeGithub();
@@ -188,7 +187,7 @@ describe("the page", () => {
   afterAll(() => app?.close());
 
   it("takes a repository and a project's ref, and the connect page links to it", async () => {
-    ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+    ensureSanomaBuilt();
     app = await startApp(test.config, { port: 0, source });
     const page = await (await fetch(new URL("/hosting/existing", app.url))).text();
     expect(page).toContain("Connect an existing repository or database");

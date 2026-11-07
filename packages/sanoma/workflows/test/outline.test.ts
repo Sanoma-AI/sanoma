@@ -2,7 +2,6 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -13,7 +12,7 @@ import { defineConnector, defineWorkflow, type WorkflowDefinition } from "../src
 import { callAt, callsOf, outlineWithSource } from "../src/outline.ts";
 import { flatten } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
-import { ensureBuilt, pkg } from "./build.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 import fanout from "./fixtures/fanout.ts";
 
 const forum = defineConnector("forum", {
@@ -532,12 +531,12 @@ describe("outlineWorkflow, spans", () => {
   });
 });
 
-// The built package reads `run` as JavaScript. Builds dist/ when it is missing or older than src/ (`ensureBuilt`).
-const dist = (file: string) => pathToFileURL(join(pkg, "dist", file)).href;
+// The built package reads `run` as JavaScript (`ensureSanomaBuilt`).
+const dist = (file: string) => new URL(`../dist/${file}`, import.meta.url).href;
 
 describe("outlineWorkflow, built", () => {
   it("outlines a workflow from its JavaScript source, in plain Node", () => {
-    ensureBuilt();
+    ensureSanomaBuilt();
     const dir = mkdtempSync(join(tmpdir(), "sanoma-outline-"));
     try {
       const script = join(dir, "outline.mjs");

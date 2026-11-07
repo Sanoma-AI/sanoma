@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, withFake } from "sanoma/testing";
+import { testDatabaseUrl, withFake } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import {
   allowAll,
@@ -26,14 +26,13 @@ import { type App, startApp } from "../src/index.ts";
 import { spanLines } from "../src/lib/lines.ts";
 import { hostEnforcement, permissions } from "../src/server/core.ts";
 import type { AppSnapshot } from "../src/snapshot.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // The Permissions page: its grid and the policy files through the server core
 // (`getPermissions`), the page as the server renders it, and in Chrome the who-are-you picker,
 // the groups under your name, a cell's rule in its sheet and its lines in the code. The page
 // needs Postgres (`pnpm db:up`) and the built app; the test in a browser needs Google Chrome, or
 // `CHROME_PATH`, and skips without either.
-
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 
 const shop = defineConnector("shop", {
   refunds: {
@@ -212,7 +211,7 @@ describe("the Permissions page", () => {
   let app: App;
 
   beforeAll(async () => {
-    ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+    ensureSanomaBuilt();
     app = await startApp(testApp.config, { port: 0, source });
   }, 120_000);
 

@@ -59,7 +59,8 @@
     "better-auth/dist",
     "better-auth/drizzle",
     "!better-auth/drizzle/*.config.ts",
-    "better-auth/README.md"
+    "better-auth/README.md",
+    "!**/*.tsbuildinfo"
   ],
   "type": "module",
   "sideEffects": false,
@@ -70,10 +71,12 @@
   },
   "exports": {
     ".": {
+      "sanoma-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./resources": {
+      "sanoma-source": "./workflows/src/constructors.ts",
       "types": "./workflows/dist/constructors.d.ts",
       "default": "./workflows/dist/constructors.js"
     },
@@ -87,143 +90,178 @@
     },
     "./ui.css": "./app/src/ui.css",
     "./data": {
+      "sanoma-source": "./workflows/src/data.ts",
       "types": "./workflows/dist/data.d.ts",
       "default": "./workflows/dist/data.js"
     },
     "./secrets": {
+      "sanoma-source": "./workflows/src/kms-secrets.ts",
       "types": "./workflows/dist/kms-secrets.d.ts",
       "default": "./workflows/dist/kms-secrets.js"
     },
     "./claims": {
+      "sanoma-source": "./workflows/src/claims.ts",
       "types": "./workflows/dist/claims.d.ts",
       "default": "./workflows/dist/claims.js"
     },
     "./tsconfig.json": "./tsconfig.base.json",
     "./workflows": {
+      "sanoma-source": "./workflows/src/index.ts",
       "types": "./workflows/dist/index.d.ts",
       "default": "./workflows/dist/index.js"
     },
     "./workflows/describe": {
+      "sanoma-source": "./workflows/src/describe.ts",
       "types": "./workflows/dist/describe.d.ts",
       "default": "./workflows/dist/describe.js"
     },
     "./workflows/description": {
+      "sanoma-source": "./workflows/src/description.ts",
       "types": "./workflows/dist/description.d.ts",
       "default": "./workflows/dist/description.js"
     },
     "./workflows/fake": {
+      "sanoma-source": "./workflows/src/fake.ts",
       "types": "./workflows/dist/fake.d.ts",
       "default": "./workflows/dist/fake.js"
     },
     "./workflows/plugin": {
+      "sanoma-source": "./workflows/src/plugin.ts",
       "types": "./workflows/dist/plugin.d.ts",
       "default": "./workflows/dist/plugin.js"
     },
     "./workflows/scenario": {
+      "sanoma-source": "./workflows/src/scenario.ts",
       "types": "./workflows/dist/scenario.d.ts",
       "default": "./workflows/dist/scenario.js"
     },
     "./workflows/scenarios": {
+      "sanoma-source": "./workflows/src/scenarios.ts",
       "types": "./workflows/dist/scenarios.d.ts",
       "default": "./workflows/dist/scenarios.js"
     },
     "./workflows/shared": {
+      "sanoma-source": "./workflows/src/shared.ts",
       "types": "./workflows/dist/shared.d.ts",
       "default": "./workflows/dist/shared.js"
     },
     "./workflows/wakeup-service": {
+      "sanoma-source": "./workflows/src/wakeup-service.ts",
       "types": "./workflows/dist/wakeup-service.d.ts",
       "default": "./workflows/dist/wakeup-service.js"
     },
     "./workflows/cloud-identity": {
+      "sanoma-source": "./workflows/src/cloud-identity.ts",
       "types": "./workflows/dist/cloud-identity.d.ts",
       "default": "./workflows/dist/cloud-identity.js"
     },
     "./workflows/db": {
+      "sanoma-source": "./workflows/src/db/index.ts",
       "types": "./workflows/dist/db/index.d.ts",
       "default": "./workflows/dist/db/index.js"
     },
     "./workflows/identity-service": {
+      "sanoma-source": "./workflows/src/identity-service.ts",
       "types": "./workflows/dist/identity-service.d.ts",
       "default": "./workflows/dist/identity-service.js"
     },
     "./app": {
+      "sanoma-source": "./app/src/index.ts",
       "types": "./app/dist/index.d.ts",
       "default": "./app/dist/index.js"
     },
     "./app/build": {
+      "sanoma-source": "./app/src/build.ts",
       "types": "./app/dist/build.d.ts",
       "default": "./app/dist/build.js"
     },
     "./app/bundle": {
+      "sanoma-source": "./app/src/bundle-build.ts",
       "types": "./app/dist/bundle-build.d.ts",
       "default": "./app/dist/bundle-build.js"
     },
     "./app/steps": {
+      "sanoma-source": "./app/src/steps/index.ts",
       "types": "./app/dist/steps/index.d.ts",
       "default": "./app/dist/steps/index.js"
     },
     "./testing": {
+      "sanoma-source": "./testing/src/index.ts",
       "types": "./testing/dist/index.d.ts",
       "default": "./testing/dist/index.js"
     },
     "./testing/database": {
+      "sanoma-source": "./testing/src/database.ts",
       "types": "./testing/dist/database.d.ts",
       "default": "./testing/dist/database.js"
     },
     "./testing/features": {
+      "sanoma-source": "./testing/src/features.ts",
       "types": "./testing/dist/features.d.ts",
       "default": "./testing/dist/features.js"
     },
     "./testing/host": {
+      "sanoma-source": "./testing/src/host.ts",
       "types": "./testing/dist/host.d.ts",
       "default": "./testing/dist/host.js"
     },
     "./testing/harness": {
+      "sanoma-source": "./testing/src/harness.ts",
       "types": "./testing/dist/harness.d.ts",
       "default": "./testing/dist/harness.js"
     },
     "./testing/replay": {
+      "sanoma-source": "./testing/src/replay.ts",
       "types": "./testing/dist/replay.d.ts",
       "default": "./testing/dist/replay.js"
     },
     "./testing/scenarios": {
+      "sanoma-source": "./testing/src/scenarios.ts",
       "types": "./testing/dist/scenarios.d.ts",
       "default": "./testing/dist/scenarios.js"
     },
     "./testing/sandbox": {
+      "sanoma-source": "./testing/src/sandbox.ts",
       "types": "./testing/dist/sandbox.d.ts",
       "default": "./testing/dist/sandbox.js"
     },
     "./testing/wakeup": {
+      "sanoma-source": "./testing/src/wakeup.ts",
       "types": "./testing/dist/wakeup.d.ts",
       "default": "./testing/dist/wakeup.js"
     },
     "./better-auth": {
+      "sanoma-source": "./better-auth/src/index.ts",
       "types": "./better-auth/dist/index.d.ts",
       "default": "./better-auth/dist/index.js"
     },
     "./internal/bridge": {
+      "sanoma-source": "./bridge/src/index.ts",
       "types": "./bridge/dist/index.d.ts",
       "default": "./bridge/dist/index.js"
     },
     "./internal/bridge/fake": {
+      "sanoma-source": "./bridge/src/fake.ts",
       "types": "./bridge/dist/fake.d.ts",
       "default": "./bridge/dist/fake.js"
     },
     "./internal/bridge/tfschema": {
+      "sanoma-source": "./bridge/src/tfschema.ts",
       "types": "./bridge/dist/tfschema.d.ts",
       "default": "./bridge/dist/tfschema.js"
     },
     "./internal/bridge/connector": {
+      "sanoma-source": "./bridge/src/connector.ts",
       "types": "./bridge/dist/connector.d.ts",
       "default": "./bridge/dist/connector.js"
     },
     "./internal/bridge/tfschema/cli": {
+      "sanoma-source": "./bridge/src/tfschema/cli.ts",
       "types": "./bridge/dist/tfschema/cli.d.ts",
       "default": "./bridge/dist/tfschema/cli.js"
     },
     "./internal/dev": {
+      "sanoma-source": "./dev/src/cli.ts",
       "types": "./dev/dist/cli.d.ts",
       "default": "./dev/dist/cli.js"
     }
@@ -232,17 +270,10 @@
     "access": "public"
   },
   "scripts": {
-    "build": "pnpm run build:workflows && pnpm run build:better-auth && pnpm run build:bridge && pnpm run build:testing && pnpm run build:app && pnpm run build:dev && pnpm run build:core",
-    "build:workflows": "tsc -p workflows/tsconfig.build.json && esbuild workflows/src/sandbox-runner.ts --bundle --platform=node --target=node22 --format=cjs --minify --external:bufferutil --external:utf-8-validate --outfile=workflows/dist/sandbox-runner.cjs --log-level=warning",
-    "build:better-auth": "tsc -p better-auth/tsconfig.build.json",
-    "build:bridge": "tsc -p bridge/tsconfig.build.json",
-    "build:testing": "tsc -p testing/tsconfig.build.json",
-    "build:app": "cd app && vite build && tsc -p tsconfig.build.json",
-    "build:dev": "tsc -p dev/tsconfig.build.json",
-    "build:core": "node scripts/oxlint.ts && tsc -p tsconfig.build.json",
+    "build": "tsc -b app/tsconfig.build.json tsconfig.build.json testing/tsconfig.build.json && esbuild workflows/src/sandbox-runner.ts --bundle --platform=node --target=node22 --format=cjs --minify --external:bufferutil --external:utf-8-validate --outfile=workflows/dist/sandbox-runner.cjs --log-level=warning && node scripts/oxlint.ts && cd app && vite build",
     "clean": "rm -rf dist workflows/dist better-auth/dist bridge/dist testing/dist app/dist dev/dist",
     "prepack": "pnpm run clean && pnpm run build",
-    "watch": "tsc -p workflows/tsconfig.build.json --watch --preserveWatchOutput & tsc -p better-auth/tsconfig.build.json --watch --preserveWatchOutput & tsc -p bridge/tsconfig.build.json --watch --preserveWatchOutput & tsc -p testing/tsconfig.build.json --watch --preserveWatchOutput & tsc -p dev/tsconfig.build.json --watch --preserveWatchOutput & tsc -p tsconfig.build.json --watch --preserveWatchOutput & cd app && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & vite build --watch)",
+    "watch": "tsc -b -w --preserveWatchOutput app/tsconfig.build.json tsconfig.build.json & cd app && vite build --watch",
     "typecheck:ui": "tsc -p app/tsconfig.json",
     "generate": "cd workflows && drizzle-kit generate --config drizzle/company.config.ts && drizzle-kit generate --config drizzle/wakeup.config.ts && cd ../better-auth && drizzle-kit generate --config drizzle/visitors.config.ts && drizzle-kit generate --config drizzle/staff.config.ts",
     "generate:bridge": "cd bridge && pnpm --package=@bufbuild/buf@1.73.0 --package=@bufbuild/protoc-gen-es@2.16.0 dlx buf generate",

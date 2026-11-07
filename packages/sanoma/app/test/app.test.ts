@@ -3,7 +3,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { fakeSandbox } from "sanoma/testing/sandbox";
 import {
   defineConfig,
@@ -77,6 +77,7 @@ import {
 import { appSteps } from "../src/steps/index.ts";
 import { pageApi } from "./page-api.ts";
 import { appSnapshot, scenariosOf } from "../src/snapshot-build.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
 // dist/server/server.js is missing or older than a file under src/.
@@ -249,7 +250,7 @@ async function onWorkerOver(root: string, source: Source | undefined, work: (ove
 
 beforeAll(async () => {
   npm.listen({ onUnhandledFrame: "bypass" });
-  ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+  ensureSanomaBuilt();
   worker = await startWorker(config);
   app = await startApp(config, { port: 0, ingress: [machineRoute, machinesRoute] });
   ctx = await contextOf(config);

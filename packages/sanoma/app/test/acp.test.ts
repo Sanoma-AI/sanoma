@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { runEnded } from "sanoma/testing/host";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
@@ -101,11 +101,6 @@ const logged = (agent: OwnAgentName): Record<string, unknown>[] =>
 
 beforeAll(async () => {
   ensureBuilt();
-  ensureAppBuilt(
-    fileURLToPath(new URL("..", import.meta.url)),
-    ["dist/server/server.js"],
-    ["pnpm", "exec", "vite", "build"],
-  );
   gitIdentity(vi.stubEnv);
   // Credentials in this process: none may reach a person's own agent.
   for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]) {

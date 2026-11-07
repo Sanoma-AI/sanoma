@@ -1,13 +1,24 @@
 {
+  // The bin and the package's root entry. They import the app's Node entries, which no project can reference
+  // (app/tsconfig.build.json is not composite), so this resolves every part as published, from its dist/
+  // (no `sanoma-source`), and `tsc -b` builds the app before it. The references build the other parts first.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.build.tsbuildinfo",
     "noEmit": false,
     "declaration": true,
     "sourceMap": true,
     "rewriteRelativeImportExtensions": true,
+    "customConditions": [],
     "paths": {}
   },
+  "references": [
+    { "path": "workflows/tsconfig.build.json" },
+    { "path": "better-auth/tsconfig.build.json" },
+    { "path": "bridge/tsconfig.build.json" },
+    { "path": "dev/tsconfig.build.json" }
+  ],
   "include": ["src"]
 }

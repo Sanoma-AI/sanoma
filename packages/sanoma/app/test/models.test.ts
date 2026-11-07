@@ -1,6 +1,5 @@
-import { fileURLToPath } from "node:url";
 import { anthropic } from "@sanoma-ai/connector-anthropic";
-import { ensureBuilt, testDatabaseUrl } from "sanoma/testing";
+import { testDatabaseUrl } from "sanoma/testing";
 import { defineConnector, resolveConfig, type SanomaClient, withSetup } from "sanoma/workflows";
 import { customProvider, generateText, NoSuchProviderError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -8,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { type App, startApp } from "../src/index.ts";
 import { modelRegistry } from "../src/server/models.ts";
 import { secretValues } from "../src/server/secrets.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // The app's models: the registry over the connectors' model halves, on a mock model and on
 // Anthropic's with no key (so nothing is sent), and Anthropic's key on its connector page, which
@@ -104,11 +104,7 @@ describe("secretValues", () => {
 describe("Anthropic's connector page", () => {
   let app: App | undefined;
   beforeAll(async () => {
-    ensureBuilt(
-      fileURLToPath(new URL("..", import.meta.url)),
-      ["dist/server/server.js"],
-      ["pnpm", "exec", "vite", "build"],
-    );
+    ensureSanomaBuilt();
     // The environment never sets it here, so the page shows it missing, with Set.
     vi.stubEnv("ANTHROPIC_API_KEY", undefined);
     app = await startApp(

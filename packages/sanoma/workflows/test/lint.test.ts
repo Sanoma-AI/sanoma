@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { lintWorkflow } from "../src/lint.ts";
-import { ensureBuilt } from "./build.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 const messages = (src: string, filename?: string) => lintWorkflow(src, filename).map((p) => p.message);
 
@@ -512,7 +512,7 @@ describe("oxlint.json", () => {
 
   beforeAll(() => {
     // The fragment loads the date rule from dist/, as an installed package does.
-    ensureBuilt();
+    ensureSanomaBuilt();
     dir = mkdtempSync(join(tmpdir(), "sanoma-oxlint-"));
     write(".oxlintrc.json", JSON.stringify({ extends: [fragment] }));
     write("workflows/bad.ts", BAD);

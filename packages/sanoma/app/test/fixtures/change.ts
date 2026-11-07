@@ -1,8 +1,7 @@
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, waitFor, withFake } from "sanoma/testing";
+import { testDatabaseUrl, waitFor, withFake } from "sanoma/testing";
 import { type TestApp, useTestApp } from "sanoma/testing/harness";
 import {
   type ApprovalState,
@@ -26,6 +25,7 @@ import { type FakeRemote, fakeRemote, memorySource } from "../../../workflows/te
 import { ACTOR_COOKIE } from "../../src/api.ts";
 import { type App, startApp } from "../../src/index.ts";
 import type { DraftCard } from "../../src/lib/chat.ts";
+import { ensureSanomaBuilt } from "../../../test/fixture.ts";
 
 // A company with a remote, for the change pages' tests (the Changes section and a change's review)
 // and the lanes that build on them: a worker and the app over C5's fake host (`fakeRemote`) and a
@@ -33,8 +33,6 @@ import type { DraftCard } from "../../src/lib/chat.ts";
 // workflow and no policy on main. `draft` opens a real change of a draft, its check answering the
 // branch's Permissions grid, and waits for its Publish. Needs Postgres (`pnpm db:up`) and the
 // built app.
-
-const appDir = fileURLToPath(new URL("../..", import.meta.url));
 
 export const PEOPLE = `import { sanoma } from "sanoma/resources";
 
@@ -128,7 +126,7 @@ export function useChangeApp(name: string): ChangeApp {
   const testApp = useTestApp(config, { databaseUrl, source: repo.source });
   let app: App | undefined;
   beforeAll(async () => {
-    ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+    ensureSanomaBuilt();
     app = await startApp(testApp.config, { port: 0, source: repo.source });
   }, 120_000);
   afterAll(async () => {

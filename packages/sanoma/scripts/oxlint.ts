@@ -1,5 +1,5 @@
 // Writes this package's `oxlint.json`, the lint a company repo's `.oxlintrc.json` extends: run by
-// `build`, before tsc. It is self-contained, with no `extends` into `node_modules` (which the
+// `build`. It is self-contained, with no `extends` into `node_modules` (which the
 // installer lays out), made of:
 // - the runtime's `workflows/oxlint.json` (its overrides for `workflows/**`), with an entry for `sanoma`
 //   derived from `sanoma/workflows`'s (the same names), the rest of `sanoma/**` refused but the

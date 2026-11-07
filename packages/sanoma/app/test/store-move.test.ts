@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { executablePath, launch } from "puppeteer-core";
 import { escapeIdentifier, Pool } from "pg";
 import { beforeAll, describe, expect, it } from "vitest";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "sanoma/testing";
+import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { memorySecretStore, SanomaClient, type SanomaConfig, startWorker } from "sanoma/workflows";
 import { startApp } from "../src/index.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
 // Needs Postgres and Chrome. The Secret storage panel's Move, in a browser: the plan, the start,
 // the paused writes and the switch to make; then, on the code that selects the destination, the
@@ -69,11 +69,7 @@ describe("the Secret storage panel's Move", () => {
   it("plans and starts a move, shows the pause and the switch, then the cutover and retirement", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
-    ensureBuilt(
-      fileURLToPath(new URL("..", import.meta.url)),
-      ["dist/server/server.js"],
-      ["pnpm", "exec", "vite", "build"],
-    );
+    ensureSanomaBuilt();
     const client = await SanomaClient.connect(before);
     try {
       await client.setSecret("PLAIN", SENTINEL, { by: "alice" });
