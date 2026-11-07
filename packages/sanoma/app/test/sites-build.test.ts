@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp, sitesOf, writeSiteFiles } from "sanoma/app/build";
 import { testDatabaseUrl } from "sanoma/testing";
@@ -33,12 +33,13 @@ import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
+import { ensureSanomaBuilt } from "../../test/fixture.ts";
 import { barGroups, barLink, barTile } from "./bar-helpers.ts";
 import { loginContexts } from "./fixtures/company-sites/login.ts";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
-// Needs Postgres (`pnpm db:up`) and the built workflows package (the server bundle imports the
-// runtime from its dist/). The one test in a browser needs Google Chrome, or `CHROME_PATH` naming
+// Needs Postgres (`pnpm db:up`) and sanoma built (the server bundle imports the runtime from its
+// dist/: `ensureSanomaBuilt`). The one test in a browser needs Google Chrome, or `CHROME_PATH` naming
 // a Chrome or Chromium binary, and skips without either.
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 const fixtureDir = fileURLToPath(new URL("./fixtures/company-sites/", import.meta.url));
@@ -71,15 +72,10 @@ function company(files: Record<string, string> = {}): string {
   return repo;
 }
 
-/**
- * Every entry under `dir`, not following links, with its modification time: what a build must leave
- * as it was. But Vite's `node_modules/.vite-temp`, where the other tests' builds of the app (from
- * its `vite.config.ts`, beside `sanoma`'s `node_modules`) load their config meanwhile.
- */
+/** Every entry under `dir`, not following links, with its modification time: what a build must leave as it was. */
 const entries = (dir: string) =>
   readdirSync(dir, { recursive: true, withFileTypes: true })
     .map((entry) => join(entry.parentPath, entry.name))
-    .filter((path) => !path.includes(`${sep}.vite-temp`))
     .map((path) => `${path} ${lstatSync(path).mtimeMs}`)
     .toSorted();
 
@@ -239,6 +235,8 @@ describe("a company's app with its sites", () => {
   let app: App;
 
   beforeAll(async () => {
+    // Built first, under its lock: no other test's build writes under `modules` while this looks.
+    ensureSanomaBuilt();
     before.src = entries(untouched.src);
     before.modules = entries(untouched.modules);
     before.sanoma = entries(untouched.sanoma);

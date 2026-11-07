@@ -68,7 +68,9 @@ export function ensureBuilt(
     const changed = Math.max(...globSync(sources, { cwd: pkgDir }).map(mtime));
     const stale =
       outputs.some((output) => !existsSync(join(pkgDir, output))) || Math.max(...outputs.map(mtime)) < changed;
-    if (stale) execFileSync(build[0], build.slice(1), { cwd: pkgDir, stdio: "inherit" });
+    // Not the tests' NODE_ENV (vitest's `test`): a build under it writes React's development build.
+    const { NODE_ENV: _, ...env } = process.env;
+    if (stale) execFileSync(build[0], build.slice(1), { cwd: pkgDir, env, stdio: "inherit" });
   });
 }
 
