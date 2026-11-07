@@ -4,7 +4,8 @@ import { deriveSigningKey, signingKeyFor } from "./deployment-key.ts";
 // Small values sealed under a key of their own, derived from the deployment's SANOMA_SIGNING_KEY
 // for one purpose (HKDF-SHA256): a sign-in code in a `login-code` run's input, a code a person
 // pastes back to their own agent's sign-in, in the message to their chat turn's run, and a request
-// for an invite that a holder of the key sends to the instance (`POST /auth/invite`). AES-256-GCM, the
+// for an invite that a holder of the key sends to the instance (`POST /auth/invite`), and an OAuth
+// attempt's PKCE verifier and code in its row (`oauth.ts`), bound to the attempt. AES-256-GCM, the
 // purpose as its additional data, so a value sealed for one purpose never opens for another.
 
 const IV = 12;
@@ -41,6 +42,7 @@ function unseal(purpose: string, sealed: string): unknown {
 }
 
 const CODE = "login code";
+const ATTEMPT = "connection attempt";
 const CHAT_CODE = "chat code";
 const INVITE = "invite request";
 
@@ -106,4 +108,20 @@ export function openInvite(sealed: string, now = Date.now()): InviteRequest | un
   if (typeof request?.email !== "string" || typeof request.exp !== "number" || typeof request.nonce !== "string")
     return undefined;
   return request.exp > now ? (request as InviteRequest) : undefined;
+}
+
+/**
+ * A value of an OAuth consent attempt (`oauth.ts`), its PKCE verifier or authorization code,
+ * sealed for that attempt and field, so its row never holds either in the clear and a value
+ * sealed for one attempt opens for no other.
+ */
+export const sealAttempt = (attempt: string, field: "verifier" | "code", value: string): string =>
+  seal(ATTEMPT, { attempt, field, value });
+
+/** What `sealAttempt` sealed for `attempt`'s `field`; undefined for anything else. */
+export function openAttempt(attempt: string, field: "verifier" | "code", sealed: string): string | undefined {
+  const opened = unseal(ATTEMPT, sealed) as { attempt?: unknown; field?: unknown; value?: unknown } | undefined;
+  return typeof opened?.value === "string" && opened.attempt === attempt && opened.field === field
+    ? opened.value
+    : undefined;
 }

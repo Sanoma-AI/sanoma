@@ -53,6 +53,7 @@ export const FIXTURE_GRID = {
   ops: [
     "sanoma.apps.list",
     "sanoma.connection.activate",
+    "sanoma.connection.authorize",
     "sanoma.connection.bind",
     "sanoma.connection.configure",
     "sanoma.connection.create",

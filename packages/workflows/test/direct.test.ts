@@ -542,6 +542,7 @@ describe("the built-in call workflow in a config", () => {
       "data.outbound.saveMany",
       "sanoma.apps.list",
       "sanoma.connection.activate",
+      "sanoma.connection.authorize",
       "sanoma.connection.bind",
       "sanoma.connection.configure",
       "sanoma.connection.create",
@@ -564,6 +565,7 @@ describe("the built-in call workflow in a config", () => {
     ).toEqual([
       "sanoma.apps.list",
       "sanoma.connection.activate",
+      "sanoma.connection.authorize",
       "sanoma.connection.bind",
       "sanoma.connection.configure",
       "sanoma.connection.create",

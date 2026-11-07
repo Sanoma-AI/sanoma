@@ -9,6 +9,7 @@ import {
   ADMIN,
   CHANGE_MERGE,
   CHANGE_WORKFLOW,
+  CONNECT_WORKFLOW,
   DRAFT_ID,
   errorMessage,
   groupNamesOf,
@@ -121,7 +122,7 @@ export const changeOps = defineConnector("sanoma", {
 
 /**
  * The built-in workflow that alone may call `op`, what the operation does and what to do instead:
- * `change` for `sanoma.change.*`; undefined for any other. `resolveConfig` refuses a workflow that
+ * `change` for `sanoma.change.*`, `connect` for `sanoma.connection.exchange`; undefined for any other. `resolveConfig` refuses a workflow that
  * uses one, and a run's call of one outside its workflow fails. A resource type's change
  * operations are not reserved: any workflow may call them for an object no data file declares,
  * and the call refuses a declared one (`refuseDeclared` in `call.ts`), which only apply changes.
@@ -129,9 +130,13 @@ export const changeOps = defineConnector("sanoma", {
 export function reservedFor(op: {
   readonly vendor: string;
   readonly resource: string;
+  readonly name: string;
 }): { workflow: string; does: string; instead: string } | undefined {
   if (op.vendor === "sanoma" && op.resource === "change") {
     return { workflow: CHANGE_WORKFLOW, does: "changes the company's repository", instead: "send a draft for review" };
+  }
+  if (op.vendor === "sanoma" && op.resource === "connection" && op.name === "exchange") {
+    return { workflow: CONNECT_WORKFLOW, does: "exchanges an OAuth code", instead: "connect the account in the app" };
   }
   return undefined;
 }

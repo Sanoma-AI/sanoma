@@ -144,6 +144,27 @@ interface CompanyApi {
         };
         expectedRevision: string;
       }, unknown>;
+      /**
+       * Admit an OAuth consent for a connection; the app then makes the attempt outside workflow history
+       *
+       * `sanoma.connection.authorize`, a access.
+       */
+      authorize: OpFn<{
+        target: {
+          connection: {
+            $connection: string;
+            vendor: string;
+            revision?: string;
+          };
+        } | {
+          rule: string;
+        };
+        requestId: string;
+        definition: string;
+        redirectUri: string;
+        replacesApplication: boolean;
+        authorization: string;
+      }, unknown>;
       /** `sanoma.connection.bind`, a access. */
       bind: OpFn<{
         connection: {

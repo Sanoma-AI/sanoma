@@ -2,6 +2,7 @@ import type {
   ApplyPlan,
   ApplyResult,
   ApprovalState,
+  CallbackError,
   ChangeView,
   Authentication,
   ConnectionCard,
@@ -261,6 +262,28 @@ export const ConnectConnectionRequest = z.object({
   credentials: SecureCredentials.optional(),
 });
 export type ConnectConnectionRequest = z.infer<typeof ConnectConnectionRequest>;
+/** What `authorizeConnectionFn` takes: the connection, its request, and the OAuth application when it is entered or replaced. */
+export const AuthorizeConnectionRequest = z.object({
+  target: ConnectionTarget,
+  requestId: z.string().min(1).max(200),
+  // Within the stored application's 8 KiB bundle.
+  client: z.object({ clientId: z.string().min(1).max(1024), clientSecret: z.string().min(1).max(4096) }).optional(),
+});
+export type AuthorizeConnectionRequest = z.infer<typeof AuthorizeConnectionRequest>;
+/** What `connectionAttemptFn` takes: an attempt the actor started. */
+export const ConnectionAttemptRequest = z.object({ attempt: z.string().min(1).max(200) });
+export type ConnectionAttemptRequest = z.infer<typeof ConnectionAttemptRequest>;
+
+/** Why an OAuth callback came back without a connection, as the connector page's `?error=` says it. */
+export const CALLBACK_ERRORS = {
+  expired: "The connection attempt expired. Connect again.",
+  mismatch: "This browser did not start that connection attempt. Connect again from this page.",
+  replayed: "That consent was already used. Connect again to authorize a new one.",
+  declined: "Consent was declined at the provider. Nothing changed.",
+  rejected: "The provider refused the authorization. Check the OAuth application, then connect again.",
+  failed: "The connection could not be completed. Connect again.",
+} as const satisfies Record<CallbackError["reason"] | "failed", string>;
+export type CallbackErrorReason = keyof typeof CALLBACK_ERRORS;
 export const TestConnectionRequest = z.object({
   connection: ConnectionReference,
   requestId: z.string().min(1).max(200),

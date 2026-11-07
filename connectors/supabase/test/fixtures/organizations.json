@@ -1,0 +1,8 @@
+[
+  {
+    "method": "GET",
+    "path": "/v1/organizations",
+    "status": 200,
+    "body": [{ "id": "sanoma-test-org", "name": "Sanoma Test" }]
+  }
+]

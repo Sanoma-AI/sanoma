@@ -1,5 +1,6 @@
 import { ANONYMOUS, DRAFT_ID } from "@sanoma-ai/workflows/shared";
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
 import { z } from "zod";
 import {
   type ActorInfo,
@@ -8,6 +9,8 @@ import {
   ClearCredentialRequest,
   PreviewConnectionRequest,
   ConnectConnectionRequest,
+  AuthorizeConnectionRequest,
+  ConnectionAttemptRequest,
   TestConnectionRequest,
   DisconnectConnectionRequest,
   DecideCall,
@@ -50,6 +53,7 @@ import {
   startRun,
   validate,
 } from "./server/core.ts";
+import { authorizeConnection } from "./server/connect.ts";
 import { availableConnectors } from "./server/available.ts";
 import { proposeColumnChange } from "./server/columns.ts";
 import { goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
@@ -177,6 +181,19 @@ export const connectConnectionFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(ConnectConnectionRequest))
   .handler(({ data, context }) => connectConnection(context.app, context.principal, data));
+/** Starts OAuth consent: the URL to open, and the cookie that binds the attempt to this browser. */
+export const authorizeConnectionFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(AuthorizeConnectionRequest))
+  .handler(async ({ data, context }) => {
+    const { cookie, ...started } = await authorizeConnection(context.app, context.principal, data, getRequest());
+    setResponseHeader("set-cookie", cookie);
+    return started;
+  });
+export const connectionAttemptFn = createServerFn(READ)
+  .middleware([withPrincipal])
+  .validator(validate(ConnectionAttemptRequest))
+  .handler(({ data, context }) => context.app.client.connectionAttempt(data.attempt, { actor: context.principal }));
 export const testConnectionFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(TestConnectionRequest))

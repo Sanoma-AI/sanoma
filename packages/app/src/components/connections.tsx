@@ -1,9 +1,15 @@
-import type { ConnectionCard, ConnectionReview, ConnectionTarget, SecretLocation } from "@sanoma-ai/workflows";
-import { CALL_WORKFLOW, STORAGE_ADVICE, STORAGE_PROBLEMS } from "@sanoma-ai/workflows/shared";
+import type {
+  AttemptStatus,
+  ConnectionCard,
+  ConnectionReview,
+  ConnectionTarget,
+  SecretLocation,
+} from "@sanoma-ai/workflows";
+import { CALL_WORKFLOW, CONNECT_WORKFLOW, STORAGE_ADVICE, STORAGE_PROBLEMS } from "@sanoma-ai/workflows/shared";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import {
   Dialog,
@@ -17,36 +23,91 @@ import { Field, FieldDescription, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { useActor } from "../actor.ts";
-import { type ConnectionsResponse, errorBodyOf } from "../api.ts";
-import { connectConnectionFn, disconnectConnectionFn, previewConnectionFn, testConnectionFn } from "../functions.ts";
+import { CALLBACK_ERRORS, type CallbackErrorReason, type ConnectionsResponse, errorBodyOf } from "../api.ts";
+import {
+  authorizeConnectionFn,
+  connectConnectionFn,
+  connectionAttemptFn,
+  disconnectConnectionFn,
+  previewConnectionFn,
+  testConnectionFn,
+} from "../functions.ts";
 import { configQuery, connectionsQuery, runLink } from "../queries.ts";
 import { secureFields, secureInput } from "../form/secure-fields.ts";
 import { ItemHeading, Notice, Region, ToneBadge, When } from "./common.tsx";
 
-/** Accounts and secure input are scoped to the current actor, including the query cache. */
-export function Connections({ vendor }: { vendor?: string }) {
-  const { actor } = useActor();
-  if (!actor) return <Notice>Sign in to manage connections.</Notice>;
-  return <ConnectionList key={actor} vendor={vendor} actor={actor} />;
+/** Where an OAuth callback sent the person back to: the attempt to follow, or why it ended. */
+export interface CallbackOutcome {
+  connection?: string;
+  attempt?: string;
+  error?: CallbackErrorReason;
 }
 
-function ConnectionList({ vendor, actor }: { vendor?: string; actor: string }) {
+/** Accounts and secure input are scoped to the current actor, including the query cache. */
+export function Connections({ vendor, callback }: { vendor?: string; callback?: CallbackOutcome }) {
+  const { actor } = useActor();
+  if (!actor) return <Notice>Sign in to manage connections.</Notice>;
+  return <ConnectionList key={actor} vendor={vendor} actor={actor} callback={callback} />;
+}
+
+/** How each authentication kind is named on the page. */
+const KIND_LABELS: Record<string, string> = {
+  "api-key": "API key",
+  fields: "credentials",
+  signed: "signing key",
+  oauth2: "OAuth consent",
+  "workload-identity": "deployment identity",
+};
+
+function ConnectionList({ vendor, actor, callback }: { vendor?: string; actor: string; callback?: CallbackOutcome }) {
   const query = useQuery({ ...connectionsQuery(), queryKey: ["connections", actor] });
   const [creating, setCreating] = useState<string>();
+  const [started, setStarted] = useState<{ rule: string; attempt: string }>();
+  const [dismissed, setDismissed] = useState(false);
   if (query.error) return <ConnectionFailure error={query.error} />;
   if (!query.data) return <Notice>Loading connections…</Notice>;
   const data = query.data;
   const cards = data.cards.filter((card) => !vendor || card.vendor === vendor);
   const rules = data.rules.filter((rule) => !vendor || rule.vendor === vendor);
   if (!cards.length && !rules.length) return null;
+  const methods = vendor ? Object.entries(data.methods[vendor] ?? {}) : [];
+  // A callback for an account a rule creates: no card holds it until the exchange stores it.
+  const unheld =
+    callback?.attempt && !dismissed && !cards.some((card) => card.id === callback.connection)
+      ? callback.attempt
+      : undefined;
   return (
     <Region title="Connections">
       <p className="text-muted-foreground">
         Accounts and requirements are declared in code. Actions follow your company’s policies.
       </p>
+      {methods.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          Ways to connect:{" "}
+          {methods.map(([name, method], index) => (
+            <span key={name}>
+              {index > 0 && ", "}
+              <code>{name}</code> ({KIND_LABELS[method.kind] ?? method.kind})
+            </span>
+          ))}
+        </p>
+      )}
+      {callback?.error && <Notice variant="destructive">{CALLBACK_ERRORS[callback.error]}</Notice>}
+      {unheld && (
+        <AttemptProgress
+          attempt={unheld}
+          vendor={vendor ?? callback?.connection?.split("/")[0] ?? "the provider"}
+          onDismiss={() => setDismissed(true)}
+        />
+      )}
       <ItemGroup>
         {cards.map((card) => (
-          <ConnectionRow key={card.id} card={card} data={data} />
+          <ConnectionRow
+            key={card.id}
+            card={card}
+            data={data}
+            attempt={callback?.connection === card.id ? callback.attempt : undefined}
+          />
         ))}
       </ItemGroup>
       {rules.map((rule) => (
@@ -64,14 +125,26 @@ function ConnectionList({ vendor, actor }: { vendor?: string; actor: string }) {
               to review an existing account.
             </p>
           )}
-          {creating === rule.id && (
-            <ConnectionDialog
-              name={rule.name}
-              target={{ rule: rule.id }}
-              method={data.methods[rule.vendor]?.[rule.method]}
-              store={data.store}
-              onClose={() => setCreating(undefined)}
-            />
+          {creating === rule.id &&
+            (data.methods[rule.vendor]?.[rule.method]?.kind === "oauth2" ? (
+              <ConsentDialog
+                name={rule.name}
+                vendor={rule.vendor}
+                target={{ rule: rule.id }}
+                onStarted={(attempt) => setStarted({ rule: rule.id, attempt })}
+                onClose={() => setCreating(undefined)}
+              />
+            ) : (
+              <ConnectionDialog
+                name={rule.name}
+                target={{ rule: rule.id }}
+                method={data.methods[rule.vendor]?.[rule.method]}
+                store={data.store}
+                onClose={() => setCreating(undefined)}
+              />
+            ))}
+          {started?.rule === rule.id && (
+            <AttemptProgress attempt={started.attempt} vendor={rule.vendor} onDismiss={() => setStarted(undefined)} />
           )}
         </div>
       ))}
@@ -148,8 +221,17 @@ type Method = ConnectionsResponse["methods"][string][string] | undefined;
 const canWrite = (store: ConnectionsResponse["store"]) =>
   store.capabilities.writable && store.capabilities.conditionalWrites !== "none";
 
-function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][number]; data: ConnectionsResponse }) {
+function ConnectionRow({
+  card,
+  data,
+  attempt: returned,
+}: {
+  card: ConnectionsResponse["cards"][number];
+  data: ConnectionsResponse;
+  attempt?: string;
+}) {
   const [editing, setEditing] = useState(false);
+  const [attempt, setAttempt] = useState(returned);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [request, setRequest] = useState<{ action: string; id: string }>();
@@ -211,15 +293,23 @@ function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][numb
             external value.
           </ItemDescription>
         )}
-        {oauth && !external && (
-          <ItemDescription>
-            OAuth Connect and Reconnect require this connector’s consent capability, which is not available yet.
+        {oauth && external && (
+          <ItemDescription className="line-clamp-none">
+            OAuth needs a store Sanoma can write, with conditional writes, to keep each grant. This connection’s store
+            is read-only: select a writable store in code to connect it.
           </ItemDescription>
         )}
         {card.health && (
           <ItemDescription>
             Last checked <When at={Date.parse(card.health.checkedAt)} />
             {card.health.externallyRenewed && " · Externally renewed"}
+            {card.health.expiresAt && (
+              <>
+                {" "}
+                · Access expires{" "}
+                <time dateTime={card.health.expiresAt}>{new Date(card.health.expiresAt).toLocaleString()}</time>
+              </>
+            )}
           </ItemDescription>
         )}
         {card.storageProblem && (
@@ -228,6 +318,12 @@ function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][numb
             {STORAGE_ADVICE[card.storageProblem]}.
           </ItemDescription>
         )}
+        {oauth && card.status === "uncertain" && (
+          <ItemDescription className="line-clamp-none">
+            The provider may have issued a grant that was not stored. Reconnect to authorize a new one.
+          </ItemDescription>
+        )}
+        {attempt && <AttemptProgress attempt={attempt} vendor={card.vendor} onDismiss={() => setAttempt(undefined)} />}
         {unsupportedWrite && !card.storageProblem && (
           <ItemDescription className="line-clamp-none">
             This store lacks conditional writes. Use an external binding or select a store that supports safe credential
@@ -266,7 +362,7 @@ function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][numb
             busy ||
             !method?.verifiable ||
             !data.store.ready ||
-            (oauth && !external) ||
+            (oauth && external) ||
             unsupportedWrite ||
             !!card.storageProblem
           }
@@ -295,16 +391,25 @@ function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][numb
           </Button>
         )}
       </ItemActions>
-      {editing && (
-        <ConnectionDialog
-          name={card.name}
-          target={{ connection: { vendor: card.vendor, $connection: card.id } }}
-          method={method}
-          card={card}
-          store={data.store}
-          onClose={() => setEditing(false)}
-        />
-      )}
+      {editing &&
+        (oauth ? (
+          <ConsentDialog
+            name={card.name}
+            vendor={card.vendor}
+            target={{ connection: { vendor: card.vendor, $connection: card.id } }}
+            onStarted={setAttempt}
+            onClose={() => setEditing(false)}
+          />
+        ) : (
+          <ConnectionDialog
+            name={card.name}
+            target={{ connection: { vendor: card.vendor, $connection: card.id } }}
+            method={method}
+            card={card}
+            store={data.store}
+            onClose={() => setEditing(false)}
+          />
+        ))}
     </Item>
   );
 }
@@ -335,8 +440,7 @@ function ConnectionDialog({
   const queryClient = useQueryClient();
   const external = card?.location?.management === "external" || !store.capabilities.writable;
   const identity = method?.kind === "workload-identity";
-  const oauth = method?.kind === "oauth2";
-  const enter = !external && !identity && !oauth;
+  const enter = !external && !identity;
   const fields = secureFields(method?.schema ?? {});
   async function submit() {
     setBusy(true);
@@ -385,12 +489,6 @@ function ConnectionDialog({
                   : "Enter credentials securely. They are never included in an approval or workflow history."}
             </DialogDescription>
           </DialogHeader>
-          {oauth && !external && (
-            <Notice>
-              This method needs an OAuth consent flow. Connect and Reconnect will be available when this connector
-              supplies that capability.
-            </Notice>
-          )}
           {!method?.verifiable && <Notice>This authentication method does not supply account verification.</Notice>}
           {enter &&
             fields.map((field) => (
@@ -461,13 +559,196 @@ function ConnectionDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={busy || !method?.verifiable || (oauth && !external) || !store.ready}>
+            <Button type="submit" disabled={busy || !method?.verifiable || !store.ready}>
               {busy ? "Checking…" : review ? "Save connection" : "Verify and review"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * OAuth Connect and Reconnect: the company's OAuth application, entered here when it is new or
+ * replaced (kept in this mounted form only, as any credential), then the provider's consent in a
+ * new tab. The attempt's progress shows on the card; the tab comes back to this page.
+ */
+function ConsentDialog({
+  name,
+  vendor,
+  target,
+  onStarted,
+  onClose,
+}: {
+  name: string;
+  vendor: string;
+  target: ConnectionTarget;
+  onStarted(attempt: string): void;
+  onClose(): void;
+}) {
+  const [requestId] = useState(() => crypto.randomUUID());
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>();
+  const authorize = useServerFn(authorizeConnectionFn);
+  const close = () => {
+    setClientSecret("");
+    onClose();
+  };
+  async function submit() {
+    setBusy(true);
+    setError(undefined);
+    // Opened in the click, so no popup blocker stops it; pointed at the provider once the attempt exists.
+    const tab = window.open("", "_blank");
+    try {
+      const entered = clientId || clientSecret ? { client: { clientId, clientSecret } } : {};
+      const { url, attempt } = await authorize({ data: { target, requestId, ...entered } });
+      if (tab) {
+        tab.opener = null;
+        tab.location.href = url;
+      } else window.location.assign(url);
+      onStarted(attempt);
+      close();
+    } catch (failure) {
+      tab?.close();
+      setError(failure);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Dialog open onOpenChange={(open) => !open && !busy && close()}>
+      <DialogContent>
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Connect · {name}</DialogTitle>
+            <DialogDescription>
+              You approve access at {vendor} in a new tab, then come back here. The grant goes to the secret store,
+              never into an approval or workflow history.
+            </DialogDescription>
+          </DialogHeader>
+          <Field>
+            <FieldLabel htmlFor="oauth-client-id">Client ID</FieldLabel>
+            <Input
+              id="oauth-client-id"
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              spellCheck={false}
+              required={!!clientSecret}
+              disabled={busy}
+              value={clientId}
+              onChange={(event) => setClientId(event.target.value)}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="oauth-client-secret">Client secret</FieldLabel>
+            <Input
+              id="oauth-client-secret"
+              type="password"
+              autoComplete="new-password"
+              data-1p-ignore
+              data-lpignore="true"
+              spellCheck={false}
+              required={!!clientId}
+              disabled={busy}
+              value={clientSecret}
+              onChange={(event) => setClientSecret(event.target.value)}
+            />
+            <FieldDescription>
+              Your company’s OAuth application at {vendor}. Leave both empty to use the one already stored.
+            </FieldDescription>
+          </Field>
+          {error !== undefined && <ConnectionFailure error={error} />}
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={busy} onClick={close}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? "Starting…" : `Continue to ${vendor}`}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** What an attempt's problem means to the person. Never the provider's own words. */
+const ATTEMPT_PROBLEMS: Record<NonNullable<AttemptStatus["problem"]>, string> = {
+  approval_pending: "Waiting for approval to store the grant.",
+  declined: "Consent was declined at the provider. Nothing changed.",
+  rejected:
+    "The provider refused the code or the OAuth application’s credentials. Check the application, then connect again.",
+  wrong_account: "The provider authorized an account this connection does not allow. Connect again with the right one.",
+  scope_changed: "The grant lacks a scope this connection requires. Grant it, then connect again.",
+  uncertain: "The provider may have issued a grant that was not stored. Reconnect to authorize a new one.",
+  expired: "The attempt expired before it finished. Connect again.",
+  missing: "The OAuth application’s client ID and secret are not stored. Connect again and enter them.",
+  revoked: "The provider revoked the grant. Connect again.",
+  unavailable: "The connection could not be completed. Connect again.",
+  unsupported: "This connection cannot connect by OAuth.",
+};
+
+const ended = (status?: AttemptStatus) => status?.state === "connected" || status?.state === "failed";
+
+/**
+ * An OAuth attempt's progress, polled until it ends: waiting for consent, exchanging, connected
+ * or failed. The connections are read again once, when it ends.
+ */
+function AttemptProgress({ attempt, vendor, onDismiss }: { attempt: string; vendor: string; onDismiss(): void }) {
+  const check = useServerFn(connectionAttemptFn);
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: ["connection-attempt", attempt],
+    queryFn: () => check({ data: { attempt } }),
+    refetchInterval: (q) => (ended(q.state.data) ? false : 1_500),
+  });
+  const status = query.data;
+  const done = ended(status);
+  useEffect(() => {
+    if (done) void queryClient.invalidateQueries({ queryKey: ["connections"] });
+  }, [done, queryClient]);
+  if (query.error) return <ConnectionFailure error={query.error} />;
+  if (!status) return <ItemDescription>Checking the connection attempt…</ItemDescription>;
+  const problem = status.problem && ATTEMPT_PROBLEMS[status.problem];
+  return (
+    <div role="status" className="flex flex-col gap-1 text-sm">
+      {status.state === "waiting" && <p>Waiting for you to approve access at {vendor} in the other tab…</p>}
+      {status.state === "exchanging" && (
+        <p>
+          {problem ?? "Storing the grant and verifying the account…"}
+          {status.runId && status.problem === "approval_pending" && (
+            <>
+              {" "}
+              <Link
+                {...runLink({ workflow: CONNECT_WORKFLOW, runId: status.runId })}
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Review the request
+              </Link>
+            </>
+          )}
+        </p>
+      )}
+      {status.state === "connected" && <p>Connected. The account is verified.</p>}
+      {status.state === "failed" && <Notice variant="destructive">{problem ?? ATTEMPT_PROBLEMS.unavailable}</Notice>}
+      {(status.state === "connected" || status.state === "failed") && (
+        <Button variant="ghost" size="sm" className="self-start" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      )}
+    </div>
   );
 }
 

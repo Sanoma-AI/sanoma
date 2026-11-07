@@ -247,7 +247,7 @@ describe("the Permissions page", () => {
       'aria-label="hold · group finance: the rule for shop.refunds.create in refund for someone in agents"',
     );
     // No public site, so no visitor's columns; built-in app listing, connection and run-inspection rows allow across.
-    expect(html.match(/>allow</g)).toHaveLength(32);
+    expect(html.match(/>allow</g)).toHaveLength(35);
     // The policy file under the grid, titled by its path, its text plain until the code loads.
     expect(html).toContain(">policies/refunds.cedar</h2>");
     expect(html).toContain("forbid (principal, action == Sanoma::Action::&quot;workflow:refund&quot;, resource)");

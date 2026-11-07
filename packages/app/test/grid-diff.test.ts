@@ -171,6 +171,7 @@ describe("diffGrids", () => {
       // The runtime's listing of apps, built in: no policy names it.
       "sanoma.apps.list": ["same", "same", "same"],
       "sanoma.connection.activate": ["same", "same", "same"],
+      "sanoma.connection.authorize": ["same", "same", "same"],
       "sanoma.connection.configure": ["same", "same", "same"],
       "sanoma.connection.prepare": ["same", "same", "same"],
       "sanoma.connection.test": ["same", "same", "same"],
@@ -181,7 +182,7 @@ describe("diffGrids", () => {
     });
     expect(diff.workflows[0]).toMatchObject({ id: "refund", title: "Refund", status: "changed" });
     expect(diff.changed).toBe(true);
-    expect(diff.counts).toEqual({ same: 31, looser: 3, tighter: 2, changed: 0, added: 0, removed: 0 });
+    expect(diff.counts).toEqual({ same: 34, looser: 3, tighter: 2, changed: 0, added: 0, removed: 0 });
     const list = diff.ops.find((op) => op.id === "shop.refunds.list")!;
     expect(list.cells.map(cellWords)).toEqual(["allow", "deny → hold · group finance", "allow → deny"]);
     expect(cellWords(diff.workflows[0]!.cells[0]!)).toBe("hold · group finance → allow");
@@ -191,7 +192,7 @@ describe("diffGrids", () => {
   it("finds nothing between a grid and itself, even when only a rule's id changed", () => {
     const diff = diffGrids(gridUnder(MAIN), gridUnder(MAIN.replace("no-agent-reads", "agents-read-nothing")));
     expect(diff.changed).toBe(false);
-    expect(diff.counts.same).toBe(36);
+    expect(diff.counts.same).toBe(39);
     expect(onlyChanged(diff)).toMatchObject({ workflows: [], ops: [] });
     expect(diffSummary(diff)).toEqual([]);
   });

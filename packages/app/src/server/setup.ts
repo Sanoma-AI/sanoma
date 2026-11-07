@@ -1,15 +1,14 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { randomBytes } from "node:crypto";
-import { parse, serialize } from "cookie-es";
-import { type CredentialStatus, GITHUB_APP, isLoopback, type Principal, requestOrigin } from "@sanoma-ai/workflows";
+import { type CredentialStatus, GITHUB_APP, isLoopback, type Principal } from "@sanoma-ai/workflows";
 import { credentialReady } from "@sanoma-ai/workflows/shared";
 import { mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { type SetCredentialRequest, SETUP_VENDORS, type SetupStatus } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { type ActorContext, invalid } from "./core.ts";
 import { declaredEmail } from "./people.ts";
-import { signer } from "../login/keys.ts";
+import { actorCookie, cookie, cookies } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
 import { secretValues } from "./secrets.ts";
 
@@ -159,21 +158,6 @@ async function missingPermissions(app: AppContext, slug: string): Promise<string
   }
 }
 
-const cookies = (request: Request) => parse(request.headers.get("cookie") ?? "");
-
-/**
- * A Set-Cookie line (`maxAge` 0 clears it): httpOnly, Lax, and Secure when the request came over
- * HTTPS (directly or through a proxy that says so).
- */
-const cookie = (request: Request, name: string, value: string, path: string, maxAge: number) =>
-  serialize(name, value, {
-    path,
-    maxAge,
-    httpOnly: true,
-    sameSite: "lax",
-    secure: requestOrigin(request).startsWith("https:"),
-  });
-
 /** What the page shows: the App's slug, each token's status and how people will sign in on the host (`signIn`); never a value. */
 export async function setupStatus(app: AppContext, actor?: Principal): Promise<SetupStatus> {
   const names = setupTokens(app);
@@ -285,7 +269,6 @@ export async function manifestPage(
   const actor = await resolve();
   if (!actor) return toConnect("nobody");
   const state = randomBytes(16).toString("base64url");
-  const payload = `${state}.${Buffer.from(actor.id).toString("base64url")}`;
   const to = new URL(
     org ? `https://github.com/organizations/${org}/settings/apps/new` : "https://github.com/settings/apps/new",
   );
@@ -302,7 +285,7 @@ export async function manifestPage(
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "set-cookie": cookie(request, STATE, `${payload}.${stateSigner().sign(payload)}`, STATE_PATH, 600),
+      "set-cookie": cookie(request, STATE, stateCookie().seal(state, actor.id), STATE_PATH, 600),
     },
   });
 }
@@ -316,13 +299,10 @@ export async function githubCallback(app: AppContext, request: Request): Promise
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const [sent, who, signature] = (cookies(request)[STATE] ?? "").split(".");
-  const payload = `${sent}.${who}`;
-  if (!code || !state || !sent || !who || !signature || sent !== state || !stateSigner().verify(payload, signature)) {
-    return toConnect("expired", request);
-  }
+  const sent = stateCookie().open(cookies(request)[STATE]);
+  if (!code || !state || sent?.value !== state) return toConnect("expired", request);
   // Who started the flow, as the manifest page admitted them.
-  const by = Buffer.from(who, "base64url").toString();
+  const by = sent.actor;
   try {
     const res = await fetch(`${API}/app-manifests/${encodeURIComponent(code)}/conversions`, {
       method: "POST",
@@ -352,6 +332,4 @@ function toConnect(github: "connected" | "expired" | "failed" | "bad-org" | "nob
 }
 
 /** Signs setup state with the independent app-signing key. */
-function stateSigner() {
-  return signer("sanoma setup state");
-}
+const stateCookie = () => actorCookie("sanoma setup state");

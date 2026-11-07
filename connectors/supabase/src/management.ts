@@ -1,4 +1,5 @@
 import { type CallContext, type Driver, DriverError, type DriverFn, storeDatabaseUrl } from "@sanoma-ai/workflows";
+import { PASSWORD_SECRET } from "./connector.ts";
 
 // The operations the provider's project does not carry, over Supabase's Management API
 // (https://api.supabase.com/api/v1): the driver's `ManagementApi` calls it, the fake's answers
@@ -22,6 +23,12 @@ export interface ApiPooler {
   db_name: string;
 }
 
+/** An organization, as `GET /v1/organizations` lists it: the fields read here. */
+export interface ApiOrganization {
+  id: string;
+  name: string;
+}
+
 /** One service's health, as `GET /v1/projects/{ref}/health` lists them. */
 export interface ApiHealth {
   name: string;
@@ -31,6 +38,7 @@ export interface ApiHealth {
 
 /** Supabase's Management API, its answers as it sends them. Each call fails with a `DriverError`. */
 export interface ManagementApi {
+  organizations(): Promise<ApiOrganization[]>;
   projects(): Promise<ApiProject[]>;
   pooler(ref: string): Promise<ApiPooler[]>;
   health(ref: string, services: readonly string[]): Promise<ApiHealth[]>;
@@ -39,9 +47,6 @@ export interface ManagementApi {
 /** The services `project.health` reads when none are named: what a worker needs. */
 const HEALTH_SERVICES = ["db", "pooler"] as const;
 
-/** The secret the project's declared `database_password` names, which the URL is built with. */
-const PASSWORD_SECRET = "SUPABASE_DB_PASSWORD";
-
 /** A project's statuses while it is deleted, and after: not a twin of a new one. */
 const GONE = new Set(["GOING_DOWN", "REMOVED"]);
 
@@ -49,14 +54,14 @@ const GONE = new Set(["GOING_DOWN", "REMOVED"]);
 const SESSION_PORT = 5432;
 
 /**
- * `driver` (the provider's) with the Management API's operations over `api()`, made on each call:
- * `pooler.get`, `project.health`, `database.storeUrl`, and `project.create` refusing a name the
- * organization has a project of already.
+ * `driver` (the provider's) with the Management API's operations over `api(call)`, made on each
+ * call with that call's credentials: `organization.list`, `pooler.get`, `project.health`,
+ * `database.storeUrl`, and `project.create` refusing a name the organization has a project of already.
  */
-export function withManagement(driver: Driver, api: () => ManagementApi): Driver {
+export function withManagement(driver: Driver, api: (call: CallContext) => ManagementApi): Driver {
   const create = driver.ops["project.create"]!;
-  const pooler = async (ref: string) => {
-    const primary = (await api().pooler(ref)).find((p) => p.database_type === "PRIMARY");
+  const pooler = async (ref: string, call: CallContext) => {
+    const primary = (await api(call).pooler(ref)).find((p) => p.database_type === "PRIMARY");
     if (!primary) throw new DriverError(`supabase: ${ref} has no primary database pooler`, { retryable: false });
     return { host: primary.db_host, port: SESSION_PORT, user: primary.db_user, database: primary.db_name };
   };
@@ -66,7 +71,7 @@ export function withManagement(driver: Driver, api: () => ManagementApi): Driver
     // it, finds it here and stops, rather than making a second one.
     "project.create": async (input: { desired: { name: string; organization_id: string } }, call: CallContext) => {
       const { name, organization_id: org } = input.desired;
-      const twin = (await api().projects()).find(
+      const twin = (await api(call).projects()).find(
         (p) =>
           p.name === name && (p.organization_id === org || p.organization_slug === org) && !GONE.has(p.status ?? ""),
       );
@@ -78,23 +83,30 @@ export function withManagement(driver: Driver, api: () => ManagementApi): Driver
       }
       return create(input, call);
     },
-    "project.health": async ({ ref, services = HEALTH_SERVICES }: { ref: string; services?: readonly string[] }) => {
-      const answers = (await api().health(ref, services)).map(({ name, healthy, status }) => ({
+    "organization.list": async (_input: unknown, call: CallContext) => ({
+      organizations: (await api(call).organizations()).map(({ id, name }) => ({ id, name })),
+    }),
+    "project.health": async (
+      { ref, services = HEALTH_SERVICES }: { ref: string; services?: readonly string[] },
+      call: CallContext,
+    ) => {
+      const answers = (await api(call).health(ref, services)).map(({ name, healthy, status }) => ({
         name,
         healthy,
         status,
       }));
       return { healthy: answers.length > 0 && answers.every((s) => s.healthy), services: answers };
     },
-    "pooler.get": ({ ref }: { ref: string }) => pooler(ref),
-    "database.storeUrl": async ({ ref, export: name }: { ref: string; export: string }, { secrets }: CallContext) => {
+    "pooler.get": ({ ref }: { ref: string }, call: CallContext) => pooler(ref, call),
+    "database.storeUrl": async ({ ref, export: name }: { ref: string; export: string }, call: CallContext) => {
+      const { secrets } = call;
       const password = await secrets.get(PASSWORD_SECRET);
       if (password === undefined) {
         throw new DriverError(`supabase: database.storeUrl: the secret ${PASSWORD_SECRET} is not set`, {
           retryable: false,
         });
       }
-      const { host, port, user, database } = await pooler(ref);
+      const { host, port, user, database } = await pooler(ref, call);
       const url = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=require`;
       return storeDatabaseUrl(secrets, name, url, {
         where: "supabase: database.storeUrl",

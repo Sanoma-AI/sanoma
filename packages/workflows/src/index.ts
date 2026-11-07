@@ -373,10 +373,14 @@ export {
   AuthenticationError,
   type AuthenticationProblem,
   type Authentication,
+  type OAuthFlow,
+  oauthGrant,
+  type OAuthGrant,
   type AuthenticationIdentity,
   type AuthenticationContext,
   type CallAuthentication,
 } from "./authentication.ts";
+export { oauthClient, CallbackError, type AttemptStatus } from "./oauth.ts";
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
 
 export { postgresSecretStore } from "./credentials.ts";

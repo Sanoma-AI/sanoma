@@ -35,6 +35,7 @@ import { chatWorkflow } from "./chat-workflow.ts";
 import { followSteps } from "./follow-steps.ts";
 import { followWorkflow } from "./follow-workflow.ts";
 import { importWorkflow } from "./import-workflow.ts";
+import { connectWorkflow } from "./connect-workflow.ts";
 import {
   type Collection,
   collectionsConnector,
@@ -79,6 +80,7 @@ import {
   DATA_VENDOR,
   FOLLOW_WORKFLOW,
   IMPORT_WORKFLOW,
+  CONNECT_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
@@ -513,6 +515,15 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   for (const wf of appWorkflows(appRunner)) names.set(wf.name, wf);
   // Built-in, in every config: a chat turn, which a worker given the app's steps runs.
   names.set(CHAT_WORKFLOW, chatWorkflow(chatSteps()));
+  // Built-in: an OAuth connection's exchange, which the app's callback starts, when a declared
+  // connection or rule connects by consent.
+  const { catalog } = connections;
+  if (
+    [...catalog.definitions.values(), ...catalog.rules.values()].some(
+      (c) => catalog.methods.get(c.vendor)?.[c.method]?.kind === "oauth2",
+    )
+  )
+    names.set(CONNECT_WORKFLOW, connectWorkflow());
   const declaredObjects = () => readDeclaredObjects(root, connectors, declarable);
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);

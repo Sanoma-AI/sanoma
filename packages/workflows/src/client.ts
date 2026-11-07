@@ -10,6 +10,7 @@ import {
   type ConnectionRule,
 } from "./connection.ts";
 import { encodeCredentials, decodeCredentials, verifyAuthentication, AuthenticationError } from "./authentication.ts";
+import { type AttemptStatus, connectRunId, oauthApplication, type OAuthClient, oauthClient } from "./oauth.ts";
 
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -100,6 +101,8 @@ import {
   CHANGE_WORKFLOW,
   CHAT_TOPIC,
   CHAT_WORKFLOW,
+  CONNECT_WORKFLOW,
+  connectionCallbackPath,
   changeIdOf,
   chatRunId,
   chatRunPrefix,
@@ -1504,6 +1507,130 @@ export class SanomaClient {
   }
 
   /**
+   * Starts OAuth consent for a connection whose method is `oauth2`, as secure intake on the
+   * trusted server: the `sanoma.connection.authorize` gate under policy (metadata only, with
+   * `replacesApplication` when `client` is given), the company's OAuth application written to the
+   * connection's `client` secret when `client` is given (else the stored one is used), then an attempt whose state and PKCE verifier are kept
+   * outside workflow history (`oauth.ts`). Returns the consent URL to open and the attempt's id,
+   * which the app binds to the person's browser for the callback. `redirectUri` must be the app's
+   * callback for the vendor (`connectionCallbackPath`), as registered with the provider.
+   */
+  async authorizeConnection(
+    target: ConnectionTarget,
+    options: { actor: Principal | string; id: string; redirectUri: string; client?: OAuthClient },
+  ): Promise<{ attempt: string; url: string; expiresAt: number; connection: string }> {
+    const actor = await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    const id = parseOrThrow(z.string().min(1).max(200), options.id, "Name the setup request");
+    target = parseOrThrow(connectionTargetSchema, target, "Select a declared connection or creation rule");
+    const redirectUri = parseOrThrow(z.string().url(), options.redirectUri, "Give the callback's URL");
+    const setup = await this.config.connections.setup(target, actor, id);
+    const method = this.config.connections.catalog.methods.get(setup.vendor)![setup.method]!;
+    if (method.kind !== "oauth2" || !setup.client || !setup.credential)
+      throw new SanomaError("invalid_input", "This connection's method does not connect by OAuth consent");
+    if (new URL(redirectUri).pathname !== connectionCallbackPath(setup.vendor))
+      throw new SanomaError("invalid_input", `The callback must be ${connectionCallbackPath(setup.vendor)}`);
+    const authorized = (await this.call(
+      "sanoma.connection.authorize",
+      {
+        target,
+        requestId: id,
+        definition: setup.definition,
+        redirectUri,
+        replacesApplication: options.client !== undefined,
+        authorization: this.connectionAuthorization(),
+      },
+      { actor, id: `connection-authorize:${id}` },
+    )) as ConnectionSetup;
+    if (!isDeepStrictEqual(authorized, setup))
+      throw new SanomaError("invalid_input", "The connection changed; start connecting again");
+    const current = await this.storedSecrets.read(setup.client);
+    let application: OAuthClient;
+    if (options.client !== undefined) {
+      application = parseOrThrow(oauthClient, options.client, "Enter the OAuth application's client ID and secret");
+      await this.storedSecrets.write(setup.client, encodeCredentials(oauthApplication, application), {
+        expectedVersion: current?.version ?? null,
+        by: actor.id,
+      });
+    } else if (current) application = decodeCredentials(oauthApplication, current.value);
+    else throw new SanomaError("invalid_input", "Enter the OAuth application's client ID and secret: none is stored");
+    const started = await this.config.connections.attempts.start({
+      flow: method.oauth,
+      connectionId: setup.id,
+      target,
+      requestId: id,
+      principal: actor.id,
+      clientId: application.clientId,
+      redirectUri,
+    });
+    return { ...started, connection: setup.id };
+  }
+
+  /**
+   * The provider's callback, from the app's route for `vendor`: the attempt the person's browser
+   * holds checked against `params`' state as the person who started it (`actor`), its code
+   * sealed into the attempt, then the built-in `connect` run started as them, given the attempt's
+   * id alone (`connect:<attempt>`). Throws a `CallbackError` (`oauth.ts`) for a mismatched,
+   * replayed, expired or declined callback. Returns the connection and the run.
+   */
+  async receiveConnection(
+    vendor: string,
+    attempt: string,
+    params: URLSearchParams,
+    options: { actor: Principal | string },
+  ): Promise<{ connection: string; runId: string }> {
+    const actor = await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    const { attempts, catalog } = this.config.connections;
+    const received = await attempts.receive(attempt, actor.id, params, async (row) => {
+      if (
+        !row.connectionId.startsWith(`${vendor}/`) ||
+        new URL(row.redirectUri).pathname !== connectionCallbackPath(vendor)
+      )
+        return undefined;
+      const setup = await this.config.connections.setup(row.target, actor, row.requestId);
+      const method = catalog.methods.get(setup.vendor)?.[setup.method];
+      return method?.kind === "oauth2" ? method.oauth : undefined;
+    });
+    const runId = connectRunId(attempt);
+    try {
+      await this.start(
+        CONNECT_WORKFLOW,
+        { target: received.target, requestId: received.requestId, attempt },
+        { startedBy: actor, runId },
+      );
+    } catch (error) {
+      // No run will take the sealed code: end the attempt, so its page says so and drops the code.
+      await attempts.settle(attempt, actor.id, "unavailable");
+      throw error;
+    }
+    return { connection: received.connectionId, runId };
+  }
+
+  /**
+   * Where the person's OAuth attempt is, for the page that waits on it: waiting for consent,
+   * exchanging (the `connect` run queued, running or held for an approval), connected, or failed
+   * with its problem. Metadata only; refused for an attempt that is not the person's.
+   */
+  async connectionAttempt(attempt: string, options: { actor: Principal | string }): Promise<AttemptStatus> {
+    const actor = await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    const row = await this.config.connections.attempts.get(attempt, actor.id);
+    if (!row) throw new SanomaError("invalid_input", "No such connection attempt");
+    const connection = row.connectionId;
+    const runId = connectRunId(attempt);
+    const run = row.received ? await this.run(runId) : undefined;
+    const ran = run && { runId };
+    if (row.outcome && row.outcome !== "exchanged")
+      return { state: "failed", connection, problem: row.outcome, ...ran };
+    if (!run) {
+      return row.received || row.expiresAt.getTime() > Date.now()
+        ? { state: row.received ? "exchanging" : "waiting", connection }
+        : { state: "failed", connection, problem: "expired" };
+    }
+    if (run.status === "finished") return { state: "connected", connection, runId };
+    if (isEnded(run.status)) return { state: "failed", connection, problem: "unavailable", runId };
+    return { state: "exchanging", connection, ...(run.status === "waiting" && { problem: "approval_pending" }), runId };
+  }
+
+  /**
    * Values resolved through the selected store and explicit bindings, with version and change
    * metadata. Missing names are left out. Server code only; pages receive status, never values.
    */
@@ -1765,6 +1892,11 @@ const OWN_STARTS: Record<
   [FOLLOW_WORKFLOW]: {
     by: "follow",
     admits: (event: RemoteEvent, by, runId) => runId === followRunId(event) && by.id === HOST_CHECK_AGENT,
+  },
+  // The callback's: the attempt's own run. The exchange takes the attempt only as the person who started it.
+  [CONNECT_WORKFLOW]: {
+    by: "receiveConnection",
+    admits: ({ attempt }: { attempt: string }, _by, runId) => runId === connectRunId(attempt),
   },
   [CHAT_WORKFLOW]: {
     by: "startTurn",

@@ -436,7 +436,49 @@ The read APIs are scoped to the admitted actor:
 
 Call `sanoma.connection.test` with `{ connection }` to verify the current bundle under policy. Its health result is a timestamped observation, not a live guarantee or background monitor: it can report expired, revoked, wrong-account, changed-scope, invalid, unavailable or store-denied states. An external bundle whose opaque version differs from the prior test is marked externally renewed. A later vendor or store change is detected on the next Test or authorized invocation.
 
-`sanoma.connection.disconnect` takes `{ connection, expectedRevision }` and makes the binding unusable under a new revision. It does not delete any stored value or revoke the token at the vendor; externally managed values remain with their owner. Deletion, vendor revocation, OAuth consent/refresh and provider-store migration require their own lifecycle support. The app's [connection forms](../app/README.md#connection-management) implement this secure intake and show these states; they do not add a second configuration source.
+`sanoma.connection.disconnect` takes `{ connection, expectedRevision }` and makes the binding unusable under a new revision. It does not delete any stored value or revoke the token at the vendor; externally managed values remain with their owner. Deletion, vendor revocation, OAuth refresh and provider-store migration require their own lifecycle support; OAuth consent is [below](#connecting-by-oauth-consent). The app's [connection forms](../app/README.md#connection-management) implement this secure intake and show these states; they do not add a second configuration source.
+
+#### Connecting by OAuth consent
+
+A method of kind `oauth2` connects an account by the provider's consent instead of a pasted value. The connector owns the flow; the runtime defines the grant's schema (`oauthGrant`: `accessToken`, `tokenType`, optional `refreshToken`, `expiresAt` in Unix milliseconds and `scopes`):
+
+```ts
+export const oauth = defineAuthentication({
+  kind: "oauth2",
+  version: 1,
+  storage: { writable: true, conditionalWrites: true, maxBytes: 16_384 },
+  oauth: {
+    authorizeUrl: "https://example.test/oauth/authorize",
+    tokenUrl: "https://example.test/oauth/token",
+    scopes: ["messages:read"],
+    pkce: true,
+    clientAuthentication: "client_secret_basic",
+  },
+  verify: async (grant) => ({ account: await accountOf(grant.accessToken), scopes: grant.scopes ?? [] }),
+});
+```
+
+Endpoints are `https`, or `http` on a loopback host for tests. A declaration names two secrets: `credentials`, the grant, and `client`, the company's own OAuth application (`{ clientId, clientSecret }`, schema `oauthClient`). They are separate bundles, so several accounts can share one application and a grant never holds the client secret. `client` is refused on any other kind of method:
+
+```ts
+const ops = defineConnection(mail, {
+  name: "ops",
+  method: "oauth",
+  credentials: secret("MAIL_OPS"),
+  client: secret("MAIL_OAUTH_APP"),
+});
+```
+
+The flow has three trusted steps and one workflow:
+
+1. `client.authorizeConnection(target, { actor, id, redirectUri, client? })` runs `sanoma.connection.authorize`, a policy gate that carries metadata only, with `replacesApplication` true when `client` is given, so a policy can hold or deny replacing the OAuth application every account of the connection or rule shares. It then stores the application when `client` is given, or reads the stored one. It makes a single-use state and a PKCE verifier and returns the consent URL, the attempt's opaque ID and its expiry. The state's hash and the sealed verifier are kept in the `sanoma_connection_attempts` row, bound to the actor, connection, setup request, client ID and redirect URI. They never enter workflow history. `redirectUri` must end in `/connect/<vendor>/callback` (`connectionCallbackPath`).
+2. The provider sends the person back. `client.receiveConnection(vendor, attempt, params, { actor })` checks the attempt's actor, state, expiry and vendor and seals the code into the row. It takes a callback once. Then it starts the built-in `connect` workflow (in a config only when a declared connection or rule connects by OAuth) with the attempt's ID alone (run ID `connect:<attempt>`); if that start fails, the attempt ends `unavailable`. A refused callback throws a `CallbackError` whose `reason` is `expired`, `mismatch`, `replayed`, `declined` or `rejected`.
+3. `connect` calls `sanoma.connection.exchange`, which only that workflow may call. It takes the code and verifier once, posts them to the token endpoint and verifies the grant. It checks the declared account and scopes, writes the grant with the store's expected version and returns metadata only. Then `sanoma.connection.activate` verifies the stored grant. Both are ordinary policy decisions and ledger records.
+4. `client.connectionAttempt(attempt, { actor })` reports `waiting`, `exchanging`, `connected` or `failed`, with the problem when it failed and `approval_pending` while a gate waits for approval.
+
+A code is never sent twice. If the provider issued a grant and the store did not keep it, the account is `uncertain` and the attempt fails with `uncertain`: connect again for a new grant. An attempt expires ten minutes after it starts, and again ten minutes after its callback: an exchange held for an approval must be approved within that time, as the provider's code expires too. Expired rows are swept an hour later. An `oauth2` method needs a writable store with conditional writes. Any other store is refused before consent, so a person never authorizes a grant the store cannot keep. The protocol is [oauth4webapi](https://github.com/panva/oauth4webapi), which runs on Node and on Cloudflare Workers.
+
+`refresh: "refresh_token"` on the flow declares that the provider renews grants. Renewal itself is not run yet ([#467](https://github.com/Sanoma-AI/sanoma/issues/467)): an expired grant needs Reconnect.
 
 #### Bootstrap keys
 

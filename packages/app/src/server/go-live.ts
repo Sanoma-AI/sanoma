@@ -97,7 +97,6 @@ export const DATABASE_EXTRAS: Record<string, (choices: { organization?: string }
 };
 
 const GITHUB_API = "https://api.github.com";
-const SUPABASE_API = "https://api.supabase.com";
 
 export const idOf = (type: Resource) => `${type.vendor}.${type.type}`;
 
@@ -127,7 +126,7 @@ export const missingTypes = (app: Company) => {
 };
 
 /**
- * The secrets going live reads: GitHub's and Supabase's tokens (for the lists the page offers),
+ * The secrets going live reads: GitHub's token (for the lists the page offers),
  * and those that say which vendors are connected (`SETUP_VENDORS`' tokens).
  */
 const connections = async ({ client, resolved }: Company, actor?: Principal) => {
@@ -146,9 +145,7 @@ const connections = async ({ client, resolved }: Company, actor?: Principal) => 
       named.set(definition.vendor, card?.status === "connected" && (!card.health || card.health.state === "connected"));
     }
   }
-  const names = [
-    ...new Set(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", ...SETUP_VENDORS.flatMap((v) => v.tokens)]),
-  ].filter(
+  const names = [...new Set(["GITHUB_TOKEN", ...SETUP_VENDORS.flatMap((v) => v.tokens)])].filter(
     (name) =>
       !named.has(
         name === "GITHUB_TOKEN" ? "github" : (SETUP_VENDORS.find((v) => v.tokens.includes(name))?.vendor ?? ""),
@@ -253,9 +250,10 @@ export async function goLiveChoices(app: AppContext, actor?: Principal): Promise
     }
   };
   const github = tokens.get("GITHUB_TOKEN")?.value;
-  // Supabase's organizations, for a Supabase project's `organization_id` (`DATABASE_EXTRAS`).
+  // Supabase's organizations, for a Supabase project's `organization_id` (`DATABASE_EXTRAS`):
+  // its own operation, as the person, through the vendor's declared default connection.
   const organized = database !== undefined && idOf(database) === SUPABASE;
-  const supabase = organized ? tokens.get("SUPABASE_ACCESS_TOKEN")?.value : undefined;
+  const supabase = organized && actor !== undefined && isConnected(chosen.stored, "supabase");
   const [user, orgs, installed, organizations] = await Promise.all([
     github
       ? listed("GitHub's user", async () => [
@@ -273,11 +271,10 @@ export async function goLiveChoices(app: AppContext, actor?: Principal): Promise
       return (await remote?.owners?.(context)) ?? [];
     }),
     supabase
-      ? listed("Supabase's organizations", () =>
-          fetchJson<{ id: string; name: string }[]>(`${SUPABASE_API}/v1/organizations`, {
-            authorization: `Bearer ${supabase}`,
-          }),
-        )
+      ? listed("Supabase's organizations", async () => {
+          const listing = await app.client.call("supabase.organization.list", {}, { actor });
+          return (listing as { organizations: { id: string; name: string }[] }).organizations;
+        })
       : [],
   ]);
   const owners: GoLiveChoices["owners"] = [

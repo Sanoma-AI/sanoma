@@ -43,6 +43,7 @@ import { Route as SetupExistingRouteImport } from './routes/setup/existing'
 import { Route as SitesIndexRouteImport } from './routes/sites.index'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as WorkflowsNameRouteRouteImport } from './routes/workflows/$name/route'
+import { Route as ConnectVendorCallbackRouteImport } from './routes/connect/$vendor/callback'
 import { Route as DataNameIndexRouteImport } from './routes/data/$name/index'
 import { Route as DataNameImportRouteImport } from './routes/data/$name/import'
 import { Route as SetupGithubCallbackRouteImport } from './routes/setup/github/callback'
@@ -221,6 +222,11 @@ const WorkflowsNameRouteRoute = WorkflowsNameRouteRouteImport.update({
   path: '/$name',
   getParentRoute: () => WorkflowsRouteRoute,
 } as any)
+const ConnectVendorCallbackRoute = ConnectVendorCallbackRouteImport.update({
+  id: '/connect/$vendor/callback',
+  path: '/connect/$vendor/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DataNameIndexRoute = DataNameIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -292,6 +298,7 @@ export interface FileRoutesByFullPath {
   '/setup/': typeof SetupIndexRoute
   '/sites/': typeof SitesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/connect/$vendor/callback': typeof ConnectVendorCallbackRoute
   '/data/$name/import': typeof DataNameImportRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
@@ -327,6 +334,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupIndexRoute
   '/sites': typeof SitesIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
+  '/connect/$vendor/callback': typeof ConnectVendorCallbackRoute
   '/data/$name/import': typeof DataNameImportRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
@@ -371,6 +379,7 @@ export interface FileRoutesById {
   '/setup/': typeof SetupIndexRoute
   '/sites/': typeof SitesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/connect/$vendor/callback': typeof ConnectVendorCallbackRoute
   '/data/$name/import': typeof DataNameImportRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
@@ -416,6 +425,7 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/sites/'
     | '/workflows/'
+    | '/connect/$vendor/callback'
     | '/data/$name/import'
     | '/setup/github/callback'
     | '/setup/github/manifest'
@@ -451,6 +461,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sites'
     | '/workflows'
+    | '/connect/$vendor/callback'
     | '/data/$name/import'
     | '/setup/github/callback'
     | '/setup/github/manifest'
@@ -494,6 +505,7 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/sites/'
     | '/workflows/'
+    | '/connect/$vendor/callback'
     | '/data/$name/import'
     | '/setup/github/callback'
     | '/setup/github/manifest'
@@ -525,6 +537,7 @@ export interface RootRouteChildren {
   RunsIndexRoute: typeof RunsIndexRoute
   SetupIndexRoute: typeof SetupIndexRoute
   SitesIndexRoute: typeof SitesIndexRoute
+  ConnectVendorCallbackRoute: typeof ConnectVendorCallbackRoute
   SetupGithubCallbackRoute: typeof SetupGithubCallbackRoute
   SetupGithubManifestRoute: typeof SetupGithubManifestRoute
 }
@@ -769,6 +782,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkflowsNameRouteRouteImport
       parentRoute: typeof WorkflowsRouteRoute
     }
+    '/connect/$vendor/callback': {
+      id: '/connect/$vendor/callback'
+      path: '/connect/$vendor/callback'
+      fullPath: '/connect/$vendor/callback'
+      preLoaderRoute: typeof ConnectVendorCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/data/$name/': {
       id: '/data/$name/'
       path: '/'
@@ -958,6 +978,7 @@ const rootRouteChildren: RootRouteChildren = {
   RunsIndexRoute: RunsIndexRoute,
   SetupIndexRoute: SetupIndexRoute,
   SitesIndexRoute: SitesIndexRoute,
+  ConnectVendorCallbackRoute: ConnectVendorCallbackRoute,
   SetupGithubCallbackRoute: SetupGithubCallbackRoute,
   SetupGithubManifestRoute: SetupGithubManifestRoute,
 }

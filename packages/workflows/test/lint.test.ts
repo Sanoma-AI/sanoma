@@ -32,6 +32,7 @@ describe("lintWorkflow", () => {
     "follow-workflow",
     "chat-workflow",
     "import-workflow",
+    "connect-workflow",
   ])("passes the built-in %s workflow, which is held to the same rules", (name) => {
     const path = fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url));
     expect(lintWorkflow(readFileSync(path, "utf8"), path)).toEqual([]);
