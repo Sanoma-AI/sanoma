@@ -45,13 +45,15 @@ const SETUP_STORE: CredentialStore = { set: setSetupTokenFn };
 
 /**
  * Going live, step 1: the GitHub App (or a token of your own), and the tokens of each vendor the
- * config declares (Supabase, Neon, Cloudflare, a wakeup service: `SETUP_VENDORS`), and what is connected.
+ * config declares (Supabase, Neon, Cloudflare, a wakeup service: `SETUP_VENDORS`), and what is
+ * connected; for a control plane, its identity enrollment writer.
  */
 function ConnectPage() {
   const { github } = Route.useSearch();
   const { data: status } = useSuspenseQuery(setupStatusQuery());
   const token = (name: string) => status.tokens.find((t) => t.name === name);
   const githubToken = token("GITHUB_TOKEN");
+  const writer = status.enrollmentWriter && token(status.enrollmentWriter);
   // Only the vendors the config declares.
   const vendors = SETUP_VENDORS.map((v) => ({ ...v, rows: v.tokens.map(token).filter((t) => t !== undefined) })).filter(
     (v) => v.rows.length > 0,
@@ -78,6 +80,16 @@ function ConnectPage() {
           </ItemGroup>
         </Region>
       ))}
+      {writer && (
+        <Region title="Identity enrollment">
+          <p className="text-sm text-muted-foreground">
+            The control plane's enrollment writer. Its Google Cloud provisioning account is a connection above.
+          </p>
+          <ItemGroup>
+            <CredentialRow credential={writer} store={SETUP_STORE} />
+          </ItemGroup>
+        </Region>
+      )}
       <p className="text-sm text-muted-foreground">
         Have a repository or a database already?{" "}
         <Link to="/hosting/existing" className="underline underline-offset-4">

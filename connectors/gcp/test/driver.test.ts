@@ -1,45 +1,23 @@
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { beforeAll, afterAll, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { BridgeError } from "@sanoma-ai/bridge";
 import { stateBridge } from "@sanoma-ai/bridge/fake";
 import { memorySecrets, type CallContext, type Driver } from "@sanoma-ai/workflows";
 import { gcpDriver } from "../src/driver.ts";
 import { gcpTf } from "../src/connector.ts";
 import { fakeGcp } from "../src/fake.ts";
-import { accountOf, type GcpIdentity } from "../src/authentication.ts";
+import { gcp } from "../src/resources.ts";
+import { accountOf, gcpAuthentication, type GcpIdentity } from "../src/authentication.ts";
 
-let directory: string;
-let a: GcpIdentity, b: GcpIdentity;
-beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), "sanoma-gcp-driver-"));
-  const identities = await Promise.all(
-    ["a", "b"].map(async (name) => {
-      const identity = {
-        project: `company-${name}`,
-        projectNumber: name === "a" ? "111111" : "222222",
-        serviceAccount: `provision-${name}@company-${name}.iam.gserviceaccount.com`,
-        credentialsFile: join(directory, `${name}.json`),
-      };
-      await writeFile(
-        identity.credentialsFile,
-        JSON.stringify({
-          type: "external_account",
-          audience: "//iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/ci/providers/github",
-          subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
-          token_url: "https://sts.googleapis.com/v1/token",
-          service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${identity.serviceAccount}:generateAccessToken`,
-          credential_source: { file: join(directory, `${name}.token`) },
-        }),
-      );
-      return identity;
-    }),
-  );
-  a = identities[0]!;
-  b = identities[1]!;
+const identityOf = (name: "a" | "b"): GcpIdentity => ({
+  project: `company-${name}`,
+  projectNumber: name === "a" ? "111111" : "222222",
+  serviceAccount: `provision-${name}@company-${name}.iam.gserviceaccount.com`,
+  audience: "//iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/provision/providers/google",
+  issuer: "https://provisioning.example.test/identity",
 });
-afterAll(() => rm(directory, { recursive: true, force: true }));
+const a = identityOf("a");
+const b = identityOf("b");
+const bearerOf = (identity: GcpIdentity) => (identity === a ? "a" : "b").repeat(43);
 let sequence = 0;
 const context = (identity: GcpIdentity, name = identity === a ? "a" : "b"): CallContext => ({
   idempotencyKey: `run:${name}:${++sequence}`,
@@ -55,9 +33,17 @@ const context = (identity: GcpIdentity, name = identity === a ? "a" : "b"): Call
     scopes: [],
     revision: "1",
     definition: "fixture",
+    credentials: { $secret: `GCP_${name.toUpperCase()}_AUTH` },
   },
-  authentication: { method: "workloadIdentity", kind: "workload-identity" },
+  authentication: {
+    method: "workloadIdentity",
+    kind: "api-key",
+    credentialVersion: "1",
+    credentials: { bearer: bearerOf(identity) },
+  },
 });
+const driverFor = (identity: GcpIdentity, bridge: ReturnType<typeof bridgeFor>) =>
+  gcpDriver(identity, gcpAuthentication(identity), bridge);
 const bridgeFor = () =>
   stateBridge({ objects: {} }, [], Object.fromEntries(Object.values(gcpTf.types).map((type) => [type.typeName, type])));
 const invoke = (driver: Driver, op: string, input: unknown, call = context(a)) => driver.ops[op]!(input, call);
@@ -88,7 +74,7 @@ it.each(["keyIamMember", "serviceAccountIamMember"])(
       new BridgeError("failed_precondition", "provider error", [missingMember]),
     );
     const apply = vi.spyOn(bridge, "apply");
-    const driver = gcpDriver({ "gcp/a": a }, bridge);
+    const driver = driverFor(a, bridge);
     expect(await invoke(driver, `${type}.read`, { id })).toMatchObject({ id, gone: true });
     expect(await invoke(driver, `${type}.plan`, { id, desired })).toMatchObject({ action: "create" });
     await invoke(driver, `${type}.delete`, { id });
@@ -116,7 +102,7 @@ it.each([
   const bridge = bridgeFor();
   vi.spyOn(bridge, "import").mockRejectedValue(failure);
   const apply = vi.spyOn(bridge, "apply");
-  const driver = gcpDriver({ "gcp/a": a }, bridge);
+  const driver = driverFor(a, bridge);
   for (const type of ["keyIamMember", "serviceAccountIamMember"])
     await expect(invoke(driver, `${type}.read`, { id: key() })).rejects.toThrow(`gcp: ${type}.read failed`);
   expect(apply).not.toHaveBeenCalled();
@@ -127,7 +113,7 @@ it("does not classify another resource's IAM-like diagnostic as absence", async 
   vi.spyOn(bridge, "import").mockRejectedValue(
     new BridgeError("failed_precondition", "provider error", [missingMember]),
   );
-  await expect(invoke(gcpDriver({ "gcp/a": a }, bridge), "cryptoKey.read", { id: key() })).rejects.toThrow(
+  await expect(invoke(driverFor(a, bridge), "cryptoKey.read", { id: key() })).rejects.toThrow(
     "gcp: cryptoKey.read failed",
   );
 });
@@ -156,7 +142,7 @@ it.each([
       { title: "runtime issuer", expression: "true", description: "bounded / proof" },
     ]) {
       const bridge = bridgeFor();
-      const driver = gcpDriver({ "gcp/a": a }, bridge);
+      const driver = driverFor(a, bridge);
       const desired = { [parentField]: parent, role, member, ...(condition && { condition }) };
       const created = (await invoke(driver, `${type}.create`, { desired })) as {
         id: string;
@@ -194,9 +180,10 @@ it.each([
 it("configures and closes distinct provider sessions for concurrent named accounts", async () => {
   const bridge = bridgeFor();
   const configure = vi.spyOn(bridge, "configure");
-  const driver = gcpDriver({ "gcp/a": a, "gcp/b": b }, bridge);
   await Promise.all(
-    [a, b].map((identity) => invoke(driver, "keyRing.read", { id: ring(identity.project) }, context(identity))),
+    [a, b].map((identity) =>
+      invoke(driverFor(identity, bridge), "keyRing.read", { id: ring(identity.project) }, context(identity)),
+    ),
   );
   const configurations = configure.mock.calls.map(([ref, json]) => ({
     session: ref.sessionId,
@@ -205,7 +192,10 @@ it("configures and closes distinct provider sessions for concurrent named accoun
   expect(new Set(configurations.map((entry) => entry.session)).size).toBe(2);
   for (const identity of [a, b]) {
     const entry = configurations.find(({ config }) => config.project === identity.project)!;
-    expect(JSON.parse(entry.config.credentials).service_account_impersonation_url).toContain(identity.serviceAccount);
+    const credentials = JSON.parse(entry.config.credentials);
+    expect(credentials.service_account_impersonation_url).toContain(identity.serviceAccount);
+    // Each session carries its own invocation's bearer, read from that call's bundle.
+    expect(credentials.credential_source.headers.Authorization).toBe(`Bearer ${bearerOf(identity)}`);
     expect(bridge.calls).toContainEqual(
       expect.objectContaining({ method: "close", ref: expect.objectContaining({ sessionId: entry.session }) }),
     );
@@ -214,10 +204,25 @@ it("configures and closes distinct provider sessions for concurrent named accoun
 
 it("refuses absent identities, stale account bindings and cross-project resource input before provider startup", async () => {
   const bridge = bridgeFor();
-  const driver = gcpDriver({ "gcp/a": a }, bridge);
+  const driver = driverFor(a, bridge);
   await expect(
     invoke(driver, "keyRing.read", { id: ring() }, { ...context(a), connection: undefined }),
   ).rejects.toMatchObject({ problem: "missing" });
+  await expect(
+    invoke(gcpDriver(undefined, gcpAuthentication(), bridge), "keyRing.read", { id: ring() }),
+  ).rejects.toMatchObject({ problem: "missing" });
+  // No bundle in this invocation, or one of another kind: refused, never read from elsewhere.
+  for (const [authentication, code] of [
+    [{ method: "workloadIdentity", kind: "api-key" as const }, "invalid_value"],
+    [{ method: "workloadIdentity", kind: "api-key" as const, credentials: { bearer: "short" } }, "invalid_value"],
+    [
+      { method: "workloadIdentity", kind: "workload-identity" as const, credentials: { bearer: bearerOf(a) } },
+      "unsupported",
+    ],
+  ] as const)
+    await expect(
+      invoke(driver, "keyRing.read", { id: ring() }, { ...context(a), authentication }),
+    ).rejects.toMatchObject({ name: "SecretStoreError", code });
   await expect(
     invoke(
       driver,
@@ -238,7 +243,7 @@ it("refuses absent identities, stale account bindings and cross-project resource
 it("pins symmetric KMS keys to PREVENT and blocks deletion, asymmetric keys and permissive OIDC trust", async () => {
   const bridge = bridgeFor();
   const plan = vi.spyOn(bridge, "plan");
-  const driver = gcpDriver({ "gcp/a": a }, bridge);
+  const driver = driverFor(a, bridge);
   await invoke(driver, "cryptoKey.plan", {
     desired: { name: "company", key_ring: ring(), rotation_period: "7776000s" },
   });
@@ -265,7 +270,7 @@ it("pins symmetric KMS keys to PREVENT and blocks deletion, asymmetric keys and 
 
 it("refuses a provider's replacement plan without applying a delete and scrubs provider failures", async () => {
   const bridge = bridgeFor();
-  const driver = gcpDriver({ "gcp/a": a }, bridge);
+  const driver = driverFor(a, bridge);
   vi.spyOn(bridge, "import").mockResolvedValue({
     warnings: [],
     resources: [
@@ -318,4 +323,80 @@ it("runs the fake with synthetic named accounts without reading a credential sou
       desired: { name: "replacement", location: "global", project: "company-a" },
     }),
   ).rejects.toThrow("replacement requires explicit retirement");
+});
+
+it("holds project-level audit configs and Cloud Run access to the connection's project", async () => {
+  const bridge = bridgeFor();
+  const driver = driverFor(a, bridge);
+  const service = "projects/company-a/locations/us-central1/services/identity";
+  const audit = {
+    project: "company-a",
+    service: "iamcredentials.googleapis.com",
+    audit_log_config: [{ log_type: "DATA_READ" }],
+  };
+  const created = (await invoke(driver, "auditConfig.create", { desired: audit })) as { id: string };
+  expect(created.id).toBe("company-a iamcredentials.googleapis.com");
+  const member = { name: service, role: "roles/run.invoker", member: "allUsers" };
+  expect(await invoke(driver, "cloudRunServiceIamMember.create", { desired: member })).toMatchObject({
+    id: `${service} roles/run.invoker allUsers`,
+  });
+  for (const [op, input] of [
+    ["auditConfig.read", { id: "company-b iamcredentials.googleapis.com" }],
+    ["auditConfig.create", { desired: { ...audit, project: "company-b" } }],
+    ["cloudRunServiceIamMember.create", { desired: { ...member, name: service.replace("company-a", "company-b") } }],
+    ["cloudRunService.read", { id: service.replace("company-a", "company-b") }],
+  ] as const)
+    await expect(invoke(driver, op, input)).rejects.toMatchObject({ problem: "wrong_account" });
+});
+
+it("names each declared resource by its provider import ID, so a first apply finds it", () => {
+  const keyRing = gcp.keyRing({ project: "company-a", location: "global", name: "credentials" });
+  const cryptoKey = gcp.cryptoKey({ name: "company", key_ring: keyRing });
+  const account = gcp.serviceAccount({ project: "company-a", account_id: "identity" });
+  const pool = gcp.workloadIdentityPool({ project: "company-a", workload_identity_pool_id: "provision" });
+  const trust = gcp.workloadIdentityProvider({
+    project: "company-a",
+    workload_identity_pool_id: "provision",
+    workload_identity_pool_provider_id: "google",
+    attribute_condition: "assertion.sub == '1'",
+    oidc: { issuer_uri: "https://accounts.google.com" },
+  });
+  const role = gcp.customRole({
+    project: "company-a",
+    role_id: "identityIssuer",
+    title: "Identity issuer",
+    permissions: ["iam.serviceAccounts.getOpenIdToken"],
+  });
+  const audit = gcp.auditConfig({
+    project: "company-a",
+    service: "iamcredentials.googleapis.com",
+    audit_log_config: [{ log_type: "DATA_READ" }],
+  });
+  const service = gcp.cloudRunService({
+    project: "company-a",
+    location: "us-central1",
+    name: "identity",
+    template: { containers: [{ image: "ghcr.io/sanoma-ai/runtime:0.11.18" }] },
+  });
+  const invoker = gcp.cloudRunServiceIamMember({ name: service, role: "roles/run.invoker", member: "allUsers" });
+  const impersonation = gcp.serviceAccountIamMember({
+    service_account_id: account,
+    role: "roles/iam.serviceAccountTokenCreator",
+    member: "serviceAccount:issuer@company-a.iam.gserviceaccount.com",
+  });
+  const declared = [keyRing, cryptoKey, account, pool, trust, role, audit, service, invoker, impersonation];
+  expect(declared.map((d) => d.name)).toEqual([
+    "projects/company-a/locations/global/keyRings/credentials",
+    "projects/company-a/locations/global/keyRings/credentials/cryptoKeys/company",
+    "projects/company-a/serviceAccounts/identity@company-a.iam.gserviceaccount.com",
+    "projects/company-a/locations/global/workloadIdentityPools/provision",
+    "projects/company-a/locations/global/workloadIdentityPools/provision/providers/google",
+    "projects/company-a/roles/identityIssuer",
+    "company-a iamcredentials.googleapis.com",
+    "projects/company-a/locations/us-central1/services/identity",
+    "projects/company-a/locations/us-central1/services/identity roles/run.invoker allUsers",
+    "projects/company-a/serviceAccounts/identity@company-a.iam.gserviceaccount.com roles/iam.serviceAccountTokenCreator serviceAccount:issuer@company-a.iam.gserviceaccount.com",
+  ]);
+  // Without its project an identity is incomplete, so the declaration is refused, not defaulted.
+  expect(() => gcp.serviceAccount({ account_id: "identity" })).toThrow("is missing");
 });

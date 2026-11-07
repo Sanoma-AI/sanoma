@@ -1,85 +1,107 @@
-import { readFile } from "node:fs/promises";
 import { GoogleAuth } from "google-auth-library";
-import { AuthenticationError, defineAuthentication, type AuthenticationContext } from "@sanoma-ai/workflows";
+import { z } from "zod";
+import { AuthenticationError, defineAuthentication } from "@sanoma-ai/workflows";
 
-/** Trusted deployment configuration, resolved inside each authorized invocation. */
+/**
+ * The provisioning identity, declared in code: who the connection provisions as and where its
+ * Google OIDC tokens come from. None of it is secret; the bearer that unlocks the issuer is the
+ * connection's stored credential, entered on the connector page.
+ */
 export interface GcpIdentity {
+  /** The project the provisioning account works in, by ID. */
   project: string;
+  /** The same project's number: resource names Google returns use either. */
   projectNumber: string;
+  /** The provisioning service account the federated principal impersonates. */
   serviceAccount: string;
-  credentialsFile?: string;
-  /** Reads protected external-account configuration; never a workflow callback or durable result. */
-  credentials?: () => Promise<string>;
-}
-export type GcpIdentities = Readonly<Record<string, GcpIdentity>>;
-
-export function identityFor(identities: GcpIdentities, context?: AuthenticationContext): GcpIdentity {
-  const identity = context?.vendor === "gcp" ? identities[context.connectionId] : undefined;
-  if (
-    !identity ||
-    !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(identity.project) ||
-    !/^[1-9][0-9]+$/.test(identity.projectNumber) ||
-    !/^[a-z][a-z0-9-]+@[a-z][a-z0-9-]+\.iam\.gserviceaccount\.com$/.test(identity.serviceAccount) ||
-    !(
-      (typeof identity.credentialsFile === "string" && identity.credentialsFile.length > 0 && !identity.credentials) ||
-      (typeof identity.credentials === "function" && identity.credentialsFile === undefined)
-    )
-  )
-    throw new AuthenticationError("missing");
-  return identity;
+  /** The workload identity provider's full audience. */
+  audience: string;
+  /** The provisioning identity service's HTTPS `GET /identity` endpoint. */
+  issuer: string;
 }
 
-/** Explicit WIF config only: no ambient ADC fallback, service-account key or executable source. */
-export async function federationCredentials(identity: GcpIdentity): Promise<Record<string, unknown>> {
+/** What the connection stores: the provisioning bearer, never the identity facts. */
+const bundle = z.object({
+  bearer: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43}$/, "A provisioning bearer is 43 base64url characters")
+    .describe(
+      "The provisioning bearer the identity service enrolled for this control plane: 43 base64url characters, from the enrollment that minted it",
+    ),
+});
+
+const AUDIENCE =
+  /^\/\/iam\.googleapis\.com\/projects\/[1-9][0-9]+\/locations\/global\/workloadIdentityPools\/[a-z][a-z0-9-]+\/providers\/[a-z][a-z0-9-]+$/;
+
+/** Refuses facts that could not name one provisioning account and one HTTPS issuer. */
+export function checkIdentity(identity: GcpIdentity): GcpIdentity {
+  const { project, projectNumber, serviceAccount, audience, issuer } = identity;
   try {
-    // Refuse ambiguous sources even when called outside identityFor. Never fall back on failure.
-    const text =
-      identity.credentials && identity.credentialsFile === undefined
-        ? await identity.credentials()
-        : identity.credentialsFile && !identity.credentials
-          ? await readFile(identity.credentialsFile, "utf8")
-          : (() => {
-              throw new Error();
-            })();
-    if (Buffer.byteLength(text) > 65_536) throw new Error();
-    const config = JSON.parse(text);
-    const impersonation = `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${identity.serviceAccount}:generateAccessToken`;
+    const url = new URL(issuer);
     if (
-      config.type !== "external_account" ||
-      config.token_url !== "https://sts.googleapis.com/v1/token" ||
-      config.service_account_impersonation_url !== impersonation ||
-      config.subject_token_type !== "urn:ietf:params:oauth:token-type:jwt" ||
-      typeof config.audience !== "string" ||
-      !config.audience.startsWith("//iam.googleapis.com/projects/") ||
-      !config.credential_source ||
-      config.credential_source.executable ||
-      config.credential_source.environment_id
+      !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(project) ||
+      !/^[1-9][0-9]+$/.test(projectNumber) ||
+      !/^[a-z][a-z0-9-]+@[a-z][a-z0-9-]+\.iam\.gserviceaccount\.com$/.test(serviceAccount) ||
+      !AUDIENCE.test(audience) ||
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      url.pathname !== "/identity"
     )
       throw new Error();
-    return config;
   } catch {
     throw new AuthenticationError("rejected");
   }
+  return Object.freeze({ project, projectNumber, serviceAccount, audience, issuer });
+}
+
+/**
+ * The external-account configuration for one invocation: Google's STS, the configured
+ * impersonation target and the issuer as a URL source carrying the bearer. Built in memory from
+ * declared facts; no ambient ADC, key file or executable source can be expressed.
+ */
+export function federationCredentials(identity: GcpIdentity, bearer: string) {
+  return {
+    type: "external_account",
+    audience: identity.audience,
+    subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+    token_url: "https://sts.googleapis.com/v1/token",
+    service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${identity.serviceAccount}:generateAccessToken`,
+    service_account_impersonation: { token_lifetime_seconds: 600 },
+    credential_source: {
+      url: identity.issuer,
+      headers: { Authorization: `Bearer ${bearer}` },
+      format: { type: "json", subject_token_field_name: "idToken" },
+    },
+  };
 }
 
 export const accountOf = (identity: GcpIdentity) =>
   `${identity.serviceAccount}/${identity.project}/${identity.projectNumber}`;
 
-export function gcpAuthentication(identities: GcpIdentities) {
+/** The `workloadIdentity` method: a stored bearer, verified by federating once as the identity. */
+export function gcpAuthentication(identity?: GcpIdentity) {
   return defineAuthentication({
-    kind: "workload-identity",
-    async verify(context) {
-      const identity = identityFor(identities, context);
-      const credentials = await federationCredentials(identity);
+    kind: "api-key",
+    version: 1,
+    schema: bundle,
+    storage: { writable: false, conditionalWrites: false, maxBytes: 1024 },
+    async verify({ bearer }) {
+      if (!identity) throw new AuthenticationError("missing");
       try {
-        // Successful impersonation proves the source may mint for this exact configured account.
-        // The provider independently refreshes the same source during its operation session.
-        const auth = new GoogleAuth({ credentials, scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+        // One OIDC token from the issuer, exchanged at STS and used to impersonate the configured
+        // account: success proves the bearer is enrolled and trusted for exactly that account.
+        const auth = new GoogleAuth({
+          credentials: federationCredentials(identity, bearer),
+          scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+        });
         if (!(await auth.getAccessToken())) throw new Error();
-        return { account: accountOf(identity), scopes: [] };
       } catch {
         throw new AuthenticationError("unavailable");
       }
+      return { account: accountOf(identity), scopes: [] };
     },
   });
 }

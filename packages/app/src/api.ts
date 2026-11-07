@@ -293,6 +293,8 @@ export interface SetupStatus {
    */
   githubApp: { slug: string; setBy?: string; setAt?: string; missing: string[] | null } | null;
   tokens: CredentialStatus[];
+  /** Which of `tokens` is the identity enrollment writer's URL, when the config names one with `secret()`. */
+  enrollmentWriter?: string;
   /**
    * How people will sign in on the host: `you`, the email declared for the person asking (the
    * invite that signs them in once the host answers goes to it); `sender`, the config's

@@ -57,7 +57,9 @@ async function identityWrite(write: () => Promise<void>): Promise<void> {
     await write();
   } catch (error) {
     const code = identityProvisioningCode(error) ?? "unavailable";
-    throw new DriverError(`Identity provisioning: ${code}`, { retryable: code === "unavailable" });
+    const message =
+      code === "unset" ? "the enrollment writer is not set: store its URL on the Hosting page, Connect" : code;
+    throw new DriverError(`Identity provisioning: ${message}`, { retryable: code === "unavailable" });
   }
 }
 

@@ -126,7 +126,10 @@ export interface SanomaConfig {
   ledger?: LedgerStore;
   /** Credential storage and explicit bindings. Omitted: encrypted Postgres, no environment fallback. */
   secrets?: SecretConfiguration;
-  /** Trusted control plane only: separate broker enrollment writer. Absent in company runtimes. */
+  /**
+   * Trusted control plane only: separate broker enrollment writer, its URL a `secret()` entered
+   * on the app's Hosting page. Absent in company runtimes.
+   */
   identityProvisioning?: IdentityProvisioning | IdentityProvisioningDatabase;
   connections?: readonly ConnectionDefinition[];
   connectionRules?: readonly ConnectionRule[];
@@ -415,11 +418,12 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
   const databaseUrl = resolveDatabaseUrl(config);
   const connectionStore = lazyDb(databaseUrl, "connections");
-  const identityProvisioning = configuredIdentityProvisioning(config.identityProvisioning);
+  const storedSecrets = configuredSecrets(config.secrets ?? {}, () => connectionStore.db());
+  const identityProvisioning = configuredIdentityProvisioning(config.identityProvisioning, storedSecrets);
   const connections = new ConnectionRegistry(
     connectionCatalog(config.connectors, config.connections, config.connectionRules),
     () => connectionStore.db(),
-    configuredSecrets(config.secrets ?? {}, () => connectionStore.db()),
+    storedSecrets,
   );
   const declared = [...collections.values()];
   const dataStore = declared.length ? lazyDb(databaseUrl, "data") : undefined;

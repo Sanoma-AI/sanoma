@@ -51,21 +51,22 @@ The broker login must have no writer-role membership, inherited write grants or 
 
 ### Provisioning operations
 
-The trusted control-plane config supplies `identityProvisioning` with its protected enrollment-writer URL and maximum credential validity. Company runtimes and the serving broker do not receive this writer. Install `CLOUD_IDENTITY_SQL` separately with administrative authority, then configure the control plane:
+The trusted control-plane config supplies `identityProvisioning` with a `secret()` reference to its enrollment-writer URL and the maximum credential validity. Company runtimes and the serving broker do not receive this writer. Install `CLOUD_IDENTITY_SQL` separately with administrative authority, then configure the control plane:
 
 ```ts
 import { defineConfig } from "sanoma";
+import { secret } from "sanoma/resources";
 
 export default defineConfig({
   connectors: [], // Add the control plane's configured vendor connectors.
   identityProvisioning: {
-    databaseUrl: process.env.SANOMA_IDENTITY_WRITE_DATABASE_URL ?? "",
+    databaseUrl: secret("IDENTITY_WRITER_URL"),
     maxValidityMs: 24 * 60 * 60 * 1000,
   },
 });
 ```
 
-The environment name above is an explicit config choice, not an automatic fallback. Supply its value through protected deployment configuration; never place the URL in source, workflow inputs/results or logs. Missing or malformed URLs are refused with a sanitized error. Remote Postgres connections require verified TLS. Each client and worker owns a separate, lazy enrollment pool and closes it on shutdown or startup failure. Config resolution and descriptions perform no database I/O and do not expose the URL. There is no fallback to the company database or broker reader.
+Enter the URL under that name on the app's Hosting page (Connect), where the enrollment writer is listed as missing until it is stored. The value lives in the control plane's secret store, never in source, an environment variable, workflow inputs/results or logs. It is read when an enrollment operation first uses the writer, inside that operation, and again on each use, so a replaced value takes effect on the next enrollment without a restart; config resolution and descriptions perform no I/O and never read it. Without a stored value, enrollment fails with "the enrollment writer is not set" and is not retried. A malformed URL is refused with a sanitized error. Remote Postgres connections require verified TLS. Each client and worker owns a separate, lazy enrollment pool and closes it on shutdown or startup failure. There is no fallback to the company database, the broker reader or the environment. A plain string `databaseUrl` is still accepted and checked at config load, for composition that holds the URL some other trusted way.
 
 Before writes, the managed pool checks that its login has schema USAGE and SELECT, INSERT and UPDATE on both enrollment tables. It refuses schema CREATE, table DELETE, TRUNCATE, REFERENCES or TRIGGER, and superuser, create-role, create-database or bypass-RLS authority. Use a dedicated restricted login rather than a database owner; effective inherited permissions also matter.
 
@@ -231,7 +232,7 @@ const handle = provisioningIdentityBroker({
 });
 ```
 
-The pool and audit sink belong to this separate service. Use the GCP connector’s `gcpProvisioningIdentity` helper to supply this endpoint as an external-account URL credential source to both the Node verifier and the Google provider. Its protected header contains a provisioning bearer; never put the resulting configuration in source control, workflow inputs/results or logs. The target account still comes from trusted deployment configuration.
+The pool and audit sink belong to this separate service. The control plane reaches it through the GCP connector's [`gcpWithIdentity`](../../connectors/gcp/README.md#deployment-identity): the issuer URL, audience and target account are declared in code, and the provisioning bearer is the `gcp/provisioning` connection's stored credential, entered on the Google Cloud connector page. Each call builds the external-account URL source from those in memory for the Node verifier and the Google provider; the configuration never enters source control, workflow inputs/results or logs.
 
 Google-issued OIDC tokens last up to **one hour**. A ten-minute final impersonated access token does not shorten that lifetime. Revoking enrollment stops new issuance, but an issued OIDC or federated credential may still obtain access tokens. Incident revocation must also remove federation and/or target impersonation trust, accounting for IAM propagation and access tokens already issued. These helpers do not implement that IAM revocation workflow. The runtime route remains POST `/token` with ten-minute OAuth access tokens.
 
@@ -239,11 +240,11 @@ Google-issued OIDC tokens last up to **one hour**. A ten-minute final impersonat
 
 An isolated live check in `sanoma-513217` verified Google-issued OIDC tokens, STS exchange, scoped impersonation and rejection of another subject and target. The observed OIDC lifetime was 3,600 seconds. Temporary federation and service accounts were removed. Local tests cover both broker routes and Google’s URL-source exchange using synthetic transports.
 
-This establishes the Google trust path, not a deployed provisioning broker or provider renewal through that broker. Deploying the separate issuer/enrollment/audit boundary, delivering and rotating protected bootstrap configuration, and proving renewal and revocation through the actual host remain [#532](https://github.com/Sanoma-AI/sanoma/issues/532).
+This establishes the Google trust path, not a deployed provisioning broker or provider renewal through that broker. Deploying the separate issuer/enrollment/audit boundary, rotating the stored provisioning bearer, and proving renewal and revocation through the actual host remain [#532](https://github.com/Sanoma-AI/sanoma/issues/532).
 
 ## Standalone identity service
 
-`sanoma identity` serves one broker mode from protected deployment environment variables. It loads no company config, `.env`, workflows or sites, starts no worker, and creates no database or schema. Deploy runtime and provisioning modes as separate services with separate attached identities, enrollment readers, bootstraps and audit boundaries; a mode flag alone does not establish that separation.
+`sanoma identity` serves one broker mode from its host's configuration. That configuration, its enrollment-reader and audit-writer database URLs among it, belongs to the service's own host (a Cloud Run service), not to a company: no company config, connector page or secret store holds it, and a company's runtime never receives it. It loads no company config, `.env`, workflows or sites, starts no worker, and creates no database or schema. Deploy runtime and provisioning modes as separate services with separate attached identities, enrollment readers, bootstraps and audit boundaries; a mode flag alone does not establish that separation.
 
 | Setting                              | Purpose                                                                                                             |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
@@ -276,4 +277,54 @@ The liveness route uses `/health`: [Cloud Run reserves some paths ending in `z`]
 
 Trusted programmatic composition may call `startIdentityService(options)` from `@sanoma-ai/workflows/identity-service`, returning `{ url, stop }`. Its default host is loopback; the caller owns shutdown. The serving package does not load company code.
 
-The product's [identity Dockerfile](../sanoma/identity/Dockerfile) installs a specified published `sanoma` version and runs `sanoma identity` as a non-root user. Build it only after that version is published, tag the result immutably and deploy by digest. It is separate from the company runtime image, which clones company code. Database credentials and mode configuration enter at deployment, not image build. Neither the service tests nor building the image substitutes for live deployment verification.
+The product's [identity Dockerfile](../sanoma/identity/Dockerfile) installs a specified published `sanoma` version and runs `sanoma identity` as a non-root user. Build it only after that version is published, tag the result immutably and deploy by digest. Database credentials and mode configuration enter at deployment, not image build. Neither the service tests nor building the image substitutes for live deployment verification.
+
+The published runtime image, `ghcr.io/sanoma-ai/runtime`, does not run the identity service. Its entrypoint accepts only `worker` and `serve`, requires a company checkout (`SANOMA_REVISION`), and has no `sanoma` command on its `PATH`. Cloud Run also deploys only from Artifact Registry or Docker Hub, so push the identity image to Artifact Registry (or pull ghcr.io through an Artifact Registry remote repository). A `gcp.cloudRunService` declaration for the provisioning mode then needs:
+
+```ts
+import { gcp } from "@sanoma-ai/connector-gcp/resources";
+
+const connection = { vendor: "gcp", $connection: "gcp/provisioning" } as const;
+const fromSecretManager = (name: string, secret: string) => ({
+  name,
+  value_source: { secret_key_ref: { secret, version: "latest" } },
+});
+export const provisioningIssuer = gcp.cloudRunService(
+  {
+    project: "example-project",
+    location: "us-central1",
+    name: "identity-provisioning",
+    ingress: "INGRESS_TRAFFIC_ALL",
+    // The bearer authenticates each request; Cloud Run's invoker check is off for this service.
+    invoker_iam_disabled: true,
+    template: {
+      service_account: "identity-issuer@example-project.iam.gserviceaccount.com",
+      containers: [
+        {
+          image: "us-central1-docker.pkg.dev/example-project/sanoma/identity@sha256:<digest>",
+          ports: { container_port: 8080 },
+          env: [
+            { name: "SANOMA_IDENTITY_MODE", value: "provisioning" },
+            {
+              name: "SANOMA_IDENTITY_SOURCE_ACCOUNT",
+              value: "provision-source@example-project.iam.gserviceaccount.com",
+            },
+            { name: "SANOMA_IDENTITY_SOURCE_SUBJECT", value: "123456789012345678901" },
+            {
+              name: "SANOMA_IDENTITY_AUDIENCE",
+              value:
+                "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/provision/providers/google",
+            },
+            fromSecretManager("SANOMA_IDENTITY_READ_DATABASE_URL", "identity-provisioning-reader"),
+            fromSecretManager("SANOMA_IDENTITY_AUDIT_DATABASE_URL", "identity-provisioning-audit"),
+          ],
+          startup_probe: { http_get: { path: "/health" } },
+        },
+      ],
+    },
+  },
+  { connection },
+);
+```
+
+Cloud Run sets `PORT`; the image defaults `SANOMA_IDENTITY_HOST` to `0.0.0.0`. The two database URLs are Secret Manager secrets of the service's project, read by its attached account at start: they are the service's host configuration, so the declaration names them and never holds their values. Runtime mode is the same service with `SANOMA_IDENTITY_MODE: "runtime"`, without the three provisioning settings, under its own attached account, databases and secrets.

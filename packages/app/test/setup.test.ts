@@ -24,6 +24,7 @@ import {
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { credentials, databaseOn } from "@sanoma-ai/workflows/db";
+import { secret } from "@sanoma-ai/workflows/resources";
 import { eq, inArray } from "drizzle-orm";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -372,6 +373,34 @@ describe("the connect page", () => {
     const odd = await get("/hosting/connect?github=bogus");
     expect(odd.status).toBe(307);
     expect(odd.headers.get("location")).toBe("/hosting/connect");
+  });
+});
+
+describe("a control plane's enrollment writer", () => {
+  it("is an item of the connect page until its URL is stored, never showing the value", async () => {
+    const writer = "IDENTITY_WRITER_URL";
+    const plane: AppContext = {
+      ...ctx,
+      resolved: resolveConfig(
+        defineConfig({ ...config, identityProvisioning: { databaseUrl: secret(writer), maxValidityMs: 86_400_000 } }),
+      ),
+    };
+    expect((await setupStatus(ctx)).enrollmentWriter).toBeUndefined();
+    const before = await setupStatus(plane);
+    expect(before.enrollmentWriter).toBe(writer);
+    expect(before.tokens.at(-1)).toMatchObject({ name: writer, status: "missing", optional: false });
+    await expect(setSetupToken(ctx, { id: "alice" }, { name: writer, value: "x" })).rejects.toThrow(
+      /not a setup token/,
+    );
+    const url = "postgresql://writer:made-up-password@db.example.test/identity";
+    try {
+      await setSetupToken(plane, { id: "alice" }, { name: writer, value: url });
+      const after = await setupStatus(plane);
+      expect(after.tokens.at(-1)).toMatchObject({ name: writer, status: "set", setBy: "alice" });
+      expect(JSON.stringify(after)).not.toContain("made-up-password");
+    } finally {
+      await client.clearSecret(writer, { by: "alice" });
+    }
   });
 });
 
