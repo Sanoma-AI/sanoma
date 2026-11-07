@@ -52,7 +52,7 @@ export interface ConnectionRef<V extends string = string> {
 export interface ConnectionDefinition<V extends string = string> extends ConnectionRef<V> {
   readonly name: string;
   readonly method: string;
-  readonly credentials?: Secret;
+  readonly credentials: Secret;
   /** An `oauth2` method's application credentials (`oauthClient`), which several connections may share. */
   readonly client?: Secret;
   readonly scopes: readonly string[];
@@ -207,7 +207,7 @@ export function defineConnection<C extends Connector<any, any>>(
   options: {
     name: string;
     method: string;
-    credentials?: Secret;
+    credentials: Secret;
     /** For an `oauth2` method: the secret holding the company's OAuth application (`oauthClient`). */
     client?: Secret;
     scopes?: readonly string[];
@@ -219,8 +219,7 @@ export function defineConnection<C extends Connector<any, any>>(
   const vendor = connector[VENDOR].id;
   const auth = setupOf(connector).authentication?.[options.method];
   if (!auth) refuse("The connector does not declare this authentication method");
-  if (auth.kind === "workload-identity" ? options.credentials !== undefined : !isSecret(options.credentials))
-    refuse("Credentials must match the authentication method");
+  if (!isSecret(options.credentials)) refuse("Credentials must match the authentication method");
   checkClient(auth, options.client, options.credentials);
   return Object.freeze({
     $connection: `${vendor}/${options.name}`,
@@ -314,8 +313,7 @@ export function connectionCatalog(
     )
       refuse("Invalid or duplicate connection declaration");
     const auth = methods.get(d.vendor)![d.method]!;
-    if (auth.kind === "workload-identity" ? d.credentials !== undefined : !isSecret(d.credentials))
-      refuse("Credentials must match the authentication method");
+    if (!isSecret(d.credentials)) refuse("Credentials must match the authentication method");
     checkClient(auth, d.client, d.credentials);
     if (d.default && defaults.has(d.vendor)) refuse("A connector can have only one explicit default connection");
     if (d.default) defaults.add(d.vendor);
@@ -439,12 +437,7 @@ export class ConnectionRegistry {
       if (!declaration || (row?.rule && row.owner !== actor)) continue;
       const method = this.catalog.methods.get(declaration.vendor)?.[declaration.method];
       if (!method) continue;
-      const credential =
-        method.kind === "workload-identity"
-          ? undefined
-          : "default" in declaration
-            ? declaration.credentials?.$secret
-            : row?.credential;
+      const credential = "default" in declaration ? declaration.credentials?.$secret : row?.credential;
       const location = credential && this.secrets ? this.secrets.location(credential) : undefined;
       const storageProblem = this.storeProblem(method, location);
       cards.push({
@@ -514,7 +507,6 @@ export class ConnectionRegistry {
     }
     const method = this.catalog.methods.get(declaration.vendor)?.[declaration.method];
     if (!method?.verify) throw new AuthenticationError("unsupported");
-    if (method.kind === "workload-identity") credential = undefined;
     this.checkStore(method, credential);
     return {
       target,
@@ -729,10 +721,7 @@ export class ConnectionRegistry {
     const method = this.catalog.methods.get(row.vendor)![row.method]!;
     const bundle = row.credential ? await this.secrets?.read(row.credential) : undefined;
     if (row.credential && !bundle) throw new SecretStoreError("unavailable");
-    const identity = await verifyAuthentication(method, bundle && decodeCredentials(method, bundle.value), {
-      connectionId: row.id,
-      vendor: row.vendor,
-    });
+    const identity = await verifyAuthentication(method, bundle && decodeCredentials(method, bundle.value));
     if (identity.account !== row.account) throw new AuthenticationError("wrong_account");
     if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(row.scopes)].toSorted()))
       throw new AuthenticationError("scope_changed");
@@ -818,7 +807,7 @@ export class ConnectionRegistry {
     const problems: ConnectionStorageProblem[] = [];
     for (const d of this.catalog.definitions.values()) {
       const method = this.catalog.methods.get(d.vendor)![d.method]!;
-      const credential = method.kind === "workload-identity" ? undefined : d.credentials?.$secret;
+      const credential = d.credentials?.$secret;
       const location = credential ? secrets.location(credential) : undefined;
       const problem = this.storeProblem(method, location);
       if (problem) problems.push({ id: d.$connection, method: d.method, problem, location });
@@ -892,29 +881,26 @@ export class ConnectionRegistry {
     const method = this.catalog.methods.get(selected.vendor)?.[selected.method];
     if (!method?.verify) throw new AuthenticationError("unsupported");
     const material: CallAuthentication = { method: selected.method, kind: method.kind };
-    if (method.kind !== "workload-identity") {
-      if (!this.secrets || !selected.credentials) throw new SecretStoreError("unavailable");
-      let bundle = await this.secrets.read(selected.credentials.$secret);
-      if (!bundle) throw new AuthenticationError("missing");
-      material.credentials = decodeCredentials(method, bundle.value);
-      if (method.kind === "oauth2" && method.oauth.refresh) {
-        const grant = material.credentials as OAuthGrant;
-        if (rejected !== undefined || renewalDue(grant)) {
-          try {
-            bundle = await this.renew(selected, method, actor, rejected);
-            material.credentials = decodeCredentials(method, bundle.value);
-          } catch (error) {
-            const usable = rejected === undefined && grant.expiresAt !== undefined && grant.expiresAt > Date.now();
-            if (!usable || authenticationProblem(error) !== "unavailable") throw error;
-          }
+    if (!this.secrets || !selected.credentials) throw new SecretStoreError("unavailable");
+    let bundle = await this.secrets.read(selected.credentials.$secret);
+    if (!bundle) throw new AuthenticationError("missing");
+    material.credentials = decodeCredentials(method, bundle.value);
+    if (method.kind === "oauth2" && method.oauth.refresh) {
+      const grant = material.credentials as OAuthGrant;
+      if (rejected !== undefined || renewalDue(grant)) {
+        try {
+          bundle = await this.renew(selected, method, actor, rejected);
+          material.credentials = decodeCredentials(method, bundle.value);
+        } catch (error) {
+          const usable = rejected === undefined && grant.expiresAt !== undefined && grant.expiresAt > Date.now();
+          if (!usable || authenticationProblem(error) !== "unavailable") throw error;
         }
       }
-      material.credentialVersion = bundle.version;
     }
-    const context = { connectionId: selected.id, vendor: selected.vendor };
+    material.credentialVersion = bundle.version;
     let identity: AuthenticationIdentity;
     try {
-      identity = await verifyAuthentication(method, material.credentials, context);
+      identity = await verifyAuthentication(method, material.credentials);
     } catch (error) {
       // The verifier's check is a call too: a grant it finds rejected is renewed once, as a driver's would be.
       if (
@@ -1118,7 +1104,7 @@ export class ConnectionRegistry {
       if (await this.paused(setup.credential)) throw new AuthenticationError("unavailable");
       sent = true;
       const grant = await requestGrant(method.oauth, client, taken);
-      const identity = await verifyAuthentication(method, grant, { connectionId: setup.id, vendor: setup.vendor });
+      const identity = await verifyAuthentication(method, grant);
       // Refuses another account, or a grant without a required scope, before anything is stored.
       const selected = await this.configure(
         target,
@@ -1216,8 +1202,7 @@ export class ConnectionRegistry {
     if (rule.scopes.some((s) => !scopes.includes(s))) refuse("The account has not granted the required scopes");
     const method = this.catalog.methods.get(rule.vendor)![rule.method]!;
     const id = `${ruleId}/${randomUUID()}`;
-    const credential =
-      method.kind === "workload-identity" ? null : `CONNECTION_${randomUUID().replaceAll("-", "").toUpperCase()}`;
+    const credential = `CONNECTION_${randomUUID().replaceAll("-", "").toUpperCase()}`;
     const row: ConnectionRow = {
       id,
       vendor: rule.vendor,

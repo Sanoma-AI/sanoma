@@ -58,7 +58,6 @@ const KIND_LABELS: Record<string, string> = {
   fields: "credentials",
   signed: "signing key",
   oauth2: "OAuth consent",
-  "workload-identity": "deployment identity",
 };
 
 function ConnectionList({ vendor, actor, callback }: { vendor?: string; actor: string; callback?: CallbackOutcome }) {
@@ -114,14 +113,10 @@ function ConnectionList({ vendor, actor, callback }: { vendor?: string; actor: s
       </ItemGroup>
       {rules.map((rule) => (
         <div key={rule.id}>
-          <Button
-            variant="outline"
-            disabled={!canWrite(data.store) && data.methods[rule.vendor]?.[rule.method]?.kind !== "workload-identity"}
-            onClick={() => setCreating(rule.id)}
-          >
+          <Button variant="outline" disabled={!canWrite(data.store)} onClick={() => setCreating(rule.id)}>
             Connect account · {rule.name}
           </Button>
-          {!canWrite(data.store) && data.methods[rule.vendor]?.[rule.method]?.kind !== "workload-identity" && (
+          {!canWrite(data.store) && (
             <p className="text-sm text-muted-foreground">
               This store cannot safely create account credentials. Declare a named connection with an external binding
               to review an existing account.
@@ -258,8 +253,7 @@ function ConnectionRow({
   const method = data.methods[card.vendor]?.[card.method];
   const external = card.location?.management === "external" || !data.store.capabilities.writable;
   const oauth = method?.kind === "oauth2";
-  const identity = method?.kind === "workload-identity";
-  const unsupportedWrite = !external && !identity && !canWrite(data.store);
+  const unsupportedWrite = !external && !canWrite(data.store);
   const state = card.status === "connected" ? (card.health?.state ?? "connected") : card.status;
   const renewalProblem = card.renewal?.outcome !== "refreshed" ? card.renewal?.outcome : undefined;
   // Only a new consent helps: the grant is gone at the provider, or may have been renewed and not kept.
@@ -430,17 +424,15 @@ function ConnectionRow({
           }
           onClick={() => setEditing(true)}
         >
-          {identity
-            ? "Verify identity"
-            : external
-              ? "Review connection"
-              : oauth
-                ? card.account
-                  ? "Reconnect"
-                  : "Connect account"
-                : card.account
-                  ? "Replace credentials"
-                  : "Connect"}
+          {external
+            ? "Review connection"
+            : oauth
+              ? card.account
+                ? "Reconnect"
+                : "Connect account"
+              : card.account
+                ? "Replace credentials"
+                : "Connect"}
         </Button>
         {method?.verifiable && (
           <Button variant="outline" disabled={busy} onClick={() => void act("test")}>
@@ -506,8 +498,7 @@ function ConnectionDialog({
   const connect = useServerFn(connectConnectionFn);
   const queryClient = useQueryClient();
   const external = card?.location?.management === "external" || !store.capabilities.writable;
-  const identity = method?.kind === "workload-identity";
-  const enter = !external && !identity;
+  const enter = !external;
   const fields = secureFields(method?.schema ?? {});
   async function submit() {
     setBusy(true);
@@ -551,9 +542,7 @@ function ConnectionDialog({
             <DialogDescription>
               {external
                 ? "Read the existing credentials from the declared management location and verify the account."
-                : identity
-                  ? "Verify the deployment’s workload identity."
-                  : "Enter credentials securely. They are never included in an approval or workflow history."}
+                : "Enter credentials securely. They are never included in an approval or workflow history."}
             </DialogDescription>
           </DialogHeader>
           {!method?.verifiable && <Notice>This authentication method does not supply account verification.</Notice>}
@@ -598,7 +587,7 @@ function ConnectionDialog({
                 <strong>Destination:</strong>{" "}
                 {review.location
                   ? `${review.location.store} · ${review.location.namespace} · ${review.location.path}`
-                  : "Deployment identity; no stored credential"}
+                  : "No storage location"}
               </p>
               {review.previousLocation && changedLocation(review.previousLocation, review.location) && (
                 <Notice>
@@ -826,7 +815,7 @@ function AttemptProgress({ attempt, vendor, onDismiss }: { attempt: string; vend
 const locationLabel = (location?: SecretLocation) =>
   location
     ? `${location.store} · ${location.namespace} · ${location.path} · ${location.management === "external" ? "managed externally" : "managed by Sanoma"}`
-    : "deployment identity";
+    : "no storage location";
 const changedLocation = (before: SecretLocation, after?: SecretLocation) =>
   !after || (["store", "namespace", "path", "management"] as const).some((key) => before[key] !== after[key]);
 

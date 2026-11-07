@@ -36,7 +36,7 @@ import { ACTIVE_MOVE_PHASES } from "./shared.ts";
 /** Where a move is: prepared, copying (`transferring`, its source fenced), checked, switched, retired, or cancelled before its cutover. */
 export type MovePhase = "prepared" | "transferring" | "verified" | "cut_over" | "retired" | "cancelled";
 /** What a moved secret holds: a connection's credential bundle (its method's kind), an OAuth application (`oauth-client`), or a plain value. */
-export type MoveItemKind = "value" | "oauth-client" | Exclude<Authentication["kind"], "workload-identity">;
+export type MoveItemKind = "value" | "oauth-client" | Authentication["kind"];
 /**
  * What the move does with a secret: copies it, or not: `kept` (an OAuth application the
  * destination holds its own of, which stays), `external` (its owner's), `bound` (the environment
@@ -255,7 +255,7 @@ export function storeMoveDriver({ config, secrets, registry, db, declared }: Sto
     const { catalog } = registry;
     const methodOf = (c: { vendor: string; method: string }) => catalog.methods.get(c.vendor)?.[c.method];
     const credential = (name: string, id: string, auth: Authentication | undefined, client?: string) => {
-      if (auth && auth.kind !== "workload-identity") add(name, auth.kind, id, auth, client);
+      if (auth) add(name, auth.kind, id, auth, client);
     };
     for (const d of catalog.definitions.values()) {
       if (d.client) add(d.client.$secret, "oauth-client", d.$connection);

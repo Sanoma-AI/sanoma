@@ -193,11 +193,4 @@ describe("authentication bundles", () => {
     );
     expect(() => checkAuthenticationStore(auth, { ...caps, maxBytes: 10 }, "sanoma")).toThrow("too_large");
   });
-  it("workload identity does not require persisted credentials", () => {
-    const identity = defineAuthentication({ kind: "workload-identity" });
-    expect(() =>
-      checkAuthenticationStore(identity, memorySecretStore({ writable: false }).capabilities, "external"),
-    ).not.toThrow();
-    expect(() => encodeCredentials(identity, "token")).toThrow("unsupported");
-  });
 });

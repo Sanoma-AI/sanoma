@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   AuthenticationError,
   defineAuthentication,
@@ -6,13 +7,21 @@ import {
   type AuthenticationIdentity,
 } from "../src/authentication.ts";
 
-const method = (verify: () => Promise<AuthenticationIdentity>) =>
-  defineAuthentication({ kind: "workload-identity", verify });
+const stored = {
+  kind: "api-key",
+  version: 1,
+  schema: z.object({}),
+  storage: { writable: true, maxBytes: 64, conditionalWrites: true },
+} as const;
+const method = (verify: () => Promise<AuthenticationIdentity>) => defineAuthentication({ ...stored, verify });
 
 describe("authentication health", () => {
   it("preserves only verified identity facts and normalizes grants", async () => {
     const identity = { account: "organization", scopes: ["write", "read", "read"], token: "private-value" };
-    const actual = await verifyAuthentication(method(async () => identity));
+    const actual = await verifyAuthentication(
+      method(async () => identity),
+      {},
+    );
     expect(actual).toEqual({ account: "organization", scopes: ["read", "write"] });
     expect(actual.scopes).not.toBe(identity.scopes);
     expect(identity.scopes).toEqual(["write", "read", "read"]);
@@ -26,12 +35,14 @@ describe("authentication health", () => {
           scopes: [],
           expiresAt: Date.now() - 1,
         })),
+        {},
       ),
     ).rejects.toMatchObject({ problem: "expired", retryable: false });
     const error = await verifyAuthentication(
       method(async () => {
         throw new Error("SDK header: private-value", { cause: "private-value" });
       }),
+      {},
     ).catch((failure: unknown) => failure);
     expect(error).toMatchObject({ problem: "unavailable", retryable: true });
     expect(error).not.toHaveProperty("cause");
@@ -50,6 +61,7 @@ describe("authentication health", () => {
         method(async () => {
           throw failure;
         }),
+        {},
       ).catch((e: unknown) => e);
       expect(actual).toMatchObject({ problem, message: `Authentication: ${problem}`, retryable: false });
       expect(actual).not.toBe(failure);
@@ -67,7 +79,12 @@ describe("authentication health", () => {
       { account: "org", scopes: [], expiresAt: Number.NaN },
     ];
     for (const identity of invalid) {
-      await expect(verifyAuthentication(method(async () => identity as AuthenticationIdentity))).rejects.toMatchObject({
+      await expect(
+        verifyAuthentication(
+          method(async () => identity as AuthenticationIdentity),
+          {},
+        ),
+      ).rejects.toMatchObject({
         problem: "unavailable",
       });
     }
@@ -76,9 +93,10 @@ describe("authentication health", () => {
         method(async () => {
           throw { name: "AuthenticationError", problem: "private-value", message: "private-value" };
         }),
+        {},
       ),
     ).rejects.toMatchObject({ problem: "unavailable", message: "Authentication: unavailable" });
-    await expect(verifyAuthentication(defineAuthentication({ kind: "workload-identity" }))).rejects.toMatchObject({
+    await expect(verifyAuthentication(defineAuthentication(stored), {})).rejects.toMatchObject({
       problem: "unsupported",
     });
   });

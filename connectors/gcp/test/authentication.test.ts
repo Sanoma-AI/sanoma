@@ -123,6 +123,7 @@ it("declares a connection with a stored credential, never one without", () => {
       account: accountOf(identity),
     }),
   ).toMatchObject({ $connection: "gcp/provisioning", credentials: { $secret: "GCP_PROVISIONING_AUTH" } });
+  // @ts-expect-error untyped callers are refused at run time too
   expect(() => defineConnection(gcp, { name: "provisioning", method: "workloadIdentity" })).toThrow(
     "Credentials must match the authentication method",
   );

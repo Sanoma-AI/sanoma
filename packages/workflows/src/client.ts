@@ -1377,30 +1377,14 @@ export class SanomaClient {
     if (!isDeepStrictEqual(authorized, setup))
       throw new SanomaError("invalid_input", "The connection changed; start a new review");
     const method = this.config.connections.catalog.methods.get(setup.vendor)![setup.method]!;
-    const external =
-      method.kind !== "workload-identity" &&
-      (setup.location?.management === "external" || !this.storedSecrets.store.capabilities.writable);
-    if (
-      !external &&
-      method.kind !== "workload-identity" &&
-      this.storedSecrets.store.capabilities.conditionalWrites === "none"
-    )
+    const external = setup.location?.management === "external" || !this.storedSecrets.store.capabilities.writable;
+    if (!external && this.storedSecrets.store.capabilities.conditionalWrites === "none")
       throw new SecretStoreError("unsupported");
-    if (credentials !== undefined && (external || method.kind === "workload-identity"))
-      throw new SecretStoreError("read_only");
+    if (credentials !== undefined && external) throw new SecretStoreError("read_only");
     const existing = setup.credential ? await this.storedSecrets.read(setup.credential) : undefined;
     if (external && !existing) throw new SecretStoreError("unavailable");
-    const encoded =
-      method.kind === "workload-identity"
-        ? undefined
-        : external
-          ? existing!.value
-          : encodeCredentials(method, credentials);
-    const identity = await verifyAuthentication(
-      method,
-      encoded === undefined ? undefined : decodeCredentials(method, encoded),
-      { connectionId: setup.id, vendor: setup.vendor },
-    );
+    const encoded = external ? existing!.value : encodeCredentials(method, credentials);
+    const identity = await verifyAuthentication(method, decodeCredentials(method, encoded));
     if (setup.expectedAccount && setup.expectedAccount !== identity.account)
       throw new AuthenticationError("wrong_account");
     if (setup.requiredScopes.some((scope) => !identity.scopes.includes(scope)))
@@ -1443,33 +1427,17 @@ export class SanomaClient {
       { actor, id: `connection-prepare:${review.requestId}` },
     );
     const method = this.config.connections.catalog.methods.get(setup.vendor)![setup.method]!;
-    const external =
-      method.kind !== "workload-identity" &&
-      (setup.location?.management === "external" || !this.storedSecrets.store.capabilities.writable);
-    if (
-      !external &&
-      method.kind !== "workload-identity" &&
-      this.storedSecrets.store.capabilities.conditionalWrites === "none"
-    )
+    const external = setup.location?.management === "external" || !this.storedSecrets.store.capabilities.writable;
+    if (!external && this.storedSecrets.store.capabilities.conditionalWrites === "none")
       throw new SecretStoreError("unsupported");
-    if (credentials !== undefined && (external || method.kind === "workload-identity"))
-      throw new SecretStoreError("read_only");
+    if (credentials !== undefined && external) throw new SecretStoreError("read_only");
     const existing = setup.credential ? await this.storedSecrets.read(setup.credential) : undefined;
     if (external && (!existing || existing.version !== review.credentialVersion))
       throw new SecretStoreError("conflict");
     if (setup.expectedRevision === review.expectedRevision && (existing?.version ?? null) !== review.credentialVersion)
       throw new SecretStoreError("conflict");
-    const encoded =
-      method.kind === "workload-identity"
-        ? undefined
-        : external
-          ? existing!.value
-          : encodeCredentials(method, credentials);
-    const identity = await verifyAuthentication(
-      method,
-      encoded === undefined ? undefined : decodeCredentials(method, encoded),
-      { connectionId: setup.id, vendor: setup.vendor },
-    );
+    const encoded = external ? existing!.value : encodeCredentials(method, credentials);
+    const identity = await verifyAuthentication(method, decodeCredentials(method, encoded));
     if (identity.account !== review.account) throw new AuthenticationError("wrong_account");
     if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(review.scopes)].toSorted()))
       throw new AuthenticationError("scope_changed");
@@ -1486,11 +1454,7 @@ export class SanomaClient {
       { actor, id: `connection-configure:${review.requestId}` },
     )) as ConnectionSnapshot;
     const ref = { vendor: selected.vendor, $connection: selected.id };
-    if (
-      (await this.config.connections.setupState(selected, actor)) === "pending" &&
-      !external &&
-      encoded !== undefined
-    ) {
+    if ((await this.config.connections.setupState(selected, actor)) === "pending" && !external) {
       let written = false;
       try {
         const receipt = await this.config.connections.storedVersion(selected.id, selected.revision);
