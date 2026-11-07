@@ -21,7 +21,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   declareFounder,
   FIRST_COMMIT,
-  type Manifest,
   packageManagerOf,
   packageName,
   pinDependencies,
@@ -33,7 +32,10 @@ import {
 import { copyFixture, ensureBuilt, linkConnector, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
-const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as Manifest;
+/** The template's manifest, as a company starts from it. */
+const template = JSON.parse(readFileSync(new URL("package.json", TEMPLATE), "utf8")) as {
+  dependencies: Record<string, string>;
+};
 /** The workspace root's manifest, whose devDependencies are the connectors the tests run. */
 const root = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")) as {
   devDependencies: Record<string, string>;
@@ -83,11 +85,8 @@ describe("startCompany", () => {
     }
     const pkg = JSON.parse(read("package.json")) as { name: string; dependencies: Record<string, string> };
     expect(pkg.name).toBe("acme-ops");
-    expect(pkg.dependencies).toEqual({
-      "@sanoma-ai/connector-anthropic": own.version,
-      "@sanoma-ai/connector-ghost": own.version,
-      sanoma: own.version,
-    });
+    // From a checkout, whose version npm may not have, the template's ranges (packed.test.ts pins them).
+    expect(pkg.dependencies).toEqual(template.dependencies);
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
     // pnpm's alone.
     expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);
@@ -146,10 +145,6 @@ describe("startCompany", () => {
 });
 
 describe("pinDependencies", () => {
-  const template = JSON.parse(readFileSync(new URL("package.json", TEMPLATE), "utf8")) as {
-    dependencies: Record<string, string>;
-  };
-
   it("pins sanoma and the connectors to the launcher's own version", () => {
     expect(pinDependencies({ ...template.dependencies, "left-alone": "^1" }, { version: "1.2.3" })).toEqual({
       "@sanoma-ai/connector-anthropic": "1.2.3",
