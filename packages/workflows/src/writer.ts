@@ -116,10 +116,55 @@ export async function setFields(
     text = text.slice(0, start) + replacement + text.slice(end);
   }
   if (Object.values(fields).some(holdsSecret)) text = withSecretImport(text);
-  // The declaration on its own: a top-level statement formats the same in its file as alone.
+  return formatDeclaration(text, exportName, options);
+}
+
+/** `text` with its declaration `exportName` formatted on its own: a top-level statement formats the same in its file as alone. */
+async function formatDeclaration(text: string, exportName: string, options: FormatConfig): Promise<string> {
   const { start, end } = declarationOf(text, exportName).statement;
   const formatted = await format(text.slice(start, end), options);
   return text.slice(0, start) + formatted.trimEnd() + text.slice(end);
+}
+
+/**
+ * `source` with fields of its declaration `exportName` renamed or removed: `renames` by dotted
+ * path, as `setFields` takes them, each to the field's new name, its value kept as written, or to
+ * null to remove the field (`collection`'s `fields.<name>`, say). Only that statement changes,
+ * formatted as `setFields` formats it. Throws `NotLiteral` as `setFields` does, and for a field
+ * whose value the file computes, which removing it would drop; an `Error` for a path the
+ * declaration does not have, or a new name its object has already.
+ */
+export async function renameFields(
+  source: string,
+  exportName: string,
+  renames: Readonly<Record<string, string | null>>,
+  options: FormatConfig = {},
+): Promise<string> {
+  let text = source;
+  for (const [path, to] of Object.entries(renames)) {
+    const { object, property } = propertyAt(declarationOf(text, exportName).object, path);
+    let start: number = property.start;
+    let end: number = property.end;
+    let replacement = "";
+    if (to !== null) {
+      if (object.properties.some((p: Node) => fieldName(p) === to))
+        throw new Error(`Cannot rename ${path}: ${to} is a field already`);
+      // A shorthand (`{ seats }`) keeps its value under the new name.
+      replacement = property.shorthand ? `${keyOf(to)}: ${property.value.name}` : keyOf(to);
+      if (!property.shorthand) end = property.key.end;
+    } else {
+      if (computed(property.value)) throw computedAt(path);
+      // With the comma between it and the next field, the one before it when it is the last, or
+      // its own trailing comma when it is the only one.
+      const at = object.properties.indexOf(property);
+      const next = object.properties[at + 1];
+      if (next) end = next.start;
+      else if (at > 0) start = object.properties[at - 1].end;
+      else end += /^\s*,?/.exec(text.slice(end))![0].length;
+    }
+    text = text.slice(0, start) + replacement + text.slice(end);
+  }
+  return formatDeclaration(text, exportName, options);
 }
 
 /** What a data file imports `secret` from when it names one. */
@@ -206,12 +251,10 @@ function editAt(object: Node, path: string, value: DataValue): { start: number; 
   for (let i = 0; i < keys.length;) {
     // A spread may hold the field, or move the list's items: what is there is the code's.
     if (node.type === "ObjectExpression" && !node.properties.some(isSpread)) {
-      const names = new Map<string, Node>(node.properties.map((p: Node) => [fieldName(p), p]));
-      let j = keys.length;
-      while (j > i && !names.has(keys.slice(i, j).join("."))) j--;
-      if (j === i) return added(node, keys.slice(i), path, value);
-      node = names.get(keys.slice(i, j).join("."))!.value;
-      i = j;
+      const field = fieldAt(node, keys, i);
+      if (!field) return added(node, keys.slice(i), path, value);
+      node = field.property.value;
+      i = field.end;
     } else if (
       node.type === "ArrayExpression" &&
       !node.elements.some(isSpread) &&
@@ -229,6 +272,41 @@ function editAt(object: Node, path: string, value: DataValue): { start: number; 
   }
   if (computed(node)) throw computedAt(path);
   return { start: node.start, end: node.end, replacement: literal(value) };
+}
+
+/**
+ * The field of `object` that `keys` from `i` names, by the longest run of them that names one (a
+ * key may hold a dot), and where that run ends; none when no run does.
+ */
+function fieldAt(object: Node, keys: readonly string[], i: number): { property: Node; end: number } | undefined {
+  const names = new Map<string, Node>(object.properties.map((p: Node) => [fieldName(p), p]));
+  for (let j = keys.length; j > i; j--) {
+    const property = names.get(keys.slice(i, j).join("."));
+    if (property) return { property, end: j };
+  }
+  return undefined;
+}
+
+/**
+ * The property `path` names in `object` and the object that holds it, by the longest run of the
+ * path's segments that names a field at each object, as `editAt` reads a path; only objects, and
+ * no spread, which may hold the field.
+ */
+function propertyAt(object: Node, path: string): { object: Node; property: Node } {
+  const keys = path.split(".");
+  let node = object;
+  for (let i = 0; i < keys.length;) {
+    if (node.type !== "ObjectExpression" || node.properties.some(isSpread)) {
+      if (computed(node)) throw computedAt(keys.slice(0, Math.max(i, 1)).join("."));
+      throw new Error(`Cannot change ${path}: ${keys.slice(0, i).join(".")} is not an object`);
+    }
+    const field = fieldAt(node, keys, i);
+    if (!field) throw new Error(`Cannot change ${path}: the declaration has no ${keys.slice(0, i + 1).join(".")}`);
+    if (field.end === keys.length) return { object: node, property: field.property };
+    node = field.property.value;
+    i = field.end;
+  }
+  throw new Error(`Cannot change ${path}: no field named`);
 }
 
 /** The refusal of a field whose value the file computes. */

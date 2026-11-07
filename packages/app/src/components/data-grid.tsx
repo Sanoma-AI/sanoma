@@ -13,6 +13,8 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
 import { Field, FieldLabel } from "#/components/ui/field.tsx";
@@ -131,7 +133,8 @@ export function GridFilters({
 
 /**
  * Which fields the grid shows (`?hide=`): a menu of the fields but the key, which names each
- * row, and, while some are hidden, a chip saying how many that shows them all again.
+ * row, and New column (the column panel, `grid/columns.tsx`); while some are hidden, a chip
+ * saying how many that shows them all again.
  */
 function HiddenFields({
   collection,
@@ -143,12 +146,14 @@ function HiddenFields({
   set: (next: Partial<DataSearch>) => void;
 }) {
   const fields = Object.keys(collection.fields).filter((field) => field !== collection.key);
+  // A collection declared in code (no data file) changes its columns there.
+  const changes = collection.declared !== undefined;
+  if (fields.length === 0 && !changes) return null;
   const hidden = fields.filter((field) => hide.includes(field));
   const toggle = (field: string, shown: boolean) => {
     const next = shown ? hidden.filter((f) => f !== field) : [...hidden, field];
     set({ hide: next.length ? next : undefined });
   };
-  if (fields.length === 0) return null;
   return (
     <div className="flex items-center gap-2">
       <DropdownMenu>
@@ -166,6 +171,12 @@ function HiddenFields({
               {field}
             </DropdownMenuCheckboxItem>
           ))}
+          {changes && fields.length > 0 && <DropdownMenuSeparator />}
+          {changes && (
+            <DropdownMenuItem onClick={() => set({ column: { change: "add" }, record: undefined, new: undefined })}>
+              New column
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       {hidden.length > 0 && (

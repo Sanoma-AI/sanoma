@@ -5,13 +5,14 @@ import type { ResolvedConfig, SanomaConfig } from "./config.ts";
 import type { SanomaClient } from "./client.ts";
 import { defineWorkflow, type Principal, type WorkflowDefinition } from "./define.ts";
 import { AtSchema } from "./description.ts";
-import type {
-  ADOPT_WORKFLOW,
-  CONNECT_EXISTING_WORKFLOW,
-  GO_LIVE_HOST_WORKFLOW,
-  GO_LIVE_WORKFLOW,
-  PATCH_WORKFLOW,
-  WorkflowFn,
+import {
+  type ADOPT_WORKFLOW,
+  type CONNECT_EXISTING_WORKFLOW,
+  FIELD_NAME,
+  type GO_LIVE_HOST_WORKFLOW,
+  type GO_LIVE_WORKFLOW,
+  type PATCH_WORKFLOW,
+  type WorkflowFn,
 } from "./shared.ts";
 import type { Source } from "./source.ts";
 
@@ -33,12 +34,21 @@ export type AdoptInput = z.infer<typeof AdoptInput>;
 /**
  * A form's Save: a declaration the description names (a resource, a collection, a site or an
  * app, by its `at`), and the fields to set in it, by dotted path as `setFields` takes them, each
- * to a JSON value.
+ * to a JSON value; the fields to rename or remove (`rename`, as `renameFields` takes them: a path
+ * to its new name, or null); and, for a change to a collection's columns, its plan as the app
+ * drafted it (`plan`), which the change it opens carries for its review (`ChangeInput.plan`).
  */
-export const PatchInput = z.object({
-  at: AtSchema,
-  fields: z.record(z.string().min(1), z.json()).refine((fields) => Object.keys(fields).length > 0, "Set a field"),
-});
+export const PatchInput = z
+  .object({
+    at: AtSchema,
+    fields: z.record(z.string().min(1), z.json()),
+    rename: z.record(z.string().min(1), z.string().regex(FIELD_NAME).nullable()).optional(),
+    plan: z.json().optional(),
+  })
+  .refine(({ fields, rename = {} }) => Object.keys(fields).length + Object.keys(rename).length > 0, {
+    message: "Set a field",
+    path: ["fields"],
+  });
 export type PatchInput = z.infer<typeof PatchInput>;
 
 /**

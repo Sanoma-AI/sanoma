@@ -34,6 +34,7 @@ import { HistoryLink } from "../record-history.tsx";
 import { CellEditor, draftOf, recordWith } from "./cell.tsx";
 import { cellText, csv, delimited } from "./clipboard.ts";
 import { isNew, type RecordsView, savedIn, withValue } from "./collection.ts";
+import { BY, ColumnMenu, HEADS, NewColumnLink, readWidths, UPDATED, writeWidths } from "./columns.tsx";
 import { type Conflict, conflictId, ConflictRow } from "./conflicts.tsx";
 import { useGestures } from "./gestures.ts";
 import { typedCharacter, useGridKeys } from "./keys.ts";
@@ -57,11 +58,6 @@ const column = createColumnHelper<typeof features, Saved>();
 /** The grid's table, which its gestures read the selection from. */
 export type GridTable = ReactTable<typeof features, Saved>;
 
-/** The columns after the fields, by ids no field can have. */
-const UPDATED = "@updated";
-const BY = "@by";
-const HEADS: Record<string, string> = { [UPDATED]: "Updated", [BY]: "By" };
-
 /** The least a column is shown at, in pixels: narrower, the table scrolls sideways instead. */
 const MIN_WIDTH = 96;
 
@@ -70,24 +66,6 @@ const ROW_PX = 37;
 
 /** How tall the grid is in the browser before it measures itself: about 16 rows. */
 const INITIAL_RECT = { width: 1200, height: 16 * ROW_PX };
-
-/** A collection's column widths, in this browser: `localStorage` may refuse to be read or written. */
-const widthsKey = (name: string) => `sanoma.grid.${name}.widths`;
-function readWidths(name: string): ColumnSizingState {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(widthsKey(name)) ?? "{}");
-    return typeof stored === "object" && stored !== null ? (stored as ColumnSizingState) : {};
-  } catch {
-    return {};
-  }
-}
-function writeWidths(name: string, widths: ColumnSizingState) {
-  try {
-    localStorage.setItem(widthsKey(name), JSON.stringify(widths));
-  } catch {
-    // A private window, or storage turned off: the widths last as long as the page.
-  }
-}
 
 /** The cell being edited, what its editor holds, and what it started with but a typed character. */
 interface Editing {
@@ -526,7 +504,7 @@ export function DataGrid({
               {table.getFlatHeaders().map((header) => {
                 const head = {
                   style: { width: share(header.getSize()) },
-                  className: "sticky top-0 z-10 border-b bg-background",
+                  className: "sticky top-0 z-10 border-b bg-background pr-9",
                 };
                 const resizer = (
                   <div
@@ -541,10 +519,14 @@ export function DataGrid({
                 return HEADS[header.id] ? (
                   <TableHead key={header.id} {...head}>
                     {HEADS[header.id]}
+                    {header.id === BY && collection.declared && <NewColumnLink />}
                     {resizer}
                   </TableHead>
                 ) : (
                   <SortHead key={header.id} field={header.id} order={order} staged={staged !== undefined} {...head}>
+                    {collection.declared && (
+                      <ColumnMenu collection={collection} field={header.id} rows={listed} hide={hide} />
+                    )}
                     {resizer}
                   </SortHead>
                 );

@@ -15,12 +15,14 @@ import {
   ToneBadge,
   When,
 } from "#/components/common.tsx";
+import { TableChangePlan } from "#/components/grid/plan.ts";
+import { TABLE_VERBS, TableChangeReview } from "#/components/grid/review.tsx";
 import { PermissionsDiff } from "#/components/permissions-diff.tsx";
 import { filesOf, groupFiles, isSettled, phaseLabel, ruleOf } from "#/lib/changes.ts";
 import { diffGrids } from "#/lib/grid-diff.ts";
 import { CHANGE_TONE } from "#/lib/tone.ts";
 import { type ChangeDetail, runName, starterName } from "#/api.ts";
-import { changeQuery, configQuery, permissionsQuery, runLink, workflowTitles } from "#/queries.ts";
+import { changeQuery, collectionNamed, configQuery, permissionsQuery, runLink, workflowTitles } from "#/queries.ts";
 
 export const Route = createFileRoute("/changes/$id")({
   // The change, and main's Permissions grid, which its branch's is diffed against.
@@ -54,6 +56,10 @@ function ChangePage() {
   // The loader found it; a change once opened is never gone.
   if (!change) throw notFound();
   const { state } = change;
+  // A change to a collection's columns carries its plan: reviewed as the table change it is, when
+  // it reads as one (else as any change).
+  const plan = TableChangePlan.safeParse(state.plan).data;
+  const { data: config } = useSuspenseQuery(configQuery());
   return (
     <>
       <CrumbHeader>
@@ -83,10 +89,13 @@ function ChangePage() {
         </span>
       </CrumbHeader>
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
-      <FloatHost float={<ChangeDecision change={change} />}>
+      <FloatHost float={<ChangeDecision change={change} {...(plan && { verbs: TABLE_VERBS })} />}>
         <div className="flex flex-col gap-(--gap-region) p-4">
           <Refusal change={change} />
           <Stranded change={change} />
+          {plan && (
+            <TableChangeReview change={change} plan={plan} collection={collectionNamed(plan.collection)(config)} />
+          )}
           <WhatChanged change={change} />
           <WhoMayDoWhat change={change} />
         </div>

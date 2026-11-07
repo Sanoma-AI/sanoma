@@ -64,7 +64,8 @@ describe("generateApi", () => {
     expect(problems).toEqual([]);
     await expect(source).toMatchFileSnapshot("./fixtures/outbound/api.ts.snap");
     // A vendor's write is never called directly.
-    expect(source).not.toContain("rename");
+    expect(source).not.toContain("acme.customer.rename");
+    expect(source).not.toMatch(/rename: OpFn/);
   });
 
   it("is deterministic: the same description gives the same text", () => {

@@ -35,6 +35,7 @@ interface CompanyApi {
     title: string;
     body?: string;
     page?: string;
+    plan?: unknown;
   }, unknown>;
   /** A chat turn: the workflow `chat`, built in. */
   chat: WorkflowFn<{
@@ -83,6 +84,8 @@ interface CompanyApi {
       export: string;
     };
     fields: Record<string, unknown>;
+    rename?: Record<string, unknown>;
+    plan?: unknown;
   }, unknown>;
   /** Plan a launch: the workflow `plan-launch`. */
   planLaunch: WorkflowFn<{

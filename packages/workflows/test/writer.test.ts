@@ -9,6 +9,7 @@ import {
   formatOptions,
   NotLiteral,
   Reference,
+  renameFields,
   renderDataFile,
   setFields,
 } from "../src/writer.ts";
@@ -197,6 +198,54 @@ export default [named, spread];
     const again = await setFields(out, "x", { token: secret("X_TOKEN", { generate: true }) });
     expect(again.split('import { secret } from "sanoma/resources";')).toHaveLength(2);
     expect(again).toContain('token: secret("X_TOKEN", { generate: true }),');
+  });
+});
+
+describe("renameFields", () => {
+  // The outbound fixture's collection, as its data file declares it.
+  const outbound = readFileSync(new URL("./fixtures/outbound/resources/data.ts", import.meta.url), "utf8");
+
+  it("renames a field in place, its value as written, and removes another with its comma, nothing else changed", async () => {
+    const renamed = await renameFields(outbound, "outbound", { "fields.seats": "headcount" }, options);
+    expect(renamed).toBe(
+      replacedOnce(
+        outbound,
+        'seats: { type: "number", optional: true }',
+        'headcount: { type: "number", optional: true }',
+      ),
+    );
+    const removed = await renameFields(outbound, "outbound", { "fields.lastTouched": null }, options);
+    expect(removed).toBe(replacedOnce(outbound, '    lastTouched: { type: "date", optional: true },\n', ""));
+    // The last field, and one in the middle, in one write.
+    const both = await renameFields(outbound, "outbound", { "fields.seats": null, "fields.contact": null }, options);
+    expect(both).toBe(
+      replacedOnce(
+        replacedOnce(outbound, '    seats: { type: "number", optional: true },\n', ""),
+        '    contact: "text",\n',
+        "",
+      ),
+    );
+  });
+
+  it("keeps a shorthand field's value under its new name, and refuses a computed value's removal, a name taken and a field it lacks", async () => {
+    const text = 'const stage = "text";\nexport const leads = { fields: { stage, owner: "person" } };\n';
+    expect(await renameFields(text, "leads", { "fields.stage": "phase" }, options)).toBe(
+      'const stage = "text";\nexport const leads = { fields: { phase: stage, owner: "person" } };\n',
+    );
+    await expect(renameFields(text, "leads", { "fields.stage": null }, options)).rejects.toBeInstanceOf(NotLiteral);
+    await expect(renameFields(text, "leads", { "fields.owner": "stage" }, options)).rejects.toThrow(
+      "Cannot rename fields.owner: stage is a field already",
+    );
+    await expect(renameFields(text, "leads", { "fields.seats": null }, options)).rejects.toThrow(
+      "Cannot change fields.seats: the declaration has no fields.seats",
+    );
+  });
+
+  it("removes an object's only field with its trailing comma", async () => {
+    const text = 'export const leads = {\n  key: "company",\n  fields: {\n    company: "text",\n  },\n};\n';
+    expect(await renameFields(text, "leads", { "fields.company": null }, options)).toBe(
+      'export const leads = {\n  key: "company",\n  fields: {},\n};\n',
+    );
   });
 });
 

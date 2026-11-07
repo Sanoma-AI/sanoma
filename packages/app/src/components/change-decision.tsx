@@ -5,16 +5,16 @@ import { CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { approverName, isSettled, ruleOf } from "#/lib/changes.ts";
 import { cn } from "#/lib/utils.ts";
 import { runLink } from "../queries.ts";
-import { ApprovalDecision, PUBLISH_VERBS } from "./approval.tsx";
+import { ApprovalDecision, PUBLISH_VERBS, type Verbs } from "./approval.tsx";
 import { CardHeading, Commit, Fact, Facts, FLOAT, FloatingCard, When } from "./common.tsx";
 
 /**
  * A change's decision, floating over its review: the policy's answer as a sentence, the facts
  * beside it (the checks, the card on the host, the merge and its deploy once merged), and, while
- * Publish waits, Publish and Reject on it. Rejecting closes the change: its run closes the pull
- * request itself.
+ * Publish waits, Publish and Reject on it (or as `verbs` names them: a table change's Approve and
+ * apply, Send back). Rejecting closes the change: its run closes the pull request itself.
  */
-export function ChangeDecision({ change }: { change: ChangeView }) {
+export function ChangeDecision({ change, verbs = PUBLISH_VERBS }: { change: ChangeView; verbs?: Verbs }) {
   const { state } = change;
   const run = { ...change, workflow: CHANGE_WORKFLOW };
   const publish = change.approvals.find((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE));
@@ -47,8 +47,10 @@ export function ChangeDecision({ change }: { change: ChangeView }) {
       </CardContent>
       {publish && (
         <CardFooter className="flex-wrap gap-2">
-          <ApprovalDecision run={run} approval={publish} verbs={PUBLISH_VERBS} />
-          <p className="w-full text-sm text-muted-foreground">Rejecting closes the change.</p>
+          <ApprovalDecision run={run} approval={publish} verbs={verbs} />
+          <p className="w-full text-sm text-muted-foreground">
+            {verbs === PUBLISH_VERBS ? "Rejecting" : `Choosing ${verbs.reject}`} closes the change.
+          </p>
         </CardFooter>
       )}
     </FloatingCard>
