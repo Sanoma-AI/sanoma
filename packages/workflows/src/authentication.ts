@@ -126,6 +126,11 @@ export interface OAuthFlow {
   authorizeUrl: string;
   /** The token endpoint the exchange posts the code to: https, or http on this machine. */
   tokenUrl: string;
+  /**
+   * The issuer a callback's `iss` (RFC 9207) must name, when the provider sends one; the
+   * authorization endpoint's origin unless declared.
+   */
+  issuer?: string;
   /** Sent as `scope`; empty when the provider takes scopes from the application's settings. */
   scopes: readonly string[];
   /** Send an S256 code challenge and the verifier with the code. */
@@ -216,6 +221,7 @@ export function defineAuthentication(definition: Authentication | Omit<OAuthAuth
         !storage.conditionalWrites ||
         !endpoint(oauth?.authorizeUrl) ||
         !endpoint(oauth?.tokenUrl) ||
+        (oauth?.issuer !== undefined && !endpoint(oauth?.issuer)) ||
         !Array.isArray(oauth?.scopes) ||
         oauth.scopes.some((scope) => typeof scope !== "string" || !scope || /\s/.test(scope)) ||
         typeof oauth.pkce !== "boolean" ||

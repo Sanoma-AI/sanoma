@@ -99,9 +99,9 @@ export const connectRunId = (attempt: string) => `connect:${attempt}`;
 
 const hash = (state: string) => createHash("sha256").update(state).digest();
 
-/** The provider as oauth4webapi takes it: its endpoints, and its origin as the issuer a callback may name. */
+/** The provider as oauth4webapi takes it: its endpoints, and the issuer a callback may name (its origin unless declared). */
 const serverOf = (flow: OAuthFlow): AuthorizationServer => ({
-  issuer: new URL(flow.authorizeUrl).origin,
+  issuer: flow.issuer ?? new URL(flow.authorizeUrl).origin,
   authorization_endpoint: flow.authorizeUrl,
   token_endpoint: flow.tokenUrl,
 });
@@ -313,7 +313,7 @@ export async function requestGrant(flow: OAuthFlow, client: OAuthClient, taken: 
       tokenType: token.token_type,
       ...(token.refresh_token && { refreshToken: token.refresh_token }),
       ...(token.expires_in !== undefined && { expiresAt: Date.now() + token.expires_in * 1000 }),
-      ...(token.scope !== undefined && { scopes: token.scope.split(" ").filter(Boolean) }),
+      ...(token.scope !== undefined && { scopes: token.scope.split(/[\s,]+/).filter(Boolean) }),
     };
   } catch (error) {
     throw new AuthenticationError(error instanceof ResponseBodyError ? "rejected" : "uncertain");

@@ -387,6 +387,24 @@ describe("OAuth consent", () => {
     });
   });
 
+  it("refuses an exchange for a connection that changed since consent, sending no code", async () => {
+    await withRuntime(async (client) => {
+      const first = await authorize(client);
+      const { runId } = await client.receiveConnection("acme", first.attempt, consent(first.url), { actor: "alice" });
+      expect((await settled(client, runId))?.status).toBe("finished");
+      // Reconnect consents to this revision; someone else changes the connection before the callback.
+      const again = await authorize(client);
+      await (await pool.db()).update(connections).set({ revision: randomUUID() });
+      const late = await client.receiveConnection("acme", again.attempt, consent(again.url), { actor: "alice" });
+      expect((await settled(client, late.runId))?.status).toBe("failed");
+      expect(await client.connectionAttempt(again.attempt, { actor: "alice" })).toMatchObject({
+        state: "failed",
+        problem: "unavailable",
+      });
+      expect(tokenRequests).toHaveBeenCalledTimes(1);
+    });
+  }, 60_000);
+
   it("ends an attempt the person declined at the provider", async () => {
     await withRuntime(async (client) => {
       const started = await authorize(client);

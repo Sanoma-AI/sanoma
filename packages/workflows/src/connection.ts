@@ -835,6 +835,9 @@ export class ConnectionRegistry {
       const method = this.catalog.methods.get(setup.vendor)![setup.method]!;
       if (method.kind !== "oauth2" || !setup.client || !setup.credential || !this.secrets)
         throw new AuthenticationError("unsupported");
+      // Connected, disconnected or reconnected by someone else since consent: not this grant's to replace.
+      if ("connection" in target && (target.connection.revision ?? null) !== setup.expectedRevision)
+        refuse("The connection changed since consent; connect again");
       const taken = await this.attempts.take(attempt, actor.id, setup.id);
       const stored = await this.secrets.read(setup.client);
       if (!stored) throw new AuthenticationError("missing");

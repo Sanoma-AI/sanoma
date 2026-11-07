@@ -587,7 +587,8 @@ function ConsentDialog({
   onStarted(attempt: string): void;
   onClose(): void;
 }) {
-  const [requestId] = useState(() => crypto.randomUUID());
+  // One request per input: a retry reuses it (an approval holds it), new credentials are a new one.
+  const [request, setRequest] = useState<{ id: string; replaces: boolean }>();
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
@@ -603,7 +604,10 @@ function ConsentDialog({
     // Opened in the click, so no popup blocker stops it; pointed at the provider once the attempt exists.
     const tab = window.open("", "_blank");
     try {
-      const entered = clientId || clientSecret ? { client: { clientId, clientSecret } } : {};
+      const replaces = Boolean(clientId || clientSecret);
+      const requestId = request?.replaces === replaces ? request.id : crypto.randomUUID();
+      setRequest({ id: requestId, replaces });
+      const entered = replaces ? { client: { clientId, clientSecret } } : {};
       const { url, attempt } = await authorize({ data: { target, requestId, ...entered } });
       if (tab) {
         tab.opener = null;

@@ -1553,10 +1553,21 @@ export class SanomaClient {
       });
     } else if (current) application = decodeCredentials(oauthApplication, current.value);
     else throw new SanomaError("invalid_input", "Enter the OAuth application's client ID and secret: none is stored");
+    // The attempt keeps the revision consented to: the exchange refuses a connection changed since.
+    const consented: ConnectionTarget =
+      "connection" in target
+        ? {
+            connection: {
+              vendor: target.connection.vendor,
+              $connection: target.connection.$connection,
+              ...(setup.expectedRevision !== null && { revision: setup.expectedRevision }),
+            },
+          }
+        : target;
     const started = await this.config.connections.attempts.start({
       flow: method.oauth,
       connectionId: setup.id,
-      target,
+      target: consented,
       requestId: id,
       principal: actor.id,
       clientId: application.clientId,
