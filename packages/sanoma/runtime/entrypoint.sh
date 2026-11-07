@@ -10,10 +10,7 @@ set -eu
 
 case "${1:-worker}" in
   worker | serve) command="${1:-worker}" ;;
-  identity)
-    shift
-    exec /pnpm/template/node_modules/.bin/sanoma identity "$@"
-    ;;
+  identity) exec /pnpm/template/node_modules/.bin/sanoma identity ;;
   *)
     echo "usage: sanoma-runtime [worker|serve|identity]" >&2
     exit 2

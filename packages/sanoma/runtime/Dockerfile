@@ -6,7 +6,8 @@
 # (SANOMA_SOURCE_KEY) when set, installs it against the store and runs `sanoma worker` on PORT
 # (`/healthz`, `/wake`, the app bundle), or with the command `serve`, `sanoma serve`. A host passes
 # those, and the bootstrap secrets (SANOMA_DATABASE_URL, SANOMA_SECRETS_KEY, SANOMA_WAKEUP_TOKEN),
-# as environment variables, or with the command `identity`, the identity service (entrypoint.sh).
+# as environment variables. With the command `identity` it checks nothing out and runs this
+# release's `sanoma identity` from the identity service's own settings (SANOMA_IDENTITY_*).
 #
 #   docker build --build-arg PACKAGES="$(node scripts/runtime-packages.ts)" -t sanoma-runtime packages/sanoma/runtime
 #
@@ -92,8 +93,7 @@ ENV SANOMA_BRIDGE_BIN=/usr/local/bin/provider-bridge \
     PORT=3000
 WORKDIR /home/node
 EXPOSE 3000
-# The worker's /healthz, else the identity service's /health (Cloud Run reserves paths ending in z).
 HEALTHCHECK --interval=10s --timeout=10s --start-period=300s \
-  CMD node -e "const at = 'http://127.0.0.1:' + process.env.PORT; fetch(at + '/healthz').then((r) => r.ok || fetch(at + '/health').then((h) => h.ok)).then((ok) => process.exit(ok ? 0 : 1), () => process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:' + process.env.PORT + '/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
 ENTRYPOINT ["/usr/local/bin/sanoma-runtime"]
 CMD ["worker"]
