@@ -1,5 +1,5 @@
 import { spawn, type SpawnOptions } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,7 @@ export const repo = fileURLToPath(new URL("../../../", import.meta.url));
 /** This package, and its manifest. */
 const sanoma = join(repo, "packages/sanoma");
 const manifest = JSON.parse(readFileSync(join(sanoma, "package.json"), "utf8")) as {
-  exports: Record<string, string | { default: string }>;
+  exports: Record<string, string | { "sanoma-source"?: string; default: string }>;
   files: string[];
   dependencies: Record<string, string>;
 };
@@ -97,9 +97,19 @@ export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", 
   linkConnector(dir, "ghost");
 
   const store = join(modules, ".pnpm/sanoma/node_modules");
-  for (const file of ["package.json", ...manifest.files.filter((entry) => !entry.startsWith("!"))]) {
+  for (const file of manifest.files.filter((entry) => !entry.startsWith("!"))) {
     cpSync(join(sanoma, file), join(store, "sanoma", file), { recursive: true });
   }
+  // Without the condition naming each entry's source: the tests' Vite resolves every import with it, a
+  // company's install never does.
+  const exports = Object.fromEntries(
+    Object.entries(manifest.exports).map(([key, entry]) => {
+      if (typeof entry === "string") return [key, entry];
+      const { "sanoma-source": _, ...built } = entry;
+      return [key, built];
+    }),
+  );
+  writeFileSync(join(store, "sanoma/package.json"), JSON.stringify({ ...manifest, exports }, null, 2));
   for (const name of Object.keys(manifest.dependencies)) link(join(sanoma, "node_modules", name), join(store, name));
   symlinkSync(join(store, "sanoma"), join(modules, "sanoma"));
   return dir;
