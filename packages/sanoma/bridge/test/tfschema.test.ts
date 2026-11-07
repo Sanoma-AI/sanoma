@@ -254,5 +254,6 @@ describe("the sanoma tfschema CLI", () => {
   it("runs nothing on import, and says how to call it", async () => {
     const { main } = await import("../src/tfschema/cli.ts");
     await expect(main([])).rejects.toThrow("usage: sanoma tfschema <resources.config.ts> <resources.gen.ts>");
+    expect(await main(["--help"])).toMatch(/^usage: sanoma tfschema /);
   });
 });

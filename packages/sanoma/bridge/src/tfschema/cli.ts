@@ -21,8 +21,9 @@ export async function main(argv: string[]): Promise<string> {
   const { positionals, values } = parseArgs({
     args: argv,
     allowPositionals: true,
-    options: { fixtures: { type: "string" } },
+    options: { fixtures: { type: "string" }, help: { type: "boolean" } },
   });
+  if (values.help) return USAGE;
   const [configPath, outPath, ...extra] = positionals;
   if (!configPath || !outPath || extra.length > 0) throw new Error(USAGE);
   const fixtures = values.fixtures ?? toPath(testdata);
