@@ -229,7 +229,7 @@ export interface RenewWhenDue {
 
 /**
  * The worker's renewals: the earliest due one is a deadline source (`addSource`), so a worker that
- * stops when quiet registers it with its wakeup and the next worker renews it; while the worker
+ * stops when idle registers it with its wakeup and the next worker renews it; while the worker
  * runs, an unref'd timer looks again at that time (at least every minute, for a grant another
  * process stored), renews what is due, counted busy while it does. `close` ends the looks, once
  * the one under way is done: a refresh token sent is never cut off from its write.

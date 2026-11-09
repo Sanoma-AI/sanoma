@@ -347,7 +347,7 @@ const plainValue = (value: unknown) =>
 /**
  * A slot's resource: its name (to its declaration), type, a few of its declared fields, its
  * binding, the latest check's verdict and the fields that differ; the host's with where the last
- * apply that made it says it answers, and its `lifetime`: always on, or stops when quiet, with
+ * apply that made it says it answers, and its `lifetime`: always on, or stops when idle, with
  * what starts it again, the Wakeup (`woken`: one naming this host is declared), or a notice that none does.
  */
 function SlotCard({
@@ -423,14 +423,12 @@ function SlotCard({
               {lifetime === "long-lived"
                 ? "Always on"
                 : woken
-                  ? "Stops when quiet; what is due while it sleeps is started by the Wakeup"
-                  : "Stops when quiet"}
+                  ? "Stops when idle; what is due while it is stopped is started by the Wakeup"
+                  : "Stops when idle"}
             </Fact>
           )}
         </Facts>
-        {lifetime === "stops-when-quiet" && !woken && (
-          <Notice>{noWakeup(`${resource.vendor}.${resource.type}`)}.</Notice>
-        )}
+        {lifetime === "stops-on-exit" && !woken && <Notice>{noWakeup(`${resource.vendor}.${resource.type}`)}.</Notice>}
         {result?.error !== undefined ? (
           <p className="text-destructive">{result.error}</p>
         ) : (

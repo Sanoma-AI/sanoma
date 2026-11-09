@@ -286,7 +286,7 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
       const { startWakeupService } = await import("sanoma/workflows/wakeup-service");
       wakeup = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
     }
-    app = await served(config, { ...options, onWrite: () => void supervised.resume() }, [
+    app = await served(config, { ...options, onWrite: () => void supervised.wake() }, [
       wakeRoute({ log, onWake: () => supervised.wake() }),
       ...(wakeup?.routes ?? []),
     ]);

@@ -611,11 +611,11 @@ describe("ConfigDescriptionSchema", () => {
   });
 
   it("says how a host keeps the runtime up, from its capabilities, and nothing of the sort for any other type", () => {
-    const quiet = fakeHost(async () => ({ url: "", stop: async () => undefined }), { lifetime: "stops-when-quiet" });
+    const quiet = fakeHost(async () => ({ url: "", stop: async () => undefined }), { lifetime: "stops-on-exit" });
     const description = describeConfig({ ...base, workflows: [], connectors: [github, docker, quiet.connector] });
     const hosts = Object.fromEntries(description.resourceTypes.map((t) => [t.id, t.host]));
     expect(hosts["docker.container"]).toEqual({ lifetime: "long-lived" });
-    expect(hosts["testhost.app"]).toEqual({ lifetime: "stops-when-quiet" });
+    expect(hosts["testhost.app"]).toEqual({ lifetime: "stops-on-exit" });
     expect(hosts["github.repository"]).toBeUndefined();
     expect(ConfigDescriptionSchema.parse(description)).toEqual(description);
     const [type] = description.resourceTypes;

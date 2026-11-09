@@ -88,10 +88,10 @@ export interface AppOptions {
    */
   ingress?: readonly IngressRoute[];
   /**
-   * Called right before each change a worker must run that the app makes: a run's start (drift,
-   * apply and a held call are starts) and an approval's decision; never for a read
-   * (`ClientOptions.onWrite`). `sanoma serve` starts its worker again with it once the worker
-   * stopped itself. Must not throw.
+   * Called right after each change a worker must run that the app makes commits: a run's start
+   * (drift, apply and a held call are starts) and an approval's decision; never for a read
+   * (`ClientOptions.onWrite`). `sanoma serve` wakes its worker with it (`Supervisor.wake`). Must
+   * not throw.
    */
   onWrite?: () => void;
 }

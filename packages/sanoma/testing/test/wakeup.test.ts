@@ -47,7 +47,7 @@ describe("the wakeup conformance kit", () => {
       failNext = false;
       throw new Error("not up yet");
     },
-    { lifetime: "stops-when-quiet" },
+    { lifetime: "stops-on-exit" },
   );
   const wakeup = fakeWakeup();
   config.connectors.push(host.connector, wakeup.connector);
