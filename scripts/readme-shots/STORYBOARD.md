@@ -2,7 +2,7 @@
 
 Status: the README GIF is implemented by `pnpm readme:shots --intro`. It uses a shadcn-authored scripted agent, simulated Git host and fake Ghost/Resend services, visibly labelled throughout. File edits, Git commits, checks, code-change approval and runtime approval use the real app. The 60-second video below remains a plan.
 
-The recorded cut shows Claude Code as an available own-plan choice, then switches to the demo model. It does not show an actual Claude subscription session. The code shot renders the actual Git diff separately; it is not an inline editor in the Changes page. The current GIF uses 1200 × 900 captures reduced to 960 px wide; no full video is exported.
+The recorded cut shows Claude Code as an available own-plan choice, then switches to the demo model. It does not show an actual Claude subscription session. The code shot renders the actual Git diff separately; it is not an inline editor in the Changes page. The GIF uses continuous Chrome recordings at 1200 × 900, reduced to 960 px wide at 15 fps. Typing, cursor movement, clicks and scrolling remain visible. Long builds and role changes are cut between clips; no standalone video is published.
 
 ## The story
 
@@ -15,7 +15,7 @@ The opening shows the finished page immediately. The recording then shows how it
 ## Format and placement
 
 - Record a 60-second video with captions that make sense without audio. An optional voiceover can read the captions; it should add no claims absent from the screen.
-- Cut a 22-second GIF from the same footage for the README, directly below the opening copy and links. Keep the full video behind a linked thumbnail or “Watch the 60-second demo” link once an actual video URL exists.
+- Make a shorter GIF for the README, directly below the opening copy and links. Allow time for visible typing and mouse actions instead of forcing the story into 22 seconds. Keep the full video behind a linked thumbnail or “Watch the 60-second demo” link once an actual video URL exists.
 - Capture at 1440 × 900. Frame the relevant panel so labels remain readable at roughly 900 px wide in a README. Export the video as H.264 MP4; export a reduced-palette GIF at about 960 px wide and 10 fps, aiming below 8 MB. Check legibility and file size after export rather than treating those as fixed guarantees.
 - Use real app footage with simple cuts, restrained cursor movement and one caption at a time. Hold the permissions and approval screens long enough to read them. Label shortened agent/build waits “Time condensed.”
 
@@ -41,16 +41,18 @@ The recipient, sender and connection names must be supplied in the demo fixture 
 
 ## The short README GIF
 
-The recorder follows these beats as selected screenshots with captions. The current cut is 24 seconds, with longer holds for the code and permissions. The mock uses the request in `intro-fixture.ts` and actual check results:
+The recorder captures the interactions continuously. The mock uses the request in `intro-fixture.ts` and actual check results. Exact duration depends on the UI and typing; cuts remove the long build waits, not the mouse and keyboard actions.
 
-| Time    | Shot                                                                   | Caption                                                                  |
-| ------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| 0–4 s   | Finished Launch desk, then the selected Claude Code agent.             | “A launch desk for marketing.” / “Bring your existing Claude Code plan.” |
-| 4–8 s   | The request, then the checked draft; indicate the cut in elapsed time. | “Ask for a page and workflow.”                                           |
-| 8–14 s  | Engineer's permission comparison and code-change approval.             | “Review the code and permissions.”                                       |
-| 14–17 s | Dana submits; the run waits for the marketing lead.                    | “External actions wait for approval.”                                    |
-| 17–22 s | Marketing lead approves; Ghost and Resend steps complete.              | “Use the tools your team already has.”                                   |
-| 22–24 s | Completed run, then the opening page.                                  | “See what ran.”                                                          |
+| Scene                | Recorded interaction                                                                                                        | Caption                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Finished tool        | Move the pointer into the Launch desk form.                                                                                 | “A launch desk for your marketing team”                                                    |
+| Agent choice         | Click the engine selector and show Claude Code, then select the demo engine for the mock turn.                              | “Bring your existing Claude Code plan”                                                     |
+| Request              | Type the request, move to Send, click and show the turn starting.                                                           | “Ask for a page, workflow and approval rule”                                               |
+| Checked draft        | Point to the real checks and click Send for review; label the skipped build wait.                                           | “A checked draft in your team's Git repo”                                                  |
+| Code and permissions | Follow the actual Git diff with the pointer, inspect the permission comparison, and click Publish through its confirmation. | “Code and permission rules stay in Git” / “Review permissions. Approve the code change.”   |
+| Submission           | Type the announcement title and body, then click Start run.                                                                 | “Your coworker submits an announcement”                                                    |
+| Runtime approval     | Show the waiting run, then the lead's Inbox; click Approve, type a note and confirm.                                        | “Publishing and email wait for approval” / “The marketing lead approves this announcement” |
+| Results              | Close the inspector, fit the completed graph, then scroll into the ledger.                                                  | “Ghost publishes. Resend sends the email.” / “See the calls, decisions and results”        |
 
 ## What must exist before recording
 

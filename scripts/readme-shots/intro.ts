@@ -23,6 +23,7 @@ import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { writeDeploymentKeys } from "../../packages/sanoma/src/key.ts";
 import { launchChrome } from "./capture.ts";
 import { captureIntro } from "./intro-capture.ts";
+import { videoInfo } from "./motion.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const work = mkdtempSync(join(tmpdir(), "sanoma-intro-"));
@@ -238,7 +239,7 @@ try {
   const chrome = await browser;
   active();
   const frames = join(work, "frames");
-  await captureIntro(chrome, base, frames, {
+  const duration = await captureIntro(chrome, base, frames, {
     say,
     diff: (id) =>
       execFileSync("git", ["diff", "main", `draft/${id}`, "--", "workflows/announce.ts", "policies/marketing.cedar"], {
@@ -276,9 +277,9 @@ try {
       "-f",
       "concat",
       "-i",
-      "frames.txt",
+      "clips.txt",
       "-vf",
-      "scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=192[p];[b][p]paletteuse=dither=none:diff_mode=rectangle",
+      "fps=15,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=192[p];[b][p]paletteuse=dither=none:diff_mode=rectangle",
       "-loop",
       "0",
       out,
@@ -287,6 +288,7 @@ try {
   );
   const [code] = await once(encoder, "close");
   assert.equal(code, 0, "ffmpeg failed");
+  assert(Math.abs(videoInfo(out).duration - duration) < 0.2, "GIF export lost recorded footage");
   active();
   const temporary = join(repo, ".github/assets/.demo.gif.new");
   copyFileSync(out, temporary);
