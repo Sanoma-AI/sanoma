@@ -130,9 +130,15 @@ export async function idle(deadlines: Deadlines, scope: IdleScope, horizonMs: nu
   return (await DBOS.getLatestApplicationVersion()).versionName !== scope.version;
 }
 
-/** What `onStopped` hears when the worker stopped itself: the deadline it registered, null for none. */
+/** What `onStopped` hears when the worker stopped itself. */
 export interface SelfStop {
+  /** The deadline it registered, null for none. */
   at: string | null;
+  /**
+   * When the check that found it idle began, on `performance.now()`'s clock: a write landing after
+   * it was not seen, so a wake sent after that write must start a worker again (`superviseWorker`).
+   */
+  checked: number;
 }
 
 /** Registers a deadline with the instance's wakeup, replacing what it held; throws when it could not. */
@@ -158,7 +164,8 @@ export interface StopRule {
  * worker, then tells `onStopped`. A failed registration is recorded on the row and logged once for
  * each new message, and the worker keeps running: the next check tries again. A run that arrives
  * while it registers keeps the worker up, since the worker must be idle twice, with the same
- * deadline, before it stops. `close` ends the checks.
+ * deadline, before it stops; one after the second check began is the caller's to hear (`checked`).
+ * `close` ends the checks.
  */
 export function stopWhenIdle(rule: StopRule): { close(): void } {
   let closed = false;
@@ -190,11 +197,12 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
       await record({ at: new Date(at), lastError: null });
     }
     lastProblem = undefined;
+    const checked = performance.now();
     if (closed || !(await rule.idle()) || rule.deadlines.nextDeadline()?.toISOString() !== next?.toISOString())
       return false;
     await record({ stoppedAt: sql`now()` });
     await rule.stop().catch((err: unknown) => warn(`the worker could not stop cleanly: ${errorMessage(err)}`));
-    rule.onStopped?.({ at });
+    rule.onStopped?.({ at, checked });
     return true;
   };
 

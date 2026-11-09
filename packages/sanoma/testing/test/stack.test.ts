@@ -57,7 +57,7 @@ describe("scale to zero, the stack on fakes", () => {
   // tick is never more than ten seconds away, within the default horizon. Every worker's stop, in order.
   const stops: SelfStop[] = [];
   const options = { idleHorizonMs: 1_000, stopCheckMs: 250, onStopped: (s: SelfStop) => stops.push(s) };
-  const host = fakeHost(inProcessHost(config, databaseUrl, options), { lifetime: "stops-when-quiet" });
+  const host = fakeHost(inProcessHost(config, databaseUrl, options), { lifetime: "stops-on-exit" });
   const wakeup = fakeWakeup();
   config.connectors.push(host.connector, wakeup.connector);
   let client: SanomaClient;

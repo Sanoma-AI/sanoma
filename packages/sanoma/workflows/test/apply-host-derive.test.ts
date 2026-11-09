@@ -52,7 +52,7 @@ const app = defineResource({
   bindingId: (state) => String(state.name),
   writable: true,
   host: {
-    capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
+    capabilities: { lifetime: "stops-on-exit", publicUrl: true, buildsFromGit: false, staticEgress: false },
     derives: true,
     inputs: { source: "source", ref: "ref", secrets: "secrets", domains: "domains" },
     revision: "revision",

@@ -20,9 +20,12 @@ export interface Supervisor {
    */
   resume(): Promise<void>;
   /**
-   * A wakeup's `GET /wake`: `resume` when the worker stopped itself; a no-op while one starts or
-   * runs. A wake that arrives late, twice or for a replaced registration starts a worker that
-   * finds nothing to do and stops again on its own check.
+   * A wakeup's `GET /wake`, sent after the write it is for: `resume` when the worker stopped
+   * itself. While one runs, a wake after its last check for being idle began wins over the stop
+   * that check leads to: a fresh worker starts once it stopped, so `onStopped` finds `stopped`
+   * false. Otherwise a no-op while one starts or runs, whose own check sees the write. A wake that
+   * arrives late, twice or for a replaced registration starts a worker that finds nothing to do
+   * and stops again on its own check.
    */
   wake(): Promise<void>;
   /** Stops the worker running or starting, and starts none again. */
@@ -53,6 +56,9 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
   let closed = false;
   // A write while the worker starts or runs, since it began starting.
   let heard = false;
+  // When the last wake while a worker ran came (`performance.now()`): one after the check that
+  // stops it began (`SelfStop.checked`) follows a write that check may not have seen.
+  let woke = -Infinity;
 
   const launch = async () => {
     heard = false;
@@ -64,7 +70,7 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
     worker = undefined;
     if (closed) return;
     // Resumed first, so `stopped` is false when `onStopped` looks.
-    if (heard) void supervisor.resume();
+    if (heard || woke >= stopped.checked) void supervisor.resume();
     onStopped?.(stopped);
   };
 
@@ -88,7 +94,11 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
           starting = undefined;
         }));
     },
-    wake: () => (supervisor.stopped ? supervisor.resume() : Promise.resolve()),
+    wake() {
+      if (supervisor.stopped) return supervisor.resume();
+      if (worker) woke = performance.now();
+      return Promise.resolve();
+    },
     async stop() {
       closed = true;
       await starting;

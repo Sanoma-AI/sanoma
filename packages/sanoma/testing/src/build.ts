@@ -78,19 +78,20 @@ export function ensureBuilt(
 }
 
 /**
- * Calls `get` every 100 ms until `done` holds for what it returns (by default, until that is
- * truthy), and returns it; throws after `timeoutMs`, naming the last value.
+ * Calls `get` every `everyMs` (100 ms) until `done` holds for what it returns (by default, until
+ * that is truthy), and returns it; throws after `timeoutMs`, naming the last value.
  */
 export async function waitFor<T>(
   get: () => T | Promise<T>,
   done: (value: T) => boolean = Boolean,
   timeoutMs = 15_000,
+  everyMs = 100,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await get();
     if (done(value)) return value;
     if (Date.now() > deadline) throw new Error(`timed out waiting; last saw ${JSON.stringify(value)}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
   }
 }

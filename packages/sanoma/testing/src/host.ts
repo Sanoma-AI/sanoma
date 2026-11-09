@@ -15,6 +15,7 @@ import {
   defineWorkflow,
   deriveHosts,
   type DriftResult,
+  envWakeup,
   errorMessage,
   type HostFacts,
   type HostLifetime,
@@ -42,7 +43,7 @@ import { testWorkerConfig } from "./index.ts";
 // config carries `hostCheck` and `hostCheckWorkflows`, which the checks start runs of.
 // `fakeHost` is a host in this process, for the kit's own tests and for building against the
 // contract before a real host lands: long-lived, or behind a proxy that starts it again on the
-// next request after it stops, as a host that scales to zero does.
+// next request after its runtime ended, as a host that scales to zero does.
 
 type State = Record<string, unknown>;
 
@@ -114,10 +115,15 @@ export interface HostUnderTest {
   /** Stops the host through its resource's operations (its `delete`); `apply` starts it again. */
   stop(): Promise<void>;
   /**
-   * Stops the company's runtime the way the host's lifetime does (it goes quiet), its URL kept:
-   * the next request to the URL starts it again. Required unless the host is `long-lived`.
+   * Stops the company's runtime as its platform may on its own (a crash, a restart), its URL
+   * kept: the next wake starts it again. Required unless the host is `long-lived`.
    */
   suspend?(): Promise<void>;
+  /**
+   * Whether the company's runtime runs now, as the host's platform tells it. Required unless the
+   * host is `long-lived`: one that `stops-on-exit` ends it once its worker is idle.
+   */
+  running?(): Promise<boolean>;
   /** A client on the host's database, its config with `hostCheck` and `hostCheckWorkflows`. */
   client: SanomaClient;
   /** The values the host was given as secrets: none may appear in a ledger record. */
@@ -154,18 +160,21 @@ export const runEnded = (client: SanomaClient, runId: string, timeoutMs: number)
 
 /**
  * Sets the check's credential to `credential` and waits until a probe run reads it through
- * the selected store. The host and database kits' check.
+ * the selected store, each start followed by `wake` when given (a host that stops). The host and
+ * database kits' check.
  */
 export async function credentialHeard(
   client: SanomaClient,
   credential: string,
   by: { id: string },
   timeoutMs: number,
+  wake?: () => Promise<void>,
 ): Promise<void> {
   await client.setSecret(HOST_CHECK_CREDENTIAL, credential, { by: by.id });
   await waitFor(
     async () => {
       const runId = await client.start("host-check-credential", {}, { startedBy: by });
+      await wake?.();
       const run = await runEnded(client, runId, timeoutMs);
       return run?.status === "finished" ? ((await client.result(runId)) as { digest: string }).digest : undefined;
     },
@@ -178,11 +187,13 @@ export async function credentialHeard(
  * Runs the conformance checks against a host, in order, each on its own (one failing goes on to
  * the next): the app answers on its port, a queued run drains, the next store read sees a credential
  * change, a sleep survives a restart, a new commit shows as drift that apply clears, and no
- * secret is in the ledger. A host that stops (`stops-when-quiet`) is also checked
- * for what a request to its URL starts again (`suspend`, then a `/wake`): a run queued while it
- * was stopped drains, and a sleep that ended while it was stopped continues. With a `page`, the
- * page answers while the host is stopped, and every ask of it answers 200 throughout a deploy of a
- * new commit. Leaves the host applied, and its check's credential cleared.
+ * secret is in the ledger. A host that stops (`stops-on-exit`) has each start followed by a
+ * `/wake`, as the app's own writes are (`drift` woken until it ends), and is also checked for what a wake starts again
+ * (`suspend`, then a `/wake`): a run queued while it was stopped drains, and a sleep that ended
+ * while it was stopped continues; and for its end: it stops once its worker is idle (`running`),
+ * and a run queued while the worker stops (as the worker records `stopped_at`) still runs. With a
+ * `page`, the page answers while the host is stopped, and every ask of it answers 200 throughout a
+ * deploy of a new commit. Leaves the host applied, and its check's credential cleared.
  */
 export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   const { type, client, timeoutMs = 60_000 } = host;
@@ -207,6 +218,37 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
     const run = await runEnded(client, runId, timeoutMs);
     if (run?.status !== "finished") throw new Error(`run ${runId} ended ${run?.status}: ${run?.error}`);
   };
+  const stops = spec.capabilities.lifetime !== "long-lived";
+  // A request, as a wakeup sends it, until the host answers 204 (one starting may answer 503 first).
+  const wake = async () => {
+    const at = new URL("/wake", wakeUrlOf(spec.outputs(applied)));
+    const answer = () => fetch(at).then((res) => res.status, errorMessage);
+    await waitFor(answer, (status) => status === 204, timeoutMs);
+  };
+  // A run started as the app starts one: on a host that stops, a wake after the write.
+  const start = async (workflow: string, input: object) => {
+    const runId = await client.start(workflow, input, { startedBy });
+    if (stops) await wake();
+    return runId;
+  };
+  // What a callback runs on the host's own worker (its drift run), on a host that stops: woken
+  // every second until it ends, so a wake follows its write as the app's would.
+  const awake = async <T>(work: Promise<T>): Promise<T> => {
+    if (!stops) return work;
+    const done = new AbortController();
+    const waking = (async () => {
+      while (!done.signal.aborted) {
+        await wake().catch(() => undefined);
+        await delay(1_000, undefined, { signal: done.signal }).catch(() => undefined);
+      }
+    })();
+    try {
+      return await work;
+    } finally {
+      done.abort();
+      await waking;
+    }
+  };
 
   // A value an earlier check left, under another key, would stop the host's worker from starting.
   await client.clearSecret(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
@@ -219,37 +261,33 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
     if (!res.ok) throw new Error(`${at}/healthz answered ${res.status}`);
   });
   await check("a queued run drains", async () => {
-    await finish(await client.start("host-check-drain", {}, { startedBy }));
+    await finish(await start("host-check-drain", {}));
   });
   await check("the next store read sees a credential change", () =>
-    credentialHeard(client, credential, startedBy, timeoutMs),
+    credentialHeard(client, credential, startedBy, timeoutMs, stops ? wake : undefined),
   );
   await check("a sleep survives a restart", async () => {
-    const runId = await client.start("host-check-sleep", { seconds: 2 }, { startedBy });
+    const runId = await start("host-check-sleep", { seconds: 2 });
     await waitFor(async () => (await client.ledger(runId)).some((r) => r.type === "sleep.started"), Boolean, timeoutMs);
     await host.stop();
     await apply();
     await finish(runId);
   });
-  if (spec.capabilities.lifetime !== "long-lived") {
+  if (stops) {
     const suspend = async () => {
       if (!host.suspend) throw new Error(`a host that is ${spec.capabilities.lifetime} needs suspend to be checked`);
       await host.suspend();
     };
-    // A request, as a wakeup sends it, until the host answers 204 (one starting may answer 503 first).
-    const wake = async () => {
-      const at = new URL("/wake", wakeUrlOf(spec.outputs(applied)));
-      const answer = () => fetch(at).then((res) => res.status, errorMessage);
-      await waitFor(answer, (status) => status === 204, timeoutMs);
+    const running = async () => {
+      if (!host.running) throw new Error(`a host that is ${spec.capabilities.lifetime} needs running to be checked`);
+      return host.running();
     };
     await check("a queued run drains after a stop and a wake", async () => {
       await suspend();
-      const runId = await client.start("host-check-drain", {}, { startedBy });
-      await wake();
-      await finish(runId);
+      await finish(await start("host-check-drain", {}));
     });
     await check("a sleep that ends while stopped continues after a wake", async () => {
-      const runId = await client.start("host-check-sleep", { seconds: 3 }, { startedBy });
+      const runId = await start("host-check-sleep", { seconds: 3 });
       const sleep = await waitFor(
         async () => (await client.ledger(runId)).find((r) => r.type === "sleep.started"),
         Boolean,
@@ -260,6 +298,23 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
       await delay(Math.max(0, until - Date.now()) + 500);
       await wake();
       await finish(runId);
+    });
+    await check("the host stops when its worker is idle", async () => {
+      await wake();
+      await waitFor(running, (up) => !up, timeoutMs);
+    });
+    await check("a run queued while the worker is stopping still runs", async () => {
+      // The worker records `stopped_at` once its last idle check passed, then stops and exits: a run
+      // queued right then was not seen by that check, and its wake must win, or start the host again.
+      const pool = await client.pool();
+      const stoppedAt = async () =>
+        (
+          await pool.query<{ at: Date | null }>("select stopped_at as at from sanoma_wakeup where id = 1")
+        ).rows[0]?.at?.getTime() ?? 0;
+      const before = await stoppedAt();
+      await wake();
+      await waitFor(stoppedAt, (at) => at > before, timeoutMs, 5);
+      await finish(await start("host-check-drain", {}));
     });
     if (host.page !== undefined) {
       const page = new URL(host.page, wakeUrlOf(spec.outputs(applied)));
@@ -301,13 +356,13 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   }
   await check("a new commit shows as drift that apply clears", async () => {
     const revision = await host.commit();
-    const drifted = await host.drift();
+    const drifted = await awake(host.drift());
     const field = drifted.fields.find((f) => f.path === spec.revision);
     if (drifted.status !== "drifted" || field?.desired !== revision) {
       throw new Error(`after a commit, drift says ${drifted.status} ${JSON.stringify(drifted.fields)}`);
     }
     await apply();
-    const cleared = await host.drift();
+    const cleared = await awake(host.drift());
     if (cleared.status !== "clean")
       throw new Error(`after apply, drift says ${cleared.status} ${JSON.stringify(cleared.fields)}`);
   });
@@ -387,6 +442,8 @@ export interface Running {
   stop(): Promise<void>;
   /** Each `GET /wake` it answered, in order, when it records them (`inProcessHost` does). */
   wakes?: readonly Wake[];
+  /** Settles once the runtime ended on its own (its process exited), for one that may. */
+  exited?: Promise<void>;
 }
 
 /** Starts the runtime at a revision on a port (0: any free one), given its secrets. */
@@ -447,13 +504,13 @@ export const fakeHostType = hostType("long-lived");
 /** How `fakeHost` runs: long-lived (the default), or one that stops and starts again on a request. */
 export interface FakeHostOptions {
   lifetime?: HostLifetime;
-  /** For `stops-when-quiet`: stops the runtime once no request has been open for this long. Default: never by itself. */
-  quietAfterMs?: number;
 }
 
 /** A host that stops: the proxy at its URL, and the runtime behind it it starts on a request. */
 interface Proxy extends Running {
   wakes: readonly Wake[];
+  /** True while a runtime is starting or runs behind it. */
+  readonly running: boolean;
   /** Stops the runtime, the proxy kept. */
   suspend(): Promise<void>;
   /** Stops the runtime, and starts the one `begin` starts in its place. */
@@ -474,31 +531,35 @@ async function listen(server: Server, port: number): Promise<string> {
 
 /**
  * A proxy on `port` (0: any free one) in front of the runtime `begin` starts, started now: each
- * request starts it again when it is stopped (one start at a time) and is forwarded to it, and
- * `quietAfterMs` after the last open request closes it stops by itself.
+ * request starts it again when it is stopped or ended on its own (`Running.exited`), one start at
+ * a time, and is forwarded to it.
  */
-async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?: number): Promise<Proxy> {
+async function proxy(begin: () => Promise<Running>, port: number): Promise<Proxy> {
   let runtime: Promise<Running> | undefined;
   let stopping: Promise<void> = Promise.resolve();
   // Every runtime it started, for the wakes each answered.
   const runs: Running[] = [];
-  let open = 0;
-  let quiet: NodeJS.Timeout | undefined;
-  const up = () =>
-    (runtime ??= stopping
+  const up = () => {
+    if (runtime) return runtime;
+    const starting: Promise<Running> = stopping
       .then(() => begin())
       .then(
         (started) => {
           runs.push(started);
+          // The host ends with its runtime: the next request starts another.
+          void started.exited?.then(() => {
+            if (runtime === starting) runtime = undefined;
+          });
           return started;
         },
         (err: unknown) => {
           runtime = undefined;
           throw err;
         },
-      ));
+      );
+    return (runtime = starting);
+  };
   const suspend = async () => {
-    clearTimeout(quiet);
     const was = runtime;
     runtime = undefined;
     if (was) {
@@ -509,18 +570,7 @@ async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?:
     }
     await stopping;
   };
-  const rest = () => {
-    if (quietAfterMs === undefined || open > 0) return;
-    clearTimeout(quiet);
-    quiet = setTimeout(() => void suspend(), quietAfterMs).unref();
-  };
   const server = createServer((req, res) => {
-    open++;
-    clearTimeout(quiet);
-    res.once("close", () => {
-      open--;
-      rest();
-    });
     up().then(
       (started) => {
         const forward = forwardRequest(
@@ -544,18 +594,19 @@ async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?:
     server.close();
     throw err;
   }
-  rest();
   return {
     url,
     get wakes() {
       return runs.flatMap((started) => started.wakes ?? []);
+    },
+    get running() {
+      return runtime !== undefined;
     },
     suspend,
     async replace(next) {
       await suspend();
       begin = next;
       await up();
-      rest();
     },
     async stop() {
       begin = () => Promise.reject(new Error("the host is deleted"));
@@ -572,15 +623,12 @@ async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?:
  * no secret. `connector` is for a config; `driver` for calling its operations directly; `type`
  * is its resource type, whose `capabilities.lifetime` is `options.lifetime`.
  *
- * Long-lived (the default), its URL is the runtime's own. Otherwise its URL is a proxy on the
- * declared port in front of the runtime: `stop` (and, for `stops-when-quiet`, `quietAfterMs`)
- * stops the runtime while the proxy stays, and the next request starts it again, at the same
+ * Long-lived (the default), its URL is the runtime's own. Otherwise (`stops-on-exit`) its URL is
+ * a proxy on the declared port in front of the runtime: the runtime ending on its own (`exited`)
+ * or `stop` ends it while the proxy stays, and the next request starts it again, at the same
  * revision with the same secrets, and is forwarded to it. A replace keeps the proxy.
  */
-export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfterMs }: FakeHostOptions = {}) {
-  if (quietAfterMs !== undefined && lifetime !== "stops-when-quiet") {
-    throw new Error(`fakeHost: quietAfterMs is for a host that stops-when-quiet, not one that is ${lifetime}`);
-  }
+export function fakeHost(start: StartHost, { lifetime = "long-lived" }: FakeHostOptions = {}) {
   const type = lifetime === "long-lived" ? fakeHostType : hostType(lifetime);
   const ops = defineConnector(
     "testhost",
@@ -621,7 +669,7 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
       });
     } else {
       await remove(declared.name);
-      running = lifetime === "long-lived" ? await begin() : await proxy(begin, declared.port, quietAfterMs);
+      running = lifetime === "long-lived" ? await begin() : await proxy(begin, declared.port);
     }
     const state = { ...kept, revision, url: running.url, running: true };
     hosts.set(declared.name, { state, running });
@@ -662,13 +710,15 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
     connector: withSetup(ops, { driver: () => driver }),
     driver,
     /**
-     * Stops the runtime behind the URL of the host `name` (default: every one), as its lifetime
-     * would, the URL kept: the next request starts it again. Refused for a long-lived host.
+     * Stops the runtime behind the URL of the host `name` (default: every one), as its platform
+     * may, the URL kept: the next request starts it again. Refused for a long-lived host.
      */
     async stop(name?: string) {
       if (lifetime === "long-lived") throw new Error("fakeHost: a long-lived host does not stop; delete it");
       for (const { running } of named(name)) if ("suspend" in running) await running.suspend();
     },
+    /** True while a runtime runs (or starts) behind the URL of the host `name` (default: any). */
+    running: (name?: string) => named(name).some(({ running }) => !("suspend" in running) || running.running),
     /** Each `/wake` the runtimes of the host `name` (default: every one) answered, across its stops, in order. */
     wakes(name?: string): Wake[] {
       return named(name).flatMap(({ running }) => running.wakes ?? []);
@@ -681,15 +731,36 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
 }
 
 /**
- * A `StartHost` for `fakeHost` that runs `config` in this process, as `sanoma serve` does: a
+ * A `StartHost` for `fakeHost` that runs `config` in this process, as `sanoma worker` does: a
  * worker on `databaseUrl` under a supervisor (`superviseWorker`, given `options`), which stops
- * itself when idle with a wakeup declared, and a server that answers `/healthz`, and
- * `GET /wake` with 204, each one recorded as the running host's `wakes` and handed to
- * the supervisor (the app itself needs its build, which this package does not).
+ * itself when idle with a wakeup, and a server that answers `/healthz`, and `GET /wake` with 204,
+ * each one recorded as the running host's `wakes` and handed to the supervisor (the app itself
+ * needs its build, which this package does not). On a host that starts it again (this process's
+ * environment names the host's wake route, `envWakeup`), it ends once its worker stopped itself
+ * (`exited`), its server closed first, so a wake after that is refused, not lost.
  */
 export function inProcessHost(config: SanomaConfig, databaseUrl: string, options: SupervisorOptions = {}): StartHost {
   return async ({ port }) => {
-    const worker = await superviseWorker(testWorkerConfig(config, databaseUrl), { quiet: true, ...options });
+    const exits = envWakeup(process.env) !== undefined;
+    let ending: Promise<void> | undefined;
+    let ended!: () => void;
+    const exited = new Promise<void>((resolve) => (ended = resolve));
+    // The server closed at once, before the worker is stopped.
+    const end = () =>
+      (ending ??= (async () => {
+        const closed = new Promise<void>((done) => server.close(() => done()));
+        server.closeAllConnections();
+        await closed;
+        await worker.stop();
+      })());
+    const worker = await superviseWorker(testWorkerConfig(config, databaseUrl), {
+      quiet: true,
+      ...options,
+      onStopped(stopped) {
+        options.onStopped?.(stopped);
+        if (exits && worker.stopped) void end().then(ended);
+      },
+    });
     const wakes: Wake[] = [];
     const server = createServer((req, res) => {
       const url = new URL(req.url ?? "/", "http://host");
@@ -703,14 +774,7 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string, options
       await worker.stop();
       throw err;
     });
-    return {
-      url,
-      wakes,
-      async stop() {
-        await new Promise<void>((done) => server.close(() => done()));
-        await worker.stop();
-      },
-    };
+    return { url, wakes, ...(exits && { exited }), stop: end };
   };
 }
 

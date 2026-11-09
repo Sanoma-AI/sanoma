@@ -365,7 +365,7 @@ describe("the stop rule", () => {
     await waitFor(() => stops.length === 1);
     const until = await untilOf(app.client, runId);
     const at = new Date(until!).toISOString();
-    expect(stops).toEqual([{ at }]);
+    expect(stops).toEqual([{ at, checked: expect.any(Number) }]);
     expect(registered).toEqual([
       {
         input: { at },
@@ -499,7 +499,7 @@ describe("the stop rule with the environment's wakeup", () => {
     await app.start({ ...fast, onStopped: (s) => stops.push(s) });
     await waitFor(() => stops.length === 1);
     const at = new Date((await untilOf(app.client, runId))!).toISOString();
-    expect(stops).toEqual([{ at }]);
+    expect(stops).toEqual([{ at, checked: expect.any(Number) }]);
     expect(wakes).toEqual([{ method: "PUT", url: "/__sanoma/wake", authorization: `Bearer ${TOKEN}`, body: { at } }]);
     // No driver: the connector's register is never called.
     expect(registered).toEqual([]);
@@ -628,6 +628,34 @@ describe("the supervisor", () => {
     } finally {
       await client.close();
     }
+  });
+
+  it("starts a fresh worker for a wake while the worker is stopping, after a write its last check missed", async () => {
+    const stops: SelfStop[] = [];
+    const said: boolean[] = [];
+    let runId: Promise<string> | undefined;
+    const shutdown = DBOS.shutdown.bind(DBOS);
+    // The worker passed its last check and is stopping: a run queued now, then its wake, as the
+    // app on a host's Worker starts one (the host's `startNow` sends the `/wake`).
+    vi.spyOn(DBOS, "shutdown").mockImplementation((...args) => {
+      runId ??= app.client.start(nap, { seconds: 0 }, { startedBy: alice }).then(async (id) => {
+        await supervisor!.wake();
+        return id;
+      });
+      return runId.then(() => shutdown(...args));
+    });
+    supervisor = await superviseWorker(app.config, {
+      ...fast,
+      onStopped: (s) => {
+        stops.push(s);
+        said.push(supervisor!.stopped);
+      },
+    });
+    await waitFor(() => stops.length === 1);
+    // Not stopped as it told the stop: a fresh worker was already starting, which runs the run.
+    expect(said[0]).toBe(false);
+    expect(stops[0]!.checked).toBeLessThan(performance.now());
+    expect(await app.client.result(await runId!)).toBe("rested");
   });
 
   it("keeps the worker running, idle past its horizon, with selfStop false", async () => {

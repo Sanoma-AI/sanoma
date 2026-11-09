@@ -134,7 +134,7 @@ const hostSchema = containerSchema.extend({
 
 /** The host contract both types meet, of which `cloudflare.host` derives what it is not told. */
 const capabilities = {
-  lifetime: "stops-when-quiet",
+  lifetime: "stops-on-exit",
   publicUrl: true,
   buildsFromGit: false,
   staticEgress: false,
@@ -143,7 +143,8 @@ const capabilities = {
 /**
  * `cloudflare.container`: the company's Worker, `sanoma-<name>`, on the account's workers.dev
  * subdomain, whose one Durable Object (`SanomaInstance`) starts the runtime image in a Container
- * on a request and stops it ten minutes after the last (`Host`: stops when quiet, its URL public).
+ * on a wake, which ends when its process exits once its worker is idle (`Host`: stops on exit, its
+ * URL public).
  * What it runs is in the Worker's plain-text bindings, so a read tells its revision with no
  * container running. A deploy uploads the Worker again; a new image is copied into the account's
  * registry (one there by a tag is pinned to its digest) and named by the upload, and the object

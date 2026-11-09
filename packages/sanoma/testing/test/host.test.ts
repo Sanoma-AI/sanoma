@@ -14,7 +14,7 @@ import {
 } from "sanoma/workflows";
 import { writeLockfile } from "sanoma/workflows/describe";
 import { secret } from "sanoma/resources";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { testDatabaseUrl } from "../src/index.ts";
 import {
   checkHost,
@@ -31,8 +31,10 @@ import {
 // Needs Postgres: `pnpm db:up`. The conformance kit against a host in this process: its worker
 // stops and starts through the host type's own operations, and drift is the built-in workflow
 // over a data file that declares the host, bound in the lockfile. Once long-lived, once behind
-// the proxy of a host that stops, which the two checks of a stopping host add to; and that one
-// again with a hostname, which never resolves, so the kit must reach the host at its wakeUrl.
+// the proxy of a host that stops on exit, its runtime ending once its worker stopped itself (the
+// environment names a wake route, a stub that takes each registration), which the checks of a
+// stopping host add to; and that one again with a hostname, which never resolves, so the kit must
+// reach the host at its wakeUrl.
 const key = "kit-secret-value-that-never-leaks";
 
 const call = (opId: string): CallContext => ({
@@ -45,10 +47,10 @@ const call = (opId: string): CallContext => ({
 
 describe.each<{ title: string; lifetime: HostLifetime; database: string; hostname?: string }>([
   { title: "long-lived", lifetime: "long-lived", database: "host_kit" },
-  { title: "stops-when-quiet", lifetime: "stops-when-quiet", database: "host_kit_stopping" },
+  { title: "stops-on-exit", lifetime: "stops-on-exit", database: "host_kit_stopping" },
   {
-    title: "stops-when-quiet, with a hostname",
-    lifetime: "stops-when-quiet",
+    title: "stops-on-exit, with a hostname",
+    lifetime: "stops-on-exit",
     database: "host_kit_hostname",
     hostname: "app.example.invalid",
   },
@@ -64,12 +66,20 @@ describe.each<{ title: string; lifetime: HostLifetime; database: string; hostnam
     ledger: memoryLedger(),
     databaseUrl,
   };
-  const host = fakeHost((input) => inProcessHost(config, databaseUrl)(input), { lifetime });
+  // A worker that stops itself soon once idle, so the checks of its end take seconds.
+  const host = fakeHost((input) => inProcessHost(config, databaseUrl, { stopCheckMs: 200 })(input), { lifetime });
+  // The host's wake route, as the environment names it: it takes each registration.
+  const wakeRoute = createServer((_, res) => void res.writeHead(204).end());
   config.connectors.push(host.connector);
   const op = (name: string) => (input: object) => host.driver.ops[`app.${name}`]!(input, call(`testhost.app.${name}`));
   let client: SanomaClient;
 
   beforeAll(async () => {
+    if (lifetime !== "long-lived") {
+      await new Promise<void>((done) => wakeRoute.listen(0, "127.0.0.1", done));
+      vi.stubEnv("SANOMA_HOST_URL", `http://127.0.0.1:${(wakeRoute.address() as AddressInfo).port}`);
+      vi.stubEnv("SANOMA_WAKEUP_TOKEN", "swi_host-kit");
+    }
     await repo.commit();
     mkdirSync(join(root, "resources"));
     writeFileSync(
@@ -84,6 +94,8 @@ describe.each<{ title: string; lifetime: HostLifetime; database: string; hostnam
   afterAll(async () => {
     await client?.close();
     await host.close();
+    vi.unstubAllEnvs();
+    wakeRoute.close();
     repo.remove();
     rmSync(root, { recursive: true, force: true });
   });
@@ -99,12 +111,12 @@ describe.each<{ title: string; lifetime: HostLifetime; database: string; hostnam
     return (done as { state: Record<string, unknown> }).state;
   }
 
-  it("passes every check against a host in this process", async () => {
+  it("passes every check against a host in this process", { timeout: 300_000 }, async () => {
     const results = await checkHost({
       type: host.type,
       apply,
       stop: async () => void (await op("delete")({ id: declared.name })),
-      ...(lifetime !== "long-lived" && { suspend: () => host.stop() }),
+      ...(lifetime !== "long-lived" && { suspend: () => host.stop(), running: async () => host.running() }),
       client,
       secrets: [key],
       commit: repo.commit,
@@ -124,6 +136,8 @@ describe.each<{ title: string; lifetime: HostLifetime; database: string; hostnam
         : [
             { name: "a queued run drains after a stop and a wake", ok: true },
             { name: "a sleep that ends while stopped continues after a wake", ok: true },
+            { name: "the host stops when its worker is idle", ok: true },
+            { name: "a run queued while the worker is stopping still runs", ok: true },
           ]),
       { name: "a new commit shows as drift that apply clears", ok: true },
       { name: "no secret is in the ledger", ok: true },
@@ -157,24 +171,22 @@ describe("fakeHost's lifetime", () => {
     return (done as { state: { url: string } }).state.url;
   };
 
-  it("is long-lived by default, and refuses to stop or to go quiet", async () => {
+  it("is long-lived by default, and refuses to stop", async () => {
     const host = fakeHost(stub().start);
     expect(host.type).toBe(fakeHostType);
     expect(host.type.host?.capabilities.lifetime).toBe("long-lived");
     await expect(host.stop()).rejects.toThrow("a long-lived host does not stop");
-    expect(() => fakeHost(stub().start, { quietAfterMs: 10 })).toThrow(
-      "quietAfterMs is for a host that stops-when-quiet, not one that is long-lived",
-    );
   });
 
-  it("stops-when-quiet: keeps its URL across a stop, and the next request starts it again as it was", async () => {
+  it("stops-on-exit: keeps its URL across a stop, and the next request starts it again as it was", async () => {
     const { starts, start } = stub();
-    const host = fakeHost(start, { lifetime: "stops-when-quiet" });
+    const host = fakeHost(start, { lifetime: "stops-on-exit" });
     try {
-      expect(host.type.host?.capabilities.lifetime).toBe("stops-when-quiet");
+      expect(host.type.host?.capabilities.lifetime).toBe("stops-on-exit");
       const url = await create(host);
       expect(await (await fetch(url)).text()).toBe(`abc ${key}`);
       await host.stop();
+      expect(host.running()).toBe(false);
       expect(starts).toHaveLength(1);
       expect(await (await fetch(url)).text()).toBe(`abc ${key}`);
       expect(starts).toHaveLength(2);
@@ -184,18 +196,26 @@ describe("fakeHost's lifetime", () => {
     }
   });
 
-  it("stops-when-quiet: stops by itself once no request is open for quietAfterMs", async () => {
+  it("stops-on-exit: ends with its runtime, and the next request starts it again", async () => {
     const { starts, start } = stub();
-    const host = fakeHost(start, { lifetime: "stops-when-quiet", quietAfterMs: 100 });
+    let exit!: () => void;
+    const host = fakeHost(
+      async (input) => {
+        const running = await start(input);
+        // Its process exits: the server closed, then the end told.
+        const exited = new Promise<void>((resolve) => (exit = () => void running.stop().then(resolve)));
+        return { ...running, exited };
+      },
+      { lifetime: "stops-on-exit" },
+    );
     try {
-      expect(host.type.host?.capabilities.lifetime).toBe("stops-when-quiet");
       const url = await create(host);
-      await fetch(url);
-      await fetch(url);
-      expect(starts).toHaveLength(1);
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(host.running()).toBe(true);
+      exit();
+      await vi.waitFor(() => expect(host.running()).toBe(false));
       expect(await (await fetch(url)).text()).toBe(`abc ${key}`);
       expect(starts).toHaveLength(2);
+      expect(host.running()).toBe(true);
     } finally {
       await host.close();
     }

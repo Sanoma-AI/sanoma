@@ -10,7 +10,8 @@
 // names (`ctx.container.images.runtime`, as the `durable_object` scheduling policy has it), drains
 // and replaces one running at another (a deploy's restart), holds the company's one wake as an
 // alarm, and answers three routes: its health, its wake, and the app bundle the worker builds,
-// pulled from the container's port with the instance token.
+// pulled from the container's port with the instance token. It never stops the container: the
+// worker exits once it is idle, and the container ends with it; the next start or wake starts it.
 
 /** The object's route that holds the company's wake, with the instance token. */
 export const WAKE_PATH = "/__sanoma/wake";
@@ -28,8 +29,13 @@ const HOST_WAKE_PATH = "/wake";
 export const DEPLOYMENT_HEADER = "x-sanoma-deployment";
 /** The header the app reads the visitor's address from (`CLIENT_IP_HEADER` in `sanoma/workflows`). */
 export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
-/** How long the container keeps running after the object's last request: Cloudflare stops it then. */
-export const INACTIVITY_MS = 10 * 60 * 1000;
+/**
+ * How long Cloudflare keeps the container running after the object's last request: its maximum,
+ * six hours, so it never decides. The worker ends the container itself, by exiting once it is
+ * idle; work inside the container is no request to the object, so a shorter timeout would cut a
+ * long run. Without one set, Cloudflare stops it shortly after the object goes quiet.
+ */
+export const INACTIVITY_MS = 6 * 60 * 60 * 1000;
 /** The Worker version's metadata binding (`version_metadata`): its `id`, which each upload answers with. */
 export const VERSION_METADATA = "CF_VERSION_METADATA";
 /** The binding that names the object, in the Worker's env. */
@@ -94,13 +100,16 @@ function parseRegistration(body) {
 export class Instance {
   /** The start in progress, which every caller waits on. */
   #starting;
-  /** True once a container this object started (or found) answered `/healthz`. */
+  /** True once a container this object started (or found) answered `/healthz`, until it ends. */
   #ready = false;
   /** What the last try of a start saw, for the health route while the container is not ready. */
   #last;
   /** How the container this object started ended, when it did: what `monitor` told. */
   #exit;
-  /** The start whose `monitor` may set `#exit`: an earlier container's end is not this one's. */
+  /**
+   * The start whose `monitor` is heard, `answered` once its container did: an earlier container's
+   * end is not this one's.
+   */
   #started;
   constructor(ctx, env) {
     this.ctx = ctx;
@@ -191,6 +200,8 @@ export class Instance {
   async #start() {
     this.#ready = false;
     this.#exit = undefined;
+    // An earlier container's end, told while this start makes its own, is none of this one's.
+    this.#started = undefined;
     const container = this.ctx.container;
     const image = container.images?.[IMAGE];
     // Not one to retry: the Worker was uploaded without its image.
@@ -242,13 +253,17 @@ export class Instance {
             labels,
           });
           // `start` returns once its options are checked: a start that fails later, or a container
-          // that exits, is what `monitor` tells, and the next try reports it. Only this start's, and
-          // only until it answered: an earlier container's monitor may settle after this one started,
-          // and one that answered and then stopped (Cloudflare's own stop, a crash) is started again
-          // by the next ask, not reported as a start that failed.
+          // that exits, is what `monitor` tells, and the next try reports it. Only this start's: an
+          // earlier container's monitor may settle after this one started. One that answered and
+          // then ended (its worker exited, idle; a crash; Cloudflare's own stop) is stopped, not a
+          // start that failed: the next ask or wake starts it again.
           this.#exit = undefined;
-          const started = (this.#started = {});
-          const ended = (how) => void (this.#started === started && !this.#ready && (this.#exit = how));
+          const started = (this.#started = { answered: false });
+          const ended = (how) => {
+            if (this.#started !== started) return;
+            if (started.answered) this.#ready = false;
+            else this.#exit = how;
+          };
           container.monitor?.().then(
             () => ended("the container exited"),
             (error) => ended(`the container failed: ${error?.message ?? error}`),
@@ -262,6 +277,8 @@ export class Instance {
         if (res.ok) {
           await container.setInactivityTimeout(INACTIVITY_MS);
           this.#ready = true;
+          // A container kept from before has no start of this one's to mark.
+          if (this.#started) this.#started.answered = true;
           return;
         }
         saw(`/healthz answered ${res.status}`);
@@ -353,11 +370,18 @@ export class Instance {
 
   /**
    * Starts the container unless it runs, then sends it `/wake`: a container that is up may hold a
-   * worker that stopped itself, which only a wake starts again.
+   * worker that is stopping, which the wake keeps up. A worker that already decided to exit has
+   * closed its port: the wake fails, and the alarm's retry starts a fresh container once it ended.
    */
   async #wakeContainer() {
     await this.ensureRunning();
-    const res = await this.ctx.container.getTcpPort(this.port).fetch("http://container/wake");
+    let res;
+    try {
+      res = await this.ctx.container.getTcpPort(this.port).fetch("http://container/wake");
+    } catch (error) {
+      this.#ready = false;
+      throw error;
+    }
     await res.body?.cancel();
     if (!res.ok) {
       console.error(`GET /wake answered ${res.status}`);

@@ -391,7 +391,7 @@ describe("the Worker's object", () => {
     container.monitor = () => new Promise<void>((resolve) => (stop = resolve));
     const object = new Instance(ctx, ENV);
     await started(object);
-    // Cloudflare stopped it after ten quiet minutes.
+    // Its worker was idle and exited 0: the container ended with it.
     container.running = false;
     stop();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -401,6 +401,79 @@ describe("the Worker's object", () => {
       running: false,
       ready: false,
     });
+    await started(object);
+    expect(container.start).toHaveBeenCalledTimes(2);
+    expect(await (await object.fetch(route(START))).json()).toMatchObject({ running: true, ready: true });
+  });
+
+  it("never lets the platform's inactivity decide: its timeout is Cloudflare's maximum, six hours", () => {
+    expect(INACTIVITY_MS).toBe(6 * 60 * 60 * 1000);
+  });
+
+  it("fails a wake whose worker closed its port to exit, and starts a fresh container on the alarm's retry once that one ended", async () => {
+    let exiting = false;
+    let stop!: () => void;
+    const { ctx, container, sent } = stubCtx({
+      answer: (r) => {
+        // The worker decided to exit: its port is closed while its container still runs, and it
+        // ends once the process is gone.
+        if (exiting) {
+          container.running = false;
+          stop();
+          throw new Error("connection refused");
+        }
+        return new Response(null, { status: new URL(r.url).pathname === "/wake" ? 204 : 200 });
+      },
+    });
+    container.monitor = () => new Promise<void>((resolve) => (stop = resolve));
+    const object = new Instance(ctx, ENV);
+    await started(object);
+    exiting = true;
+    await object.startNow();
+    await expect(object.alarm({ retryCount: 0, isRetry: false })).rejects.toThrow("connection refused");
+    exiting = false;
+    await object.alarm({ retryCount: 1, isRetry: true });
+    expect(container.start).toHaveBeenCalledTimes(2);
+    expect(sent.at(-1)!.url).toBe("http://container/wake");
+    expect(await (await object.fetch(route(START))).json()).toMatchObject({ running: true, ready: true });
+  });
+
+  it("does not take a clean exit of the container before as the end of the one starting", async () => {
+    const { ctx, container } = stubCtx();
+    let endFirst!: () => void;
+    let starts = 0;
+    container.monitor = () =>
+      new Promise<void>((resolve) => {
+        if (++starts === 1) endFirst = resolve;
+      });
+    const object = new Instance(ctx, ENV);
+    await started(object);
+    // Its worker exited; the platform tells it only once the next start began.
+    container.running = false;
+    let reads = 0;
+    const { images } = container;
+    Object.defineProperty(container, "images", {
+      get() {
+        if (++reads === 1) endFirst();
+        return images;
+      },
+    });
+    await started(object);
+    expect(container.start).toHaveBeenCalledTimes(2);
+    expect(await (await object.fetch(route(START))).json()).toMatchObject({ ready: true });
+  });
+
+  it("starts the new revision when a deploy's drain finds the container already ending, its worker idle", async () => {
+    const { ctx, container } = stubCtx({ running: true, labels: { revision: "r1", image: IMAGE } });
+    // The worker exited as the drain came: the container is gone, and the signal finds none.
+    vi.mocked(container.signal).mockImplementation(() => {
+      container.running = false;
+      throw new Error("the container is not running");
+    });
+    const object = new Instance(ctx, ENV);
+    await started(object);
+    expect(container.start).toHaveBeenCalledWith(expect.objectContaining({ labels: { revision: "r2", image: IMAGE } }));
+    expect(await (await object.fetch(route(START))).json()).toMatchObject({ running: true, ready: true });
   });
 
   it("answers its health to anyone without starting the container", async () => {
