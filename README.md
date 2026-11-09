@@ -12,9 +12,9 @@ Permissions control who can run each workflow and whether its connector calls ar
 
 Sanoma is early and [fair source under FSL-1.1-ALv2](#license). You can read the source and host it yourself.
 
-![Workflow demo: Dana starts an announcement, the marketing lead approves it, and the run finishes](.github/assets/demo.gif)
+![Launch desk demo: request a tool, review code and permissions, then approve an announcement using Ghost and Resend](.github/assets/demo.gif)
 
-Workflow demo: Dana submits an announcement, the marketing lead approves it, and the workflow waits until launch time to publish. This recording uses a fake Ghost service, even though the form says "Live vendors" and "Calls Ghost for real". [See the workflow's code](#what-a-workflow-looks-like).
+A launch desk from request to reviewed code, then an announcement approved for Ghost and Resend. This repeatable demo uses scripted AI and simulated Git hosting and service calls; the file edits, checks and approvals run through Sanoma. The Claude Code selector shows an available choice, not a recorded Claude session. [How the demo is recorded →](scripts/readme-shots/README.md#the-intro)
 
 ## Try it locally
 
