@@ -2,6 +2,8 @@
 
 `pnpm readme:shots` retakes the README's pictures in [`.github/assets/`](../../.github/assets/) from the running app: `demo.gif` (1200×800, about 27 s) and six stills at 2x, `workflow.png`, `runs.png`, `inbox.png`, `run.png`, `site.png` and `data.png`. Run it after a change to the app's look, then look at what changed before committing it.
 
+The [intro video storyboard](STORYBOARD.md) plans the replacement demo: a coworker builds a launch desk with their own AI subscription, a developer reviews its permissions, and a run uses Ghost and Resend after approval. It is a recording plan; the current capture script still records the workflow-only demo described below.
+
 ## What one run does
 
 1. Builds what the preview loads from `dist/` (`workflows`, `connector-ghost`, `testing`, `app`, `sanoma`) when a package's `dist/` is older than its `src/`.
