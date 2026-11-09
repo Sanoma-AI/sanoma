@@ -112,6 +112,12 @@ import { checkDatabaseOps } from "./database.ts";
  */
 export interface SanomaConfig {
   /**
+   * The company's name, as the app shows it ("Maple Street Studio"): its `appName`, which also
+   * scopes its runs in the database, so a new name leaves the runs in progress under the old one
+   * behind, as a new `package.json` name does. Default: `<root>/package.json`'s `name`.
+   */
+  name?: string;
+  /**
    * Workflows besides those the launcher finds (`sanoma` imports every file of `workflows/` and
    * each app's `apps/<app>/workflows/`): listing one it finds as well is no second one.
    */
@@ -155,7 +161,7 @@ export interface SanomaConfig {
   drivers?: never;
   /** @deprecated Gone: each connector carries the maker of its fake (`withSetup`, from its package). Leave it out. */
   fakes?: never;
-  /** @deprecated Gone: the app's name is the `name` in `<root>/package.json`, else "sanoma". Leave it out. */
+  /** @deprecated Gone: the app's name is `name`, else the `name` in `<root>/package.json`, else "sanoma". Leave it out. */
   appName?: never;
   /** @deprecated Gone: the scenarios are `<root>/scenarios/`. Leave it out. */
   scenarios?: never;
@@ -198,8 +204,9 @@ export interface ResolvedConfig {
   connectionStore: LazyDb;
   identityProvisioning: ReturnType<typeof configuredIdentityProvisioning>;
   /**
-   * Scopes workflows, queues and versions in the system database: the `name` of
-   * `<root>/package.json` when it names one, else "sanoma".
+   * Scopes workflows, queues and versions in the system database, and names the company where
+   * people read it: the config's `name`, else the `name` of `<root>/package.json` when it names
+   * one, else "sanoma".
    */
   appName: string;
   databaseUrl: string;
@@ -416,7 +423,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const collections = collectionsOf(config);
   const ledger = ledgerOf(config);
   const root = rootOf(config);
-  const appName = appNameAt(root);
+  const appName = config.name?.trim() || appNameAt(root);
   const scenarios = scenariosAt(root);
   // With the built-in `sanoma.wakeup` when they declare a host type.
   const running = withBuiltIns(config.connectors);
