@@ -106,7 +106,7 @@ export const sanoma = defineConnector("sanoma", {
       effect: "access",
       idempotent: true,
       description:
-        "Enroll a deployment identity, keeping its bootstrap credential in the secret store. It holds until retired or revoked; a higher generation replaces it; mappings are immutable",
+        "Enroll a deployment identity, keeping its bootstrap credential in the secret store. It holds until retired or revoked, also beside a higher generation; mappings are immutable",
       input: DeploymentIdentity.extend({ generation: Generation, store: SecretName }),
       output: z.object({ deployment: z.string(), generation: Generation, store: z.string() }),
       target: IdentityTarget,
@@ -123,7 +123,8 @@ export const sanoma = defineConnector("sanoma", {
     revoke: {
       effect: "access",
       idempotent: true,
-      description: "Disable all token renewal for a deployment. This deployment id cannot be re-enrolled",
+      description:
+        "Refuse every further token for a deployment, in every generation. This deployment id cannot be re-enrolled",
       input: DeploymentIdentity,
       output: z.object({}),
       target: IdentityTarget,
