@@ -1,4 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testDatabaseUrl } from "sanoma/testing";
@@ -13,14 +15,15 @@ import {
   withSetup,
 } from "sanoma/workflows";
 import { writeLockfile } from "sanoma/workflows/describe";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { host, cloudOps } from "../src/connector.ts";
 import { fakeCloud } from "../src/fake.ts";
 
 // Needs Postgres: `pnpm db:up`. The Host contract's conformance kit against `cloud.host` on
-// the fake: the company runs in this process behind its address, which the fake stops as the
-// Cloud does when it is quiet. The host binds its own bootstrap, so it is given no secrets. Drift
-// is the built-in workflow over a data file that declares the host, bound in the lockfile.
+// the fake: the company runs in this process behind its address, ending once its worker is idle
+// (its environment names a wake route, a stub that takes each registration, as the Cloud's Worker
+// does). The host binds its own bootstrap, so it is given no secrets. Drift is the built-in
+// workflow over a data file that declares the host, bound in the lockfile.
 
 let n = 0;
 const call = (opId: string): CallContext => ({
@@ -44,13 +47,19 @@ describe("cloud.host meets the Host contract on the fake", () => {
     databaseUrl,
   };
   const fake = fakeCloud({
-    start: ({ revision }) => inProcessHost(config, databaseUrl)({ port: 0, revision, secrets: {} }),
+    // It stops itself soon once idle, so the checks of its end take seconds.
+    start: ({ revision }) =>
+      inProcessHost(config, databaseUrl, { stopCheckMs: 500 })({ port: 0, revision, secrets: {} }),
   });
+  const wakeRoute = createServer((_, res) => void res.writeHead(204).end());
   config.connectors.push(withSetup(cloudOps, { driver: () => fake.driver }));
   const op = (name: string) => (input: object) => fake.driver.ops[`host.${name}`]!(input, call(`cloud.host.${name}`));
   let client: SanomaClient;
 
   beforeAll(async () => {
+    await new Promise<void>((done) => wakeRoute.listen(0, "127.0.0.1", done));
+    vi.stubEnv("SANOMA_HOST_URL", `http://127.0.0.1:${(wakeRoute.address() as AddressInfo).port}`);
+    vi.stubEnv("SANOMA_WAKEUP_TOKEN", "swi_cloud-kit");
     await repo.commit();
     mkdirSync(join(root, "resources"));
     writeFileSync(
@@ -65,6 +74,8 @@ describe("cloud.host meets the Host contract on the fake", () => {
   afterAll(async () => {
     await client?.close();
     await fake.close();
+    vi.unstubAllEnvs();
+    wakeRoute.close();
     repo.remove();
     rmSync(root, { recursive: true, force: true });
   });
@@ -79,12 +90,13 @@ describe("cloud.host meets the Host contract on the fake", () => {
     return (done as { state: Record<string, unknown> }).state;
   }
 
-  it("passes every check, the two of a host that stops among them", { timeout: 300_000 }, async () => {
+  it("passes every check, the ones of a host that stops among them", { timeout: 300_000 }, async () => {
     const results = await checkHost({
       type: host,
       apply,
       stop: async () => void (await op("delete")({ id: declared.name })),
       suspend: () => fake.stop(declared.name),
+      running: async () => fake.running(declared.name),
       client,
       secrets: [],
       commit: repo.commit,
@@ -101,6 +113,8 @@ describe("cloud.host meets the Host contract on the fake", () => {
       { name: "a sleep survives a restart", ok: true },
       { name: "a queued run drains after a stop and a wake", ok: true },
       { name: "a sleep that ends while stopped continues after a wake", ok: true },
+      { name: "the host stops when its worker is idle", ok: true },
+      { name: "a run queued while the worker is stopping still runs", ok: true },
       { name: "a new commit shows as drift that apply clears", ok: true },
       { name: "no secret is in the ledger", ok: true },
     ]);
@@ -112,7 +126,7 @@ describe("cloud.host meets the Host contract on the fake", () => {
   it("is a host that binds its own bootstrap, and takes no secrets", () => {
     expect(host.host).toMatchObject({
       bindsBootstrap: true,
-      capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
+      capabilities: { lifetime: "stops-on-exit", publicUrl: true, buildsFromGit: false, staticEgress: false },
     });
     expect(host.host?.inputs.secrets).toBeUndefined();
     expect(() => host({ ...declared, secrets: {} } as never)).toThrow(/no field secrets/);

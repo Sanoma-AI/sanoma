@@ -32,7 +32,7 @@ const service = defineResource({
   find: ({ name }) => name,
   writable: true,
   host: {
-    capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: true, staticEgress: false },
+    capabilities: { lifetime: "stops-on-exit", publicUrl: true, buildsFromGit: true, staticEgress: false },
     inputs: { source: "repo", ref: "branch", secrets: "env", port: "port" },
     revision: "commit",
     outputs: (state) => ({ url: String(state.url), healthy: true }),

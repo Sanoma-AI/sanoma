@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-openai",
-  "version": "0.11.21",
+  "version": "0.11.22",
   "description": "Codex, OpenAI's coding agent, for Sanoma's chat on a person's own ChatGPT plan",
   "keywords": [
     "codex",

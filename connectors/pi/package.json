@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-pi",
-  "version": "0.11.21",
+  "version": "0.11.22",
   "description": "Pi, the coding agent, for Sanoma's chat on a person's own plan or, through the AI SDK, on the company's Anthropic key",
   "keywords": [
     "ai-sdk",

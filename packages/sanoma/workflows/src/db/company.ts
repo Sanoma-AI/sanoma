@@ -233,7 +233,7 @@ export const connectionAttempts = pgTable("sanoma_connection_attempts", {
  * Each OAuth connection's renewal (`renewal.ts`): the lease one process holds while it renews the
  * grant (`holder`, until `leaseUntil`; `sentAt` once the refresh request may have reached the
  * provider), when it was last renewed and how that ended, and when the next renewal is due, the
- * deadline a worker that stops when quiet registers with its wakeup. Metadata only, never a token.
+ * deadline a worker that stops when idle registers with its wakeup. Metadata only, never a token.
  */
 export const connectionRenewals = pgTable("sanoma_connection_renewals", {
   connectionId: text().primaryKey(),
