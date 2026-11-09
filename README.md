@@ -1,24 +1,64 @@
 # sanoma
 
-Sanoma is a TypeScript framework for building business apps. Your pages, data, workflows and service integrations live together in your own repo.
+**A workflow and site builder for your nontechnical coworkers.**
 
-**For developers:** build apps with the people who run the business. Use branches, tests and code review to make changes before they go live.
+Your coworkers describe what they need in chat. Sanoma's agent builds a draft with React pages, TypeScript workflows and data definitions in your team's Git repo. You can review the code, run tests and approve the change before it goes live.
 
-**If you don't write code:** describe what you need in chat. The agent drafts the change, and your team reviews and accepts it before it goes live.
+Use it for the tools people keep asking you to build: a page to collect requests, a workflow that waits for someone's approval, or a site backed by your team's data. Sanoma provides the app to build and run them, with sign-in, service integrations and a record of what ran.
 
-Sanoma is early. This repo contains the runtime, the app and the connectors. You can read the source and host it yourself under the [license](#license).
+[Try it locally](#try-it-locally) · [Download the desktop preview](https://github.com/Sanoma-AI/sanoma/releases/latest) · [See a workflow](#what-a-workflow-looks-like) · [Documentation](packages/sanoma/README.md)
 
-## How it fits together
+Sanoma is early and [fair source under FSL-1.1-ALv2](#license). You can read the source and host it yourself.
 
-- **One repo per business.** Keep `sanoma.config.ts` alongside `sites/`, `workflows/`, `resources/` and `policies/`. The [`sanoma`](packages/sanoma/README.md) command runs the business's code and serves the app on your machine.
-- **[Sites](packages/sanoma/README.md#sites).** Build React pages for your team or the public, with sign-in. Pages can call workflows and access data directly.
-- **Workflows.** Write TypeScript functions for the work behind your pages. They run on [DBOS](https://dbos.dev) with Postgres, so steps, approvals and scheduled waits survive a restart. Each run stays on the [code version](packages/sanoma/workflows/README.md#versions) it started with. Lint checks help keep workflows [safe to replay](packages/sanoma/workflows/README.md#keeping-workflows-replay-safe).
-- **[Data](packages/sanoma/workflows/README.md#collections).** Define collections in `resources/data.ts` and store them in your business's own Postgres database.
-- **Connectors.** Call services like Stripe, Resend and GitHub through typed APIs. Each workflow declares which operations it can call.
-- **Policies and the ledger.** Write [policies](packages/sanoma/workflows/README.md#policies) in [Cedar](https://docs.cedarpolicy.com) to allow a call, deny it or require someone's approval. The [ledger](packages/sanoma/workflows/README.md#ledger) records every run.
-- **The agent.** Ask for changes in chat. Sanoma's agent edits and tests a draft copy of the repo. You can also work with Claude Code, Codex or another agent. With a Git remote connected, you [publish changes in the app](packages/sanoma/workflows/README.md#changes); new companies require an admin's approval. Without a remote, merge the draft branch by hand.
+## Try it locally
 
-Run Sanoma locally from the command line or the [desktop app](#desktop-preview), or deploy it to [your own host](packages/sanoma/README.md#hosting-it-yourself), such as Cloudflare with Neon. See [Contents](#contents) for the available connectors.
+### Desktop
+
+Download for [Apple silicon](https://github.com/Sanoma-AI/sanoma/releases/latest/download/Sanoma-mac-arm64.dmg), [Intel Mac](https://github.com/Sanoma-AI/sanoma/releases/latest/download/Sanoma-mac-x64.dmg), or [Windows x64](https://github.com/Sanoma-AI/sanoma/releases/latest/download/Sanoma-windows-x64.exe). Install Sanoma, open it and choose **New company…** to create a folder for your team's code and data. You can also open an existing company folder.
+
+The app includes Node and pnpm. It needs Git and a Git name and email configured on your machine. macOS offers Apple's command line tools when Git first runs; on Windows, install Git for Windows. Use a folder outside iCloud Drive, OneDrive or Dropbox because it holds a running database.
+
+The desktop app is a preview. On Windows, the provider bridge is unavailable, so resources and Go live do not work, and the agent expects a POSIX shell. See [desktop details](#desktop-preview) and [known limitations](packages/desktop/README.md#what-it-does).
+
+### Command line
+
+With **Node 26 or later** and **Git** installed, and `git config user.name` and `git config user.email` set:
+
+```sh
+mkdir my-team && cd my-team
+npx sanoma
+```
+
+This creates a company repo, installs its packages, starts its own local Postgres database and serves the app. Open the local address printed in your terminal. You do not need Docker or a separate database for this path. See [the launcher docs](packages/sanoma/README.md#start-a-company) for setup details.
+
+### Make your first draft
+
+The default chat agent needs an Anthropic API key; the app links to the connector page where you enter it. Model usage is billed by the provider. You can also choose a supported coding agent under **Your own plan** in chat and follow its sign-in steps.
+
+Try asking:
+
+> Build an internal page where teammates can submit a request with a title, description and due date. Store the requests and show them in a list.
+
+The agent edits a draft branch and runs checks. Inspect the draft before accepting it. To send it for review and publish from the app, connect a Git remote; a new company's policy requires an admin's approval. Without a remote, merge the draft branch by hand. [How changes are reviewed and published →](packages/sanoma/workflows/README.md#changes)
+
+## From a coworker's request to a running tool
+
+1. **Your coworker describes the work.** They ask for a page or workflow in chat and use the app to inspect it.
+2. **The agent builds a draft.** Its changes live on a separate branch, with checks and a diff your team can review. You can also edit the repo with your own editor, Claude Code or Codex.
+3. **Your team reviews and publishes.** With a remote connected, Sanoma opens a pull request and shows the changes and permissions in the app. The change policy decides who must approve publishing; new companies require an admin.
+4. **People use the tool.** They fill in pages, start workflows and approve requests in the Inbox. Each run has a graph and a ledger of its calls, policy decisions and results.
+
+Reviewing a code change and approving a workflow's action are separate decisions. You might approve a workflow once, while requiring the marketing lead to approve each post it publishes.
+
+## What comes with Sanoma
+
+- **Sites and data.** Build [React pages](packages/sanoma/README.md#sites) for your team or the public, with sign-in. Pages can start workflows and read [collections](packages/sanoma/workflows/README.md#collections) stored in your company's Postgres database.
+- **Durable workflows.** TypeScript functions run on [DBOS](https://dbos.dev) and Postgres. Steps, approvals and scheduled waits survive a restart, and each run stays on the [code version](packages/sanoma/workflows/README.md#versions) it started with. Lint checks help keep workflows [safe to replay](packages/sanoma/workflows/README.md#keeping-workflows-replay-safe).
+- **Service integrations.** Connectors provide typed operations and resources for services such as Ghost, Resend, GitHub and Stripe. Each workflow declares the operations it can call. See the [connector list](#contents) for what each supports.
+- **Policies and approvals.** [Cedar policies](packages/sanoma/workflows/README.md#policies) allow a connector call, deny it or require someone's approval. Approvals appear in the Inbox; the [ledger](packages/sanoma/workflows/README.md#ledger) records calls and decisions.
+- **Code your team owns.** Pages, workflows, resource declarations and policies live together in your repo. Keep using branches, tests and code review as the tools grow.
+
+## See approvals and runs in the app
 
 ![The app: dana starts a run of announce, marketing-lead approves its launch copy in the Inbox, then the run finishes](.github/assets/demo.gif)
 
@@ -65,51 +105,11 @@ The marketing lead's Inbox shows pending approvals, links to the drafts and the 
 
 After a run finishes, the graph shows the result of each step. The ledger keeps the calls, policy decisions and approval notes.
 
-## Contents
+## Where it runs
 
-| Path                                                                     | What it is                                                                                                                            |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| [`packages/`](packages/AGENTS.md)                                        | Core workspace packages                                                                                                               |
-| [`sanoma`](packages/sanoma/README.md)                                    | The bin a company repo runs, checks and exports itself with; what its workflows import                                                |
-| [`sanoma/workflows`](packages/sanoma/workflows/README.md)                | Define connectors and workflows, run them durably on DBOS, and lint them                                                              |
-| [`sanoma/app`](packages/sanoma/app/README.md)                            | Web UI over a config, started with `startApp(config)`                                                                                 |
-| [`@sanoma-ai/invoices`](packages/invoices/README.md)                     | Shared invoice validation, exact calculations, industry adapters and React PDF rendering (private)                                    |
-| [`sanoma/testing`](packages/sanoma/testing/README.md)                    | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing                                          |
-| [`sanoma/internal/bridge`](packages/sanoma/bridge/README.md)             | OpenTofu providers: the provider-bridge client, its fake, the resource generator                                                      |
-| [`@sanoma-ai/desktop`](packages/desktop/README.md)                       | The desktop shell (private): runs a company folder's own launcher and shows the app                                                   |
-| [`connectors/`](connectors/AGENTS.md)                                    | Vendor connectors, one workspace package each                                                                                         |
-| [`@sanoma-ai/connector-invoices`](connectors/invoices/README.md)         | Local invoice PDF generation for workflows (private)                                                                                  |
-| [`@sanoma-ai/connector-gcp`](connectors/gcp/README.md)                   | Google Cloud KMS/IAM resources through explicit workload identity and isolated provider sessions                                      |
-| [`@sanoma-ai/connector-ghost`](connectors/ghost/README.md)               | Ghost Admin API post operations and an in-memory fake                                                                                 |
-| [`@sanoma-ai/connector-resend`](connectors/resend/README.md)             | Resend broadcast and email operations, the sending domain as a resource, and an in-memory fake                                        |
-| [`@sanoma-ai/connector-exa`](connectors/exa/README.md)                   | Exa web search, page contents, similar pages and answers, and an in-memory fake                                                       |
-| [`@sanoma-ai/connector-bluesky`](connectors/bluesky/README.md)           | Bluesky post operations and an in-memory fake                                                                                         |
-| [`@sanoma-ai/connector-cloudflare`](connectors/cloudflare/README.md)     | Cloudflare: a Container host that stops when quiet, its public sites on the Worker, the alarm that wakes it, and a zone's DNS records |
-| [`@sanoma-ai/connector-docker`](connectors/docker/README.md)             | The local Docker host: a container that runs the company, through its OpenTofu provider                                               |
-| [`@sanoma-ai/connector-github`](connectors/github/README.md)             | GitHub resources read through its OpenTofu provider, and a replay fake                                                                |
-| [`@sanoma-ai/connector-stripe`](connectors/stripe/README.md)             | Stripe resources read through its OpenTofu provider, and a replay fake                                                                |
-| [`@sanoma-ai/connector-supabase`](connectors/supabase/README.md)         | Supabase projects read through its OpenTofu provider, and a replay fake                                                               |
-| [`@sanoma-ai/connector-neon`](connectors/neon/README.md)                 | Neon projects, the company's database that pauses and branches, and an in-memory fake                                                 |
-| [`@sanoma-ai/connector-sanoma-cloud`](connectors/sanoma-cloud/README.md) | Sanoma Cloud: the company's database and host in Sanoma's accounts, over sanoma-ops's workflows                                       |
-| [`sanoma/better-auth`](packages/sanoma/better-auth/README.md)            | Better Auth, the visitor login for public sites and the staff sign-in on a host, on the company's database                            |
-| [`@sanoma-ai/connector-anthropic`](connectors/anthropic/README.md)       | Anthropic's Claude models for the app's agent, through the AI SDK                                                                     |
-| [`@sanoma-ai/connector-agent37`](connectors/agent37/README.md)           | Agent37 instances, the boxes coding agents work in, driven through Sanoma's runner                                                    |
-| [`modules/`](modules/AGENTS.md)                                          | Placeholder for parts not written yet                                                                                                 |
-| [`types/`](types/AGENTS.md)                                              | Ambient type declarations shared by the packages                                                                                      |
-| [`.github/`](.github/AGENTS.md)                                          | GitHub Actions CI and the README's images                                                                                             |
-| [`.claude/`](.claude/)                                                   | Agent skills for Claude Code                                                                                                          |
-| [`.agents/`](.agents/)                                                   | Vendored agent skills                                                                                                                 |
-| [`package.json`](package.json)                                           | Root scripts: checks, build, test, `db:up`, `bridge:download`, `postgres:download`                                                    |
-| [`tsconfig.json`](tsconfig.json)                                         | Root TypeScript config: `sanoma`'s shipped options, with `@sanoma-ai/*` paths to each `src/`                                          |
-| [`vitest.config.ts`](vitest.config.ts)                                   | Test config with aliases to the package sources                                                                                       |
-| [`docker-compose.yml`](docker-compose.yml)                               | Postgres for DBOS on port 5433                                                                                                        |
-| [`lefthook.yml`](lefthook.yml)                                           | Pre-commit format and lint on staged files                                                                                            |
-| [`.oxlintrc.json`](.oxlintrc.json)                                       | Lint config                                                                                                                           |
-| [`.oxfmtrc.json`](.oxfmtrc.json)                                         | Format config                                                                                                                         |
-| [`pnpm-workspace.yaml`](pnpm-workspace.yaml)                             | Workspace globs: `packages/*` and `connectors/*`                                                                                      |
-| [`skills-lock.json`](skills-lock.json)                                   | Lock file for installed agent skills                                                                                                  |
+Run Sanoma on your machine through the desktop app or CLI, or [host it yourself](packages/sanoma/README.md#hosting-it-yourself), including on Cloudflare with Neon. The desktop app runs the same company launcher as the CLI. To keep workflows running while your laptop is off, use a host that stays available.
 
-Connectors live here under `connectors/`; one moves to its own repo only when someone outside the team maintains it.
+Locally, the company's database lives in `.sanoma/postgres` inside its folder unless you configure another Postgres database. When self-hosting, you choose the database and host. Requests to models and connected services go to those providers; running locally does not make those calls offline. You pay for the model, vendor services and hosting you use.
 
 ## Desktop (preview)
 
@@ -241,16 +241,62 @@ npx wrangler containers push sanoma-runtime:<version>
 
 Declare the image reference Wrangler prints (`registry.cloudflare.com/<account id>/sanoma-runtime:<version>`). Apply uses that reference directly.
 
-On Cloudflare, the company's Worker serves public sites on their own domains without a login. Pages are prerendered or rendered on the Worker using the company's database. A page only wakes the container when it starts a workflow run. See [public sites on the Worker](connectors/cloudflare/README.md#public-sites-on-the-worker).
+On Cloudflare, the company's Worker serves public sites on their own domains without a login. Pages are prerendered or rendered on the Worker using the company's database. A page only wakes the container when it starts a workflow run. See [public sites on the Worker](connectors/cloudflare/README.md#the-worker).
 
 The container's worker builds the app bundle for a deploy's revision, in a checkout of its own (`GET /__sanoma/app-bundle?revision=<commit>`, [the worker's port](packages/sanoma/README.md#the-workers-port)), using `buildAppBundle` from `sanoma/app/bundle`. The build needs `workerd`, which `sanoma/app` installs alongside `wrangler` and `@cloudflare/vite-plugin`.
 
 ## License
 
-[Functional Source License 1.1, Apache 2.0 future license](LICENSE) (FSL-1.1-ALv2). You may use, modify and self-host Sanoma for any purpose except offering it as a competing commercial product or service. Each version becomes available under Apache-2.0 two years after its release.
+Sanoma is **fair source**, not open source: [Functional Source License 1.1, Apache 2.0 future license](LICENSE) (FSL-1.1-ALv2). You may use, modify and self-host Sanoma for any purpose except offering it as a competing commercial product or service. Each version becomes available under Apache-2.0 two years after its release.
 
 ## Contributing
 
 For repository maintenance, start with [AGENTS.md](AGENTS.md) and follow only the relevant package guide.
 
 Contributions are accepted under the [Developer Certificate of Origin](https://developercertificate.org/) (DCO). Sign off every commit with `git commit -s`. See the org-wide contributing guide, code of conduct and security policy in [`Sanoma-AI/.github`](https://github.com/Sanoma-AI/.github).
+
+## Contents
+
+| Path                                                                     | What it is                                                                                                                            |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| [`packages/`](packages/AGENTS.md)                                        | Core workspace packages                                                                                                               |
+| [`sanoma`](packages/sanoma/README.md)                                    | The bin a company repo runs, checks and exports itself with; what its workflows import                                                |
+| [`sanoma/workflows`](packages/sanoma/workflows/README.md)                | Define connectors and workflows, run them durably on DBOS, and lint them                                                              |
+| [`sanoma/app`](packages/sanoma/app/README.md)                            | Web UI over a config, started with `startApp(config)`                                                                                 |
+| [`@sanoma-ai/invoices`](packages/invoices/README.md)                     | Shared invoice validation, exact calculations, industry adapters and React PDF rendering (private)                                    |
+| [`sanoma/testing`](packages/sanoma/testing/README.md)                    | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing                                          |
+| [`sanoma/internal/bridge`](packages/sanoma/bridge/README.md)             | OpenTofu providers: the provider-bridge client, its fake, the resource generator                                                      |
+| [`@sanoma-ai/desktop`](packages/desktop/README.md)                       | The desktop shell (private): runs a company folder's own launcher and shows the app                                                   |
+| [`connectors/`](connectors/AGENTS.md)                                    | Vendor connectors, one workspace package each                                                                                         |
+| [`@sanoma-ai/connector-invoices`](connectors/invoices/README.md)         | Local invoice PDF generation for workflows (private)                                                                                  |
+| [`@sanoma-ai/connector-gcp`](connectors/gcp/README.md)                   | Google Cloud KMS/IAM resources through explicit workload identity and isolated provider sessions                                      |
+| [`@sanoma-ai/connector-ghost`](connectors/ghost/README.md)               | Ghost Admin API post operations and an in-memory fake                                                                                 |
+| [`@sanoma-ai/connector-resend`](connectors/resend/README.md)             | Resend broadcast and email operations, the sending domain as a resource, and an in-memory fake                                        |
+| [`@sanoma-ai/connector-exa`](connectors/exa/README.md)                   | Exa web search, page contents, similar pages and answers, and an in-memory fake                                                       |
+| [`@sanoma-ai/connector-bluesky`](connectors/bluesky/README.md)           | Bluesky post operations and an in-memory fake                                                                                         |
+| [`@sanoma-ai/connector-cloudflare`](connectors/cloudflare/README.md)     | Cloudflare: a Container host that stops when quiet, its public sites on the Worker, the alarm that wakes it, and a zone's DNS records |
+| [`@sanoma-ai/connector-docker`](connectors/docker/README.md)             | The local Docker host: a container that runs the company, through its OpenTofu provider                                               |
+| [`@sanoma-ai/connector-github`](connectors/github/README.md)             | GitHub resources read through its OpenTofu provider, and a replay fake                                                                |
+| [`@sanoma-ai/connector-stripe`](connectors/stripe/README.md)             | Stripe resources read through its OpenTofu provider, and a replay fake                                                                |
+| [`@sanoma-ai/connector-supabase`](connectors/supabase/README.md)         | Supabase projects read through its OpenTofu provider, and a replay fake                                                               |
+| [`@sanoma-ai/connector-neon`](connectors/neon/README.md)                 | Neon projects, the company's database that pauses and branches, and an in-memory fake                                                 |
+| [`@sanoma-ai/connector-sanoma-cloud`](connectors/sanoma-cloud/README.md) | Sanoma Cloud: the company's database and host in Sanoma's accounts, over sanoma-ops's workflows                                       |
+| [`sanoma/better-auth`](packages/sanoma/better-auth/README.md)            | Better Auth, the visitor login for public sites and the staff sign-in on a host, on the company's database                            |
+| [`@sanoma-ai/connector-anthropic`](connectors/anthropic/README.md)       | Anthropic's Claude models for the app's agent, through the AI SDK                                                                     |
+| [`@sanoma-ai/connector-agent37`](connectors/agent37/README.md)           | Agent37 instances, the boxes coding agents work in, driven through Sanoma's runner                                                    |
+| [`modules/`](modules/AGENTS.md)                                          | Placeholder for parts not written yet                                                                                                 |
+| [`types/`](types/AGENTS.md)                                              | Ambient type declarations shared by the packages                                                                                      |
+| [`.github/`](.github/AGENTS.md)                                          | GitHub Actions CI and the README's images                                                                                             |
+| [`.claude/`](.claude/)                                                   | Agent skills for Claude Code                                                                                                          |
+| [`.agents/`](.agents/)                                                   | Vendored agent skills                                                                                                                 |
+| [`package.json`](package.json)                                           | Root scripts: checks, build, test, `db:up`, `bridge:download`, `postgres:download`                                                    |
+| [`tsconfig.json`](tsconfig.json)                                         | Root TypeScript config: `sanoma`'s shipped options, with `@sanoma-ai/*` paths to each `src/`                                          |
+| [`vitest.config.ts`](vitest.config.ts)                                   | Test config with aliases to the package sources                                                                                       |
+| [`docker-compose.yml`](docker-compose.yml)                               | Postgres for DBOS on port 5433                                                                                                        |
+| [`lefthook.yml`](lefthook.yml)                                           | Pre-commit format and lint on staged files                                                                                            |
+| [`.oxlintrc.json`](.oxlintrc.json)                                       | Lint config                                                                                                                           |
+| [`.oxfmtrc.json`](.oxfmtrc.json)                                         | Format config                                                                                                                         |
+| [`pnpm-workspace.yaml`](pnpm-workspace.yaml)                             | Workspace globs: `packages/*` and `connectors/*`                                                                                      |
+| [`skills-lock.json`](skills-lock.json)                                   | Lock file for installed agent skills                                                                                                  |
+
+Connectors live here under `connectors/`; one moves to its own repo only when someone outside the team maintains it.
