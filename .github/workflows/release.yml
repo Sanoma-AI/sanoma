@@ -1,7 +1,8 @@
 name: Release
 # Run by hand on release/<version>, a branch at the bump's merge commit, never on main (README "Release"):
 # it publishes every public package whose version is not yet on npm, then pushes the runtime image for the
-# sanoma version to GitHub's registry (ghcr.io/sanoma-ai/runtime) when it does not have it yet.
+# sanoma version to GitHub's registry (ghcr.io/sanoma-ai/runtime) when it does not have it yet, and the
+# company template (packages/sanoma/template) to Sanoma-AI/company-template's main.
 on:
   workflow_dispatch:
 
@@ -121,3 +122,57 @@ jobs:
           push: true
           tags: ${{ steps.image.outputs.tag }}
           build-args: PACKAGES=${{ steps.image.outputs.packages }}
+
+  company-template:
+    needs: publish
+    runs-on: ubuntu-latest
+    # Sanoma Cloud's sign-up makes a company from Sanoma-AI/company-template, `sanoma init` from the template
+    # this package ships: this job makes the first the second, at this release's versions, with a lockfile
+    # (a host installs with --frozen-lockfile). COMPANY_TEMPLATE_TOKEN is a fine-grained token with contents
+    # write on that repository alone; the repository keeps its own README.md, LICENSE, .github/ and .mise.toml.
+    permissions:
+      contents: read
+    # Actions pinned to commits, as in the publish job: this job pushes to another repository's main.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Sanoma-AI/company-template
+          ref: main
+          token: ${{ secrets.COMPANY_TEMPLATE_TOKEN }}
+          path: .company-template
+      # Node and pnpm for the lockfile. No cache, as in the publish job.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: false
+      - name: Mirror the template
+        run: |
+          version=$(jq -r .version packages/sanoma/package.json)
+          pm=$(jq -r .packageManager package.json)
+          cd .company-template
+          git ls-files -z | grep -zvE '^(README\.md|LICENSE|\.mise\.toml|\.github/.*)$' | xargs -0 -r git rm -q --
+          cp -R ../packages/sanoma/template/. .
+          # npm drops a package's .gitignore, so the template carries it as gitignore (as `sanoma init` renames it).
+          mv gitignore .gitignore
+          # As an installed launcher pins them (`pinDependencies`), with the pnpm this repository runs.
+          jq --arg v "$version" --arg pm "$pm" '
+            .dependencies |= with_entries(if .key == "sanoma" or (.key | startswith("@sanoma-ai/connector-")) then .value = $v else . end)
+            | .packageManager = $pm' package.json > "$RUNNER_TEMP/package.json"
+          mv "$RUNNER_TEMP/package.json" package.json
+          # The registry may take a minute to serve what the publish job just published.
+          for wait in 0 30 60 120; do
+            sleep "$wait"
+            pnpm install --lockfile-only && break
+          done
+          [ -f pnpm-lock.yaml ] || { echo "::error::pnpm could not write the lockfile for sanoma $version"; exit 1; }
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::notice title=Company template unchanged::Sanoma-AI/company-template already has sanoma $version's template."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -s --quiet -m "The template of sanoma $version"
+          git push origin HEAD:main
+          echo "Pushed sanoma $version's template to Sanoma-AI/company-template." >> "$GITHUB_STEP_SUMMARY"
