@@ -56,15 +56,7 @@ afterEach(cleanup);
 
 type Script = AiSdkChat<ChatMessage>;
 
-function Scripted({
-  script,
-  onAsk = () => {},
-  onContinue,
-}: {
-  script: Script;
-  onAsk?: (ask: string) => void;
-  onContinue?: () => void;
-}) {
+function Scripted({ script, onSend = () => {} }: { script: Script; onSend?: (text: string) => void }) {
   const { messages, sendMessage, status, error } = useChat<ChatMessage>({
     messages: script.get(0) as ChatMessage[],
     transport: script.transport({ delayMs: 0 }) as never,
@@ -72,7 +64,7 @@ function Scripted({
   const next = script.next(messages);
   return (
     <>
-      <Thread chat="chat" messages={messages} status={status} error={error} onAsk={onAsk} onContinue={onContinue} />
+      <Thread chat="chat" messages={messages} status={status} error={error} onSend={onSend} canContinue />
       <button type="button" disabled={!next} onClick={() => next && void sendMessage(next as ChatMessage)}>
         Next turn
       </button>
@@ -91,11 +83,8 @@ function draw(page: () => ReactNode) {
 }
 
 /** Draws the thread and sends the script's first message. */
-async function play(
-  script: Script,
-  { onAsk, onContinue }: { onAsk?: (ask: string) => void; onContinue?: () => void } = {},
-) {
-  draw(() => <Scripted script={script} onAsk={onAsk} onContinue={onContinue} />);
+async function play(script: Script, onSend?: (text: string) => void) {
+  draw(() => <Scripted script={script} onSend={onSend} />);
   fireEvent.click(await screen.findByRole("button", { name: "Next turn" }));
 }
 
@@ -224,28 +213,37 @@ describe("the chat's thread", () => {
   });
 
   it("marks a step left under way as stopped and offers Continue", async () => {
-    const onContinue = vi.fn<() => void>();
+    const onSend = vi.fn<(text: string) => void>();
     await play(
       createChat<ChatMessage>()
         .user("Fix it")
         .assistant(({ writer }) => {
           writer.tool("read_file", { input: { path: "a.ts" } as never });
         }),
-      { onContinue },
+      onSend,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
-    expect(onContinue).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("continue");
     expect(screen.getByText("Read a.ts").textContent).toBe("Stopped: Read a.ts");
   });
 
   it("draws an empty chat's start in place of what to ask", async () => {
-    draw(() => <Thread chat="chat" messages={[]} status="ready" start={<p>Connect your agent</p>} onAsk={() => {}} />);
+    draw(() => (
+      <Thread
+        chat="chat"
+        messages={[]}
+        status="ready"
+        start={<p>Connect your agent</p>}
+        onSend={() => {}}
+        canContinue
+      />
+    ));
     expect(await screen.findByText("Connect your agent")).toBeTruthy();
     expect(screen.queryByText("What should change?")).toBeNull();
   });
 
   it("leaves out the agent's cue to speak first, and sends a suggested ask of the last reply", async () => {
-    const onAsk = vi.fn<(ask: string) => void>();
+    const onSend = vi.fn<(text: string) => void>();
     await play(
       createChat<ChatMessage>()
         .user("", { metadata: { intro: true } })
@@ -253,12 +251,12 @@ describe("the chat's thread", () => {
           writer.text("Hi, I make the changes.");
           writer.data({ type: "data-suggestions", data: { asks: ["Add a step"] } });
         }),
-      { onAsk },
+      onSend,
     );
     const asks = await screen.findByRole("list", { name: "Suggested asks" });
     expect(document.querySelector('[data-slot="bubble"]')).toBeNull();
     fireEvent.click(within(asks).getByRole("button", { name: "Add a step" }));
-    expect(onAsk).toHaveBeenCalledExactlyOnceWith("Add a step");
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("Add a step");
   });
 
   it("says a turn's error, and where to set a missing key", async () => {

@@ -23,6 +23,7 @@ import {
   ENGINE_NAMES,
   type EngineName,
   installed,
+  isBusy,
   MODEL_CONNECTOR,
   onModelConnector,
   ownPlan,
@@ -33,7 +34,7 @@ import { useCrumbs } from "../common.tsx";
 import type { Prompt } from "./chat-prompt.ts";
 import { Composer } from "./composer.tsx";
 import { ConnectAgent } from "./connect-agent.tsx";
-import { ConnectorPageLink, isBusy, Thread } from "./thread.tsx";
+import { ConnectorPageLink, Thread } from "./thread.tsx";
 
 // The chat column, beside the bar on the same surface: the operator agent (POST /api/chat, its
 // stream read by the AI SDK's useChat), your chats, and the composer carrying the page you are on.
@@ -156,14 +157,13 @@ function ChatPane({ id, known, ...opened }: { id: string; known: boolean } & Ope
 }
 
 /**
- * The conversation: its messages (not the agent's cue to speak first, `isIntro`), the last reply's
- * suggested asks, a turn's error, Continue after a turn that stopped short, and the composer
- * (holding the opening prompt's text), which says "Connect a model" (and Continue is not offered)
- * while the chat's engine (its own, `openedOn`, else the one chosen for a new chat) needs the model
- * connector and it has no key. A new chat shows the agents to connect while so (or when Agent…
- * opened it); a suggested ask is sent in it; and the agent speaks first in the person's first
- * chat once its engine is connected, when a card chose a plan of their own, and once the sign-in
- * it asked for in a chat they have not written in is done.
+ * The conversation on `useChat`: its `Thread`, and the composer (holding the opening prompt's
+ * text), which says "Connect a model" (and Continue is not offered) while the chat's engine (its
+ * own, `openedOn`, else the one chosen for a new chat) needs the model connector and it has no
+ * key. A new chat's thread starts with the agents to connect while so (or when Agent… opened it);
+ * and the agent speaks first in the person's first chat once its engine is connected, when a card
+ * chose a plan of their own, and once the sign-in it asked for in a chat they have not written in
+ * is done.
  */
 function Conversation({
   id,
@@ -257,8 +257,8 @@ function Conversation({
             />
           ) : undefined
         }
-        onAsk={send}
-        onContinue={noModel ? undefined : () => send("continue")}
+        onSend={send}
+        canContinue={!noModel}
       />
       <div className="p-3">
         <Composer

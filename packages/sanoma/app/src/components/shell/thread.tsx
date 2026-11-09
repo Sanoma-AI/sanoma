@@ -17,21 +17,18 @@ import {
 } from "#/components/ui/message-scroller.tsx";
 import { Trace, TraceLine, TraceTitle } from "#/components/ui/trace.tsx";
 import { Notice } from "../kit.tsx";
-import { type ChatMessage, errorParts, isIntro, textOf, unfinished } from "../../lib/chat.ts";
+import { type ChatMessage, errorParts, isBusy, isIntro, suggestionsOf, textOf, unfinished } from "../../lib/chat.ts";
 import { Reply, Suggested } from "./chat-parts.tsx";
 
 // The chat's thread, given its messages and status: off `common.tsx` and `useChat`, so a test draws
 // it on a scripted conversation.
 
-/** Whether a turn is under way. */
-export const isBusy = (status: ChatStatus) => status === "submitted" || status === "streaming";
-
 /**
  * The thread (AI Elements' Chat): an empty chat's `start` (else what to ask), then each turn an
  * item of the scroller (not the agent's cue to speak first, `isIntro`), the person's the anchor, so
  * a new question settles near the top with the reply streaming below it; then the last reply's
- * suggested asks (sent with `onAsk`), what waits on the turn, its error, and Continue
- * (`onContinue`, when it can be offered) after one that stopped short.
+ * suggested asks, what waits on the turn, its error, and Continue (when `canContinue`) after one
+ * that stopped short. A suggested ask and Continue are sent with `onSend`.
  */
 export function Thread({
   chat,
@@ -39,19 +36,20 @@ export function Thread({
   status,
   error,
   start,
-  onAsk,
-  onContinue,
+  onSend,
+  canContinue,
 }: {
   chat: string;
   messages: ChatMessage[];
   status: ChatStatus;
   error?: Error;
   start?: ReactNode;
-  onAsk: (ask: string) => void;
-  onContinue?: () => void;
+  onSend: (text: string) => void;
+  canContinue: boolean;
 }) {
   const busy = isBusy(status);
   const last = messages.at(-1);
+  const asks = !busy && last?.role === "assistant" ? suggestionsOf(last) : [];
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
       <MessageScroller className="h-auto min-h-0 flex-1">
@@ -65,7 +63,11 @@ export function Thread({
                 <Turn key={message.id} message={message} live={busy && i === messages.length - 1} chat={chat} />
               ),
             )}
-            {!busy && last?.role === "assistant" && <Suggested message={last} onAsk={onAsk} />}
+            {asks.length > 0 && (
+              <MessageScrollerItem>
+                <Suggested asks={asks} onAsk={onSend} />
+              </MessageScrollerItem>
+            )}
             {status === "submitted" && (
               <MessageScrollerItem>
                 <Trace>
@@ -80,11 +82,11 @@ export function Thread({
                 <TurnError message={error.message} />
               </MessageScrollerItem>
             )}
-            {!busy && !error && onContinue && stoppedShort(messages) && (
+            {!busy && !error && canContinue && stoppedShort(last) && (
               <MessageScrollerItem>
                 <Marker>
                   <MarkerContent>The last turn stopped before it finished.</MarkerContent>
-                  <Button variant="secondary" size="sm" onClick={onContinue}>
+                  <Button variant="secondary" size="sm" onClick={() => onSend("continue")}>
                     Continue
                   </Button>
                 </Marker>
@@ -121,8 +123,7 @@ const Turn = memo(function Turn({ message, live, chat }: { message: ChatMessage;
 });
 
 /** A turn that stopped before it finished (a restart, say): no reply to the last message, or a step or text still under way. */
-function stoppedShort(messages: ChatMessage[]): boolean {
-  const last = messages.at(-1);
+function stoppedShort(last: ChatMessage | undefined): boolean {
   if (!last) return false;
   return last.role === "user" || last.parts.some(unfinished);
 }

@@ -11,7 +11,6 @@ import { Card, CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { CodeBlock, CodeBlockContent } from "#/components/ui/code-block.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { Message, MessageContent, MessageFooter } from "#/components/ui/message.tsx";
-import { MessageScrollerItem } from "#/components/ui/message-scroller.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import {
   Trace,
@@ -366,25 +365,21 @@ function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; 
   );
 }
 
-/** A reply's suggested asks (its `data-suggestions` part), an item of the thread's scroller, each a button that sends it (`onAsk`); nothing when it suggests none. */
-export function Suggested({ message, onAsk }: { message: ChatMessage; onAsk: (ask: string) => void }) {
-  const asks = message.parts.findLast((part) => part.type === "data-suggestions")?.data.asks ?? [];
-  if (!asks.length) return null;
+/** A reply's suggested asks (`suggestionsOf`), each a button that sends it (`onAsk`). */
+export function Suggested({ asks, onAsk }: { asks: string[]; onAsk: (ask: string) => void }) {
   return (
-    <MessageScrollerItem>
-      <ul aria-label="Suggested asks" className="flex flex-col gap-2">
-        {asks.map((ask) => (
-          <li key={ask}>
-            <Button
-              variant="outline"
-              className="h-auto w-full justify-start py-2 text-left whitespace-normal"
-              onClick={() => onAsk(ask)}
-            >
-              {ask}
-            </Button>
-          </li>
-        ))}
-      </ul>
-    </MessageScrollerItem>
+    <ul aria-label="Suggested asks" className="flex flex-col gap-2">
+      {asks.map((ask) => (
+        <li key={ask}>
+          <Button
+            variant="outline"
+            className="h-auto w-full justify-start py-2 text-left whitespace-normal"
+            onClick={() => onAsk(ask)}
+          >
+            {ask}
+          </Button>
+        </li>
+      ))}
+    </ul>
   );
 }

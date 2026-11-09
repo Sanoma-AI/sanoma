@@ -115,7 +115,7 @@ const ELEMENTS: Components = {
     !href ? (
       <span>{props.children}</span>
     ) : href.startsWith("#") ? (
-      <a {...props} href={href} className="underline underline-offset-4" />
+      <a {...props} href={href} />
     ) : (
       <StreamdownLink
         {...props}
