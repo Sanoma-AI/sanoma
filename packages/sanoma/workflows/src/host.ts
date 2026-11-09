@@ -7,13 +7,14 @@ import type { z } from "zod";
 /**
  * How a host keeps the runtime up:
  * - `long-lived`: the process is restarted if it exits, and never stopped for being quiet (Docker).
- * - `stops-when-quiet`: the host stops the instance after a while without inbound requests, and
- *   starts it again on the next request (a free Render service, Cloudflare Containers).
+ * - `stops-on-exit`: the instance ends with its process, which exits once its worker is idle, and
+ *   the host starts it again on a wake (Cloudflare Containers). The worker decides when it is
+ *   done; the host only starts it.
  *
- * A host that stops needs a declared `Wakeup` for what is due at a time while it is stopped.
- * Later: `stops-on-exit`, with a host that stops the instance when its process exits (Fly).
+ * A host that stops needs a wakeup for what is due at a time while it is stopped: a declared
+ * `Wakeup`, or its own wake route named in the runtime's environment (`envWakeup`).
  */
-export type HostLifetime = "long-lived" | "stops-when-quiet";
+export type HostLifetime = "long-lived" | "stops-on-exit";
 
 /** What a host can do, for choosing one. */
 export interface HostCapabilities {
@@ -131,7 +132,7 @@ export const UNNAMED = "(the repository's name)";
 export const RUNTIME_PORT = 3000;
 
 /** Every `HostLifetime`, for a schema of one. */
-export const LIFETIMES = ["long-lived", "stops-when-quiet"] as const satisfies readonly HostLifetime[];
+export const LIFETIMES = ["long-lived", "stops-on-exit"] as const satisfies readonly HostLifetime[];
 
 /** True when `schema` has a field at the dotted `path`, looking through optional, nullable and default wrappers. */
 export function hasPath(schema: z.ZodType, path: string): boolean {
