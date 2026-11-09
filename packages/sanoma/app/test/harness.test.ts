@@ -298,6 +298,7 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
         draft: id,
         branch: `draft/${id}`,
         files: ["workflows/offboarding.ts"],
+        head: expect.stringMatching(/^[0-9a-f]{40}$/),
         summary: expect.stringContaining("workflows/offboarding.ts"),
         checks: { ok: true, problems: [], warnings: [] },
       });
