@@ -275,11 +275,14 @@ const RELOAD_MS = 1_000;
  * saved into the checkout asks the worker to reload (`WorkerOptions.reload`): a moment later the
  * company's files are loaded again (`loadConfig`'s `fresh`) and, once they resolve, the app and
  * the worker stop and start again on them, the app on the same port; files that do not load or
- * resolve are logged, and the old keep running. `stop` stops the app, the service, then the worker.
+ * resolve are logged and change nothing, and ones that fail to start are logged and the old
+ * started again in their place. `stop` stops the app, the service, then the worker.
  */
 export async function serve(config: SanomaConfig, serveOptions: ServeOptions): Promise<Served> {
   // Read and built before the worker starts, so a mistake in the variables or a site starts nothing.
   const options = await appStart(config, serveOptions);
+  /** What the app runs with now: `options`, then a reload's. */
+  let current = options;
   const { log } = serveOptions;
   // An app on this machine alone is not the instance the host runs: its worker never stops
   // itself (its wakeup would wake that instance).
@@ -325,9 +328,18 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
     const nextOptions = await appStart(next, { ...serveOptions, port, resolved });
     await app.stop();
     await supervised.stop();
-    supervised = await supervise(next);
-    app = await start(next, nextOptions);
+    try {
+      supervised = await supervise(next);
+      app = await start(next, nextOptions);
+    } catch (err) {
+      // Started again on the files as they were, which ran a moment ago.
+      await supervised.stop().catch(() => {});
+      supervised = await supervise(config);
+      app = await start(config, { ...current, port });
+      throw err;
+    }
     config = next;
+    current = nextOptions;
     log(`${resolved.appName} started again on the saved files`);
   };
   return {

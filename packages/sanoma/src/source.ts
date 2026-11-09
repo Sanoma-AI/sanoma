@@ -86,10 +86,10 @@ const withoutToken = (what: string, token: string) => (err: { stderr?: string; m
   throw new Error(`${what} failed: ${why}`);
 };
 
-/** `Source.commit` in the checkout at `cwd`: the root's, or a draft's. */
 /** The environment a commit by `author` is made in: named `<author> via Sanoma`, the email the machine's. */
 const authoredBy = (author: string) => ({ GIT_AUTHOR_NAME: `${author} via Sanoma` });
 
+/** `Source.commit` in the checkout at `cwd`: the root's, or a draft's. */
 const commitIn =
   (cwd: string): Source["commit"] =>
   ({ paths, message, author }) =>

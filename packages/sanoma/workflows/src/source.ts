@@ -44,7 +44,7 @@ export interface Source {
   /**
    * Saves the draft `id` into the checked-out branch: what it changes, merged with what that branch
    * gained since, as one commit titled `title` by `author` (a squash; the draft stays open). Refused
-   * while the checkout has uncommitted changes to its files, when the draft changes nothing there,
+   * while the checkout has uncommitted changes to any file git tracks, when the draft changes nothing there,
    * or when the two edit the same lines. The commit.
    */
   merge?(id: string, change: { title: string; author: string }): Promise<{ revision: string }>;

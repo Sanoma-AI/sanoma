@@ -142,7 +142,7 @@ export const openChangeFn = createServerFn(CHANGE)
 
 /** The saves of a chat's draft, by the draft's id, newest first. */
 export const getSaves = createServerFn(READ)
-  .validator(validate(z.object({ id: z.string().min(1) })))
+  .validator(validate(z.object({ id: z.string().regex(DRAFT_ID) })))
   .handler(({ data, context }) => saves(context.app, data.id));
 
 /** Saves the person's chat's draft, or undoes what it saved: the save's run id. */

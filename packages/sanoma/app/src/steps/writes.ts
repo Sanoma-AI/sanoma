@@ -189,7 +189,7 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
  * A chat's draft saved, as the run's actor, the chat's person (or, for an undo, the saved commit
  * reverted first in the draft of its own, `undoDraftOf`, left as it is when a retry finds it open).
  * With a repository that drafts and has a remote a connector's remote half is for, its change is
- * opened as saved (`ChangeInput.save`), which the policy decides: the change's run id. Otherwise
+ * opened as saved at `head` (`ChangeInput.save`), which the policy decides: the change's run id. Otherwise
  * saving is publishing: the draft at `head` merged into the checkout (`Source.merge`), a change to
  * the rules only by someone in `admin` (`not_approver` for anyone else, as for a form's Save), the
  * draft closed, and the worker started again on the files (`reload`). Refused for a draft of
@@ -207,17 +207,28 @@ export async function saveDraft(
     if ((await client.chats.get(id))?.person !== by.id)
       throw new SanomaError("invalid_input", `No draft of yours is ${id}`);
   } else if (!(await source.drafts()).includes(id)) {
-    await step.serially(() => source.revert!(id, { sha: undo, author: by.id }));
+    // A revert that fails closes its draft, so a retry reverts again.
+    await step.serially(() =>
+      source.revert!(id, { sha: undo, author: by.id }).catch(async (err: unknown) => {
+        await source.closeDraft!(id);
+        throw err;
+      }),
+    );
   }
-  if (await reviewsChanges(step, source)) {
-    const input = { id, title, save: true, ...(page !== undefined && { page }) };
-    return { change: await client.openChange(input, { startedBy: by }) };
-  }
-  return step.serially(async () => {
-    const [diff, draft] = await Promise.all([source.diff!(id), source.draft!(id)]);
+  /** The draft's change, as long as it is still at `head`, the commit the person saved. */
+  const saving = async () => {
+    const diff = await source.diff!(id);
     if (head !== undefined && diff.head !== head) {
       throw new SanomaError("invalid_input", "The draft has changed since: save it from its latest card");
     }
+    return diff;
+  };
+  if (await reviewsChanges(step, source)) {
+    const input = { id, title, save: (await saving()).head, ...(page !== undefined && { page }) };
+    return { change: await client.openChange(input, { startedBy: by }) };
+  }
+  return step.serially(async () => {
+    const [diff, draft] = await Promise.all([saving(), source.draft!(id)]);
     if (await editsRules(source.root, draft.root, diff.files)) adminOnly(by, "the policies or the people");
     const { revision } = await source.merge!(id, { title, author: by.id });
     await source.closeDraft!(id);

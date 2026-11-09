@@ -120,4 +120,15 @@ describe("saving a chat's draft without a remote", () => {
     expect(await source.drafts!()).not.toContain(undoDraftOf(revision));
     expect(reloads).toBe(2);
   });
+
+  it("closes the undo's draft when the revert fails, so Undo can be asked again", async () => {
+    const first = await drafted("greet", "Greet", { "notes/greet.md": "hello\n" });
+    const { runId: saved } = await saveDraft(app, { id: "alice" }, { id: "greet", head: first }, ORIGIN);
+    const { revision: greeted } = (await client.result(saved)) as { revision: string };
+    const again = await drafted("greet-again", "Greet again", { "notes/greet.md": "hello again\n" });
+    await client.result((await saveDraft(app, { id: "alice" }, { id: "greet-again", head: again }, ORIGIN)).runId);
+    const { runId } = await saveDraft(app, { id: "alice" }, { id: "greet", undo: greeted }, ORIGIN);
+    expect(await outcome(runId)).toMatchObject({ message: expect.stringContaining("cannot be undone here") });
+    expect(await source.drafts!()).not.toContain(undoDraftOf(greeted));
+  });
 });

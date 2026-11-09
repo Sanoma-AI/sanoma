@@ -36,8 +36,8 @@ export interface ChangeSteps {
   /** Withdraws every approval of the run approved for the merge, saying `reason`: none lifts a hold on a newer head. */
   retire(reason: string): Promise<void>;
   /**
-   * For a change opened by Save (`ChangeInput.save`): approves the Publish about to be asked of
-   * `approver` as the run's actor, when they may decide it (`refusalOf`, the run's own actor
+   * For a change opened by Save, in a round at the head saved (`ChangeInput.save`): approves the
+   * Publish about to be asked of `approver` as the run's actor, when they may decide it (`refusalOf`, the run's own actor
    * allowed only while nobody else could). Nothing when they may not: Publish waits as asked.
    */
   publishOnSave(approver: Approver): Promise<void>;
@@ -110,11 +110,7 @@ export function changeWorkflow(
         return steps.publish(state);
       };
       let report: ChangeReport | undefined;
-      // Save is the person's Publish of the head they saved: the first round's alone.
-      let saving = input.save === true;
       while (report === undefined) {
-        const saved = saving;
-        saving = false;
         // An approval is given for a head: one approved for an earlier round lifts no hold on this one.
         await steps.retire("the change was planned again at a new head");
         await show({ phase: "opening", decision: undefined, blocked: undefined });
@@ -141,7 +137,8 @@ export function changeWorkflow(
         if (told === undefined && blocked === undefined) {
           try {
             await show({ phase: "waiting" });
-            if (saved) await steps.publishOnSave(decision.approver!);
+            // Save is the person's Publish of the head they saved, and of no other.
+            if (input.save === opened.head) await steps.publishOnSave(decision.approver!);
             await ctx.approval(PUBLISH, {
               approver: decision.approver!,
               covers: [ops.change.merge],
