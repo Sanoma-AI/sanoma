@@ -7,9 +7,9 @@ import { isSecret, type Secret } from "./secret.ts";
 import type { SecretAccess } from "./secret-store.ts";
 
 export type DeploymentIdentity = Omit<IdentityEnrollment, "generation">;
+/** A generation holds until it is retired or its deployment revoked: enrollment sets no expiry. */
 export interface EnrollIdentity extends IdentityEnrollment {
   hash: string;
-  validUntil: string;
 }
 
 /** Provisioning authority only. The serving broker receives the separate read-only interface. */
@@ -25,7 +25,6 @@ export interface IdentityProvisioning {
  */
 export interface IdentityProvisioningDatabase {
   databaseUrl: string | Secret;
-  maxValidityMs: number;
 }
 
 /** A restricted writer's connection string, TLS verified beyond this machine; refused sanitized. */
@@ -105,7 +104,7 @@ export function configuredIdentityProvisioning(
       AND NOT has_table_privilege('sanoma_identity.credentials','DELETE,TRUNCATE,REFERENCES,TRIGGER') AS allowed`);
     if (!rows[0]?.allowed) fail("invalid");
     return db;
-  }, config);
+  });
   return {
     store,
     close() {
@@ -171,16 +170,11 @@ const deadlineOf = (value: string) => {
 };
 
 /** Caller owns a dedicated writer pool; never give this pool to the broker or company code. */
-export function postgresIdentityProvisioning(
-  database: () => Promise<Db>,
-  options: { maxValidityMs: number },
-): IdentityProvisioning {
-  const maximum = options.maxValidityMs;
-  if (!Number.isSafeInteger(maximum) || maximum <= 0) fail("invalid");
+export function postgresIdentityProvisioning(database: () => Promise<Db>): IdentityProvisioning {
   async function transaction(
     input: DeploymentIdentity,
     create: boolean,
-    run: (tx: Db, enabled: boolean, now: number) => Promise<void>,
+    run: (tx: Db, enabled: boolean) => Promise<void>,
   ) {
     checkIdentity(input);
     try {
@@ -210,26 +204,24 @@ export function postgresIdentityProvisioning(
           .where(eq(identityDeployments.id, input.deployment))
           .for("update");
         if (!row || !sameIdentity(row, input)) fail("conflict");
-        const clock = await tx.execute<{ now: number }>(
-          sql`SELECT (extract(epoch FROM clock_timestamp()) * 1000)::float8 AS now`,
-        );
-        await run(tx, row.enabled, clock.rows[0]!.now);
+        await run(tx, row.enabled);
       });
     } catch (error) {
       const code = identityProvisioningCode(error);
       if (code) throw new IdentityProvisioningError(code);
-      if (pgCode(error) === "23505") throw new IdentityProvisioningError("conflict");
+      const sqlState = pgCode(error);
+      if (sqlState === "23505") throw new IdentityProvisioningError("conflict");
+      // Any other constraint violation is the schema refusing the row: permanent, never retried.
+      if (sqlState.startsWith("23")) throw new IdentityProvisioningError("invalid");
       throw new IdentityProvisioningError("unavailable");
     }
   }
   return {
     async enroll(input) {
       generationOf(input.generation);
-      const until = deadlineOf(input.validUntil);
       if (!/^[0-9a-f]{64}$/.test(input.hash)) fail("invalid");
-      await transaction(input, true, async (tx, enabled, now) => {
+      await transaction(input, true, async (tx, enabled) => {
         if (!enabled) fail("conflict");
-        if (until <= now || until - now > maximum) fail("invalid");
         const rows = await tx
           .select({
             generation: identityCredentials.generation,
@@ -243,8 +235,7 @@ export function postgresIdentityProvisioning(
         const existing = rows.find((r) => r.generation === input.generation);
         if (existing) {
           // An exact retry is safe. Never extend a retired generation or revive a revoked one.
-          if (existing.hash !== input.hash || existing.revoked || existing.validUntil.getTime() !== until)
-            fail("conflict");
+          if (existing.hash !== input.hash || existing.revoked || existing.validUntil) fail("conflict");
           return;
         }
         if (rows[0] && rows[0].generation >= input.generation) fail("conflict");
@@ -252,7 +243,6 @@ export function postgresIdentityProvisioning(
           hash: input.hash,
           deployment: input.deployment,
           generation: input.generation,
-          validUntil: new Date(until),
         });
       });
     },
@@ -260,7 +250,7 @@ export function postgresIdentityProvisioning(
       generationOf(input.generation);
       const until = deadlineOf(input.validUntil);
       await transaction(input, false, async (tx) => {
-        // Retirement only shortens access. The predicate protects the schema's finite interval.
+        // Retirement only shortens access: LEAST ignores a NULL (no expiry). The predicate keeps the interval nonempty.
         const deadline = sql`${new Date(until).toISOString()}::timestamptz`;
         const updated = await tx
           .update(identityCredentials)
@@ -294,7 +284,7 @@ export function postgresIdentityProvisioning(
 export function memoryIdentityProvisioning(): IdentityProvisioning {
   const deployments = new Map<
     string,
-    { identity: DeploymentIdentity; enabled: boolean; credentials: Map<number, EnrollIdentity> }
+    { identity: DeploymentIdentity; enabled: boolean; credentials: Map<number, { hash: string; retired?: true }> }
   >();
   const hashes = new Set<string>();
   const find = (input: DeploymentIdentity) => {
@@ -307,28 +297,27 @@ export function memoryIdentityProvisioning(): IdentityProvisioning {
     async enroll(input) {
       checkIdentity(input);
       generationOf(input.generation);
-      if (deadlineOf(input.validUntil) <= Date.now() || !/^[0-9a-f]{64}$/.test(input.hash)) fail("invalid");
+      if (!/^[0-9a-f]{64}$/.test(input.hash)) fail("invalid");
       const found = deployments.get(input.deployment);
       if (found && (!sameIdentity(found.identity, input) || !found.enabled)) fail("conflict");
       const current = found?.credentials.get(input.generation);
       if (current) {
-        if (current.hash !== input.hash || deadlineOf(current.validUntil) !== deadlineOf(input.validUntil))
-          fail("conflict");
+        if (current.hash !== input.hash || current.retired) fail("conflict");
         return;
       }
       if (hashes.has(input.hash) || (found && [...found.credentials.keys()].some((g) => g >= input.generation)))
         fail("conflict");
-      const row = found ?? { identity: { ...input }, enabled: true, credentials: new Map<number, EnrollIdentity>() };
-      row.credentials.set(input.generation, { ...input });
+      const row = found ?? { identity: { ...input }, enabled: true, credentials: new Map() };
+      row.credentials.set(input.generation, { hash: input.hash });
       hashes.add(input.hash);
       deployments.set(input.deployment, row);
     },
     async retire(input) {
       generationOf(input.generation);
-      const deadline = deadlineOf(input.validUntil);
+      deadlineOf(input.validUntil);
       const current = find(input).credentials.get(input.generation);
       if (!current) return fail("conflict");
-      current.validUntil = new Date(Math.min(deadlineOf(current.validUntil), deadline)).toISOString();
+      current.retired = true;
     },
     async revoke(input) {
       find(input).enabled = false;

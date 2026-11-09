@@ -575,7 +575,6 @@ describe("the runtime's own operations in a config", () => {
         environment: "production",
         serviceAccount: "runtime@example-project.iam.gserviceaccount.com",
         generation: 1,
-        validUntil: "2030-01-01T00:00:00Z",
         store: name,
       }),
     ).toBe(false);

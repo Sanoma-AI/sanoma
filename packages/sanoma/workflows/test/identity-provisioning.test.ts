@@ -4,7 +4,12 @@ import { testDatabaseUrl } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { databaseOn, lazyDb } from "../src/db.ts";
 import { identityCredentials, identityDeployments } from "../src/db/identity.ts";
-import { CLOUD_IDENTITY_SQL, createDeploymentCredential, postgresIdentityEnrollments } from "../src/cloud-identity.ts";
+import {
+  CLOUD_IDENTITY_SQL,
+  createDeploymentCredential,
+  identityBroker,
+  postgresIdentityEnrollments,
+} from "../src/cloud-identity.ts";
 import {
   postgresIdentityProvisioning,
   memoryIdentityProvisioning,
@@ -23,7 +28,7 @@ import { rootWith } from "./harness.ts";
 
 const databaseUrl = testDatabaseUrl("identity_provisioning");
 const pool = lazyDb(databaseUrl, "identity-provisioning-test");
-const provision = postgresIdentityProvisioning(() => pool.db(), { maxValidityMs: 86_400_000 });
+const provision = postgresIdentityProvisioning(() => pool.db());
 const reader = postgresIdentityEnrollments(() => pool.db());
 const writerName = `identity_writer_${randomUUID().replaceAll("-", "")}`;
 const writerRole = sql.identifier(writerName);
@@ -40,7 +45,6 @@ const enrollment = () => ({
   ...identity(),
   generation: 1,
   hash: createDeploymentCredential().hash,
-  validUntil: new Date(Date.now() + 3_600_000).toISOString(),
 });
 beforeAll(async () => {
   const db = await pool.db();
@@ -66,7 +70,7 @@ describe("declarative enrollment writer", () => {
   it("describes and closes unused config without I/O, and sanitizes invalid URLs", async () => {
     const connect = vi.spyOn(Pool.prototype, "connect");
     try {
-      const config = { databaseUrl: writerUrl.href, maxValidityMs: 86_400_000 };
+      const config = { databaseUrl: writerUrl.href };
       expect(JSON.stringify(describeConfig({ connectors: [], identityProvisioning: config }))).not.toContain(
         writerUrl.href,
       );
@@ -83,7 +87,7 @@ describe("declarative enrollment writer", () => {
   it("reads a secret() writer URL when the writer is first used, never at config load", async () => {
     const values = new Map<string, string>();
     const get = vi.fn<(name: string) => Promise<string | undefined>>(async (name) => values.get(name));
-    const config = { databaseUrl: secret("IDENTITY_WRITER_URL"), maxValidityMs: 86_400_000 };
+    const config = { databaseUrl: secret("IDENTITY_WRITER_URL") };
     expect(() => describeConfig({ connectors: [], identityProvisioning: config })).not.toThrow();
     const configured = configuredIdentityProvisioning(config, { get });
     expect(configured.secret).toBe("IDENTITY_WRITER_URL");
@@ -105,7 +109,7 @@ describe("declarative enrollment writer", () => {
   });
 
   it("refuses a misconfigured writer binding for good and retries an unreachable store", async () => {
-    const config = { databaseUrl: secret("IDENTITY_WRITER_URL"), maxValidityMs: 86_400_000 };
+    const config = { databaseUrl: secret("IDENTITY_WRITER_URL") };
     for (const [code, expected] of [
       ["invalid_configuration", { code: "invalid", retryable: false }],
       ["unavailable", { code: "unavailable", retryable: true }],
@@ -119,10 +123,7 @@ describe("declarative enrollment writer", () => {
   });
 
   it("uses a restricted writer, denies privilege drift and closes its own pool", async () => {
-    const configured = configuredIdentityProvisioning(
-      { databaseUrl: writerUrl.href, maxValidityMs: 86_400_000 },
-      memorySecrets(),
-    );
+    const configured = configuredIdentityProvisioning({ databaseUrl: writerUrl.href }, memorySecrets());
     const input = enrollment();
     try {
       await configured.store!.enroll(input);
@@ -144,7 +145,7 @@ describe("declarative enrollment writer", () => {
   });
 
   it("rejects an administrator writer and leaves caller-supplied adapters owned by the caller", async () => {
-    const admin = configuredIdentityProvisioning({ databaseUrl, maxValidityMs: 86_400_000 }, memorySecrets());
+    const admin = configuredIdentityProvisioning({ databaseUrl }, memorySecrets());
     try {
       await expect(admin.store!.enroll(enrollment())).rejects.toMatchObject({ code: "invalid" });
     } finally {
@@ -177,27 +178,51 @@ describe("transactional enrollment authority", () => {
     expect(await db.select().from(identityDeployments).where(eq(identityDeployments.id, other.deployment))).toEqual([]);
   });
 
-  it("rotates, bounds overlap, and never restores retired access on retry", async () => {
-    const old = enrollment();
-    const next = { ...old, generation: 2, hash: createDeploymentCredential().hash };
+  it("exchanges a generation with no expiry, overlaps a rotation, and refuses a retired one at once", async () => {
+    const broker = identityBroker({
+      enrollments: reader,
+      issue: async () => ({ accessToken: "synthetic-access-token", expiresAt: Date.now() + 600_000 }),
+      audit: async () => {},
+    });
+    const exchange = async (credential: string) =>
+      (
+        await broker(
+          new Request("https://identity.test/token", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${credential}` },
+          }),
+        )
+      ).status;
+    const first = createDeploymentCredential(),
+      second = createDeploymentCredential();
+    const old = { ...enrollment(), hash: first.hash };
+    const next = { ...old, generation: 2, hash: second.hash };
     await provision.enroll(old);
+    const db = await pool.db();
+    const validUntil = async (hash: string) =>
+      (
+        await db
+          .select({ validUntil: identityCredentials.validUntil })
+          .from(identityCredentials)
+          .where(eq(identityCredentials.hash, hash))
+      )[0]!.validUntil;
+    expect(await validUntil(old.hash)).toBeNull();
+    expect(await exchange(first.credential)).toBe(200);
+    // A deploy's rollout: both generations exchange until the old one is retired.
     await provision.enroll(next);
-    expect(await reader.active(old.hash)).toBeDefined();
-    expect(await reader.active(next.hash)).toBeDefined();
+    expect(await exchange(first.credential)).toBe(200);
+    expect(await exchange(second.credential)).toBe(200);
     const overlap = new Date(Date.now() + 60_000).toISOString();
     await provision.retire({ ...old, validUntil: overlap });
-    await provision.retire(old); // Later deadline cannot extend access.
-    const db = await pool.db();
-    const [retired] = await db
-      .select({ validUntil: identityCredentials.validUntil })
-      .from(identityCredentials)
-      .where(eq(identityCredentials.hash, old.hash));
-    expect(retired!.validUntil.toISOString()).toBe(overlap);
+    await provision.retire({ ...old, validUntil: new Date(Date.now() + 3_600_000).toISOString() }); // Never extends.
+    expect((await validUntil(old.hash))!.toISOString()).toBe(overlap);
+    expect(await exchange(first.credential)).toBe(200);
     await expect(provision.enroll(old)).rejects.toMatchObject({ code: "conflict" });
     await provision.retire({ ...old, validUntil: new Date(0).toISOString() });
-    expect(await reader.active(old.hash)).toBeUndefined();
-    expect(await reader.active(next.hash)).toBeDefined();
+    expect(await exchange(first.credential)).toBe(401);
+    expect(await exchange(second.credential)).toBe(200);
     await expect(provision.enroll({ ...next, generation: 1 })).rejects.toMatchObject({ code: "conflict" });
+    expect(await validUntil(next.hash)).toBeNull();
   });
 
   it("serializes revocation with new generations and keeps revocation terminal", async () => {
@@ -212,29 +237,37 @@ describe("transactional enrollment authority", () => {
     await expect(provision.enroll({ ...next, generation: 3 })).rejects.toMatchObject({ code: "conflict" });
   });
 
-  it("refuses wrong-owner mutations and invalid validity without creating a mapping", async () => {
+  it("refuses wrong-owner mutations and an invalid retirement deadline", async () => {
     const input = enrollment();
     await provision.enroll(input);
+    const retirement = { ...input, validUntil: new Date(0).toISOString() };
     await expect(provision.revoke({ ...input, company: "company-b" })).rejects.toMatchObject({ code: "conflict" });
-    await expect(provision.retire({ ...input, environment: "preview" })).rejects.toMatchObject({ code: "conflict" });
+    await expect(provision.retire({ ...retirement, environment: "preview" })).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await expect(provision.retire({ ...retirement, validUntil: "infinity" })).rejects.toMatchObject({
+      code: "invalid",
+    });
     expect(await reader.active(input.hash)).toBeDefined();
-    for (const validUntil of [
-      new Date(0).toISOString(),
-      "infinity",
-      new Date(Date.now() + 2 * 86_400_000).toISOString(),
-    ]) {
-      const invalid = { ...enrollment(), validUntil };
-      await expect(provision.enroll(invalid)).rejects.toMatchObject({ code: "invalid" });
+  });
+
+  it("refuses for good, not retried, a row the installed schema refuses", async () => {
+    // As an enrollment database installed when every credential needed an end refuses one without.
+    const db = await pool.db();
+    await db.execute(
+      sql`ALTER TABLE sanoma_identity.credentials ADD CONSTRAINT needs_end CHECK (valid_until IS NOT NULL) NOT VALID`,
+    );
+    try {
+      await expect(provision.enroll(enrollment())).rejects.toMatchObject({ code: "invalid", retryable: false });
+    } finally {
+      await db.execute(sql`ALTER TABLE sanoma_identity.credentials DROP CONSTRAINT needs_end`);
     }
   });
 
   it("sanitizes database failures", async () => {
-    const broken = postgresIdentityProvisioning(
-      async () => {
-        throw new Error("synthetic-database-password");
-      },
-      { maxValidityMs: 1000 },
-    );
+    const broken = postgresIdentityProvisioning(async () => {
+      throw new Error("synthetic-database-password");
+    });
     await expect(broken.enroll(enrollment())).rejects.toMatchObject({
       message: "Identity provisioning: unavailable",
       retryable: true,
@@ -253,7 +286,7 @@ describe("transactional enrollment authority", () => {
       await db.execute(sql`GRANT USAGE ON SCHEMA sanoma_identity TO ${role}`);
       await db.execute(sql`GRANT SELECT ON ALL TABLES IN SCHEMA sanoma_identity TO ${role}`);
       const readOnly = postgresIdentityEnrollments(async () => databaseOn(restricted));
-      const forbidden = postgresIdentityProvisioning(async () => databaseOn(restricted), { maxValidityMs: 86_400_000 });
+      const forbidden = postgresIdentityProvisioning(async () => databaseOn(restricted));
       expect(await readOnly.active(input.hash)).toMatchObject({ deployment: input.deployment });
       for (const write of [
         () => forbidden.enroll({ ...input, generation: 2, hash: createDeploymentCredential().hash }),
@@ -361,7 +394,6 @@ const enroll = defineWorkflow({
     company: z.string(),
     store: z.string(),
     generation: z.number(),
-    validUntil: z.string(),
   }),
   uses: [sanoma.identity.enroll],
   run: async (ctx, input) =>
@@ -420,7 +452,6 @@ when { context.input.company == "company-b" };
       company: "company-a",
       store: "COMPANY_A_BOOTSTRAP",
       generation: 1,
-      validUntil: new Date(Date.now() + 3_600_000).toISOString(),
     };
     const run = await app.client.start(enroll.name, input, { startedBy: "ada" });
     expect(await app.client.result(run)).toEqual({ deployment: input.deployment, generation: 1, store: input.store });
@@ -474,7 +505,7 @@ describe("runtime-owned enrollment connection", () => {
       connectors: [],
       workflows: [enroll, revoke],
       secrets: { store },
-      identityProvisioning: { databaseUrl: writerUrl.href, maxValidityMs: 86_400_000 },
+      identityProvisioning: { databaseUrl: writerUrl.href },
     },
     { databaseUrl: testDatabaseUrl("identity_config_runtime") },
   );
@@ -484,7 +515,6 @@ describe("runtime-owned enrollment connection", () => {
       company: "company-a",
       store: "CONFIGURED_BOOTSTRAP",
       generation: 1,
-      validUntil: new Date(Date.now() + 3_600_000).toISOString(),
     };
     await app.client.result(await app.client.start(enroll, input, { startedBy: "ada" }));
     const bearer = (await store.read({ namespace: "default", path: input.store }))!.value;
@@ -515,7 +545,6 @@ const writerInput = () => ({
   company: "company-a",
   store: `SECRET_WRITER_BOOTSTRAP_${randomUUID().replaceAll("-", "").toUpperCase()}`,
   generation: 1,
-  validUntil: new Date(Date.now() + 3_600_000).toISOString(),
 });
 
 describe("an enrollment writer entered as a secret", () => {
@@ -525,7 +554,7 @@ describe("an enrollment writer entered as a secret", () => {
       connectors: [],
       workflows: [enroll],
       secrets: { store },
-      identityProvisioning: { databaseUrl: secret("IDENTITY_WRITER_URL"), maxValidityMs: 86_400_000 },
+      identityProvisioning: { databaseUrl: secret("IDENTITY_WRITER_URL") },
     },
     { databaseUrl: testDatabaseUrl("identity_config_secret") },
   );
