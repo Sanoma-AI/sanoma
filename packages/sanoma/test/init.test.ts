@@ -363,11 +363,46 @@ describe("sanoma in an empty directory", () => {
     expect(readdirSync(dir)).toEqual([]);
 
     writeFileSync(join(dir, "notes.txt"), "mine\n");
+    const elsewhere = await runCli(dir, ["check", "--name", "Acme"], env);
+    expect(elsewhere.code).toBe(2);
+    expect(elsewhere.stderr).toContain("--name, --you and --email are sanoma init's");
+
     const full = await runCli(dir, ["init"], env);
     expect(full.code).toBe(2);
     expect(full.stderr).toMatch(/sanoma init starts a company in an empty directory: .+ holds files already/);
   });
 });
+
+/** A workflow that sends, beside the template's, for its policy to hold. */
+const WELCOME = `import { resend } from "@sanoma-ai/connector-resend";
+import { defineWorkflow, z } from "sanoma";
+
+export default defineWorkflow({
+  name: "welcome",
+  title: "Welcome a lead",
+  trigger: "manual",
+  input: z.object({ to: z.string() }),
+  uses: [resend.emails.send],
+  run: async (ctx, { to }) =>
+    ctx.resend.emails.send({ from: "Acme <hi@acme.test>", to, subject: "Hello", text: "Hello" }, { name: "Send it" }),
+});
+`;
+
+const WELCOME_FEATURE = `Feature: Welcome a lead
+  Scenario: The founder approves
+    When welcome runs with
+      | to | sam@acme.test |
+    And "Review before it goes out" is approved by ada
+    Then resend.emails.send was held for group "admin"
+    And the run succeeds
+
+  Scenario: The founder sends without a review
+    Given ada is acting
+    When welcome runs with
+      | to | sam@acme.test |
+    Then resend.emails.send was called
+    And the run succeeds
+`;
 
 describe("the template", () => {
   beforeAll(ensureBuilt, 600_000);
@@ -380,6 +415,10 @@ describe("the template", () => {
     // The template's connectors: the chat's model, the sign-in code's sender, the repository's and Sanoma Cloud's.
     for (const name of ["anthropic", "resend", "github", "sanoma-cloud"]) linkConnector(dir, name);
     rmSync(started, { recursive: true, force: true });
+    // A workflow that sends, which the template's policy holds for admin unless someone in admin asked.
+    writeFileSync(join(dir, "workflows/welcome.ts"), WELCOME);
+    mkdirSync(join(dir, "scenarios/welcome"));
+    writeFileSync(join(dir, "scenarios/welcome/welcome.feature"), WELCOME_FEATURE);
     const env = {
       SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-template"),
       ANTHROPIC_API_KEY: "",
@@ -397,6 +436,8 @@ describe("the template", () => {
     expect(existsSync(join(dir, "sites"))).toBe(false);
     // The policy holds, so the scenarios ran: each passed under it.
     expect(logged).toContain("passed scenarios/record-lead/record.feature › A lead is recorded");
+    expect(logged).toContain("passed scenarios/welcome/welcome.feature › The founder approves");
+    expect(logged).toContain("passed scenarios/welcome/welcome.feature › The founder sends without a review");
     expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("recordLead: WorkflowFn<");
     const current = await runCli(dir, ["env", "--check"], env);
     expect(current.code, current.stderr).toBe(0);

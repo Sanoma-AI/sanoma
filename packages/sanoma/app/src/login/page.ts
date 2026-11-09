@@ -17,7 +17,7 @@ export interface Company {
 }
 
 /**
- * The company an app's name (`package.json`'s, `resolved.appName`) is, for people to read: its
+ * The company a name (the config's, else `package.json`'s: `resolved.name`) is, for people to read: its
  * scope dropped, `-` and `_` as spaces, each word capitalised (`sanoma-ops` is "Sanoma Ops", "SO").
  */
 export function companyOf(appName: string): Company {

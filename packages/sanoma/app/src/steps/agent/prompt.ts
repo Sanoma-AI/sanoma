@@ -42,8 +42,8 @@ How you work:
 ${COMMON_RULES}`;
 
 /** Who the agent acts for, in which company and chat. */
-const actingFor = (appName: string, principal: Principal, chat: Chat) =>
-  `The company: ${appName}. You act for ${principal.id}. This chat is ${chat.id}.`;
+const actingFor = (company: string, principal: Principal, chat: Chat) =>
+  `The company: ${company}. You act for ${principal.id}. This chat is ${chat.id}.`;
 
 /**
  * A coding agent's instructions for `principal`'s turn in `chat`: the rules, who it acts for, and
@@ -55,7 +55,7 @@ export function harnessInstructions(
   chat: Chat,
   history: ChatMessage[],
 ): string {
-  const sections = [HARNESS_RULES, actingFor(resolved.appName, principal, chat)];
+  const sections = [HARNESS_RULES, actingFor(resolved.name, principal, chat)];
   // Whole messages, the latest first, until the limit (the latest one always).
   const said: string[] = [];
   let size = 0;
@@ -80,7 +80,7 @@ function spoken(message: ChatMessage): string {
 /** The loop's instructions for `principal`'s turn in `chat`. */
 export async function instructions(step: AppStepContext, principal: Principal, chat: Chat): Promise<string> {
   const { config, resolved } = step;
-  const sections = [RULES, actingFor(resolved.appName, principal, chat)];
+  const sections = [RULES, actingFor(resolved.name, principal, chat)];
   const [guide, drafts] = await Promise.all([companyGuide(step), openDrafts(step, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
   // A vendor's title is its first connector's, as the app's pages name it.

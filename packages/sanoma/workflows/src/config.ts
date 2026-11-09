@@ -112,9 +112,9 @@ import { checkDatabaseOps } from "./database.ts";
  */
 export interface SanomaConfig {
   /**
-   * The company's name, as the app shows it ("Maple Street Studio"): its `appName`, which also
-   * scopes its runs in the database, so a new name leaves the runs in progress under the old one
-   * behind, as a new `package.json` name does. Default: `<root>/package.json`'s `name`.
+   * The company's name, as people read it ("Maple Street Studio"): the app, the agent and a
+   * sign-in code's mail name the company by it. Default: the `appName`. Only shown, so it may
+   * change any time; the runs are scoped by `appName`.
    */
   name?: string;
   /**
@@ -161,7 +161,7 @@ export interface SanomaConfig {
   drivers?: never;
   /** @deprecated Gone: each connector carries the maker of its fake (`withSetup`, from its package). Leave it out. */
   fakes?: never;
-  /** @deprecated Gone: the app's name is `name`, else the `name` in `<root>/package.json`, else "sanoma". Leave it out. */
+  /** @deprecated Gone: the app's name is the `name` in `<root>/package.json`, else "sanoma". Leave it out. */
   appName?: never;
   /** @deprecated Gone: the scenarios are `<root>/scenarios/`. Leave it out. */
   scenarios?: never;
@@ -204,11 +204,12 @@ export interface ResolvedConfig {
   connectionStore: LazyDb;
   identityProvisioning: ReturnType<typeof configuredIdentityProvisioning>;
   /**
-   * Scopes workflows, queues and versions in the system database, and names the company where
-   * people read it: the config's `name`, else the `name` of `<root>/package.json` when it names
-   * one, else "sanoma".
+   * Scopes workflows, queues and versions in the system database: the `name` of
+   * `<root>/package.json` when it names one, else "sanoma".
    */
   appName: string;
+  /** The company's name as people read it: the config's `name`, else `appName`. */
+  name: string;
   databaseUrl: string;
   /** The DBOS application version: `<appName>@<DBOS__APPVERSION, or a hash of the workflows>`. */
   version: string;
@@ -423,7 +424,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const collections = collectionsOf(config);
   const ledger = ledgerOf(config);
   const root = rootOf(config);
-  const appName = config.name?.trim() || appNameAt(root);
+  const appName = appNameAt(root);
+  const name = config.name?.trim() || appName;
   const scenarios = scenariosAt(root);
   // With the built-in `sanoma.wakeup` when they declare a host type.
   const running = withBuiltIns(config.connectors);
@@ -563,8 +565,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: a sheet's rows saved into a collection, when the config has one.
   if (collections.size) names.set(IMPORT_WORKFLOW, importWorkflow(collections));
   // Built-in: sending a sign-in code, when the config names how.
-  const login = config.login && checkLogin(config.login, ops, drivers, appName);
-  if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, appName));
+  const login = config.login && checkLogin(config.login, ops, drivers, name);
+  if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, name));
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   const bundled = rootSnapshot(root);
   return {
@@ -573,6 +575,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     connectionStore,
     identityProvisioning,
     appName,
+    name,
     databaseUrl,
     // The built-in's code and operations are part of the app's version, like the config's own. A
     // bundle's code is not the source's: it carries the hashes of the root it was read from.

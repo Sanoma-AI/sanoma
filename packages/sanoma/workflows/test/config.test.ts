@@ -264,6 +264,13 @@ describe("resolveConfig's conventions", () => {
     expect(resolveConfig(config({ file: join(named, "sanoma.config.ts") })).appName).toBe("@acme/ops");
   });
 
+  it("names the company for people by the config's name, the runs still by the app's", () => {
+    const named = tree("display", { "package.json": JSON.stringify({ name: "maple" }) });
+    const resolved = resolveConfig(config({ root: named, name: " Maple Street Studio " }));
+    expect(resolved).toMatchObject({ appName: "maple", name: "Maple Street Studio", queueName: "sanoma:maple" });
+    expect(resolveConfig(config({ root: named })).name).toBe("maple");
+  });
+
   it("names the app sanoma when the root's package.json names none, never taking a name from above", () => {
     expect(resolveConfig(config({ root: tree("nameless", { "package.json": "{}" }) })).appName).toBe("sanoma");
     // A directory below a named one, with no package.json or one naming nothing: the parent's name does not leak in.

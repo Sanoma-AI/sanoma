@@ -300,7 +300,7 @@ export async function goLiveChoices(app: AppContext, actor?: Principal): Promise
     missing: missingTypes(app),
     connect: toConnect(chosen),
     name:
-      app.snapshot.description.appName
+      app.snapshot.description.name
         .toLowerCase()
         .replaceAll(/[^a-z0-9]+/g, "-")
         .replaceAll(/^-+|-+$/g, "")

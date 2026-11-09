@@ -92,6 +92,11 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
   const [command, ...rest] = positionals;
+  if (command !== "init" && (values.name ?? values.you ?? values.email) !== undefined) {
+    throw new UsageError(
+      "--name, --you and --email are sanoma init's: sanoma init [--name <name>] [--you <name>] [--email <email>]",
+    );
+  }
   switch (command) {
     case undefined: {
       if (!existsSync(join(process.cwd(), "sanoma.config.ts")) && (await initCompany(values))) {
@@ -279,14 +284,14 @@ async function keep(
     await postgres?.stop().catch(() => {});
     throw err;
   }
-  const running = `${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}`;
+  const running = `${resolved.name} running ${[...resolved.workflows.keys()].join(", ")}`;
   if (started.url === undefined) {
     console.log(`${running}; ctrl-c to stop`);
   } else {
     console.log(running);
     // Each public site at its own host, before the line that says how to stop.
     for (const [name, url] of Object.entries(started.sites ?? {})) console.log(`${name}: ${url}`);
-    console.log(`${resolved.appName} at ${started.url}; ctrl-c to stop`);
+    console.log(`${resolved.name} at ${started.url}; ctrl-c to stop`);
     emit({ event: "ready", url: started.url, sites: started.sites ?? {} });
   }
   // Postgres last, once the worker and the app have closed their connections.
