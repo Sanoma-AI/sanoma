@@ -214,13 +214,13 @@ describe("sanoma worker on a host that starts it again", () => {
       vi.stubEnv("SANOMA_APP_HOST", "0.0.0.0");
       onTestFinished(() => void vi.unstubAllEnvs());
       const lines: string[] = [];
-      const exit = vi.fn<() => void>();
       const worker = await runWorker(
         testWorkerConfig({ workflows: [], connectors: [], root: company, ledger: memoryLedger() }, databaseUrl),
         (line) => lines.push(line),
-        exit,
       );
       onTestFinished(() => worker.stop());
+      let exited = false;
+      void worker.exited?.then(() => (exited = true));
       const at = lines.find((line) => line.startsWith("the worker's port at "))!.slice("the worker's port at ".length);
       const before = await stoppedAt();
       const bundle = await fetch(`${at}/__sanoma/app-bundle?revision=${R1}`, {
@@ -233,11 +233,11 @@ describe("sanoma worker on a host that starts it again", () => {
         interval: 200,
       });
       await new Promise((resolve) => setTimeout(resolve, 500));
-      expect(exit).not.toHaveBeenCalled();
+      expect(exited).toBe(false);
       // The build ends: a fresh worker starts, and once it stops itself the process is done.
       const first = await stoppedAt();
       writeFileSync(release, "");
-      await vi.waitFor(() => expect(exit).toHaveBeenCalledOnce(), { timeout: 60_000, interval: 200 });
+      await vi.waitFor(() => expect(exited).toBe(true), { timeout: 60_000, interval: 200 });
       expect(await stoppedAt()).toBeGreaterThan(first);
     },
   );

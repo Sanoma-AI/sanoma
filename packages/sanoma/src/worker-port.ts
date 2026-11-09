@@ -167,16 +167,15 @@ export function listenWorkerPort(root: string, { host, port, onWake, ...bundle }
  *
  * On a host that starts the process again on a wake (its own wake route in the environment,
  * `envWakeup`), being done means ending: once the worker stopped itself and no app bundle is
- * building, `exit` is called, as a signal's stop, and the container ends with the process. A wake
- * before that wins (the supervisor starts a fresh worker); one after it finds the port closed, so
- * the host starts a fresh process. A build that ends while the worker is stopped starts a fresh
+ * building, `exited` settles, `sanoma worker` stops as on a signal, and the container ends with the
+ * process. A wake before that wins (the supervisor starts a fresh worker); one after it finds the
+ * port closed, so the host starts a fresh process. A build that ends while the worker is stopped starts a fresh
  * one, which ends the process on its own check, once the deploy that asked had time to take it.
  */
 export async function runWorker(
   config: SanomaConfig,
   log: (line: string) => void,
-  exit: () => void,
-): Promise<Stoppable> {
+): Promise<Stoppable & { exited?: Promise<void> }> {
   const port = process.env.PORT;
   if (!port) {
     const worker = await startWorker(config, workerOptions(config));
@@ -185,9 +184,11 @@ export async function runWorker(
   const host = process.env.SANOMA_APP_HOST || "127.0.0.1";
   const exits = envWakeup(process.env) !== undefined;
   let building = false;
-  // Synchronous up to the port's close (`exit` stops it first), so no wake is answered after this.
+  // Settled before any later request is handled, and the port closes first on the stop that
+  // follows, so no wake is answered after this.
+  const exited = Promise.withResolvers<void>();
   const done = () => {
-    if (exits && supervised.stopped && !building) exit();
+    if (exits && supervised.stopped && !building) exited.resolve();
   };
   const supervised = await superviseWorker(config, {
     ...workerOptions(config),
@@ -209,6 +210,7 @@ export async function runWorker(
     });
     log(`the worker's port at ${listening.url}`);
     return {
+      ...(exits && { exited: exited.promise }),
       async stop() {
         try {
           await listening.stop();

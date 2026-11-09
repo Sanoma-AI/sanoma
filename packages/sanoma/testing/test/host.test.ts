@@ -111,7 +111,7 @@ describe.each<{ title: string; lifetime: HostLifetime; database: string; hostnam
     return (done as { state: Record<string, unknown> }).state;
   }
 
-  it("passes every check against a host in this process", { timeout: 300_000 }, async () => {
+  it("passes every check against a host in this process", { timeout: 120_000 }, async () => {
     const results = await checkHost({
       type: host.type,
       apply,

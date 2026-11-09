@@ -219,8 +219,10 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
     if (run?.status !== "finished") throw new Error(`run ${runId} ended ${run?.status}: ${run?.error}`);
   };
   const stops = spec.capabilities.lifetime !== "long-lived";
-  // A request, as a wakeup sends it, until the host answers 204 (one starting may answer 503 first).
+  // A request, as a wakeup sends it, until the host answers 204 (one starting may answer 503
+  // first); none to a host that never stops.
   const wake = async () => {
+    if (!stops) return;
     const at = new URL("/wake", wakeUrlOf(spec.outputs(applied)));
     const answer = () => fetch(at).then((res) => res.status, errorMessage);
     await waitFor(answer, (status) => status === 204, timeoutMs);
@@ -228,7 +230,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   // A run started as the app starts one: on a host that stops, a wake after the write.
   const start = async (workflow: string, input: object) => {
     const runId = await client.start(workflow, input, { startedBy });
-    if (stops) await wake();
+    await wake();
     return runId;
   };
   // What a callback runs on the host's own worker (its drift run), on a host that stops: woken
@@ -264,7 +266,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
     await finish(await start("host-check-drain", {}));
   });
   await check("the next store read sees a credential change", () =>
-    credentialHeard(client, credential, startedBy, timeoutMs, stops ? wake : undefined),
+    credentialHeard(client, credential, startedBy, timeoutMs, wake),
   );
   await check("a sleep survives a restart", async () => {
     const runId = await start("host-check-sleep", { seconds: 2 });
@@ -743,8 +745,7 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string, options
   return async ({ port }) => {
     const exits = envWakeup(process.env) !== undefined;
     let ending: Promise<void> | undefined;
-    let ended!: () => void;
-    const exited = new Promise<void>((resolve) => (ended = resolve));
+    const exited = Promise.withResolvers<void>();
     // The server closed at once, before the worker is stopped.
     const end = () =>
       (ending ??= (async () => {
@@ -758,7 +759,7 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string, options
       ...options,
       onStopped(stopped) {
         options.onStopped?.(stopped);
-        if (exits && worker.stopped) void end().then(ended);
+        if (exits && worker.stopped) void end().then(exited.resolve);
       },
     });
     const wakes: Wake[] = [];
@@ -774,7 +775,7 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string, options
       await worker.stop();
       throw err;
     });
-    return { url, wakes, ...(exits && { exited }), stop: end };
+    return { url, wakes, ...(exits && { exited: exited.promise }), stop: end };
   };
 }
 

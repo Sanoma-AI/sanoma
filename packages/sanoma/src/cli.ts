@@ -102,7 +102,7 @@ export async function main(argv: string[]): Promise<number> {
       return serveCommand(values.dev ?? false);
     case "worker": {
       const { runWorker } = await import("./worker-port.ts");
-      return keep(await load({ postgres: "find" }), (config, _resolved, exit) => runWorker(config, log, exit));
+      return keep(await load({ postgres: "find" }), (config) => runWorker(config, log));
     }
     case "app": {
       const { runApp } = await import("./serve.ts");
@@ -230,7 +230,7 @@ async function withPostgres(
 
 /**
  * Starts what `start` starts over the loaded config, prints what runs (and where, when it
- * listens), and stops it on SIGINT or SIGTERM, or once it calls `exit` (done), then the Postgres `load` started, then exits 0. The worker names the vendors not
+ * listens), and stops it on SIGINT or SIGTERM, or once what it started has `exited` (done), then the Postgres `load` started, then exits 0. The worker names the vendors not
  * configured yet itself, in one line.
  */
 async function keep(
@@ -238,15 +238,11 @@ async function keep(
   start: (
     config: SanomaConfig,
     resolved: Loaded["resolved"],
-    exit: () => void,
-  ) => Promise<{ stop(): Promise<void>; url?: string; sites?: Record<string, string> }>,
+  ) => Promise<{ stop(): Promise<void>; exited?: Promise<void>; url?: string; sites?: Record<string, string> }>,
 ): Promise<never> {
   let started: Awaited<ReturnType<typeof start>>;
-  // What `start` calls when what it runs is done (`runWorker`): the signal's stop, once installed.
-  let stopOnce: (() => void) | undefined;
-  let exitAsked = false;
   try {
-    started = await start(config, resolved, () => (stopOnce ? stopOnce() : void (exitAsked = true)));
+    started = await start(config, resolved);
   } catch (err) {
     await postgres?.stop().catch(() => {});
     throw err;
@@ -262,8 +258,9 @@ async function keep(
     emit({ event: "ready", url: started.url, sites: started.sites ?? {} });
   }
   // Postgres last, once the worker and the app have closed their connections.
-  stopOnce = onSignal(() => started.stop().finally(() => postgres?.stop()));
-  if (exitAsked) stopOnce();
+  const stopOnce = onSignal(() => started.stop().finally(() => postgres?.stop()));
+  // Done on its own (`runWorker`): stopped as a signal stops it.
+  void started.exited?.then(stopOnce);
   return new Promise(() => {});
 }
 

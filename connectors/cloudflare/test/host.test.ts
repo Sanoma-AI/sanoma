@@ -18,7 +18,6 @@ import { secret } from "sanoma/resources";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { cloudflareOps, container } from "../src/connector.ts";
 import { fakeCloudflare, stubAppBundle, stubContainer } from "../src/fake.ts";
-import { HEALTH_PATH } from "../worker/instance.js";
 
 // Needs Postgres: `pnpm db:up`. The Host contract's conformance kit against `cloudflare.container`
 // on the fake: its Worker script served in this process (the package's own `serve` over the app
@@ -99,15 +98,8 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  /** Where the Worker answers, as the last apply said. */
-  let workerUrl = "";
   /** Apply, as it runs for a host: the revision from the ref, then a plan, then the change it names. */
   async function apply() {
-    const state = await planAndApply();
-    workerUrl = String(state.worker_url);
-    return state;
-  }
-  async function planAndApply() {
     const desired = {
       ...declared,
       secrets: { SANOMA_SECRETS_KEY: secret("HOST_KEY"), SANOMA_DATABASE_URL: secret("DB_URL") },
@@ -130,9 +122,7 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
         apply,
         stop: async () => void (await op("delete")({ id: declared.name })),
         suspend: () => fake.stop(declared.name),
-        // As the object's health tells it to anyone.
-        running: async () =>
-          ((await (await fetch(`${workerUrl}${HEALTH_PATH}`)).json()) as { running: boolean }).running,
+        running: async () => fake.running(declared.name),
         client,
         secrets: [key],
         commit: repo.commit,

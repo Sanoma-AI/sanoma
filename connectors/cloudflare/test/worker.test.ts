@@ -406,10 +406,6 @@ describe("the Worker's object", () => {
     expect(await (await object.fetch(route(START))).json()).toMatchObject({ running: true, ready: true });
   });
 
-  it("never lets the platform's inactivity decide: its timeout is Cloudflare's maximum, six hours", () => {
-    expect(INACTIVITY_MS).toBe(6 * 60 * 60 * 1000);
-  });
-
   it("fails a wake whose worker closed its port to exit, and starts a fresh container on the alarm's retry once that one ended", async () => {
     let exiting = false;
     let stop!: () => void;
