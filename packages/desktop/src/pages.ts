@@ -35,14 +35,24 @@ export interface CompanyState {
 export const CLONING = "Cloning";
 export const INSTALLING = "Installing packages";
 export const STARTING = "Starting the company";
+/** What a new company's init reports before it installs (its `stage` events), and once its database answers. */
+export const FROM_TEMPLATE = "Copying the starter";
+export const ADDING_YOU = "Adding the founder";
+export const OPENING = "Opening the app";
 
 const INSTALL_AND_START = [
   { label: "Installing what it needs", reportedBy: INSTALLING },
   { label: "Starting the company", reportedBy: STARTING },
 ];
-const STEPS: Record<Kind, { label: string; reportedBy?: string }[]> = {
+const STEPS: Record<Kind, { label: string; reportedBy: string }[]> = {
   open: INSTALL_AND_START,
-  new: [{ label: "Setting up the company" }, { label: "Starting it", reportedBy: STARTING }],
+  new: [
+    { label: "Making the company from the starter", reportedBy: FROM_TEMPLATE },
+    { label: "Adding you as its admin", reportedBy: ADDING_YOU },
+    { label: "Installing what it needs", reportedBy: INSTALLING },
+    { label: "Starting its database on this computer", reportedBy: STARTING },
+    { label: "Opening it", reportedBy: OPENING },
+  ],
   clone: [{ label: "Copying from GitHub", reportedBy: CLONING }, ...INSTALL_AND_START],
 };
 
@@ -53,8 +63,10 @@ export interface Step {
 
 /**
  * The start's steps, all of them from the beginning: the one the session reported last is under
- * way, and those before it are done (a copy from GitHub that is there already skips its first).
- * Done all through once only Got it holds the app back.
+ * way, and those before it are done (a copy from GitHub that is there already skips its first, a
+ * new company tried again in a folder that got that far its first two). A report no step has (a
+ * launcher without `stage` events says nothing until its database answers) moves nothing. Done
+ * all through once only Got it holds the app back.
  */
 export function stepsOf({
   kind,
@@ -63,9 +75,10 @@ export function stepsOf({
   warning,
 }: Pick<CompanyState, "kind" | "phase" | "progress" | "warning">): Step[] {
   const steps = STEPS[kind];
+  const reported = progress.findLast((said) => steps.some((step) => step.reportedBy === said));
   const now = Math.max(
     0,
-    steps.findIndex((step) => step.reportedBy === progress.at(-1)),
+    steps.findIndex((step) => step.reportedBy === reported),
   );
   const waiting = phase === "running" && warning;
   return steps.map(({ label }, index) => ({

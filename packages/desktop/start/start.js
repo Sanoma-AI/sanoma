@@ -1,6 +1,7 @@
 // The start screen, what the window shows with no company shown: the choices (each saying what it
-// is for while there are no companies), the recent companies (marked when they run), and the forms
-// for a new company, a copy from GitHub and who commits. A company starts in the same window, on
+// is for while there are no companies), the recent companies (whether each is Local or Live, and
+// runs here), and the forms for a new company (its name and who starts it), a copy from GitHub and
+// who commits. A company starts in the same window, on
 // its own page (company.js), then its app.
 // `window.sanoma` is the preload's bridge (src/preload.ts).
 // Imported, not named in the HTML: the dev server serves a file outside start/ only to an import.
@@ -43,7 +44,11 @@ function renderAsk(ask) {
     problem.hidden = !problem.textContent;
   }
   if (kind && kind !== shownAsk) {
-    if (kind === "new") $("new-name").value = ask.name;
+    if (kind === "new") {
+      $("new-name").value = ask.name;
+      $("new-you").value = ask.you;
+      $("new-email").value = ask.email;
+    }
     if (kind === "clone") $("clone-url").value = ask.url ?? "";
     if (kind === "identity") {
       $("identity-name").value = ask.name;
@@ -93,25 +98,39 @@ function render(state) {
   );
 
   $("recent").hidden = !returning;
-  $("recent").replaceChildren(
-    ...state.recent.map((c) =>
-      el(
-        "li",
-        {},
-        el(
-          "button",
-          { className: "row", onclick: () => bridge.open(c.path) },
-          el(
-            "span",
-            { className: "row-text" },
-            el("span", { className: "row-name", textContent: c.name }),
-            el("small", { textContent: c.place }),
-          ),
-          ...(c.running ? [el("span", { className: "running" }, el("span", { className: "dot" }), "Running")] : []),
-        ),
-      ),
-    ),
+  $("recent").replaceChildren(...state.recent.map(recentRow));
+}
+
+/**
+ * A recent company: its row opens it, and says whether it is Local or Live in the app's badge
+ * words, and whether it runs here. A live one's address is a link of its own, under the row.
+ */
+function recentRow(c) {
+  const { live } = c;
+  const state = el("span", {
+    className: live ? "pill ok" : "pill off",
+    textContent: live ? "Live · drafting copy" : "Local",
+  });
+  const running = el(
+    "span",
+    { className: "running" },
+    ...(c.running ? [el("span", { className: "dot" }), "Running"] : ["Not running"]),
   );
+  const row = el(
+    "button",
+    { className: "row", onclick: () => bridge.open(c.path) },
+    el(
+      "span",
+      { className: "row-text" },
+      el("span", { className: "row-name", textContent: c.name }),
+      el("small", { textContent: c.place }),
+    ),
+    el("span", { className: "status" }, state, running),
+  );
+  if (!live?.hostname) return el("li", {}, row);
+  const address = `https://${live.hostname}`;
+  const link = el("a", { href: address, target: "_blank", rel: "noreferrer", textContent: live.hostname });
+  return el("li", { className: "live" }, row, el("p", { className: "row-link small" }, "Live at ", link));
 }
 
 $("choose").addEventListener("click", () => bridge.choose());
@@ -121,7 +140,12 @@ $("new-name").addEventListener("input", () => shown?.ask?.kind === "new" && show
 $("new-change").addEventListener("click", () => bridge.changePlace());
 $("new-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  bridge.answer("new", { name: $("new-name").value, parent: shown.ask.parent });
+  bridge.answer("new", {
+    name: $("new-name").value,
+    you: $("new-you").value,
+    email: $("new-email").value,
+    parent: shown.ask.parent,
+  });
 });
 $("clone-form").addEventListener("submit", (event) => {
   event.preventDefault();

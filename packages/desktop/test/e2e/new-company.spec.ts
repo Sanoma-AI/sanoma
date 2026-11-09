@@ -51,7 +51,7 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
   const folder = join(work, "acme");
   const postmasterPid = join(folder, ".sanoma", "postgres", "data", "postmaster.pid");
   const postgresPid = () => Number(readFileSync(postmasterPid, "utf8").split("\n")[0]);
-  // A git with no identity, as a new computer's, so the form asks; the setting goes to this file.
+  // A git with no identity, as a new computer's, so the form's name and email are git's too; the setting goes to this file.
   const gitConfig = join(work, "gitconfig");
   writeFileSync(gitConfig, "");
   const env = {
@@ -98,22 +98,14 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
       `const name = document.getElementById("new-name");
        name.value = "Acme";
        name.dispatchEvent(new Event("input"));
+       document.getElementById("new-you").value = "Ada Lovelace";
+       document.getElementById("new-email").value = "ada@example.com";
        document.getElementById("new-change").click(); true`,
     );
     await expect
       .poll(() => inPage(shell!, "start", `document.getElementById("new-place").textContent`), { timeout: 30_000 })
       .toBe(folder);
     await inPage(shell, "start", `document.getElementById("new-form").requestSubmit(), true`);
-    await expect
-      .poll(() => inPage(shell!, "start", `document.getElementById("identity-form").hidden`), { timeout: 30_000 })
-      .toBe(false);
-    await inPage(
-      shell,
-      "start",
-      `document.getElementById("identity-name").value = "Ada Lovelace";
-       document.getElementById("identity-email").value = "ada@example.com";
-       document.getElementById("identity-form").requestSubmit(); true`,
-    );
 
     await expect
       .poll(
@@ -132,7 +124,7 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
     expect(firstStart).toContain(`"event":"database"`);
     expect(firstStart).toContain(`"how":"created"`);
 
-    // The launcher's init did its part: the commit, under the name given; the install; the Postgres.
+    // The launcher's init did its part: the commit, under the name the form gave; the install; the Postgres.
     expect(gitIn("log", "-1", "--format=%s|%an|%ae")).toBe("Start a Sanoma company|Ada Lovelace|ada@example.com");
     expect(existsSync(join(folder, "node_modules", "sanoma", "package.json"))).toBe(true);
     const first = postgresPid();

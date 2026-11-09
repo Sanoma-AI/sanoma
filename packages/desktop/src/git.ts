@@ -91,7 +91,7 @@ export async function identityOf(cwd: string, env: NodeJS.ProcessEnv, exec: Run 
 
 /** What is wrong with an identity a person typed, in one line; undefined when it will do. */
 export function identityProblem({ name, email }: Identity): string | undefined {
-  if (!name.trim()) return "Type the name your changes are signed with.";
+  if (!name.trim()) return "Type your name: your changes are signed with it.";
   if (!/^[^\s@<>]+@[^\s@<>]+$/.test(email.trim())) return "Type an email address, such as you@example.com.";
   return undefined;
 }

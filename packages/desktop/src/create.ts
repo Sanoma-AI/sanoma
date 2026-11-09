@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isDatabaseEvent } from "./events.ts";
+import { isDatabaseEvent, stageOf } from "./events.ts";
 import type { Company } from "./companies.ts";
 import { gitEnv, gitFailure } from "./git.ts";
-import { launch, launcherEnv, spawnGroup, type Stream } from "./launcher.ts";
-import { CLONING, folderNameOf, STARTING } from "./pages.ts";
+import { type Exit, launch, launcherEnv, spawnGroup, type Stream, USAGE_EXIT } from "./launcher.ts";
+import { ADDING_YOU, CLONING, FROM_TEMPLATE, folderNameOf, INSTALLING, OPENING, STARTING } from "./pages.ts";
 import { isCompanyFolder } from "./places.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
 import { writeShims } from "./shims.ts";
@@ -45,28 +45,40 @@ export function newCompanyTarget(name: string, parent: string): { dir: string } 
   }
 }
 
+/** What the new company form asks: the company's name, and the name and email of whoever starts it. */
+export interface NewCompany {
+  name: string;
+  you: string;
+  email: string;
+}
+
+/** The step each stage of `sanoma init` begins (`stageOf`): its `git` stage is part of adding you. */
+const STAGE_STEPS: Record<string, string> = {
+  template: FROM_TEMPLATE,
+  people: ADDING_YOU,
+  install: INSTALLING,
+  database: STARTING,
+};
+
 /**
- * Starts a company in an empty folder: the launcher's own init (`pnpm dlx sanoma`, sanoma from
- * npm) with the shell's Node and pnpm shims and the environment of a run (`launcherEnv`). It
- * copies the template, commits and installs, then serves the company it started from that
- * company's own `node_modules/sanoma`, so its window opens as an opened company's does. A folder
- * that holds files (an init that got that far, retried) is opened as any other (`startSession`).
- * Its progress: this start, then the launcher's `database` event once the company is set up.
+ * The step a line of a new company's start reports: each stage of `sanoma init` as it begins, and
+ * the app opening once the company's database answers (its `database` stage done, or the
+ * `database` event, which a launcher without stages prints too). Undefined for any other line.
  */
-export function createSession(options: SessionOptions): Session {
-  // Start again, after the person removed the empty folder a failed start left.
-  mkdirSync(options.repo, { recursive: true });
-  if (hasFiles(options.repo)) return startSession(options);
-  const { repo, port, node, pnpm, bin, onLine, onProgress, killAfterMs, pollMs } = options;
-  const env = launcherEnv(options.env, writeShims(bin, node, pnpm), port);
-  onProgress("Starting a new company with sanoma from npm");
+export function stepOf(line: string): string | undefined {
+  const stage = stageOf(line);
+  if (!stage) return isDatabaseEvent(line) ? OPENING : undefined;
+  if (stage.status === "start") return STAGE_STEPS[stage.stage];
+  return stage.stage === "database" ? OPENING : undefined;
+}
+
+/** `pnpm dlx sanoma` with `args` in the company's folder, with the shell's Node and pnpm shims and the environment of a run (`launcherEnv`). */
+function dlxSanoma(options: SessionOptions, args: readonly string[]): Session {
+  const { repo, port, node, pnpm, bin, onLine, killAfterMs, pollMs } = options;
   const launched = launch({
     cwd: repo,
-    env,
-    onLine(stream, line) {
-      onLine(stream, line);
-      if (isDatabaseEvent(line)) onProgress(STARTING);
-    },
+    env: launcherEnv(options.env, writeShims(bin, node, pnpm), port),
+    onLine,
     killAfterMs,
     node,
     cli: pnpm,
@@ -77,12 +89,81 @@ export function createSession(options: SessionOptions): Session {
       "--config.minimumReleaseAgeExclude=@sanoma-ai/*",
       "dlx",
       "sanoma",
+      ...args,
     ],
     port,
     pollMs,
   });
   return { ready: launched.ready, ended: launched.exited, stop: launched.stop };
 }
+
+/**
+ * `first`, then, when it ends on its own without having been ready, the session `next` makes of
+ * how it ended (none: it ends there). Ready when either is; ended when the last one is.
+ */
+function followedBy(first: Session, next: (exit: Exit) => Session | undefined): Session {
+  let stopped = false;
+  const wasReady = first.ready.then(
+    () => true,
+    () => false,
+  );
+  const following = first.ended.then(async (exit) => (!stopped && !(await wasReady) ? next(exit) : undefined));
+  const ready = first.ready.catch(async (err: unknown) => {
+    const session = await following;
+    if (!session) throw err;
+    return session.ready;
+  });
+  ready.catch(() => {});
+  const ended = following.then((session) => session?.ended ?? first.ended);
+  return {
+    ready,
+    ended,
+    async stop() {
+      stopped = true;
+      await first.stop();
+      await (await following)?.stop();
+      await ended;
+    },
+  };
+}
+
+/**
+ * Starts a company in an empty folder: the launcher's own init, `pnpm dlx sanoma init` with the
+ * form's answers (sanoma from npm), which copies the template, declares whoever starts it, commits
+ * and installs, then serves the company it started from that company's own `node_modules/sanoma`,
+ * so its window opens as an opened company's does. An init that only sets up is followed by the
+ * company opened (`startSession`); a sanoma from before `init` refuses it (`USAGE_EXIT`, the
+ * folder untouched) and is run as it was then, `pnpm dlx sanoma`, which starts the company as git's
+ * user. A folder that holds files (an init that got that far, retried) is opened as any other.
+ * Its progress: init's stages, then the database answering (`stepOf`).
+ */
+export const createSession =
+  ({ name, you, email }: NewCompany) =>
+  (options: SessionOptions): Session => {
+    // Start again, after the person removed the empty folder a failed start left.
+    mkdirSync(options.repo, { recursive: true });
+    let last: string | undefined;
+    const report = (step: string) => {
+      if (step !== last) options.onProgress((last = step));
+    };
+    const reporting: SessionOptions = {
+      ...options,
+      onLine(stream, line) {
+        options.onLine(stream, line);
+        const step = stream === "stdout" ? stepOf(line) : undefined;
+        if (step) report(step);
+      },
+      onProgress: report,
+    };
+    if (hasFiles(options.repo)) return startSession(reporting);
+    report("Starting a new company with sanoma from npm");
+    const init = dlxSanoma(reporting, ["init", "--name", name, "--you", you, "--email", email]);
+    return followedBy(init, ({ code }) => {
+      if (code === 0) return startSession(reporting);
+      if (code === USAGE_EXIT && !hasFiles(options.repo)) return dlxSanoma(reporting, []);
+      return undefined;
+    });
+  };
 
 /** An address git clones from: a web, ssh, git or file URL, or ssh's `user@host:path`. */
 export const isCloneUrl = (url: string) => /^(https?|ssh|git|file):\/\/\S+$|^[\w.-]+@[\w.-]+:\S+$/.test(url);

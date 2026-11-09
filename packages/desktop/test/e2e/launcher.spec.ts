@@ -140,12 +140,20 @@ test("the app waits for Got it on a synced folder, once per folder", async () =>
   await expect.poll(shown, { timeout: 45_000 }).toMatch(/^http:/);
 });
 
-test("a new company's form asks its name and says where it goes, making nothing until it is answered", async () => {
+test("a new company's form asks its name and who starts it, says where it goes, and makes nothing until it is answered", async () => {
   mkdirSync(join(work, "elsewhere"));
+  // Git's identity on this computer fills who starts it.
+  writeFileSync(join(work, "home", ".gitconfig"), "[user]\n\tname = Dana Reyes\n\temail = dana@example.com\n");
   await launch();
   const page = await pageNamed("index.html");
   await page.click("#create");
+  await expect(page.locator("#new-you")).toHaveValue("Dana Reyes");
+  await expect(page.locator("#new-email")).toHaveValue("dana@example.com");
+  await page.fill("#new-email", "dana");
   await page.fill("#new-name", "Northside Plumbing");
+  await page.click('#new-form button[type="submit"]');
+  await expect(page.locator("#new-problem")).toContainText("Type an email address");
+  await page.fill("#new-email", "dana@example.com");
   await expect(page.locator("#new-place")).toHaveText(join("~", "Companies", "northside-plumbing"));
   await page.fill("#new-name", "...");
   await page.click('#new-form button[type="submit"]');
@@ -170,6 +178,48 @@ test("a new company's form asks its name and says where it goes, making nothing 
   await page.click("#new-form [data-cancel]");
   await expect(page.locator("#home")).toBeVisible();
   expect(existsSync(join(work, "home", "Companies"))).toBe(false);
+});
+
+test("the list says whether each company is Local or Live, and runs here, a live one's address a link", async () => {
+  const local = fixture(join(work, "local"));
+  const live = fixture(join(work, "live"));
+  mkdirSync(join(live, "resources", "sanoma"), { recursive: true });
+  writeFileSync(
+    join(live, "resources", "sanoma.lock.json"),
+    JSON.stringify({ "resources/sanoma/infra.ts#host": { type: "cloud.host", id: "maple" } }),
+  );
+  writeFileSync(
+    join(live, "resources", "sanoma", "infra.ts"),
+    `export const host = cloud.host({ name: "maple", hostname: "maple.sanoma.work" });\n`,
+  );
+  mkdirSync(join(work, "user-data"));
+  writeFileSync(
+    join(work, "user-data", "companies.json"),
+    JSON.stringify([
+      { path: local, name: "Northside Plumbing", port: 3100, lastOpened: "2026-11-01" },
+      { path: live, name: "Maple Street Studio", port: 3101, lastOpened: "2026-11-02" },
+    ]),
+  );
+  await launch();
+  const page = await pageNamed("index.html");
+  const rows = page.locator("#recent > li");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("Maple Street Studio");
+  await expect(rows.nth(0).locator(".pill")).toHaveText("Live · drafting copy");
+  await expect(rows.nth(0).locator(".running")).toHaveText("Not running");
+  await expect(rows.nth(0).locator("a")).toHaveAttribute("href", "https://maple.sanoma.work");
+  await expect(rows.nth(1).locator(".pill")).toHaveText("Local");
+  await expect(rows.nth(1).locator("a")).toHaveCount(0);
+
+  type Opened = { opened?: string[] };
+  await shell.evaluate(({ shell: desktop }) => {
+    const opened: string[] = [];
+    (globalThis as Opened).opened = opened;
+    desktop.openExternal = async (url) => void opened.push(url);
+  });
+  await rows.nth(0).locator("a").click();
+  await expect.poll(() => shell.evaluate(() => (globalThis as Opened).opened)).toEqual(["https://maple.sanoma.work/"]);
+  expect(await shown()).toMatch(/index\.html$/);
 });
 
 test("a link on the shell's pages goes to the browser, and only a web or mail link goes anywhere", async () => {
