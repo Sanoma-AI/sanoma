@@ -95,7 +95,13 @@ export function Composer({
           {engine && (
             <DropdownMenu>
               <DropdownMenuTrigger
-                render={<InputGroupButton size="sm" aria-label="Engine" className="-ml-2 text-xs" />}
+                render={
+                  <InputGroupButton
+                    size="sm"
+                    aria-label={`Engine: ${ENGINE_NAMES[engine.value]}`}
+                    className="-ml-2 text-xs"
+                  />
+                }
               >
                 {ENGINE_NAMES[engine.value]}
                 <CaretDownIcon aria-hidden="true" data-icon="inline-end" />

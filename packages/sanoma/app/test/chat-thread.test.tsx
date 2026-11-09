@@ -121,6 +121,16 @@ describe("the chat's thread", () => {
     await within(log).findByRole("button", { name: "Copy" });
   });
 
+  it("keeps a task list's own classes beside the app's", async () => {
+    await play(createChat<ChatMessage>().user("Plan?").assistant("- [x] Read it\n- [ ] Fix it"));
+    const item = await waitFor(() => {
+      const found = screen.getByText("Read it").closest("li");
+      expect(found?.className).toContain("task-list-item");
+      return found as HTMLElement;
+    });
+    expect(item.closest("ul")?.className).toMatch(/contains-task-list.*list-disc|list-disc.*contains-task-list/);
+  });
+
   it("draws a fenced block as a code block, with its copy", async () => {
     await play(createChat<ChatMessage>().user("Show me").assistant("Here:\n\n```ts\nconst a = 1;\n```"));
     // Once its chunk has come, in place of the plain block.
@@ -291,7 +301,7 @@ describe("the chat's composer", () => {
 
   it("picks the engine a new chat opens on", async () => {
     draw(() => <EnginePicker />);
-    const trigger = await screen.findByRole("button", { name: "Engine" });
+    const trigger = await screen.findByRole("button", { name: "Engine: Sanoma" });
     expect(trigger.textContent).toBe("Sanoma");
     fireEvent.click(trigger);
     // Our loop first, a person's own agents last, under a label of their own.
@@ -309,5 +319,6 @@ describe("the chat's composer", () => {
     expect(screen.getByText("Your own plan")).toBeTruthy();
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Codex (your plan)" }));
     await waitFor(() => expect(trigger.textContent).toBe("Codex (your plan)"));
+    expect(trigger.getAttribute("aria-label")).toBe("Engine: Codex (your plan)");
   });
 });

@@ -20,6 +20,7 @@ import {
 } from "#/components/ui/dialog.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { Table, TableCell, TableHead } from "#/components/ui/table.tsx";
+import { cn } from "#/lib/utils.ts";
 
 // A reply's text as Markdown, streamed (Streamdown closes what is still open), in the app's own
 // classes: a company's Tailwind does not scan Streamdown's install, so every element it draws with
@@ -29,11 +30,11 @@ import { Table, TableCell, TableHead } from "#/components/ui/table.tsx";
 // in-page anchor); a fenced block is the kit's CodeBlock, its highlighter and each language loaded
 // the first time one is shown.
 
-/** An element as `tag` with `className`, without the `node` Streamdown passes a component. */
+/** An element as `tag` with `className` after any a plugin gave it (a task list's), without the `node` Streamdown passes a component. */
 const styled =
   (tag: ElementType, className: string) =>
-  <Props extends object>({ node: _node, ...props }: Props & { node?: unknown }) =>
-    createElement(tag, { ...props, className });
+  <Props extends { className?: string }>({ node: _node, ...props }: Props & { node?: unknown }) =>
+    createElement(tag, { ...props, className: cn(props.className, className) });
 
 /** Shiki's core with it, so a reply with no code does not load it. */
 const Fence = lazy(() => import("./fence.tsx"));

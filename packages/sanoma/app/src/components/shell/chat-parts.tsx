@@ -131,9 +131,9 @@ function ReplyTrace({ parts, live }: { parts: TracePart[]; live: boolean }) {
     <Trace role="group" aria-label="Steps" className="gap-1">
       {parts.map((part, i) =>
         part.type === "reasoning" ? (
-          <Reasoning key={i} part={part} live={live} />
+          <Reasoning key={`reasoning-${i}`} part={part} live={live} />
         ) : (
-          <Step key={part.toolCallId} step={part} live={live} />
+          <Step key={`step-${part.toolCallId}`} step={part} live={live} />
         ),
       )}
     </Trace>
