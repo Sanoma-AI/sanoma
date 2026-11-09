@@ -48,10 +48,10 @@ export function ensureSanomaBuilt(): void {
   );
 }
 
-/** `sanoma` and the connectors a fixture copy installs, built (`ensureSanomaBuilt`). */
+/** `sanoma` and the connectors a fixture copy installs, the template's among them, built (`ensureSanomaBuilt`). */
 export function ensureBuilt(): void {
   ensureSanomaBuilt();
-  for (const name of ["ghost", "anthropic", "docker"]) {
+  for (const name of ["ghost", "anthropic", "docker", "github", "resend", "sanoma-cloud"]) {
     ensure(join(repo, "connectors", name), ["dist/index.js"], ["pnpm", "run", "build"]);
   }
 }

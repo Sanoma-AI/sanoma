@@ -155,7 +155,9 @@ describe("sanoma from packed tarballs: the dev server", () => {
       });
       expect(JSON.parse(readFileSync(join(company, "package.json"), "utf8")).dependencies).toEqual({
         "@sanoma-ai/connector-anthropic": sanoma.version,
-        "@sanoma-ai/connector-ghost": sanoma.version,
+        "@sanoma-ai/connector-github": sanoma.version,
+        "@sanoma-ai/connector-resend": sanoma.version,
+        "@sanoma-ai/connector-sanoma-cloud": sanoma.version,
         sanoma: sanoma.version,
       });
     } finally {

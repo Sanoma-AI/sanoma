@@ -173,6 +173,21 @@ describe("SANOMA_EVENTS=1, for a parent process", () => {
     expect(quiet.code).toBe(2);
     expect(quiet.stdout).toBe("");
   });
+
+  it("brackets the company's own Postgres in the database stage, which a failure leaves without its done", async () => {
+    dir = copyFixture();
+    // No URL named: the company's own, which `app` only finds running, and none runs.
+    const failed = await runCli(dir, ["app"], { ...events, SANOMA_DATABASE_URL: "" });
+    expect(failed.code).toBe(2);
+    const [first, last, ...rest] = failed.stdout.trimEnd().split("\n");
+    expect(JSON.parse(first!)).toEqual({ sanoma: 1, event: "stage", stage: "database", status: "start" });
+    expect(JSON.parse(last!)).toMatchObject({
+      sanoma: 1,
+      event: "error",
+      message: expect.stringContaining("no Postgres runs"),
+    });
+    expect(rest).toEqual([]);
+  });
 });
 
 describe("sanoma env", () => {

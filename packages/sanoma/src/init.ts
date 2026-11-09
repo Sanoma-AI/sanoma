@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { AGENTS, RUNTIME_AGENTS, VISITORS } from "sanoma/workflows";
 import { isVisitor } from "sanoma/workflows/shared";
+import { emit, type Stage } from "./events.ts";
 import { writeDeploymentKeys } from "./key.ts";
 
 const run = promisify(execFile);
@@ -37,6 +38,8 @@ export interface Creator {
 }
 
 export interface StartOptions {
+  /** The company's name, as the app shows it (`name` in `sanoma.config.ts`); without one, the directory's name stands. */
+  name?: string;
   /** Runs `<packageManager> install` in the directory; the default inherits this process's stdio. */
   install?: (cwd: string, packageManager: string) => Promise<void>;
   /** Who is starting it; the default asks `gh` and git (`whoIsStarting`). */
@@ -44,22 +47,31 @@ export interface StartOptions {
   log?: (line: string) => void;
 }
 
+/** Runs `work` as one stage of starting a company, between its `stage` events. */
+async function stage(name: Stage, work: () => unknown): Promise<void> {
+  emit({ event: "stage", stage: name, status: "start" });
+  await work();
+  emit({ event: "stage", stage: name, status: "done" });
+}
+
 /**
- * `sanoma` where there is no `sanoma.config.ts`: in an empty directory (dotfiles aside) it starts
- * a company there and says so; anywhere else it does nothing and says it did not. Starting copies
- * the template, names the package after the directory, declares whoever starts it as the first
- * person in `resources/people.ts` (so the app admits them), writes `.env` (a new
- * signing and encryption key, keeping what it already holds; no database URL, so `sanoma` runs the
- * company's own Postgres), commits what it wrote as the first
- * commit of a git repository, as the machine's git user, then installs with the package manager
- * that ran this (`npm_config_user_agent`, else pnpm) and adds the lockfile to that commit. Throws
- * before writing anything when git is missing or has no user to commit as.
+ * `sanoma init`, and `sanoma` where there is no `sanoma.config.ts`: in an empty directory (dotfiles
+ * aside) it starts a company there and says so; anywhere else it does nothing and says it did not.
+ * Starting copies the template, names the package after the directory, writes the company's `name`
+ * in `sanoma.config.ts` when one is given and its slug (`slugOf` the name, else the directory's) in
+ * `resources/sanoma/infra.ts`, writes `.env` (a new signing and encryption key, keeping what it
+ * already holds; no database URL, so `sanoma` runs the company's own Postgres), declares whoever
+ * starts it as the first person in `resources/people.ts` (so the app admits them), commits what it
+ * wrote as the first commit of a git repository, as the machine's git user, then installs with the
+ * package manager that ran this (`npm_config_user_agent`, else pnpm) and adds the lockfile to that
+ * commit: the stages `template`, `people`, `git` and `install`, each a `stage` event. Throws before
+ * writing anything when git is missing or has no user to commit as.
  */
 export async function startCompany(
   cwd: string,
-  { install = installWith, creator = whoIsStarting, log = () => {} }: StartOptions = {},
+  { name, install = installWith, creator = whoIsStarting, log = () => {} }: StartOptions = {},
 ): Promise<boolean> {
-  if (readdirSync(cwd).some((name) => !name.startsWith("."))) return false;
+  if (readdirSync(cwd).some((file) => !file.startsWith("."))) return false;
   await run("git", ["var", "GIT_AUTHOR_IDENT"]).catch((err: unknown) => {
     const missing = (err as NodeJS.ErrnoException).code === "ENOENT";
     throw new Error(
@@ -68,6 +80,39 @@ export async function startCompany(
     );
   });
   log(`starting a Sanoma company in ${cwd}`);
+  const packageManager = packageManagerOf(process.env.npm_config_user_agent);
+  await stage("template", () => copyTemplate(cwd, name, packageManager));
+  await stage("people", async () => {
+    const people = join(cwd, "resources", "people.ts");
+    writeFileSync(people, declareFounder(readFileSync(people, "utf8"), await creator()));
+  });
+
+  // Committed before the install, so a failed install leaves a repository to rerun it in; the
+  // lockfile joins the same commit after. Only what this wrote: a dotfile already here may be a secret.
+  const commit = async (...args: string[]) => {
+    const wrote = [...readdirSync(TEMPLATE), ...LOCKFILES]
+      .map((file) => (file === "gitignore" ? ".gitignore" : file))
+      .filter((file) => existsSync(join(cwd, file)));
+    await run("git", ["add", "--", ...wrote], { cwd });
+    await run("git", ["commit", "--quiet", "-m", FIRST_COMMIT, ...args], { cwd });
+  };
+  await stage("git", async () => {
+    await run("git", ["init", "--quiet", "--initial-branch=main"], { cwd });
+    await commit();
+  });
+  log(`committed "${FIRST_COMMIT}"; installing with ${packageManager}`);
+  await stage("install", async () => {
+    await install(cwd, packageManager);
+    await commit("--amend");
+  });
+  return true;
+}
+
+/**
+ * The template copied into `cwd`: its `.gitignore`, the package named after the directory, the
+ * company's `name` and slug, `.env`, and pnpm's workspace file for pnpm alone.
+ */
+function copyTemplate(cwd: string, name: string | undefined, packageManager: string): void {
   cpSync(TEMPLATE, cwd, { recursive: true, force: false });
   // npm drops a package's .gitignore, so the template carries it as gitignore.
   const [carried, ignore] = [join(cwd, "gitignore"), join(cwd, ".gitignore")];
@@ -80,35 +125,19 @@ export async function startCompany(
   const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as Manifest;
   const manifest = join(cwd, "package.json");
   const pkg = JSON.parse(readFileSync(manifest, "utf8")) as { name: string; dependencies: Record<string, string> };
-  const name = packageName(basename(cwd));
+  const packaged = packageName(basename(cwd));
   // npm refuses to install a package into one of the same name (`sanoma` in `sanoma/`).
-  pkg.name = name in pkg.dependencies ? `${name}-company` : name;
+  pkg.name = packaged in pkg.dependencies ? `${packaged}-company` : packaged;
   if (INSTALLED) pkg.dependencies = pinDependencies(pkg.dependencies, own);
   writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
 
-  const people = join(cwd, "resources", "people.ts");
-  writeFileSync(people, declareFounder(readFileSync(people, "utf8"), await creator()));
+  const edit = (file: string, change: (text: string) => string) =>
+    writeFileSync(join(cwd, file), change(readFileSync(join(cwd, file), "utf8")));
+  if (name) edit("sanoma.config.ts", (text) => declareName(text, name));
+  edit(INFRA, (text) => declareSlug(text, slugOf(name || basename(cwd))));
 
   writeDeploymentKeys(join(cwd, ".env"));
-
-  const packageManager = packageManagerOf(process.env.npm_config_user_agent);
   if (packageManager !== "pnpm") rmSync(join(cwd, "pnpm-workspace.yaml"));
-
-  // Committed before the install, so a failed install leaves a repository to rerun it in; the
-  // lockfile joins the same commit after. Only what this wrote: a dotfile already here may be a secret.
-  const commit = async (...args: string[]) => {
-    const wrote = [...readdirSync(TEMPLATE), ...LOCKFILES]
-      .map((file) => (file === "gitignore" ? ".gitignore" : file))
-      .filter((file) => existsSync(join(cwd, file)));
-    await run("git", ["add", "--", ...wrote], { cwd });
-    await run("git", ["commit", "--quiet", "-m", FIRST_COMMIT, ...args], { cwd });
-  };
-  await run("git", ["init", "--quiet", "--initial-branch=main"], { cwd });
-  await commit();
-  log(`committed "${FIRST_COMMIT}"; installing with ${packageManager}`);
-  await install(cwd, packageManager);
-  await commit("--amend");
-  return true;
 }
 
 /**
@@ -154,6 +183,42 @@ export function declareFounder(text: string, creator: Creator): string {
   return text.replace(FOUNDER, () => `export const founder = sanoma.person({ ${fields.join(", ")} });`);
 }
 
+/** Where the template declares the company's database and host on Sanoma Cloud. */
+const INFRA = "resources/sanoma/infra.ts";
+
+/** The template config's opening, after which `declareName` writes the company's name. */
+const CONFIG_OPENING = /^export default defineConfig\(\{\n/m;
+
+/** The config file with the company's `name` declared first. */
+export function declareName(text: string, name: string): string {
+  if (!CONFIG_OPENING.test(text))
+    throw new Error("the template's sanoma.config.ts has no `export default defineConfig({`");
+  return text.replace(CONFIG_OPENING, (opening) => `${opening}  name: ${JSON.stringify(name)},\n`);
+}
+
+/** The template's slug in `resources/sanoma/infra.ts`: the Cloud names and its address. */
+const TEMPLATE_SLUG = /"company(\.sanoma\.work)?"/g;
+
+/** The infra file with the company's slug for the template's, in the names and the address. */
+export function declareSlug(text: string, slug: string): string {
+  if (text.search(TEMPLATE_SLUG) < 0) throw new Error(`the template's ${INFRA} names no "company"`);
+  return text.replaceAll(TEMPLATE_SLUG, (_, address: string | undefined) => JSON.stringify(slug + (address ?? "")));
+}
+
+/**
+ * A company's name as its Sanoma Cloud slug, its address `<slug>.sanoma.work`: lower case letters,
+ * digits and single dashes, a dash at neither end, 3 to 40 of them, as the Cloud takes it; a shorter
+ * one gains `-company`, and none at all is `company`.
+ */
+export function slugOf(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .slice(0, 40)
+    .replaceAll(/^-+|-+$/g, "");
+  return slug.length >= 3 ? slug : [slug, "company"].filter(Boolean).join("-");
+}
+
 /** What a command prints, trimmed; empty when it fails or is missing. */
 const output = (cmd: string, args: string[]) =>
   run(cmd, args, { timeout: 10_000 }).then(
@@ -191,19 +256,22 @@ function machineUser(): string {
   }
 }
 
+/** Whether `text` reads as an email address: what a host's staff login can send a code to. */
+export const isEmail = (text: string) => /^[^\s@]+@[^\s@]+$/.test(text);
+
 /**
  * Who is starting the company: their GitHub login, as `gh` is signed in, which the GitHub sign-in
- * matches and the loopback sign-in takes as the id; else this machine's user name. Named as git's
- * `user.name`, which `startCompany` requires, with git's `user.email`, which a host's staff login
- * sends sign-in codes to.
+ * matches and the loopback sign-in takes as the id; else this machine's user name. Named as `given`
+ * says (`sanoma init --you --email`), else as git's `user.name`, which `startCompany` requires, with
+ * git's `user.email`, which a host's staff login sends sign-in codes to.
  */
-export async function whoIsStarting(): Promise<Creator> {
+export async function whoIsStarting(given: { name?: string; email?: string } = {}): Promise<Creator> {
   const [login, name, email] = await Promise.all([
     output("gh", ["api", "user", "--jq", ".login"]),
-    output("git", ["config", "user.name"]),
-    output("git", ["config", "user.email"]),
+    given.name || output("git", ["config", "user.name"]),
+    given.email || output("git", ["config", "user.email"]),
   ]);
-  const named = { ...(name && { name }), ...(/^[^\s@]+@[^\s@]+$/.test(email) && { email }) };
+  const named = { ...(name && { name }), ...(isEmail(email) && { email }) };
   if (/^[A-Za-z0-9-]+$/.test(login)) return { id: free(login), github: login, ...named };
   return { id: free(machineUser()), ...named };
 }

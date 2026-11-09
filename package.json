@@ -23,6 +23,7 @@
     "@sanoma-ai/connector-ghost": "workspace:*",
     "@sanoma-ai/connector-github": "workspace:*",
     "@sanoma-ai/connector-resend": "workspace:*",
+    "@sanoma-ai/connector-sanoma-cloud": "workspace:*",
     "@sanoma-ai/connector-stripe": "workspace:*",
     "@sanoma-ai/connector-supabase": "workspace:*",
     "@types/node": "^26.6.4",

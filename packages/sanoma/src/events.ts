@@ -5,8 +5,17 @@
 
 import type { CheckResult } from "sanoma/workflows";
 
+/**
+ * The stages of starting a company, in order: `sanoma init` (and `sanoma` in an empty directory)
+ * copies the template, declares its founder, makes the git repository, installs, then makes its
+ * database answer as every `sanoma` run does.
+ */
+export type Stage = "template" | "people" | "git" | "install" | "database";
+
 /** What the launcher tells a parent process. */
 export type SanomaEvent =
+  /** A stage of starting a company began or ended; a failed stage has no `done`, and an `error` follows. */
+  | { event: "stage"; stage: Stage; status: "start" | "done" }
   /** The app listens at `url`, each public site at its own host (`{}` for none); again after each restart. */
   | { event: "ready"; url: string; sites: Record<string, string> }
   /** The launcher failed, with what it printed on stderr; the exit code follows (2 usage or config, 1 failure). */

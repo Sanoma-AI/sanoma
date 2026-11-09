@@ -17,13 +17,15 @@ import { testDatabaseUrl } from "sanoma/testing";
 import { AGENTS, VISITORS } from "sanoma/workflows";
 import { readPeople } from "sanoma/workflows/describe";
 import { groupNamesOf, principalIdsOf } from "sanoma/workflows/shared";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   declareFounder,
+  declareName,
   FIRST_COMMIT,
   packageManagerOf,
   packageName,
   pinDependencies,
+  slugOf,
   startCompany,
   TEMPLATE,
   templatePeopleIds,
@@ -76,7 +78,9 @@ describe("startCompany", () => {
     expect(log).toEqual([`starting a Sanoma company in ${dir}`, `committed "${FIRST_COMMIT}"; installing with npm`]);
     for (const file of [
       "sanoma.config.ts",
-      "workflows/publish-post.ts",
+      "secrets.ts",
+      "workflows/record-lead.ts",
+      "scenarios/record-lead/record.feature",
       "policies/policy.cedar",
       "policies/changes.cedar",
       "AGENTS.md",
@@ -92,10 +96,16 @@ describe("startCompany", () => {
     expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);
     // No database URL: `sanoma` runs the company's own Postgres.
     expect(Object.keys(parseEnv(read(".env"))).toSorted()).toEqual(["SANOMA_SECRETS_KEY", "SANOMA_SIGNING_KEY"]);
-    // Its creator is its first person, so the app admits them.
+    // Its creator is its one person, so the app admits them, and picks them without asking.
     expect(read("resources/people.ts")).toContain(
       'export const founder = sanoma.person({ id: "ada", name: "Ada Ortiz", github: "ada-ortiz" });',
     );
+    expect(templatePeopleIds()).toEqual(["founder", "admin"]);
+    // Sanoma Cloud declared, by the directory's name for want of the company's.
+    expect(read("resources/sanoma/infra.ts")).toContain(
+      'export const host = cloud.host({ name: "acme-ops", database: store, hostname: "acme-ops.sanoma.work" });',
+    );
+    expect(read("resources/sanoma/infra.ts")).toContain('export const store = cloud.database({ name: "acme-ops" });');
 
     expect(git("log", "--format=%s|%an")).toBe(`${FIRST_COMMIT}|Test User`);
     expect(git("branch", "--show-current")).toBe("main");
@@ -136,6 +146,28 @@ describe("startCompany", () => {
     expect(git("log", "--format=%s")).toBe(FIRST_COMMIT);
   });
 
+  it("names the company and its slug after the name it is given, and says each stage it goes through", async () => {
+    gitIdentity(vi.stubEnv);
+    vi.stubEnv("SANOMA_EVENTS", "1");
+    const lines: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((line) => lines.push(String(line)) > 0);
+    await startCompany(fresh("maple"), { name: "Maple Street Studio", creator, install: writeLockfile });
+    vi.mocked(process.stdout.write).mockRestore();
+
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual(
+      ["template", "people", "git", "install"].flatMap((stage) =>
+        ["start", "done"].map((status) => ({ sanoma: 1, event: "stage", stage, status })),
+      ),
+    );
+    expect(read("sanoma.config.ts")).toContain('export default defineConfig({\n  name: "Maple Street Studio",\n');
+    expect(read("resources/sanoma/infra.ts")).toContain(
+      'cloud.host({ name: "maple-street-studio", database: store, hostname: "maple-street-studio.sanoma.work" })',
+    );
+    // The package stays named after the directory.
+    expect(JSON.parse(read("package.json")).name).toBe("maple");
+    expect(git("status", "--porcelain")).toBe("");
+  });
+
   it("leaves a directory that holds anything else alone", async () => {
     fresh();
     writeFileSync(join(dir, "notes.txt"), "mine\n");
@@ -148,7 +180,9 @@ describe("pinDependencies", () => {
   it("pins sanoma and the connectors to the launcher's own version", () => {
     expect(pinDependencies({ ...template.dependencies, "left-alone": "^1" }, { version: "1.2.3" })).toEqual({
       "@sanoma-ai/connector-anthropic": "1.2.3",
-      "@sanoma-ai/connector-ghost": "1.2.3",
+      "@sanoma-ai/connector-github": "1.2.3",
+      "@sanoma-ai/connector-resend": "1.2.3",
+      "@sanoma-ai/connector-sanoma-cloud": "1.2.3",
       "left-alone": "^1",
       sanoma: "1.2.3",
     });
@@ -158,6 +192,25 @@ describe("pinDependencies", () => {
     for (const name of Object.keys(template.dependencies).filter((dep) => dep !== "sanoma")) {
       expect(root.devDependencies[name], name).toBe("workspace:*");
     }
+  });
+});
+
+describe("declareName and slugOf", () => {
+  it("writes the company's name first in the config, as given", () => {
+    expect(declareName("export default defineConfig({\n  connectors: [],\n});\n", 'Ann\'s "Co" $&')).toBe(
+      'export default defineConfig({\n  name: "Ann\'s \\"Co\\" $&",\n  connectors: [],\n});\n',
+    );
+    expect(() => declareName("export default {};\n", "Acme")).toThrow("has no `export default defineConfig({`");
+  });
+
+  it("makes a slug the Cloud takes of any name", () => {
+    expect(slugOf("Maple Street Studio")).toBe("maple-street-studio");
+    expect(slugOf("  Café & Co.  ")).toBe("caf-co");
+    expect(slugOf("AB")).toBe("ab-company");
+    expect(slugOf("!!!")).toBe("company");
+    const long = slugOf(`${"a".repeat(39)} b`);
+    expect(long).toBe("a".repeat(39));
+    expect(slugOf("x".repeat(60))).toHaveLength(40);
   });
 });
 
@@ -184,10 +237,24 @@ describe("whoIsStarting", () => {
   it("takes the GitHub login as the id, unless the template's people, the runtime's agents or the visitors have it", async () => {
     signedIn("ada-ortiz");
     expect(await whoIsStarting()).toMatchObject({ id: "ada-ortiz", github: "ada-ortiz" });
-    for (const taken of ["reviewer", "editor", "admin", "agents", "scenarios", "visitors", "anonymous"]) {
+    for (const taken of ["founder", "admin", "agents", "scenarios", "visitors", "anonymous"]) {
       signedIn(taken);
       expect(await whoIsStarting()).toMatchObject({ id: "founder", github: taken });
     }
+  });
+
+  it("takes the name and email it is given over git's", async () => {
+    signedIn("ada-ortiz");
+    const config = join(mkdtempSync(join(tmpdir(), "sanoma-git-")), "gitconfig");
+    writeFileSync(config, "[user]\n\tname = Ada Ortiz\n\temail = ada@acme.test\n");
+    vi.stubEnv("GIT_CONFIG_GLOBAL", config);
+    expect(await whoIsStarting({ name: "Dana Reyes", email: "dana@maple.test" })).toEqual({
+      id: "ada-ortiz",
+      github: "ada-ortiz",
+      name: "Dana Reyes",
+      email: "dana@maple.test",
+    });
+    expect(await whoIsStarting({ name: "", email: "" })).toMatchObject({ name: "Ada Ortiz", email: "ada@acme.test" });
   });
 
   it("takes git's user.email as the email a host's sign-in sends codes to", async () => {
@@ -234,34 +301,71 @@ describe("packageManagerOf and packageName", () => {
   });
 });
 
+/** A pnpm that installs only a stub of `sanoma`, whose `main` says it ran, first on the PATH. */
+const stubbed = () => {
+  const bin = mkdtempSync(join(tmpdir(), "sanoma-bin-"));
+  writeFileSync(
+    join(bin, "pnpm"),
+    [
+      "#!/bin/sh",
+      "mkdir -p node_modules/sanoma/dist",
+      `echo 'export const main = async (argv) => { console.log("served", JSON.stringify(argv)); return 0; };' > node_modules/sanoma/dist/cli.js`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(join(bin, "pnpm"), 0o755);
+  onTestFinished(() => rmSync(bin, { recursive: true, force: true }));
+  return {
+    ...gitIdentity(),
+    PATH: `${bin}:${process.env.PATH}`,
+    npm_config_user_agent: "pnpm/11.15.1 npm/? node/v24.2.0",
+  };
+};
+
 describe("sanoma in an empty directory", () => {
   it("starts a company, then serves it with the sanoma it installed", async () => {
-    // A pnpm that installs only a stub of `sanoma`, whose `main` says it ran.
-    const bin = mkdtempSync(join(tmpdir(), "sanoma-bin-"));
-    const pnpm = join(bin, "pnpm");
-    writeFileSync(
-      pnpm,
-      [
-        "#!/bin/sh",
-        "mkdir -p node_modules/sanoma/dist",
-        `echo 'export const main = async (argv) => { console.log("served", JSON.stringify(argv)); return 0; };' > node_modules/sanoma/dist/cli.js`,
-        "",
-      ].join("\n"),
-    );
-    chmodSync(pnpm, 0o755);
     fresh("acme");
-    const done = await runCli(dir, [], {
-      ...gitIdentity(),
-      PATH: `${bin}:${process.env.PATH}`,
-      npm_config_user_agent: "pnpm/11.15.1 npm/? node/v24.2.0",
-    });
-    rmSync(bin, { recursive: true, force: true });
+    const done = await runCli(dir, [], stubbed());
 
     expect(done.code, done.stderr).toBe(0);
     expect(done.stdout).toBe("served []\n");
     expect(done.stderr).toContain("installing with pnpm");
     expect(git("log", "--format=%s")).toBe(FIRST_COMMIT);
     expect(basename(dir)).toBe(JSON.parse(read("package.json")).name);
+  });
+
+  it("sanoma init names the company and who starts it as told, says each stage, then serves it", async () => {
+    fresh("maple");
+    const done = await runCli(
+      dir,
+      ["init", "--name", "Maple Street Studio", "--you", "Dana Reyes", "--email", "dana@maple.test"],
+      { ...stubbed(), SANOMA_EVENTS: "1" },
+    );
+
+    expect(done.code, done.stderr).toBe(0);
+    const stages = ["template", "people", "git", "install"].flatMap((stage) =>
+      ["start", "done"].map((status) => JSON.stringify({ sanoma: 1, event: "stage", stage, status })),
+    );
+    expect(done.stdout).toBe(`${[...stages, "served []"].join("\n")}\n`);
+    expect(read("sanoma.config.ts")).toContain('  name: "Maple Street Studio",\n');
+    expect(read("resources/people.ts")).toMatch(
+      /^export const founder = sanoma\.person\(\{ id: "[^"]+", .*name: "Dana Reyes", email: "dana@maple\.test" \}\);$/m,
+    );
+    expect(read("resources/sanoma/infra.ts")).toContain('hostname: "maple-street-studio.sanoma.work"');
+  });
+
+  it("sanoma init refuses a directory with files in it, and an email that is no address before writing anything", async () => {
+    const env = stubbed();
+    fresh();
+    const bad = await runCli(dir, ["init", "--email", "dana"], env);
+    expect(bad.code).toBe(2);
+    expect(bad.stderr).toContain('--email: "dana" is not an email address');
+    expect(readdirSync(dir)).toEqual([]);
+
+    writeFileSync(join(dir, "notes.txt"), "mine\n");
+    const full = await runCli(dir, ["init"], env);
+    expect(full.code).toBe(2);
+    expect(full.stderr).toMatch(/sanoma init starts a company in an empty directory: .+ holds files already/);
   });
 });
 
@@ -273,14 +377,14 @@ describe("the template", () => {
     const started = fresh();
     await startCompany(started, { creator, install: async () => {} });
     dir = copyFixture(started);
-    // The template's other connector: the chat's model.
-    linkConnector(dir, "anthropic");
+    // The template's connectors: the chat's model, the sign-in code's sender, the repository's and Sanoma Cloud's.
+    for (const name of ["anthropic", "resend", "github", "sanoma-cloud"]) linkConnector(dir, name);
     rmSync(started, { recursive: true, force: true });
     const env = {
       SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-template"),
       ANTHROPIC_API_KEY: "",
-      GHOST_ADMIN_URL: "",
-      GHOST_ADMIN_API_KEY: "",
+      RESEND_API_KEY: "",
+      SANOMA_CLOUD_TOKEN: "",
     };
     const checked = await runCli(dir, ["check"], env);
     expect(checked.code, `${checked.stdout}${checked.stderr}`).toBe(0);
@@ -292,9 +396,8 @@ describe("the template", () => {
     expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "app", "schema.cedarschema"]);
     expect(existsSync(join(dir, "sites"))).toBe(false);
     // The policy holds, so the scenarios ran: each passed under it.
-    expect(logged).toContain("passed scenarios/publish-post/publish.feature › The editor approves");
-    expect(logged).toContain("passed scenarios/publish-post/publish.feature › An editor publishes without a review");
-    expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("publishPost: WorkflowFn<");
+    expect(logged).toContain("passed scenarios/record-lead/record.feature › A lead is recorded");
+    expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("recordLead: WorkflowFn<");
     const current = await runCli(dir, ["env", "--check"], env);
     expect(current.code, current.stderr).toBe(0);
   }, 120_000);
