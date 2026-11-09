@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,6 +7,7 @@ import { resolveConfig } from "sanoma/workflows";
 import { afterEach, describe, expect, it } from "vitest";
 import { UsageError } from "sanoma/workflows/shared";
 import { loadConfig } from "../src/config.ts";
+import { ensureSanomaBuilt } from "./fixture.ts";
 
 let dir = "";
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -29,6 +31,9 @@ const DATA = `import { collection } from "sanoma/data";
 export const leads = collection({ name: "leads", key: "id", fields: { id: "text" } });
 export const deals = collection({ name: "deals", key: "id", fields: { id: "text", won: "boolean" } });
 `;
+
+/** A helper file's text, exporting `title`. */
+const title = (name: string) => `export const title = "${name}";\n`;
 
 /** A workflow file's text: `name`, its default export. */
 const workflow = (name: string) =>
@@ -87,5 +92,39 @@ describe("loadConfig", () => {
       "workflows/odd.ts": "export default 1;\n",
     });
     await expect(loadConfig(root)).rejects.toThrow(/\/workflows\/odd\.ts's default export is not a workflow: /);
+  });
+
+  it("reads the files as they are now with fresh, though this process imported them before", () => {
+    const root = company({
+      "sanoma.config.ts": CONFIG(),
+      "workflows/named.ts":
+        'import { defineWorkflow } from "sanoma";\nimport { title } from "./title.ts";\nexport default defineWorkflow({ name: title, trigger: "manual", uses: [], run: async () => ({}) });\n',
+      "workflows/title.ts": title("welcome"),
+    });
+    // In Node itself: Vitest imports a module its own way, past Node's resolve hooks.
+    ensureSanomaBuilt();
+    const script = `
+      import { writeFileSync } from "node:fs";
+      import { resolveConfig } from "sanoma/workflows";
+      const { loadConfig } = await import(${JSON.stringify(new URL("../src/config.ts", import.meta.url).href)});
+      const names = async (fresh) => (await loadConfig(process.cwd(), { fresh })).config.workflows.map((w) => w.name).toSorted();
+      const seen = [await names(false)];
+      writeFileSync("workflows/title.ts", ${JSON.stringify(title("onboard"))});
+      writeFileSync("workflows/later.ts", ${JSON.stringify(workflow("later"))});
+      seen.push(await names(false), await names(true));
+      writeFileSync("workflows/title.ts", ${JSON.stringify(title("follow-up"))});
+      const { config } = await loadConfig(process.cwd(), { fresh: true });
+      seen.push(resolveConfig(config).workflows.has("follow-up"));
+      console.log(JSON.stringify(seen));
+    `;
+    const out = execFileSync(process.execPath, ["--input-type=module", "-e", script], { cwd: root, encoding: "utf8" });
+    expect(JSON.parse(out)).toEqual([
+      ["welcome"],
+      // Without fresh, a file imported before is the module it was.
+      ["later", "welcome"],
+      ["later", "onboard"],
+      // And again, each fresh load its own.
+      true,
+    ]);
   });
 });
