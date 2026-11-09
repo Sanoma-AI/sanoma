@@ -4,11 +4,17 @@
 
 Your coworkers describe what they need in chat. Sanoma's agent builds a draft with React pages, TypeScript workflows and data definitions in your team's Git repo. You can review the code, run tests and approve the change before it goes live.
 
-Use it for the tools people keep asking you to build: a page to collect requests, a workflow that waits for someone's approval, or a site backed by your team's data. Sanoma provides the app to build and run them, with sign-in, service integrations and a record of what ran.
+Use the tools you already have: Claude Code with your own Claude subscription, and connectors for services such as Ghost, Resend, GitHub and Stripe. [See supported integrations and limits](#use-your-existing-tools).
+
+Permissions control who can run each workflow and whether its connector calls are allowed, denied or held for someone's approval. Your coworkers use the pages and workflows; your team can inspect the code, permissions and record of what ran.
 
 [Try it locally](#try-it-locally) · [Download the desktop preview](https://github.com/Sanoma-AI/sanoma/releases/latest) · [See a workflow](#what-a-workflow-looks-like) · [Documentation](packages/sanoma/README.md)
 
 Sanoma is early and [fair source under FSL-1.1-ALv2](#license). You can read the source and host it yourself.
+
+![Workflow demo: Dana starts an announcement, the marketing lead approves it, and the run finishes](.github/assets/demo.gif)
+
+Workflow demo: Dana submits an announcement, the marketing lead approves it, and the workflow waits until launch time to publish. This recording uses a fake Ghost service, even though the form says "Live vendors" and "Calls Ghost for real". [See the workflow's code](#what-a-workflow-looks-like).
 
 ## Try it locally
 
@@ -33,7 +39,7 @@ This creates a company repo, installs its packages, starts its own local Postgre
 
 ### Make your first draft
 
-The default chat agent needs an Anthropic API key; the app links to the connector page where you enter it. Model usage is billed by the provider. You can also choose a supported coding agent under **Your own plan** in chat and follow its sign-in steps.
+In chat, choose **Your own plan → Claude Code** to use a Claude subscription that includes Claude Code, then follow its sign-in steps. Other supported agents include Codex and Copilot. Your provider's plan and usage limits apply. Alternatively, the default Sanoma agent uses an Anthropic API key entered on its connector page, with API usage billed separately. See [AI subscriptions](#ai-subscriptions).
 
 Try asking:
 
@@ -50,6 +56,25 @@ The agent edits a draft branch and runs checks. Inspect the draft before accepti
 
 Reviewing a code change and approving a workflow's action are separate decisions. You might approve a workflow once, while requiring the marketing lead to approve each post it publishes.
 
+## Use your existing tools
+
+### AI subscriptions
+
+Choose a supported agent under **Your own plan** in chat to use your own account, including Claude Code, Codex or Copilot. For Claude Code, use a [Claude plan that includes Claude Code](https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-max-or-ultra-plan). This uses your subscription under the provider's terms and usage limits. The default Sanoma agent uses an Anthropic API key instead; API billing is separate from a Claude subscription.
+
+### Service integrations
+
+Connectors let workflows call your existing accounts through typed operations, permissions and approvals. Support depends on the connector:
+
+| Service                               | Available today                                                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| [Ghost](connectors/ghost/README.md)   | Create and publish blog posts.                                                                                      |
+| [Resend](connectors/resend/README.md) | Create and send broadcasts, send individual emails, and manage a sending domain.                                    |
+| [GitHub](connectors/github/README.md) | Read repository resources; Sanoma also uses a connected Git remote for draft pull requests and publishing changes.  |
+| [Stripe](connectors/stripe/README.md) | Read products and webhook endpoints. Creating charges, refunds or subscriptions is not supported by this connector. |
+
+For other services, you can [write a connector](packages/sanoma/workflows/README.md#usage) for the API operations your team needs. PostHog does not yet have a bundled connector; using its API from a workflow would require adding one. See the [full connector list](#contents) for the rest.
+
 ## What comes with Sanoma
 
 - **Sites and data.** Build [React pages](packages/sanoma/README.md#sites) for your team or the public, with sign-in. Pages can start workflows and read [collections](packages/sanoma/workflows/README.md#collections) stored in your company's Postgres database.
@@ -57,12 +82,6 @@ Reviewing a code change and approving a workflow's action are separate decisions
 - **Service integrations.** Connectors provide typed operations and resources for services such as Ghost, Resend, GitHub and Stripe. Each workflow declares the operations it can call. See the [connector list](#contents) for what each supports.
 - **Policies and approvals.** [Cedar policies](packages/sanoma/workflows/README.md#policies) allow a connector call, deny it or require someone's approval. Approvals appear in the Inbox; the [ledger](packages/sanoma/workflows/README.md#ledger) records calls and decisions.
 - **Code your team owns.** Pages, workflows, resource declarations and policies live together in your repo. Keep using branches, tests and code review as the tools grow.
-
-## See approvals and runs in the app
-
-![The app: dana starts a run of announce, marketing-lead approves its launch copy in the Inbox, then the run finishes](.github/assets/demo.gif)
-
-Dana starts the workflow below. The marketing lead approves the copy, then the workflow waits until launch time and publishes. This recording uses a fake Ghost service, even though the form says "Live vendors" and "Calls Ghost for real".
 
 ## What a workflow looks like
 
