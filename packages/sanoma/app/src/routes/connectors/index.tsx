@@ -14,7 +14,6 @@ import {
   CrumbHeader,
   ExternalLink,
   LinkItem,
-  Logo,
   Nothing,
   Notice,
   plural,
@@ -22,6 +21,7 @@ import {
   TierBadge,
   VendorLogo,
 } from "../../components/common.tsx";
+import { Logo } from "../../components/logo.tsx";
 import { availableConnectorsQuery, configQuery, connectorsOf, credentialsQuery } from "../../queries.ts";
 import { SecretStorage } from "../../components/connections.tsx";
 
