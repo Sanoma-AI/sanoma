@@ -1,4 +1,5 @@
 import { withSetup } from "sanoma/workflows";
+import { copilot } from "./agent.ts";
 import { githubOps } from "./connector.ts";
 import { githubDriver } from "./driver.ts";
 import { fakeGithub } from "./fake.ts";
@@ -11,10 +12,12 @@ import { githubRemote } from "./remote.ts";
  * `.commit`, `.head`, `.addDeployKey`), each on an installation token minted when called. It carries its
  * live driver (`githubDriver`, on the default bridge), its fake (`fakeGithub`), of which each
  * sandbox run makes its own, and its remote half (`githubRemote`): a repository's pull requests,
- * the `sanoma` status, the rules on a branch and the App's webhooks.
+ * the `sanoma` status, the rules on a branch and the App's webhooks. And Copilot (`copilot`), a
+ * coding agent the chat runs on a person's own plan.
  */
 export const github = withSetup(githubOps, {
   driver: githubDriver,
   fake: fakeGithub,
   remote: () => githubRemote,
+  agent: copilot,
 });

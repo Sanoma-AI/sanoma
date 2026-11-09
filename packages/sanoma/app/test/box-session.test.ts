@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { github } from "@sanoma-ai/connector-github";
+import { pi } from "@sanoma-ai/connector-pi";
 import { waitFor } from "sanoma/testing";
 import { checkSandbox, fakeSandbox } from "sanoma/testing/sandbox";
 import {
@@ -252,7 +254,8 @@ describe("personBox", () => {
   });
 
   it("refuses both engines' turns on a live instance that declares none, saying what to declare, before any draft", async () => {
-    const resolved = resolveConfig({ workflows: [], connectors: [], root: company(), databaseUrl: LIVE });
+    // Pi's and Copilot's connectors, which give the engines their agents.
+    const resolved = resolveConfig({ workflows: [], connectors: [pi, github], root: company(), databaseUrl: LIVE });
     await expect(personBox({ resolved, by, client: undefined as never })).rejects.toThrow(NO_BOX);
     expect(NO_BOX).toBe(
       "Coding agents work in a box of their own on a live instance, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY [connector:agent37]",

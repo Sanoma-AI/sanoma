@@ -14,6 +14,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { anthropic } from "@sanoma-ai/connector-anthropic";
+import { pi } from "@sanoma-ai/connector-pi";
 import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeSandbox } from "sanoma/testing/sandbox";
@@ -170,7 +171,7 @@ const sandbox = fakeSandbox(realpathSync(mkdtempSync(join(tmpdir(), "sanoma-harn
 const testApp = useTestApp(
   {
     workflows: [],
-    connectors: [anthropic, sandbox.connector],
+    connectors: [anthropic, pi, sandbox.connector],
     root,
     secrets: { bindings: { ANTHROPIC_API_KEY: { env: "ANTHROPIC_API_KEY" } } },
   },

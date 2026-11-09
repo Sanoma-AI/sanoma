@@ -1,7 +1,6 @@
-import { join } from "node:path";
-import type { HarnessV1, HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
+import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
-import type { AppStepContext, Box } from "sanoma/workflows";
+import type { AppStepContext, Box, KeyAgent, ResolvedConfig } from "sanoma/workflows";
 import { errorMessage } from "sanoma/workflows/shared";
 import {
   createUIMessageStream,
@@ -10,7 +9,7 @@ import {
   LoadAPIKeyError,
   type UIMessageStreamWriter,
 } from "ai";
-import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
+import { type ChatMessage, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
 import { modelRegistry } from "../../server/models.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { boxSession, homeOf, personBox } from "./box-session.ts";
@@ -37,71 +36,51 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // checkout rule), destroyed (what it started killed). Then what the agent changed is committed in
 // the box and carried back to the draft (`carryOut`), the box is stopped, and the draft checked.
 
-/** The connector whose model (`<vendor>/default`) and key the coding agents use, with its key's variable and its base URL's. */
-const VENDOR = "anthropic";
-const KEY = "ANTHROPIC_API_KEY";
-const BASE_URL = "ANTHROPIC_BASE_URL";
+/** A coding agent on the company's key as a turn runs it: its connector's facts (`KeyAgent`), with its id and name. */
+type KeyTurnAgent = KeyAgent & { id: string; title: string };
 
-/** A coding agent `HarnessAgent` drives, on the company's Anthropic key. */
-interface Runtime {
-  /** Pi takes `<provider>/<model-id>`; a bridge, the bare id. */
-  qualified: boolean;
-  /** A bridge, a child of the session: its first start in a box installs it under the box's home. */
-  bridge: boolean;
-  /** Its adapter, loaded when first used, on the key as an explicit `auth` record (never this process's environment or keychain). */
-  harness(auth: Record<string, string>, home: string): Promise<HarnessV1>;
+/**
+ * The coding agent `id` on the company's key, as an installed connector gives it
+ * (`ResolvedConfig.agents`); without one, an error that says so, which the turn's reply shows.
+ */
+function keyAgent({ agents }: Pick<ResolvedConfig, "agents">, id: string): KeyTurnAgent {
+  const agent = agents.get(id);
+  if (!agent?.onKey) {
+    throw new Error(
+      agent
+        ? `${agent.title} does not run on the company's key: choose it on your own plan`
+        : `No connector of this company gives the coding agent ${id}: add the connector that has it to sanoma.config.ts`,
+    );
+  }
+  return { ...agent.onKey, id, title: agent.title };
 }
-
-/** The runtimes' names, each an engine a chat's row keeps. */
-export type RuntimeName = "pi" | "claude-code";
-
-const RUNTIMES: Readonly<Record<RuntimeName, Runtime>> = {
-  pi: {
-    qualified: true,
-    bridge: false,
-    // Pi's own settings under the session's home, not this user's ~/.pi.
-    harness: async (auth, home) =>
-      (await import("@ai-sdk/harness-pi")).createPi({ auth, agentDir: join(home, ".pi", "agent") }),
-  },
-  "claude-code": {
-    qualified: false,
-    bridge: true,
-    harness: async (auth) =>
-      (await import("@ai-sdk/harness-claude-code")).createClaudeCode({
-        auth,
-        env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", DISABLE_AUTOUPDATER: "1" },
-      }),
-  },
-  // Later: Codex, once its adapter asks before an edit or a command (vercel/ai#22550); it runs only
-  // `allow-all`, which the checkout rule could not answer for. Then a vendor per runtime.
-};
 
 /** A bridge's first session in a box, by its runtime and the box's id: it installs the bridge there, so the next ones wait for it. */
 const installing = new Map<string, Promise<unknown>>();
 
-/** The engine for `name`: a turn of a chat through that runtime. */
+/** The engine for the agent `id`: a turn of a chat through that agent on the company's key. */
 export const harnessEngine =
-  (name: RuntimeName): Engine =>
+  (id: string): Engine =>
   (turn) =>
     createUIMessageStream<ChatMessage>({
       onError: (err) => {
         // A missing key (`authFor`'s words); the adapter's or the bridge's own otherwise (a bootstrap
         // that failed, say).
         if (LoadAPIKeyError.isInstance(err)) return err.message;
-        console.error(`sanoma app: a ${ENGINE_NAMES[name]} turn failed:`, err);
+        console.error(`sanoma app: a ${id} turn failed:`, err);
         return errorMessage(err);
       },
-      execute: ({ writer }) => runTurn(name, turn, writer),
+      execute: ({ writer }) => runTurn(keyAgent(turn.step.resolved, id), turn, writer),
     });
 
-async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
+async function runTurn(agent: KeyTurnAgent, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
   const { step, chat } = turn;
   // The box chosen and the key first: a turn without either opens no draft.
   const person = await personBox(step);
-  const auth = await authFor(step);
+  const auth = await authFor(step, agent);
   // The agent works in the chat's draft from its first turn, in the person's box, opened last
   // so that nothing that fails before leaves it running.
-  const [draft, model, port] = await Promise.all([openDraft(step, chat), modelFor(step, RUNTIMES[name]), freePort()]);
+  const [draft, model, port] = await Promise.all([openDraft(step, chat), modelFor(step, agent), freePort()]);
   /** Whether the box's commits reached the draft. */
   let carried = false;
   try {
@@ -119,14 +98,14 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
       // However the turn ended (an error too): the session destroyed, so nothing in the box writes
       // again, then what it changed committed in the box and carried back to the draft. A failed
       // carry is the turn's error (its edits are lost), the one before it logged.
-      const ended = await converse(name, turn, writer, sandbox, { auth, model, home, box })
+      const ended = await converse(agent, turn, writer, sandbox, { auth, model, home, box })
         .finally(() => sandbox.destroy())
         .then(
           () => undefined,
           (err: unknown) => ({ err }),
         );
       try {
-        const message = turnMessage(turn, ENGINE_NAMES[name]);
+        const message = turnMessage(turn, agent.title);
         carried = await carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id });
       } catch (err) {
         if (ended) console.error(`sanoma app: the turn in the box ${box.id} failed:`, ended.err);
@@ -143,7 +122,7 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
 
 /** The turn's harness session in `sandbox`, run to its end, its permission requests answered by the checkout rule. */
 async function converse(
-  name: RuntimeName,
+  agent: KeyTurnAgent,
   { step, chat, messages }: EngineTurn,
   writer: UIMessageStreamWriter<ChatMessage>,
   sandbox: HarnessV1NetworkSandboxSession,
@@ -151,9 +130,8 @@ async function converse(
 ) {
   const { by: principal, signal } = step;
   const real = realIn(box);
-  const runtime: Runtime = RUNTIMES[name];
-  const harness = await runtime.harness(auth, home);
-  const agent = new HarnessAgent({
+  const harness = await agent.harness(auth, home);
+  const harnessAgent = new HarnessAgent({
     harness,
     model,
     instructions: harnessInstructions(step, principal, chat, messages.slice(0, -1)),
@@ -163,12 +141,13 @@ async function converse(
     sandboxConfig: { workDir: "." },
   });
   const said = messages.at(-1)!;
-  const create = () => agent.createSession({ sessionId: sandbox.id, sandboxSession: sandbox, abortSignal: signal });
-  const key = `${name} ${box.id}`;
+  const create = () =>
+    harnessAgent.createSession({ sessionId: sandbox.id, sandboxSession: sandbox, abortSignal: signal });
+  const key = `${agent.id} ${box.id}`;
   const installed = installing.get(key);
   const started = installed ? installed.then(create) : create();
   // Kept as whether it started (not the session); a failed first start is tried again by the next.
-  if (runtime.bridge && !installed) {
+  if (agent.bridge && !installed) {
     installing.set(
       key,
       started.then(
@@ -179,7 +158,7 @@ async function converse(
   }
   const session = await started;
   try {
-    let result = await agent.stream({ session, prompt: textOf(said), abortSignal: signal });
+    let result = await harnessAgent.stream({ session, prompt: textOf(said), abortSignal: signal });
     for (let first = true; ; first = false) {
       for await (const chunk of result.toUIMessageStream({
         sendStart: first,
@@ -205,7 +184,7 @@ async function converse(
           ),
         ),
       );
-      result = await agent.continueStream({ session, toolApprovalContinuations: answers, abortSignal: signal });
+      result = await harnessAgent.continueStream({ session, toolApprovalContinuations: answers, abortSignal: signal });
     }
   } finally {
     await session.destroy();
@@ -213,29 +192,34 @@ async function converse(
 }
 
 /**
- * The company's key, as the adapter's `auth`: its variable, and its base URL's when this process
- * sets one (a stand-in's, in tests). Without it, `LoadAPIKeyError` says so, with the connector's
- * page when the company has the connector (`noKeyText`).
+ * The company's key, as the adapter's `auth`: the variables the model connector's driver declares
+ * (`KeyAgent.model`), and the endpoint's (`baseUrl`) when this process sets one (a stand-in's, in
+ * tests). Without the connector or a key, `LoadAPIKeyError` says so, with the connector's page
+ * when the company has the connector (`noKeyText`).
  */
-async function authFor({ client, resolved }: AppStepContext): Promise<Record<string, string>> {
-  const value = (await secretValues(client)([KEY])).get(KEY);
-  if (!value) {
-    const message = `${VENDOR} is not configured: ${KEY}`;
+async function authFor({ client, resolved }: AppStepContext, agent: KeyTurnAgent): Promise<Record<string, string>> {
+  const { model: vendor, baseUrl, title } = agent;
+  if (!resolved.models.has(vendor)) {
     throw new LoadAPIKeyError({
-      message: resolved.models.has(VENDOR)
-        ? noKeyText(VENDOR, `${message}; set it on the connector page`)
-        : `${message}; no connector gives it yet`,
+      message: `${title} runs on ${vendor}'s model, and no connector of this company gives it: add ${vendor}'s connector to sanoma.config.ts`,
     });
   }
-  const base = process.env[BASE_URL];
-  return { [KEY]: value, ...(base && { [BASE_URL]: base }) };
+  const declared = resolved.driversByVendor.get(vendor)?.env?.shape ?? {};
+  const values = await secretValues(client)(Object.keys(declared));
+  const auth = Object.fromEntries([...values].filter((entry): entry is [string, string] => !!entry[1]));
+  const missing = Object.keys(declared).filter((name) => !auth[name] && !declared[name]!.safeParse(undefined).success);
+  if (missing.length) {
+    const message = `${vendor} is not configured: ${missing.join(", ")}; set it on the connector page`;
+    throw new LoadAPIKeyError({ message: noKeyText(vendor, message) });
+  }
+  const base = baseUrl && process.env[baseUrl];
+  return base ? { ...auth, [baseUrl]: base } : auth;
 }
 
-/** The model `<vendor>/default` names, as the runtime takes it; the runtime's own default without that connector. */
-async function modelFor(step: AppStepContext, { qualified }: Runtime): Promise<string | undefined> {
-  if (!step.resolved.models.has(VENDOR)) return undefined;
-  const { modelId } = (await modelRegistry(step)).languageModel(`${VENDOR}/default`);
-  return qualified ? `${VENDOR}/${modelId}` : modelId;
+/** The model `<vendor>/default` names, as the agent takes it. */
+async function modelFor(step: AppStepContext, { model: vendor, qualified }: KeyTurnAgent): Promise<string> {
+  const { modelId } = (await modelRegistry(step)).languageModel(`${vendor}/default`);
+  return qualified ? `${vendor}/${modelId}` : modelId;
 }
 
 /**

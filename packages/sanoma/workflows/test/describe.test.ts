@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { docker } from "@sanoma-ai/connector-docker";
 import { ghost } from "@sanoma-ai/connector-ghost";
+import { anthropic } from "@sanoma-ai/connector-anthropic";
 import { github } from "@sanoma-ai/connector-github";
+import { openai } from "@sanoma-ai/connector-openai";
+import { opencode } from "@sanoma-ai/connector-opencode";
+import { pi } from "@sanoma-ai/connector-pi";
 import { resend } from "@sanoma-ai/connector-resend";
 import { stripe } from "@sanoma-ai/connector-stripe";
 import { supabase } from "@sanoma-ai/connector-supabase";
@@ -13,7 +17,15 @@ import { fakeHost } from "sanoma/testing/host";
 import { fakeSandbox } from "sanoma/testing/sandbox";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineConfig, defineConnector, defineWorkflow, memoryLedger, vendorInfo } from "../src/index.ts";
+import {
+  defineConfig,
+  defineConnector,
+  defineWorkflow,
+  memoryLedger,
+  resolveConfig,
+  vendorInfo,
+  withSetup,
+} from "../src/index.ts";
 import { readPolicyFiles } from "../src/cedar.ts";
 import { rootOf } from "../src/config.ts";
 import { ConfigDescriptionSchema, describeConfig, liveDescription, outlineWorkflow } from "../src/describe.ts";
@@ -197,14 +209,20 @@ describe("describeConfig", () => {
   });
 
   // The app finds connectors not installed on npm by the keyword, and shows them by the `sanoma` field.
-  it.each(Object.entries({ bluesky, docker, ghost, github, resend, stripe, supabase }))(
+  it.each(
+    Object.entries({ anthropic, bluesky, docker, ghost, github, openai, opencode, pi, resend, stripe, supabase }),
+  )(
     "takes the %s connector's title, logo, package and homepage from its package.json, which npm can list",
     (vendor, connector) => {
       const dir = new URL(`../../../../connectors/${vendor}/`, import.meta.url);
       const pkg = JSON.parse(readFileSync(new URL("package.json", dir), "utf8"));
       expect(pkg.keywords).toContain("sanoma-connector");
       // Its logos are shipped, so npm's copy has them too.
-      expect(pkg.files).toEqual(expect.arrayContaining([pkg.sanoma.logo, pkg.sanoma.logoDark].filter(Boolean)));
+      expect(pkg.files).toEqual(
+        expect.arrayContaining(
+          [pkg.sanoma.logo, pkg.sanoma.logoDark, pkg.sanoma.agent?.mark, pkg.sanoma.agent?.markDark].filter(Boolean),
+        ),
+      );
       expect(connector[VENDOR].info).toMatchObject({
         title: pkg.sanoma.title,
         package: pkg.name,
@@ -260,6 +278,45 @@ describe("describeConfig", () => {
     expect(() => defineConnector("counter", specs, { logo: { svg: "<svg></svg>", dark: "x" } })).toThrow("logo.dark");
     expect(() => defineConnector("counter", specs, { logo: { svg: '<svg viewBox="0 0 1 1"></svg>' } })).not.toThrow();
     expect(() => defineConnector("counter", specs, { logo: { svg: "<svg></svg>", dark: undefined } })).not.toThrow();
+  });
+
+  it("describes the coding agents the connectors give, by their package.json, with the plans each runs on", () => {
+    const { agents, vendors } = describeConfig({
+      ...base,
+      connectors: [...base.connectors, github, anthropic, openai, opencode, pi],
+    });
+    const mark = { src: expect.stringMatching(/^data:image\/svg\+xml,%3Csvg/) };
+    const marks = { ...mark, dark: expect.stringMatching(/^data:image\/svg\+xml,%3Csvg/) };
+    expect(agents).toEqual([
+      { id: "copilot", vendor: "github", title: "Copilot", mark: marks, own: true },
+      { id: "claude-code", vendor: "anthropic", title: "Claude Code", mark, own: true, onKey: { model: "anthropic" } },
+      { id: "codex", vendor: "openai", title: "Codex", mark: marks, own: true },
+      { id: "opencode", vendor: "opencode", title: "OpenCode", mark: marks, own: true },
+      { id: "pi", vendor: "pi", title: "Pi", mark: marks, own: true, onKey: { model: "anthropic" } },
+    ]);
+    // Each agent's vendor is described as any connector's.
+    expect(Object.keys(vendors)).toEqual(expect.arrayContaining(agents.map((agent) => agent.vendor)));
+    expect(describeConfig(base).agents).toEqual([]);
+  });
+
+  it("refuses a coding agent its package.json does not name, one id given by two vendors, and an id no engine can take", () => {
+    const own = { packages: [], bin: "x", args: [], signIn: { run: [] } };
+    const nameless = withSetup(defineConnector("acme", {}, { title: "Acme" }), { agent: { own } });
+    expect(() => resolveConfig({ ...base, connectors: [...base.connectors, nameless] })).toThrow(
+      'The "acme" connector attaches a coding agent but does not say who it is',
+    );
+    const twin = withSetup(defineConnector("acme", {}, { agent: { id: "codex", title: "Codex" } }), { agent: { own } });
+    expect(() => resolveConfig({ ...base, connectors: [...base.connectors, openai, twin] })).toThrow(
+      'Two connectors in `connectors` give the coding agent "codex": "openai" and "acme"',
+    );
+    for (const id of ["loop", "acp-codex", "Codex", "co dex", ""]) {
+      expect(() => defineConnector("acme", {}, { agent: { id, title: "Acme" } })).toThrow(
+        'defineConnector("acme"): agent.id must be lowercase letters, digits and dashes',
+      );
+    }
+    expect(() => defineConnector("acme", {}, { agent: { id: "acme", title: "Acme", mark: { svg: "x" } } })).toThrow(
+      "agent.mark.svg must be inline SVG markup",
+    );
   });
 
   it("keeps the logo it checked, whatever the caller changes later", () => {

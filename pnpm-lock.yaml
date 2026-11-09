@@ -26,6 +26,15 @@ importers:
       '@sanoma-ai/connector-github':
         specifier: workspace:*
         version: link:connectors/github
+      '@sanoma-ai/connector-openai':
+        specifier: workspace:*
+        version: link:connectors/openai
+      '@sanoma-ai/connector-opencode':
+        specifier: workspace:*
+        version: link:connectors/opencode
+      '@sanoma-ai/connector-pi':
+        specifier: workspace:*
+        version: link:connectors/pi
       '@sanoma-ai/connector-resend':
         specifier: workspace:*
         version: link:connectors/resend
@@ -95,6 +104,9 @@ importers:
       '@ai-sdk/anthropic':
         specifier: 4.0.88
         version: 4.0.88(zod@4.6.5)
+      '@ai-sdk/harness-claude-code':
+        specifier: 1.0.162
+        version: 1.0.162(zod@4.6.5)
       '@ai-sdk/provider':
         specifier: 4.0.34
         version: 4.0.34
@@ -241,6 +253,37 @@ importers:
       msw:
         specifier: ^3.0.3
         version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      sanoma:
+        specifier: workspace:*
+        version: link:../../packages/sanoma
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
+  connectors/openai:
+    devDependencies:
+      sanoma:
+        specifier: workspace:*
+        version: link:../../packages/sanoma
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
+  connectors/opencode:
+    devDependencies:
+      sanoma:
+        specifier: workspace:*
+        version: link:../../packages/sanoma
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
+  connectors/pi:
+    dependencies:
+      '@ai-sdk/harness-pi':
+        specifier: 1.0.160
+        version: 1.0.160(@aws-sdk/credential-provider-node@3.972.88)(@modelcontextprotocol/sdk@1.32.1(supports-color@11.0.0)(zod@4.6.5))(@smithy/signature-v4@5.7.4)(supports-color@11.0.0)(ws@8.22.0)(zod@4.6.5)
+    devDependencies:
       sanoma:
         specifier: workspace:*
         version: link:../../packages/sanoma
@@ -417,12 +460,6 @@ importers:
       '@ai-sdk/harness':
         specifier: 1.0.158
         version: 1.0.158(ws@8.22.0)(zod@4.6.5)
-      '@ai-sdk/harness-claude-code':
-        specifier: 1.0.162
-        version: 1.0.162(zod@4.6.5)
-      '@ai-sdk/harness-pi':
-        specifier: 1.0.160
-        version: 1.0.160(@aws-sdk/credential-provider-node@3.972.88)(@modelcontextprotocol/sdk@1.32.1(supports-color@11.0.0)(zod@4.6.5))(@smithy/signature-v4@5.7.4)(supports-color@11.0.0)(ws@8.22.0)(zod@4.6.5)
       '@ai-sdk/provider':
         specifier: 4.0.34
         version: 4.0.34
