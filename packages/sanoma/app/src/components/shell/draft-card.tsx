@@ -213,10 +213,11 @@ function Undo({ chat, sha }: { chat: string; sha: string }) {
   const save = useSaveDraft();
   const [latest] = saves ?? [];
   if (change) return <ChangeLink id={id} change={change} />;
-  if (latest?.output && "revision" in latest.output) {
+  const undone = savedOf(latest, undefined);
+  if (undone) {
     return (
       <span>
-        Undone by {latest.startedBy?.id ?? "someone"}, <When at={latest.updatedAt ?? latest.createdAt} />.
+        Undone by {undone.by}, <When at={undone.at} />.
       </span>
     );
   }

@@ -87,6 +87,9 @@ const withoutToken = (what: string, token: string) => (err: { stderr?: string; m
 };
 
 /** `Source.commit` in the checkout at `cwd`: the root's, or a draft's. */
+/** The environment a commit by `author` is made in: named `<author> via Sanoma`, the email the machine's. */
+const authoredBy = (author: string) => ({ GIT_AUTHOR_NAME: `${author} via Sanoma` });
+
 const commitIn =
   (cwd: string): Source["commit"] =>
   ({ paths, message, author }) =>
@@ -96,9 +99,7 @@ const commitIn =
       await gitIn(cwd, ["add", "--", ...paths]);
       if (!(await gitIn(cwd, ["status", "--porcelain", "--", ...paths]))) return undefined;
       // Only these paths, whatever else is staged; the email stays the machine's.
-      await gitIn(cwd, ["commit", "--quiet", "-m", message, "--", ...paths], {
-        GIT_AUTHOR_NAME: `${author} via Sanoma`,
-      });
+      await gitIn(cwd, ["commit", "--quiet", "-m", message, "--", ...paths], authoredBy(author));
       return { revision: await gitIn(cwd, ["rev-parse", "HEAD"]) };
     });
 
@@ -172,7 +173,7 @@ async function mergeIn(
     throw new Error("The draft has uncommitted changes: commit them first");
   const merged = await behindIn(cwd, from, folder);
   if (!merged && !take) return { folder, revision: await gitIn(cwd, ["rev-parse", "HEAD"]), merged, conflicts: [] };
-  const as = { GIT_AUTHOR_NAME: `${author} via Sanoma` };
+  const as = authoredBy(author);
   if (merged) {
     const merge = ["-c", "merge.conflictStyle=diff3", "merge", "--quiet", "--no-ff", "--no-commit"];
     const failed = await gitIn(cwd, [...merge, ...(take ? ["--allow-unrelated-histories"] : []), from], as).then(
@@ -476,9 +477,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         if (tree === (await git(["rev-parse", "HEAD^{tree}"]))) {
           throw new Error(`The draft ${id} changes nothing here`);
         }
-        const commit = await git(["commit-tree", tree, "-p", "HEAD", "-m", title], {
-          GIT_AUTHOR_NAME: `${author} via Sanoma`,
-        });
+        const commit = await git(["commit-tree", tree, "-p", "HEAD", "-m", title], authoredBy(author));
         await git(["merge", "--quiet", "--ff-only", commit]);
         return { revision: commit };
       });
@@ -488,7 +487,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       const { root: at } = await source.draft!(id);
       await checkingAt.get(at);
       return serial(async () => {
-        await gitIn(at, ["revert", "--no-edit", sha], { GIT_AUTHOR_NAME: `${author} via Sanoma` }).catch(
+        await gitIn(at, ["revert", "--no-edit", sha], authoredBy(author)).catch(
           async (err: { stderr?: string; message: string }) => {
             await gitIn(at, ["revert", "--abort"]).catch(() => undefined);
             throw new Error(`${sha.slice(0, 7)} cannot be undone here: ${err.stderr?.trim() || err.message}`);

@@ -337,10 +337,12 @@ export async function change({ client, snapshot }: AppContext, id: string): Prom
   const view = await client.change(id);
   if (!view) return null;
   // As the planner finds them: a workflow's file relative to the repository's root, in `touches`.
-  const touched = new Set(view.state.facts?.touches);
-  const files = Object.entries(snapshot.repository?.workflows ?? {});
-  return { ...view, edits: files.filter(([, file]) => touched.has(file)).map(([name]) => name) };
+  return { ...view, edits: workflowsIn(snapshot, view.state.facts?.touches ?? []) };
 }
+
+/** The config's workflows, by name, whose files (relative to the repository's root) are among `files`. */
+const workflowsIn = (snapshot: AppContext["snapshot"], files: readonly string[]) =>
+  Object.entries(snapshot.repository?.workflows ?? {}).flatMap(([name, file]) => (files.includes(file) ? [name] : []));
 
 /** The connector whose remote half is for the repository's remote (`remoteFor`); none without a remote, or without such a connector. */
 export const remoteOf = ({ resolved, snapshot }: Pick<AppContext, "resolved" | "snapshot">) => {
@@ -375,11 +377,10 @@ export async function openChange(
  * workflows whose files it saved (`edits`), as the files say now.
  */
 export async function saves({ client, snapshot }: AppContext, id: string): Promise<SaveDetail[]> {
-  const files = Object.entries(snapshot.repository?.workflows ?? {});
-  return (await client.saves(id)).map((save) => {
-    const saved = new Set(save.output && "files" in save.output ? save.output.files : []);
-    return { ...save, edits: files.filter(([, file]) => saved.has(file)).map(([name]) => name) };
-  });
+  return (await client.saves(id)).map((save) => ({
+    ...save,
+    edits: workflowsIn(snapshot, save.output && "files" in save.output ? save.output.files : []),
+  }));
 }
 
 /**

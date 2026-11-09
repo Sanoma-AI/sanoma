@@ -180,14 +180,7 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
   }
   return step.serially(async () => {
     const { before, text } = await edited(root);
-    const rules = isRules(at.file) || mayDeclarePeople(before) || peopleSources(root).has(at.file);
-    if (rules && by.groups?.includes(ADMIN) !== true) {
-      throw new SanomaError(
-        "not_approver",
-        `A change to ${at.file} waits for an admin, and this company has no remote to review on`,
-        { approver: { group: ADMIN } },
-      );
-    }
+    if (isRules(at.file) || mayDeclarePeople(before) || peopleSources(root).has(at.file)) adminOnly(by, at.file);
     return written(step, at.file, text, message);
   });
 }
@@ -225,18 +218,27 @@ export async function saveDraft(
     if (head !== undefined && diff.head !== head) {
       throw new SanomaError("invalid_input", "The draft has changed since: save it from its latest card");
     }
-    if ((await editsRules(source.root, draft.root, diff.files)) && by.groups?.includes(ADMIN) !== true) {
-      throw new SanomaError(
-        "not_approver",
-        "A change to the policies or the people waits for an admin, and this company has no remote to review on",
-        { approver: { group: ADMIN } },
-      );
-    }
+    if (await editsRules(source.root, draft.root, diff.files)) adminOnly(by, "the policies or the people");
     const { revision } = await source.merge!(id, { title, author: by.id });
     await source.closeDraft!(id);
     reload?.();
     return { revision, files: diff.files, running: reload !== undefined };
   });
+}
+
+/**
+ * Refuses (`not_approver`) a change to the rules (`what` it edits) by someone outside `admin`:
+ * without a remote, nothing would review it.
+ */
+function adminOnly(by: AppStepContext["by"], what: string): void {
+  if (by.groups?.includes(ADMIN) === true) return;
+  throw new SanomaError(
+    "not_approver",
+    `A change to ${what} waits for an admin, and this company has no remote to review on`,
+    {
+      approver: { group: ADMIN },
+    },
+  );
 }
 
 /**
