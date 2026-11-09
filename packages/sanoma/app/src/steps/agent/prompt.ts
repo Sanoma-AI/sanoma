@@ -1,11 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type AppStepContext, type Chat, isDirect, type Principal, VENDOR } from "sanoma/workflows";
+import { type AppStepContext, type Chat, isDirect, type Principal, type SanomaConfig, VENDOR } from "sanoma/workflows";
+import { readPeople } from "sanoma/workflows/describe";
 import { type ChatMessage, textOf } from "../../lib/chat.ts";
+import { ASKS_LINE } from "./transcript.ts";
 
-// Our loop's system prompt: the rules, then what it is told of the company: its AGENTS.md, its
-// connectors and their operations' effects, and the person's open drafts. And a coding agent's
-// (`harnessInstructions`), which reads the repository's AGENTS.md itself.
+// Our loop's system prompt: the rules, then what it is told of the company: the company at a
+// glance, its AGENTS.md, its connectors and their operations' effects, and the person's open
+// drafts. And a coding agent's (`harnessInstructions`), the company at a glance too, which reads
+// the repository's AGENTS.md itself.
 
 /** The most of the company's AGENTS.md the prompt carries, in characters. */
 const AGENTS_LIMIT = 40_000;
@@ -18,7 +21,8 @@ const ROLE =
 const COMMON_RULES = `- The person reviews the draft and merges its branch by hand; the live instance keeps running the old code until it restarts. Never say a change is live.
 - Never ask for, read or write a credential: keys are set on the app's connector pages.
 - For a missing or expired connection, send the person to /connectors/<vendor> for secure input. Describe only account requirements and status. Never ask them to paste a key, password or OAuth token into chat.
-- Answer in plain words, briefly. Say what you changed and where.`;
+- Answer in plain words, briefly. Say what you changed and where.
+- When you introduce yourself, and after you make a change, suggest what the person could ask you next: end your reply with a line that says only "${ASKS_LINE}", then one ask to a line, each starting with "- " and worded as the person would type it (after a change, the two most useful). Otherwise suggest none.`;
 
 const RULES = `${ROLE}
 
@@ -45,17 +49,46 @@ ${COMMON_RULES}`;
 const actingFor = (appName: string, principal: Principal, chat: Chat) =>
   `The company: ${appName}. You act for ${principal.id}. This chat is ${chat.id}.`;
 
+/** Each vendor's title, its first connector's, as the app's pages name it. */
+function vendorTitles(config: SanomaConfig): Map<string, string> {
+  const titles = new Map<string, string>();
+  for (const connector of config.connectors) {
+    const { id, info } = connector[VENDOR];
+    if (!titles.has(id)) titles.set(id, info?.title ?? id);
+  }
+  return titles;
+}
+
+/** Names as a list, or "none". */
+const namesOrNone = (names: string[]) => (names.length ? names.join(", ") : "none");
+
+/** The company in one paragraph, what the agent says it read when it speaks first: its workflows, connectors and people. */
+function atAGlance(
+  { config, resolved }: Pick<AppStepContext, "config" | "resolved">,
+  titles: Map<string, string>,
+): string {
+  // The people the runtime admits, from the config's root.
+  const { people } = readPeople(resolved.root);
+  const named = (type: string) =>
+    people.filter((r) => r.type === type).map((r) => (typeof r.desired.name === "string" ? r.desired.name : r.name));
+  return `The company at a glance: its workflows: ${namesOrNone((config.workflows ?? []).map((wf) => wf.title ?? wf.name))}; its connectors: ${namesOrNone([...titles.values()])}; its people: ${namesOrNone(named("person"))}; its groups: ${namesOrNone(named("group"))}.`;
+}
+
 /**
  * A coding agent's instructions for `principal`'s turn in `chat`: the rules, who it acts for, and
  * the chat's earlier messages (`history`, their text), since each turn starts a new session of it.
  */
 export function harnessInstructions(
-  { resolved }: Pick<AppStepContext, "resolved">,
+  step: Pick<AppStepContext, "config" | "resolved">,
   principal: Principal,
   chat: Chat,
   history: ChatMessage[],
 ): string {
-  const sections = [HARNESS_RULES, actingFor(resolved.appName, principal, chat)];
+  const sections = [
+    HARNESS_RULES,
+    actingFor(step.resolved.appName, principal, chat),
+    atAGlance(step, vendorTitles(step.config)),
+  ];
   // Whole messages, the latest first, until the limit (the latest one always).
   const said: string[] = [];
   let size = 0;
@@ -80,15 +113,10 @@ function spoken(message: ChatMessage): string {
 /** The loop's instructions for `principal`'s turn in `chat`. */
 export async function instructions(step: AppStepContext, principal: Principal, chat: Chat): Promise<string> {
   const { config, resolved } = step;
-  const sections = [RULES, actingFor(resolved.appName, principal, chat)];
+  const titles = vendorTitles(config);
+  const sections = [RULES, actingFor(resolved.appName, principal, chat), atAGlance(step, titles)];
   const [guide, drafts] = await Promise.all([companyGuide(step), openDrafts(step, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
-  // A vendor's title is its first connector's, as the app's pages name it.
-  const titles = new Map<string, string>();
-  for (const connector of config.connectors) {
-    const { id, info } = connector[VENDOR];
-    if (!titles.has(id)) titles.set(id, info?.title ?? id);
-  }
   const ops = [...resolved.ops.values()].toSorted((a, b) => a.id.localeCompare(b.id));
   const connectors = [...Map.groupBy(ops, (op) => op.vendor)].map(([vendor, of]) => {
     const listed = of.map(
