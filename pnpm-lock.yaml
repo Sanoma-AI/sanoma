@@ -35,6 +35,9 @@ importers:
       '@sanoma-ai/connector-supabase':
         specifier: workspace:*
         version: link:connectors/supabase
+      '@shadcn/helpers':
+        specifier: ^0.3.0
+        version: 0.3.0(ai@7.0.153(zod@4.6.5))
       '@types/node':
         specifier: ^26.6.4
         version: 26.6.4
@@ -2925,6 +2928,20 @@ packages:
 
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
+
+  '@shadcn/helpers@0.3.0':
+    resolution: {integrity: sha512-paltuTr6OGY8ss4SVbWkrZOfRGTi+JvBRgzjh1DCqjwpDOPRY7IWiCuOSNQpaVNaf3yAoWrmdvGjmJV62twqog==}
+    peerDependencies:
+      '@tanstack/ai': '>=0.40.0 <0.41.0'
+      '@tanstack/ai-client': '>=0.20.0 <0.21.0'
+      ai: 7.0.153
+    peerDependenciesMeta:
+      '@tanstack/ai':
+        optional: true
+      '@tanstack/ai-client':
+        optional: true
+      ai:
+        optional: true
 
   '@shadcn/registry@0.1.2':
     resolution: {integrity: sha512-yN+z+I9lBPI0b5DOr5IwrC4E1kkoSMkdO3M6pNALz07c0if9zFE/cH+Ekfp7AT93FBN0d49rSiVyKwqIAsrEsg==}
@@ -9187,6 +9204,10 @@ snapshots:
   '@rolldown/pluginutils@1.0.1': {}
 
   '@sec-ant/readable-stream@0.4.1': {}
+
+  '@shadcn/helpers@0.3.0(ai@7.0.153(zod@4.6.5))':
+    optionalDependencies:
+      ai: 7.0.153(zod@4.6.5)
 
   '@shadcn/registry@0.1.2(supports-color@11.0.0)':
     dependencies:

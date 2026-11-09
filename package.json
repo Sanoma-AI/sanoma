@@ -25,6 +25,7 @@
     "@sanoma-ai/connector-resend": "workspace:*",
     "@sanoma-ai/connector-stripe": "workspace:*",
     "@sanoma-ai/connector-supabase": "workspace:*",
+    "@shadcn/helpers": "^0.3.0",
     "@types/node": "^26.6.4",
     "@types/pngjs": "^6.0.5",
     "@types/semver": "^7.8.0",
