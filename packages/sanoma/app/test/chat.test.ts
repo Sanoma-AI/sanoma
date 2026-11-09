@@ -483,7 +483,7 @@ describe("the chat", () => {
     const other = `intro-${RUN}`;
     const reply = await speak(other);
     expect(reply!.parts.filter((part) => part.type === "text").map((part) => part.text)).toEqual([
-      "Hi ada, I make the changes to chat-test. It has two workflows.",
+      "Hi ada, I make the changes to chat-test. It has two workflows.\n\nAsk me anything.",
     ]);
     expect(reply!.parts.at(-1)).toEqual({
       type: "data-suggestions",
@@ -494,6 +494,7 @@ describe("the chat", () => {
       /The company at a glance: its workflows: none; its connectors: crm, mock; its people: ada, lead; its groups: none\./,
     );
     expect(systems.at(-1)).toContain('end your reply with a line that says only "Suggested asks:"');
+    expect(systems.at(-1)).toContain("Otherwise suggest none.");
 
     const { chats } = testApp.client;
     expect(await chats.get(other)).toMatchObject({ person: "ada", engine: "loop", title: "Getting started" });
@@ -503,7 +504,7 @@ describe("the chat", () => {
     expect(intro).toMatchObject({ role: "user", parts: [{ type: "text", text: INTRO }] });
     expect(isIntro(intro!)).toBe(true);
     expect(stored!.parts.filter((part) => part.type === "text").map((part) => part.text)).toEqual([
-      "Hi ada, I make the changes to chat-test. It has two workflows.",
+      "Hi ada, I make the changes to chat-test. It has two workflows.\n\nAsk me anything.",
     ]);
 
     // Once the person has written, the agent does not speak first again.
@@ -664,6 +665,18 @@ describe("suggestedAsks", () => {
       asks: undefined,
     });
     expect(await through(["One ", "two  \n\n"])).toEqual({ text: "One two", asks: undefined });
+    // Mid-line, however the deltas fall, it is the text's own words.
+    expect(await through(["Here are the", " suggested asks: below."])).toEqual({
+      text: "Here are the suggested asks: below.",
+      asks: undefined,
+    });
+  });
+
+  it("shows what the reply says after its asks once the text ends", async () => {
+    expect(await through(["Done.\n\nSuggested asks:\n- A\n\n- B\n\nRestart the worker", " to pick it up."])).toEqual({
+      text: "Done.\n\nRestart the worker to pick it up.",
+      asks: ["A", "B"],
+    });
   });
 });
 

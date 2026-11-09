@@ -74,7 +74,7 @@ export default function Root() {
       setPrompt({ id: generateId(), ...opening });
     };
     return {
-      open: (text, options) => openOn({ text, ...options }),
+      open: (text) => openOn({ text }),
       chooseAgent: () => openOn({ text: "", choose: true }),
     };
   }, []);

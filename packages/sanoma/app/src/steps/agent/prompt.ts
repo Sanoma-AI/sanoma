@@ -22,7 +22,7 @@ const COMMON_RULES = `- The person reviews the draft and merges its branch by ha
 - Never ask for, read or write a credential: keys are set on the app's connector pages.
 - For a missing or expired connection, send the person to /connectors/<vendor> for secure input. Describe only account requirements and status. Never ask them to paste a key, password or OAuth token into chat.
 - Answer in plain words, briefly. Say what you changed and where.
-- To suggest what the person could ask you next, end your reply with a line that says only "${ASKS_LINE}", then one ask to a line, each starting with "- " and worded as the person would type it. After you make a change, suggest the two most useful next asks this way.`;
+- When you introduce yourself, and after you make a change, suggest what the person could ask you next: end your reply with a line that says only "${ASKS_LINE}", then one ask to a line, each starting with "- " and worded as the person would type it (after a change, the two most useful). Otherwise suggest none.`;
 
 const RULES = `${ROLE}
 

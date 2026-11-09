@@ -107,11 +107,12 @@ export function NavUser() {
             <DropdownMenuSeparator />
           </>
         )}
-        <DropdownMenuItem onClick={() => chat.chooseAgent()}>
+        {/* No chat column on a phone. */}
+        <DropdownMenuItem className="max-md:hidden" onClick={() => chat.chooseAgent()}>
           <SparkleIcon aria-hidden="true" />
           Agent…
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="max-md:hidden" />
         {signOut && (
           <>
             <DropdownMenuItem onClick={() => void signOutAt(signOut)}>

@@ -18,7 +18,6 @@ import { decidableBy } from "../../lib/decidable.ts";
 import { approvalKey, configQuery, runQuery } from "../../queries.ts";
 import { ApprovalDecision, ApprovalDetails } from "../approval.tsx";
 import { CardHeading, TipButton } from "../common.tsx";
-import { useChatPrompt } from "./chat-prompt.ts";
 import { DraftCardView } from "./draft-card.tsx";
 
 // What the chat draws of the agent's reply, per app.md's Chat: plain text at the reply size, the
@@ -279,12 +278,8 @@ function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; 
   );
 }
 
-/**
- * A reply's suggested asks (its `data-suggestions` part), each a button that sends it in a new
- * chat on the person's engine (`useChatPrompt`); nothing when it suggests none.
- */
-export function Suggested({ message }: { message: ChatMessage }) {
-  const chat = useChatPrompt();
+/** A reply's suggested asks (its `data-suggestions` part), each a button that sends it (`onAsk`); nothing when it suggests none. */
+export function Suggested({ message, onAsk }: { message: ChatMessage; onAsk: (ask: string) => void }) {
   const asks = message.parts.findLast((part) => part.type === "data-suggestions")?.data.asks ?? [];
   if (!asks.length) return null;
   return (
@@ -294,7 +289,7 @@ export function Suggested({ message }: { message: ChatMessage }) {
           <Button
             variant="outline"
             className="h-auto w-full justify-start py-2 text-left whitespace-normal"
-            onClick={() => chat.open(ask, { send: true })}
+            onClick={() => onAsk(ask)}
           >
             {ask}
           </Button>

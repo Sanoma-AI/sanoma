@@ -167,9 +167,9 @@ function ChatPane({ id, known, ...opened }: { id: string; known: boolean } & Ope
  * (holding the opening prompt's text), which says "Connect a model" (and Continue is not offered)
  * while the chat's engine (its own, `openedOn`, else the one chosen for a new chat) needs the model
  * connector and it has no key. A new chat shows the agents to connect while so (or when Agent…
- * opened it); a suggested ask that opened it is sent; and the agent speaks first in the person's
- * first chat once its engine is connected, when a card chose a plan of their own, and once the
- * sign-in it asked for in a chat they have not written in is done.
+ * opened it); a suggested ask is sent in it; and the agent speaks first in the person's first
+ * chat once its engine is connected, when a card chose a plan of their own, and once the sign-in
+ * it asked for in a chat they have not written in is done.
  */
 function Conversation({
   id,
@@ -224,19 +224,18 @@ function Conversation({
   const signedIn =
     !messages.some((m) => m.role === "user" && !isIntro(m)) &&
     last?.parts.some((part) => part.type === "data-signIn" && part.data.state === "done");
-  // What the chat does by itself, once each time its last message changes.
-  const cue =
-    opening?.send && fresh
-      ? "ask"
-      : !busy && !error && ((first && fresh && !openedOn && !cards) || signedIn)
-        ? "speak"
-        : undefined;
+  // The agent speaks by itself once each time the last message changes: in the person's first
+  // chat while it is in view (not one a page opened with a prompt), and after a sign-in it asked for.
+  const greet = first && fresh && !openedOn && !opening && model !== undefined && !cards;
+  const cue = !busy && !error && (greet || signedIn);
   const acted = useRef<string>(undefined);
-  const act = useEffectEvent(() => (cue === "ask" ? send(opening!.text) : speak(engine)));
-  useEffect(() => {
-    if (!cue || acted.current === (last?.id ?? "")) return;
+  const act = useEffectEvent(() => {
+    if (greet && !document.getElementById("chat")?.checkVisibility()) return;
     acted.current = last?.id ?? "";
-    act();
+    speak(engine);
+  });
+  useEffect(() => {
+    if (cue && acted.current !== (last?.id ?? "")) act();
   }, [cue, last?.id]);
   return (
     <>
@@ -246,7 +245,10 @@ function Conversation({
             vendor={model?.vendor}
             onChoose={(name) => {
               choose(name);
-              if (ownPlan(name)) speak(name);
+              if (!ownPlan(name)) return;
+              // Spoken here, so the chat does not speak by itself as well.
+              acted.current = last?.id ?? "";
+              speak(name);
             }}
           />
         ) : (
@@ -261,7 +263,7 @@ function Conversation({
             <Reply key={message.id} message={message} live={busy && i === messages.length - 1} chat={id} />
           ),
         )}
-        {!busy && last?.role === "assistant" && <Suggested message={last} />}
+        {!busy && last?.role === "assistant" && <Suggested message={last} onAsk={send} />}
         {status === "submitted" && <Spinner aria-label="Waiting for the agent" />}
         {error && <TurnError message={error.message} />}
         {!busy && !error && !noModel && stoppedShort(messages) && (
@@ -277,7 +279,7 @@ function Conversation({
         <Composer
           busy={busy}
           onSend={send}
-          draft={opening?.send ? undefined : opening?.text}
+          draft={opening?.text}
           engine={fresh && !openedOn ? { value: engine, set: choose } : undefined}
           note={
             cards && noModel ? (

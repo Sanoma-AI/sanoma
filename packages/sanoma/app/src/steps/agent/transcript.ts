@@ -43,7 +43,7 @@ export const ASKS_LINE = "Suggested asks:";
 /** The most asks a reply suggests. */
 const MOST_ASKS = 4;
 
-/** `ASKS_LINE` at a line's start, after any markdown the model put before it. */
+/** `ASKS_LINE` at a line's start (of the whole text), after any markdown the model put before it. */
 const ASKS_AT = /(?<=^|\n)[\t #*_]*suggested asks:/i;
 
 /** Whether a line could still become `ASKS_LINE` as more of it comes. */
@@ -52,29 +52,36 @@ const mayBeAsks = (line: string) => ASKS_LINE.toLowerCase().startsWith(line.repl
 /** An ask's line: a list item, its text without the bold or quotes around it. */
 const ASK = /^\s*(?:[-*•]|\d+[.)])\s+(?:\*\*|["“])?(.+?)(?:\*\*|["”])?\s*$/;
 
+/** A text under way: all of it so far, how much of it was shown, and where its asks' line starts once it came. */
+interface Text {
+  all: string;
+  shown: number;
+  asks?: number;
+}
+
 /**
  * `stream` with its suggested asks taken out of its text into a `data-suggestions` part (by the id
- * `suggestions`), written as it finishes: a text's lines from one that is `ASKS_LINE` on are held
- * back, and their list items are the asks. The end of a text that may still become that line, and
- * the blank lines before it, are held until it cannot, so the asks never show as text.
+ * `suggestions`), written as it finishes: a text's list items after a line that is `ASKS_LINE`
+ * are the asks, never shown; what it says after them shows as the text ends. The end of a text
+ * that may still become that line, and the blank lines before it, are held until it cannot.
  */
 export function suggestedAsks(stream: ReadableStream<UIMessageChunk>): ReadableStream<UIMessageChunk> {
-  /** Each text under way, by id: what is held back of it, and its asks' lines once they began. */
-  const texts = new Map<string, { held: string; asks?: string }>();
+  const texts = new Map<string, Text>();
   let asks: string[] = [];
   return stream.pipeThrough(
     new TransformStream<UIMessageChunk, UIMessageChunk>({
       transform(chunk, controller) {
-        if (chunk.type === "text-start") texts.set(chunk.id, { held: "" });
-        else if (chunk.type === "text-delta" && texts.has(chunk.id)) {
-          const shown = release(texts.get(chunk.id)!, chunk.delta);
-          if (shown) controller.enqueue({ ...chunk, delta: shown });
+        const text = chunk.type === "text-delta" || chunk.type === "text-end" ? texts.get(chunk.id) : undefined;
+        if (chunk.type === "text-start") texts.set(chunk.id, { all: "", shown: 0 });
+        else if (chunk.type === "text-delta" && text) {
+          const delta = release(text, chunk.delta);
+          if (delta) controller.enqueue({ ...chunk, delta });
           return;
-        } else if (chunk.type === "text-end" && texts.has(chunk.id)) {
-          const { held, asks: lines } = texts.get(chunk.id)!;
+        } else if (chunk.type === "text-end" && text) {
           texts.delete(chunk.id);
-          if (lines !== undefined) asks = asksIn(lines);
-          else if (held.trim()) controller.enqueue({ type: "text-delta", id: chunk.id, delta: held.trimEnd() });
+          let rest = text.all.slice(text.shown);
+          if (text.asks !== undefined) ({ asks, rest } = asksIn(text.all.slice(text.asks)));
+          if (rest.trim()) controller.enqueue({ type: "text-delta", id: chunk.id, delta: rest.trimEnd() });
         } else if (chunk.type === "finish" && asks.length) {
           controller.enqueue({ type: "data-suggestions", id: "suggestions", data: { asks } });
         }
@@ -84,35 +91,29 @@ export function suggestedAsks(stream: ReadableStream<UIMessageChunk>): ReadableS
   );
 }
 
-/**
- * What of a text's `delta` shows now: up to its asks' line, or else up to what may still become
- * that line, or the blank lines before it, which stay held.
- */
-function release(text: { held: string; asks?: string }, delta: string): string {
-  if (text.asks !== undefined) {
-    text.asks += delta;
-    return "";
-  }
-  const all = text.held + delta;
-  const found = ASKS_AT.exec(all);
-  if (found) {
-    text.asks = all.slice(found.index);
-    text.held = "";
-    return all.slice(0, found.index).trimEnd();
-  }
-  const line = all.lastIndexOf("\n") + 1;
-  const shown = all.slice(0, mayBeAsks(all.slice(line)) ? line : all.length).trimEnd();
-  text.held = all.slice(shown.length);
+/** What of a text shows with `delta`: up to its asks' line, or else up to what may still become that line, less the blank lines before it. */
+function release(text: Text, delta: string): string {
+  text.all += delta;
+  if (text.asks === undefined) text.asks = ASKS_AT.exec(text.all)?.index;
+  const line = text.all.lastIndexOf("\n") + 1;
+  const end = text.asks ?? (mayBeAsks(text.all.slice(line)) ? line : text.all.length);
+  const upTo = Math.max(text.shown, text.all.slice(0, end).trimEnd().length);
+  const shown = text.all.slice(text.shown, upTo);
+  text.shown = upTo;
   return shown;
 }
 
-/** The asks in the lines from `ASKS_LINE` on: its list items, the first `MOST_ASKS`. */
-const asksIn = (lines: string): string[] =>
-  lines
-    .split("\n")
-    .slice(1)
-    .flatMap((line) => ASK.exec(line)?.[1] ?? [])
-    .slice(0, MOST_ASKS);
+/** The asks in a text from its asks' line on, the first `MOST_ASKS` list items, and what it says after them. */
+function asksIn(from: string): { asks: string[]; rest: string } {
+  const lines = from.split("\n").slice(1);
+  // The list ends at the first line, after its first item, that is neither an item nor blank.
+  const end = lines.findIndex(
+    (line, i) => line.trim() && !ASK.test(line) && lines.slice(0, i).some((l) => ASK.test(l)),
+  );
+  const items = end === -1 ? lines : lines.slice(0, end);
+  const asks = items.flatMap((line) => ASK.exec(line)?.[1] ?? []).slice(0, MOST_ASKS);
+  return { asks, rest: end === -1 ? "" : `\n\n${lines.slice(end).join("\n")}` };
+}
 
 async function writeChunks(client: SanomaClient, chat: Chat, turn: string, stream: ReadableStream<UIMessageChunk>) {
   let batch: UIMessageChunk[] = [];
