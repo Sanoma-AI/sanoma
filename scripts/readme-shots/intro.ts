@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
@@ -220,11 +220,11 @@ function cleanup() {
   })();
   return cleaning;
 }
-for (const signal of ["SIGINT", "SIGTERM"] as const)
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
   process.on(signal, () => {
     if (interrupted) return;
     interrupted = true;
-    void cleanup().then(() => process.exit(signal === "SIGINT" ? 130 : 143));
+    void cleanup().then(() => process.exit(128 + constants.signals[signal]));
   });
 try {
   execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
