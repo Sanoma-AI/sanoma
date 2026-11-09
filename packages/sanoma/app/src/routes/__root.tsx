@@ -5,7 +5,7 @@ import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
 import { lazy, type ReactNode } from "react";
 import { DENSITY_COOKIE } from "#/components/density.tsx";
-import { CHAT_COOKIE, chatPref, type ChatPref } from "#/components/shell/prefs.ts";
+import { CHAT_COOKIE, chatPref, type ChatPref, ENGINE_COOKIE } from "#/components/shell/prefs.ts";
 import { defaultLocaleOf, type PageLanguages, pageLanguages, usePageLanguages } from "#/lib/locales.ts";
 import { alternatesOf } from "#/site-path.ts";
 import { ActorContext, useActorState } from "../actor.ts";
@@ -104,10 +104,11 @@ const APP_HEAD = {
 
 /**
  * What the app's root loader returns: whether the chat column was left open or folded (neither
- * until Chat is first used), and the density.
+ * until Chat is first used), the engine a new chat opens on (none until one is chosen), and the density.
  */
 interface Prefs {
   chat: ChatPref;
+  engine?: string;
   compact: boolean;
 }
 
@@ -156,8 +157,8 @@ function SiteActor({ children }: { children: ReactNode }) {
 }
 
 /**
- * Whether the chat column was left open or folded (its cookie, unset until Chat is used) and whether the
- * page is Compact (DensityProvider says why a cookie), from the request's cookies on the server
+ * Whether the chat column was left open or folded (its cookie, unset until Chat is used), the engine
+ * a new chat opens on (its cookie, unset until one is chosen) and whether the page is Compact (DensityProvider says why a cookie), from the request's cookies on the server
  * and `document.cookie` in the browser. Each takes its value once, as it mounts: the first render
  * is hydration, which has the server's answer; reading it in the browser too keeps a later
  * remount (an error boundary's retry, say) on the cookie's side for both.
@@ -165,10 +166,12 @@ function SiteActor({ children }: { children: ReactNode }) {
 const readPrefs = createIsomorphicFn()
   .server(() => ({
     chat: chatPref(getCookie(CHAT_COOKIE)),
+    engine: getCookie(ENGINE_COOKIE),
     compact: getCookie(DENSITY_COOKIE) === "compact",
   }))
   .client(() => ({
     chat: chatPref(cookieValue(CHAT_COOKIE)),
+    engine: cookieValue(ENGINE_COOKIE),
     compact: cookieValue(DENSITY_COOKIE) === "compact",
   }));
 
