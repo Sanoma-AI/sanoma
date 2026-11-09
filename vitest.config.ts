@@ -31,7 +31,7 @@ export default defineConfig({
   test: {
     include: [
       "packages/*/test/**/*.test.ts",
-      "packages/sanoma/*/test/**/*.test.ts",
+      "packages/sanoma/*/test/**/*.test.{ts,tsx}",
       "connectors/*/test/**/*.test.ts",
       "scripts/*.test.ts",
     ],
