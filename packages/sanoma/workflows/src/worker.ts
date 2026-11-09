@@ -328,7 +328,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
       await applyScheduled(resolved, registered, () => secrets.db());
-      // A schedule's next tick is a deadline: a worker that stops when quiet registers it with its wakeup.
+      // A schedule's next tick is a deadline: a worker that stops when idle registers it with its wakeup.
       state.deadlines.addSource(() => nextScheduledFire(resolved, new Date()));
     }
     // An OAuth grant due for renewal is a deadline, and the renewal agent's call when it comes.

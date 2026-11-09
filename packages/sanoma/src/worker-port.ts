@@ -169,8 +169,10 @@ export function listenWorkerPort(root: string, { host, port, onWake, ...bundle }
  * `envWakeup`), being done means ending: once the worker stopped itself and no app bundle is
  * building, `exited` settles, `sanoma worker` stops as on a signal, and the container ends with the
  * process. A wake before that wins (the supervisor starts a fresh worker); one after it finds the
- * port closed, so the host starts a fresh process. A build that ends while the worker is stopped starts a fresh
- * one, which ends the process on its own check, once the deploy that asked had time to take it.
+ * port closed, so the host starts a fresh process. A build that ends gives the worker one more idle
+ * stop (a fresh one when it had stopped), so the deploy that asked has time to take the bundle
+ * before the process ends. A fresh worker that fails to start ends the process too: the next wake
+ * starts a fresh one.
  */
 export async function runWorker(
   config: SanomaConfig,
@@ -199,13 +201,13 @@ export async function runWorker(
     const listening = await listenWorkerPort(rootOf(config), {
       host,
       port: Number(port),
-      onWake: () => supervised.wake(),
+      onWake: () => supervised.wake().then(done),
       token: process.env.SANOMA_WAKEUP_TOKEN,
       checkout: process.env.SANOMA_CHECKOUT,
       log,
       onBuilding(now) {
         building = now;
-        if (!now && exits && supervised.stopped) void supervised.wake();
+        if (!now && exits) void supervised.resume().then(done);
       },
     });
     log(`the worker's port at ${listening.url}`);

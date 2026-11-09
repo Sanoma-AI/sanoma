@@ -15,7 +15,7 @@ import { fakeHost, hostCheck, inProcessHost } from "../src/host.ts";
 import { fakeWakeup, wakeupCheckWorkflows } from "../src/wakeup.ts";
 
 // Needs Postgres: `pnpm db:up`. Scale to zero end to end, on fakes and no account: a host that
-// stops when quiet, running the company in this process as `sanoma serve` does (a
+// stops when idle, running the company in this process as `sanoma serve` does (a
 // worker under its supervisor), the fake wakeup applied for it, a sleeping run and a schedule.
 // The worker stops itself when idle and registers its next deadline; the process stops; a wake
 // starts it again; the worker stops again, and a wake starts a fresh one in the same process.
@@ -109,7 +109,7 @@ describe("scale to zero, the stack on fakes", () => {
       expect(timer).toMatchObject({ state: { name: "wake", host: url } });
 
       // The worker stops itself with its next deadline registered; then the process stops, as a
-      // host that stops when quiet stops it.
+      // host that stops when idle stops it.
       const first = (await waitFor(() => stops.find((s) => s.at !== null), Boolean, 30_000))!;
       expect(wakeup.registered().at(-1)).toEqual({ at: first.at });
       const before = wakeup.registered().length;
