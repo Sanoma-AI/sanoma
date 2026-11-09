@@ -158,18 +158,19 @@ export async function serve(
     return plain(404, "Not found\n");
   }
   let client: Promise<SanomaClient> | undefined;
-  // Once per request, however many writes it makes: the worker starts once.
-  let starting: Promise<unknown> | undefined;
   const connect = () =>
     (client ??= SanomaClient.connect(
       { ...config, root, databaseUrl: app.context.resolved.databaseUrl },
       {
         // A run waits for a worker of this bundle's code, which may not be live yet.
         appVersion: snapshot.version,
+        // Each write once it committed, so the worker that answers looks after it, however many
+        // writes the request makes.
         onWrite: () => {
-          if (starting || !host) return;
-          starting = host.startNow().catch((err: unknown) => console.error("sanoma: starting the worker failed:", err));
-          ctx.waitUntil(starting);
+          if (!host) return;
+          ctx.waitUntil(
+            host.startNow().catch((err: unknown) => console.error("sanoma: starting the worker failed:", err)),
+          );
         },
       },
     ));

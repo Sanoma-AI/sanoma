@@ -1,4 +1,5 @@
 import type { CheckResult } from "sanoma/workflows";
+import type { ConfigDescription } from "sanoma/workflows/describe";
 import { DefaultChatTransport, type InferUITools, isTextUIPart, isToolUIPart, type UIMessage } from "ai";
 import type { LoopTools } from "../steps/agent/tools.ts";
 
@@ -58,6 +59,18 @@ export const ENGINE_NAMES = {
 /** Whether an engine spends the person's own plan: their own agent over ACP. */
 export const ownPlan = (engine: string) => engine.startsWith("acp-");
 
+/** The engine of a person's own plan of the coding agent `id` (`ConfigDescription.agents`). */
+export const ownEngine = (id: string) => `acp-${id}`;
+
+/**
+ * Whether the company can run an engine: our loop always, a coding agent only when a connector of
+ * the company gives it for the plan the engine names (`ConfigDescription.agents`); a turn on any
+ * other fails, saying which connector to add.
+ */
+export const installed = (engine: string, agents: ConfigDescription["agents"]) =>
+  engine === "loop" ||
+  agents.some((a) => (ownPlan(engine) ? a.own && ownEngine(a.id) === engine : a.onKey && a.id === engine));
+
 /** Whether an engine answers on the company's model connector (`chatModel`): our loop; a coding agent says what it lacks itself. */
 export const onModelConnector = (engine: string) => engine === "loop";
 
@@ -74,8 +87,17 @@ export function pathOf(input: unknown): string | undefined {
 /** An engine's name, as a chat's row keeps it. */
 export type EngineName = keyof typeof ENGINE_NAMES;
 
+/**
+ * What a reply suggests the person ask next, the `data-suggestions` part (by the id `suggestions`)
+ * every engine's reply gets from the asks its text ends with (`suggestedAsks`): each worded as the
+ * person would type it, which the chat shows as a button that sends it.
+ */
+export interface Suggestions {
+  asks: string[];
+}
+
 /** The data parts of a chat message, by name: `data-<name>`. */
-export type ChatData = { draft: DraftCard; signIn: SignInCard };
+export type ChatData = { draft: DraftCard; signIn: SignInCard; suggestions: Suggestions };
 
 /**
  * A message of the operator agent's chat: our loop's tools typed (`InferAgentUIMessage` of its
@@ -112,6 +134,15 @@ export function errorParts(text: string): { text: string; vendor?: string } {
   return found ? { text: text.slice(0, found.index), vendor: found[1]! } : { text };
 }
 
+/**
+ * Whether a message is the cue for the agent to speak first (`POST /api/chat`'s `start`): the
+ * app's own, kept in the transcript as the turn's message but never shown.
+ */
+export const isIntro = (message: UIMessage) => (message.metadata as { intro?: unknown } | undefined)?.intro === true;
+
+/** Whether the person has written in a chat: a message of theirs that is not the agent's cue (`isIntro`). */
+export const written = (messages: UIMessage[]) => messages.some((m) => m.role === "user" && !isIntro(m));
+
 /** A message's text, its text parts joined by `separator`. */
 export const textOf = (message: UIMessage, separator = "\n\n") =>
   message.parts
@@ -134,13 +165,14 @@ export const unfinished = (part: UIMessage["parts"][number]): boolean =>
  * The chat's transport to `POST /api/chat` (`api`), as the chat column makes it: only the new
  * message is sent, the server reading the rest from the chat's transcript, with the engine a new
  * chat opens on when the send names one (`sendMessage(message, { body: { engine } })`; a chat
- * keeps the one it opened on).
+ * keeps the one it opened on), and `start` when the message is the agent's cue to speak first
+ * (`sendMessage({ text: "", metadata: { intro: true } }, { body: { engine, start: true } })`).
  */
 export const chatTransport = (api: string, headers: () => Record<string, string>) =>
   new DefaultChatTransport<ChatMessage>({
     api,
     headers,
     prepareSendMessagesRequest: ({ id, messages, body }) => ({
-      body: { id, message: messages.at(-1), engine: body?.engine },
+      body: { id, message: messages.at(-1), engine: body?.engine, start: body?.start },
     }),
   });

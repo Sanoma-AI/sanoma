@@ -1,11 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppBundle } from "sanoma/app";
+import { testDatabaseUrl, testWorkerConfig } from "sanoma/testing";
+import { memoryLedger } from "sanoma/workflows";
+import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { Listening } from "../src/listen.ts";
-import { listenWorkerPort, type Run, type WorkerPortOptions } from "../src/worker-port.ts";
+import { listenWorkerPort, type Run, runWorker, type WorkerPortOptions } from "../src/worker-port.ts";
 import { copyFixture, ensureBuilt, runCli } from "./fixture.ts";
 
 // The worker's port over a fake `Run`: the checkout (with its install) and the revision's own
@@ -125,6 +128,23 @@ describe("the worker's port", () => {
     expect((await settled(R2)).status).toBe(200);
   });
 
+  it("tells when it starts building and when the last build queued ends", async () => {
+    built.set(R1, BUNDLE);
+    built.set(R2, BUNDLE);
+    let release!: () => void;
+    hold = new Promise((resolve) => (release = resolve));
+    const building: boolean[] = [];
+    await port.stop();
+    port = await listen({ onBuilding: (now) => building.push(now) });
+    expect((await ask(R1)).status).toBe(202);
+    expect((await ask(R2)).status).toBe(202);
+    expect(building).toEqual([true]);
+    release();
+    await settled(R1);
+    await settled(R2);
+    expect(building).toEqual([true, false]);
+  });
+
   it("refuses another token, no token and a revision that is not a commit id, building nothing", async () => {
     expect((await ask(R1, "swi_another")).status).toBe(401);
     expect((await fetch(`${port.url}/__sanoma/app-bundle?revision=${R1}`)).status).toBe(401);
@@ -163,4 +183,62 @@ describe("the worker's port on a company", () => {
     );
     expect(bundle.assets.map((a) => a.path)).toEqual(expect.arrayContaining(bundle.prerendered.map((p) => p.asset)));
   }, 600_000);
+});
+
+describe("sanoma worker on a host that starts it again", () => {
+  const databaseUrl = testDatabaseUrl("worker_port_exit");
+  const company = join(work, "exiting");
+  mkdirSync(company, { recursive: true });
+  // A checkout that waits until released, then fails: a build under way, for as long as the test says.
+  const release = join(work, "release");
+  const checkout = join(work, "checkout.sh");
+  writeFileSync(checkout, `#!/bin/sh\nwhile [ ! -f "${release}" ]; do sleep 0.1; done\nexit 1\n`);
+  chmodSync(checkout, 0o755);
+  const pool = new Pool({ connectionString: databaseUrl });
+  afterAll(() => pool.end());
+  const stoppedAt = async () =>
+    (
+      await pool.query<{ at: Date | null }>("select stopped_at as at from sanoma_wakeup where id = 1")
+    ).rows[0]?.at?.getTime() ?? 0;
+
+  it(
+    "exits once its worker stopped itself, a build under way holding it until a fresh worker stops",
+    { timeout: 120_000 },
+    async () => {
+      // Any address: no deadline is registered.
+      vi.stubEnv("SANOMA_HOST_URL", "http://127.0.0.1:9");
+      vi.stubEnv("SANOMA_WAKEUP_TOKEN", TOKEN);
+      vi.stubEnv("SANOMA_CHECKOUT", checkout);
+      vi.stubEnv("PORT", "0");
+      // Beyond loopback, as in a container: a worker there stops itself.
+      vi.stubEnv("SANOMA_APP_HOST", "0.0.0.0");
+      onTestFinished(() => void vi.unstubAllEnvs());
+      const lines: string[] = [];
+      const worker = await runWorker(
+        testWorkerConfig({ workflows: [], connectors: [], root: company, ledger: memoryLedger() }, databaseUrl),
+        (line) => lines.push(line),
+      );
+      onTestFinished(() => worker.stop());
+      let exited = false;
+      void worker.exited?.then(() => (exited = true));
+      const at = lines.find((line) => line.startsWith("the worker's port at "))!.slice("the worker's port at ".length);
+      const before = await stoppedAt();
+      const bundle = await fetch(`${at}/__sanoma/app-bundle?revision=${R1}`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      expect(bundle.status).toBe(202);
+      // The worker stops itself at its first check, idle; the build holds the process.
+      await vi.waitFor(async () => expect(await stoppedAt()).toBeGreaterThan(before), {
+        timeout: 40_000,
+        interval: 200,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(exited).toBe(false);
+      // The build ends: a fresh worker starts, and once it stops itself the process is done.
+      const first = await stoppedAt();
+      writeFileSync(release, "");
+      await vi.waitFor(() => expect(exited).toBe(true), { timeout: 60_000, interval: 200 });
+      expect(await stoppedAt()).toBeGreaterThan(first);
+    },
+  );
 });

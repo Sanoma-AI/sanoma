@@ -83,15 +83,15 @@ describe("a host type", () => {
     ],
     ["a revision that is write-only", { writeOnly: ["env", "commit"] }, /revision must not be write-only/],
     [
-      "a lifetime it does not know (stops-on-exit, until a host that stops on exit)",
-      { capabilities: { ...host.capabilities, lifetime: "stops-on-exit" as never } },
+      "a lifetime it does not know (stops-when-quiet: the host's inactivity never decides)",
+      { capabilities: { ...host.capabilities, lifetime: "stops-when-quiet" as never } },
       /lifetime/,
     ],
   ])("is refused with %s", (_, overrides, message) => {
     expect(() => hostOf(overrides)).toThrow(message);
   });
 
-  it.each(["long-lived", "stops-when-quiet"] as const)("may be %s", (lifetime) => {
+  it.each(["long-lived", "stops-on-exit"] as const)("may be %s", (lifetime) => {
     expect(hostOf({ capabilities: { ...host.capabilities, lifetime } }).host?.capabilities.lifetime).toBe(lifetime);
   });
 

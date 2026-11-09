@@ -12,7 +12,7 @@ allowBuilds:
   fs-xattr: true
   macos-alias: true
   lefthook: false
-  # Pi's model providers (through @ai-sdk/harness-pi): their install scripts are not needed.
+  # Pi's model providers (through connector-pi's @ai-sdk/harness-pi): their install scripts are not needed.
   "@google/genai": false
   protobufjs: false
   # The app's Worker build for the Cloudflare host (@cloudflare/vite-plugin, wrangler): their

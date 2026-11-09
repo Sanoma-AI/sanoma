@@ -243,7 +243,7 @@ describe("sanoma.wakeup meets the Wakeup contract", () => {
     ledger: memoryLedger(),
     databaseUrl,
   };
-  const host = fakeHost(inProcessHost(config, databaseUrl), { lifetime: "stops-when-quiet" });
+  const host = fakeHost(inProcessHost(config, databaseUrl), { lifetime: "stops-on-exit" });
   config.connectors.push(host.connector);
   let client: SanomaClient;
   let url: string;

@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-cloudflare
 
-[Cloudflare Containers](https://developers.cloudflare.com/containers/) as a host that stops when quiet, and its [Durable Object](https://developers.cloudflare.com/durable-objects/)'s [alarm](https://developers.cloudflare.com/durable-objects/api/alarms/) as the wakeup that starts it again, for [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md). Both are one Worker per company, `sanoma-<name>`, on the account's workers.dev subdomain. And a set of [DNS records](#dns-records) in one of the account's zones, such as the ones a sending domain asks for.
+[Cloudflare Containers](https://developers.cloudflare.com/containers/) as a host that stops when its worker is idle, and its [Durable Object](https://developers.cloudflare.com/durable-objects/)'s [alarm](https://developers.cloudflare.com/durable-objects/api/alarms/) as the wakeup that starts it again, for [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md). Both are one Worker per company, `sanoma-<name>`, on the account's workers.dev subdomain. And a set of [DNS records](#dns-records) in one of the account's zones, such as the ones a sending domain asks for.
 
 ## Usage
 
@@ -70,7 +70,7 @@ The plan then binds `#host.sourceKey` from `#deployKey` and updates the host in 
 
 `cloudflare.container`, deprecated, declares every field itself: `image`, `source`, `ref`, `port`, `secrets` (each a `secret(...)`) and `domains` (by site name). Workflows that make a host for each of several companies (Sanoma Cloud's) call its operations with those fields filled.
 
-The host's outputs are `{ url, wakeUrl, revision, healthy }` (`wakeUrl` its `worker_url`). Its capabilities: stops when quiet, a public URL, it runs an image rather than building one, no fixed egress. `healthy` is the application existing and the Worker answering `/__sanoma/health`, which does not start a stopped container: a stopped host is healthy, and a read or a drift check leaves it stopped.
+The host's outputs are `{ url, wakeUrl, revision, healthy }` (`wakeUrl` its `worker_url`). Its capabilities: stops on exit (`stops-on-exit`), a public URL, it runs an image rather than building one, no fixed egress. `healthy` is the application existing and the Worker answering `/__sanoma/health`, which does not start a stopped container: a stopped host is healthy, and a read or a drift check leaves it stopped.
 
 An explicit `host.update` or `container.update` waits for startup readiness even when the desired fields are unchanged. It starts a stopped container and checks the source and configuration revisions before returning success, so retrying an upload whose startup failed cannot succeed from bindings alone. This unchanged update uploads no Worker or secret values. Reads and plans remain non-starting; a plan with no changes does not perform this readiness check.
 
@@ -97,7 +97,9 @@ The object runs the company's worker in its container and never sees a visitor's
 - at the alarm, starts the container and calls its `/wake`, then notes when (`rang`); a failure throws, so Cloudflare rings the alarm again;
 - over RPC, `startNow()`: sets the alarm now, unless one is due sooner, and the alarm starts the container without the caller waiting and sends it `/wake`; a wake held for later is set again once the start is made, and one that rang never rings twice.
 
-A container that ended reports how once (`exit`, a 503), so a deploy waiting on it stops rather than starting it again. Cloudflare stops the container after ten minutes without a request to the object; the object, its storage and its alarm stay. Visitors' requests go to the app, not the object, so a run the worker keeps busy longer than that relies on the worker's own registration (a sleep's end, a queued run's `startNow`) to start it again.
+A container that ended before it answered reports how once (`exit`, a 503), so a deploy waiting on it stops rather than starting it again.
+
+The worker decides when the container stops; the object only starts it. Once nothing runs, nothing is queued and nothing is due within a minute, the worker registers its next deadline at `/__sanoma/wake`, stops, and `sanoma worker` exits 0 (its environment names the Worker's wake route, `SANOMA_HOST_URL`, so it knows something starts it again); the container ends with its process, and the object, its storage and its alarm stay. A container that answered and then ended is stopped, not a failed start: health says `running: false`, and the next start or wake starts it again, paying the cold start. A scheduled wake costs the start, the work and about a minute. A wake that comes while the worker is stopping wins, and the worker carries on; one that finds the process gone fails, so the alarm rings again and starts a fresh container. A deploy's bundle being built keeps the process up until it is built. The object sets the container's inactivity timeout to Cloudflare's maximum, six hours, so the platform never decides: work inside the container is not a request to the object, so a run that keeps the worker busy runs to its end, up to six hours after the object's last request.
 
 The application is of the `durable_object` scheduling policy (public beta, the one Cloudflare documents for new applications; it refused `default` on the account the connector was first run on): the object starts its container, with the image and the instance type it names, so the application is only a name and the object's namespace, and has no image, versions or rollouts. The policy is fixed once an application is made: one of the `default` policy under that name is deleted by hand before the apply. A Worker of that name that is not Sanoma's (no `SANOMA_INSTANCE` binding) reads as gone, and a create or a delete refuses to touch it.
 
@@ -221,9 +223,9 @@ The Worker's `SANOMA_IMAGE` binding holds the declared image and its upload the 
 1. **The connector.** Add `cloudflare` to the connectors in `sanoma.config.ts`: the worker on the host calls `cloudflare.alarm.register` through it.
 2. **Credentials.** On the connector's page, `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (below).
 3. **Go live.** `infra.ts` declares the host and, after it, `export const wakeup = cloudflare.alarm({ host })`: apply mints `SANOMA_WAKEUP_TOKEN` when none is stored and gives it to the host. One apply makes the Worker, waits for it, then the alarm, which checks the Worker holds the token.
-4. **A sleeping run.** Start a workflow that sleeps past ten quiet minutes. Before the container stops the worker registers the sleep's end; at `at` the object's alarm starts the container and calls `/wake`, and the run continues.
+4. **A sleeping run.** Start a workflow that sleeps for a few minutes. Before its process exits the worker registers the sleep's end; at `at` the object's alarm starts the container and calls `/wake`, and the run continues.
 
-To stop scaling to zero, delete the `wakeup` line (from a `cloudflare.container`, its `SANOMA_WAKEUP_TOKEN` too), and apply: the alarm is deleted, and the next request still starts the container. The token stays among the Worker's secrets (apply mints one when none is declared: the bundle and restart routes need it), so the runtime registers with the Worker's wake route itself (`envWakeup`), as a Sanoma Cloud company's does.
+Without the `wakeup` line (from a `cloudflare.container`, its `SANOMA_WAKEUP_TOKEN` too) it still scales to zero: the token stays among the Worker's secrets (apply mints one when none is declared: the bundle and restart routes need it), so the runtime registers with the Worker's wake route itself (`envWakeup`), as a Sanoma Cloud company's does, and exits once idle all the same.
 
 ## Custom domains
 
@@ -292,7 +294,7 @@ Containers need the Workers Paid plan. An instance is billed while it runs, by i
 
 ### Running it live
 
-`test/live.ts`, run by hand, runs the Host and Wakeup kits against a real account, then prints how long a cold wake took (a request to a stopped container until it answers). It makes a Worker and a `durable_object` application named `sanoma-host-check` (`CLOUDFLARE_TEST_NAME` changes it), takes about an hour (each stop is Cloudflare's own ten quiet minutes), and deletes both at the end. It is what checks what the fixtures cannot: the copy and its pin by digest, the image's preparation, the upload's `containers[].images`, the application's body, the object's `start` with the `standard-1` instance type, and a deploy check's new image started by the object:
+`test/live.ts`, run by hand, runs the Host and Wakeup kits against a real account, then prints how long a cold wake took (a request to a stopped container until it answers). It makes a Worker and a `durable_object` application named `sanoma-host-check` (`CLOUDFLARE_TEST_NAME` changes it), takes a while (each stop waits for the idle worker to exit, about a minute after its last run), and deletes both at the end. It is what checks what the fixtures cannot: the copy and its pin by digest, the image's preparation, the upload's `containers[].images`, the application's body, the object's `start` with the `standard-1` instance type, and a deploy check's new image started by the object:
 
 ```sh
 pnpm build
@@ -334,7 +336,8 @@ const fake = fakeCloudflare({
   start: ({ revision, env }) => inProcessHost(config, databaseUrl)({ port: 0, revision, secrets: env }),
 });
 // ...apply a container, then:
-await fake.stop("acme"); // as ten quiet minutes would: the next request starts it
+await fake.stop("acme"); // as Cloudflare may on its own: the next start or wake starts it
+fake.running("acme"); // false once the company's process exited: the container ended with it
 await fake.fire(); // rings every armed alarm now
 fake.wakes(); // each /wake the containers answered
 await fake.close();

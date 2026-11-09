@@ -56,6 +56,8 @@ import { type Fake, fakeSanomaWakeup } from "./fake.ts";
 import { peopleConnector } from "./person.ts";
 import type { LedgerStore } from "./ledger.ts";
 import {
+  type AgentInfo,
+  type CodingAgent,
   type Connector,
   type ConnectorSetup,
   type Driver,
@@ -248,6 +250,8 @@ export interface ResolvedConfig {
   sandboxBackends: ReadonlyMap<string, NonNullable<ConnectorSetup["sandbox"]>>;
   /** The remote halves the connectors attach, made once for this resolution, by vendor id in `connectors` order: `remoteFor` finds a URL's. */
   remotes: ReadonlyMap<string, RemoteHalf>;
+  /** The coding agents the connectors attach (`ConnectorSetup.agent`), by the agent's id, in `connectors` order: the chat's engines. */
+  agents: ReadonlyMap<string, InstalledAgent>;
   /**
    * The resources the data files under `root` declare whose type is a host (`<file>#<export>`),
    * read at each call: what a change's deploy and a push to `main` apply. None when no connector
@@ -596,6 +600,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     models: makersOf(config.connectors, "model"),
     sandboxBackends: makersOf(config.connectors, "sandbox"),
     remotes,
+    agents: agentsOf(config.connectors),
     hosts,
     sandboxes: declaredOf("sandbox"),
     declaredObjects,
@@ -724,6 +729,35 @@ export const connectorsOf = (config: Pick<SanomaConfig, "connectors">): Connecto
   peopleConnector,
 ];
 
+/** A connector's coding agent as a config installs it: its vendor, who it is, and how it runs. */
+export type InstalledAgent = AgentInfo & CodingAgent & { vendor: string };
+
+/**
+ * The coding agents the connectors attach, by the agent's id (`VendorInfo.agent`, which a
+ * connector with one must give), one per vendor as `makersOf` holds the other parts; two vendors
+ * may not give one id.
+ */
+function agentsOf(connectors: readonly Connector<any, any>[]): Map<string, InstalledAgent> {
+  const infos = new Map(connectors.map((connector) => [connector[VENDOR].id, connector[VENDOR].info]));
+  const agents = new Map<string, InstalledAgent>();
+  for (const [vendor, agent] of makersOf(connectors, "agent")) {
+    const info = infos.get(vendor)?.agent;
+    if (info === undefined) {
+      throw new Error(
+        `The "${vendor}" connector attaches a coding agent but does not say who it is: its package.json's "sanoma" field needs an "agent"`,
+      );
+    }
+    const seen = agents.get(info.id);
+    if (seen) {
+      throw new Error(
+        `Two connectors in \`connectors\` give the coding agent "${info.id}": "${seen.vendor}" and "${vendor}"`,
+      );
+    }
+    agents.set(info.id, { ...info, ...agent, vendor });
+  }
+  return agents;
+}
+
 /**
  * What the connectors' setups attach under `key` (`withSetup`), by vendor id in `connectors`
  * order. One vendor's connectors may name one maker, as copies of one connector do, never two.
@@ -739,7 +773,8 @@ function makersOf<K extends keyof ConnectorSetup>(
     const vendor = connector[VENDOR].id;
     const seen = makers.get(vendor);
     if (seen && seen !== make) {
-      throw new Error(`Two connectors in \`connectors\` attach a ${key} for "${vendor}"; keep one per vendor`);
+      const part = key === "agent" ? "coding agent" : key;
+      throw new Error(`Two connectors in \`connectors\` attach a ${part} for "${vendor}"; keep one per vendor`);
     }
     makers.set(vendor, make);
   }
