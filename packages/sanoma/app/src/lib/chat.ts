@@ -74,8 +74,17 @@ export function pathOf(input: unknown): string | undefined {
 /** An engine's name, as a chat's row keeps it. */
 export type EngineName = keyof typeof ENGINE_NAMES;
 
+/**
+ * What a reply suggests the person ask next, the `data-suggestions` part (by the id `suggestions`)
+ * every engine's reply gets from the asks its text ends with (`suggestedAsks`): each worded as the
+ * person would type it, which the chat shows as a button that sends it.
+ */
+export interface Suggestions {
+  asks: string[];
+}
+
 /** The data parts of a chat message, by name: `data-<name>`. */
-export type ChatData = { draft: DraftCard; signIn: SignInCard };
+export type ChatData = { draft: DraftCard; signIn: SignInCard; suggestions: Suggestions };
 
 /**
  * A message of the operator agent's chat: our loop's tools typed (`InferAgentUIMessage` of its
@@ -112,6 +121,12 @@ export function errorParts(text: string): { text: string; vendor?: string } {
   return found ? { text: text.slice(0, found.index), vendor: found[1]! } : { text };
 }
 
+/**
+ * Whether a message is the cue for the agent to speak first (`POST /api/chat`'s `start`): the
+ * app's own, kept in the transcript as the turn's message but never shown.
+ */
+export const isIntro = (message: UIMessage) => (message.metadata as { intro?: unknown } | undefined)?.intro === true;
+
 /** A message's text, its text parts joined by `separator`. */
 export const textOf = (message: UIMessage, separator = "\n\n") =>
   message.parts
@@ -134,13 +149,14 @@ export const unfinished = (part: UIMessage["parts"][number]): boolean =>
  * The chat's transport to `POST /api/chat` (`api`), as the chat column makes it: only the new
  * message is sent, the server reading the rest from the chat's transcript, with the engine a new
  * chat opens on when the send names one (`sendMessage(message, { body: { engine } })`; a chat
- * keeps the one it opened on).
+ * keeps the one it opened on), and `start` when the message is the agent's cue to speak first
+ * (`sendMessage({ text: "", metadata: { intro: true } }, { body: { engine, start: true } })`).
  */
 export const chatTransport = (api: string, headers: () => Record<string, string>) =>
   new DefaultChatTransport<ChatMessage>({
     api,
     headers,
     prepareSendMessagesRequest: ({ id, messages, body }) => ({
-      body: { id, message: messages.at(-1), engine: body?.engine },
+      body: { id, message: messages.at(-1), engine: body?.engine, start: body?.start },
     }),
   });
