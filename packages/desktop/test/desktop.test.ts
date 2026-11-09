@@ -451,6 +451,22 @@ export const host = cloud.host({
 `,
     );
     expect(liveOf(repo)).toEqual({ hostname: "acme.sanoma.work" });
+    // A comment or a call in the declaration before it; never another declaration's.
+    writeFileSync(
+      infra,
+      `export const host = cloudflare.host({
+  // What it serves (\`sites/*/site.ts\`), from build("x").
+  source: build("x"),
+  hostname: "internal.sanoma.work",
+});
+`,
+    );
+    expect(liveOf(repo)).toEqual({ hostname: "internal.sanoma.work" });
+    writeFileSync(
+      infra,
+      `export const host = cloud.host({ name: "acme" });\nexport const site = page({ hostname: "x.example" });\n`,
+    );
+    expect(liveOf(repo)).toEqual({});
   });
 
   test("forgets a failed start whose folder holds no company, such as a failed clone, and keeps any other", () => {
@@ -490,6 +506,11 @@ export default defineConfig({
     writeFileSync(
       config,
       `export default defineConfig({\n  connectors: [defineConnection(neon, { name: "x" })],\n});\n`,
+    );
+    expect(companyName(repo)).toBe("acme");
+    writeFileSync(
+      config,
+      `export default defineConfig({\n  connectors: [],\n});\n\nconst x = defineConnection(neon, {\n  name: "cloud",\n});\n`,
     );
     expect(companyName(repo)).toBe("acme");
     expect(partitionOf("/x/acme")).toMatch(/^persist:company-[0-9a-f]{40}$/);

@@ -184,7 +184,7 @@ const archWarning = () => archWarnings(app.runningUnderARM64Translation);
 /** Whether the company runs or is starting now. */
 const isLive = (path: string) => running.has(path) || opening.has(path);
 /** The companies running or starting now, by real path. */
-const live = () => new Set([...running.keys(), ...opening.keys()]);
+const runningNow = () => new Set([...running.keys(), ...opening.keys()]);
 
 let startTimer: NodeJS.Timeout | undefined;
 /** Sends the start screen what it shows (soon, once for a burst of changes). */
@@ -197,7 +197,10 @@ function sendStart() {
 }
 
 const startState = (): StartState => ({
-  recent: recentOf(readCompanies(companiesFile()), live()).map((c) => ({ ...c, place: withTilde(c.path, homedir()) })),
+  recent: recentOf(readCompanies(companiesFile()), runningNow()).map((c) => ({
+    ...c,
+    place: withTilde(c.path, homedir()),
+  })),
   warnings: archWarning(),
   notice,
   ask,
@@ -831,15 +834,15 @@ const knownIdentity = async (): Promise<Identity> =>
   (await needsCommandLineTools()) ? { name: "", email: "" } : identityOf(homedir(), gitEnv(process.env));
 
 /**
- * Sets git's identity globally to `typed` when git has none (`user.name` or `user.email` missing),
- * as a new company's first commit, and the app's later ones, need one; an identity git has stays.
- * Why it could not, in one line.
+ * Sets what git's identity lacks (`user.name`, `user.email`) globally from `typed`, as a new
+ * company's first commit, and the app's later ones, need both; what git has stays. Why it could
+ * not, in one line.
  */
 async function saveIdentity(typed: Identity): Promise<string | undefined> {
   const env = gitEnv(process.env);
   const known = await identityOf(homedir(), env);
   if (known.name && known.email) return undefined;
-  return setIdentity(typed, env).then(
+  return setIdentity({ name: known.name || typed.name, email: known.email || typed.email }, env).then(
     () => undefined,
     (err: unknown) => `git could not save your name and email: ${messageOf(err)}`,
   );
@@ -955,9 +958,13 @@ async function newCompany(): Promise<void> {
     typed = { name: value.name, you: value.you, email: value.email };
     parent = value.parent;
     const target = newCompanyTarget(typed.name, parent);
+    if ("problem" in target) {
+      problem = target.problem;
+      continue;
+    }
     const founder = { name: typed.you, email: typed.email };
-    problem = "problem" in target ? target.problem : identityProblem(founder);
-    if (problem || "problem" in target) continue;
+    problem = identityProblem(founder);
+    if (problem) continue;
     if (!(await gitReady())) return;
     problem = await saveIdentity(founder);
     if (problem) continue;

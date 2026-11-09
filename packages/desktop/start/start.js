@@ -128,8 +128,12 @@ function recentRow(c) {
     el("span", { className: "status" }, state, running),
   );
   if (!live?.hostname) return el("li", {}, row);
-  const address = `https://${live.hostname}`;
-  const link = el("a", { href: address, target: "_blank", rel: "noreferrer", textContent: live.hostname });
+  const link = el("a", {
+    href: `https://${live.hostname}`,
+    target: "_blank",
+    rel: "noreferrer",
+    textContent: live.hostname,
+  });
   return el("li", { className: "live" }, row, el("p", { className: "row-link small" }, "Live at ", link));
 }
 

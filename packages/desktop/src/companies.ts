@@ -103,8 +103,11 @@ export type Live = { hostname?: string } | undefined;
 
 /** The lockfile's key for the company's host. */
 const HOST_KEY = "resources/sanoma/infra.ts#host";
-/** The `hostname` a `.host({ … })` declaration names, read as text: the data file is code the shell never runs. */
-const HOSTNAME = /\.host\(\s*\{[^)]*?\bhostname\s*:\s*["'`]([^"'`\s]+)["'`]/;
+/**
+ * The `hostname` a `.host({ … })` declaration names before the `})` that closes it, read as text:
+ * the data file is code the shell never runs.
+ */
+const HOSTNAME = /\.host\(\s*\{(?:(?!\}\s*\))[\s\S])*?\bhostname\s*:\s*["'`]([^"'`\s]+)["'`]/;
 
 /** What `file` holds, or undefined when it cannot be read. */
 const textOf = (file: string) => {
@@ -171,9 +174,9 @@ export async function portFor(
 /**
  * The `name` that `sanoma.config.ts` gives `defineConfig`, read as text: a top-level key, so the
  * first `name: "…"` after `defineConfig({` that is first in the braces or on a line of its own one
- * level in.
+ * level in, before the line that closes it with `})`.
  */
-const CONFIG_NAME = /defineConfig\(\s*\{(?:\s*|[\s\S]*?\n[ \t]{1,2})name\s*:\s*("(?:[^"\\\n]|\\.)*")/;
+const CONFIG_NAME = /defineConfig\(\s*\{(?:\s*|(?:(?!\n\}\))[\s\S])*?\n[ \t]{1,2})name\s*:\s*("(?:[^"\\\n]|\\.)*")/;
 
 /** The name `sanoma.config.ts` at `path` gives the company, if it gives one. */
 function configName(path: string): string | undefined {

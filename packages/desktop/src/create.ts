@@ -97,6 +97,9 @@ function dlxSanoma(options: SessionOptions, args: readonly string[]): Session {
   return { ready: launched.ready, ended: launched.exited, stop: launched.stop };
 }
 
+/** How a sanoma from before `init` refuses it: an option it does not know, or the command. */
+const WITHOUT_INIT = /^Unknown option '--(name|you|email)'|^unknown command "init"/;
+
 /**
  * `first`, then, when it ends on its own without having been ready, the session `next` makes of
  * how it ended (none: it ends there). Ready when either is; ended when the last one is.
@@ -132,8 +135,8 @@ function followedBy(first: Session, next: (exit: Exit) => Session | undefined): 
  * form's answers (sanoma from npm), which copies the template, declares whoever starts it, commits
  * and installs, then serves the company it started from that company's own `node_modules/sanoma`,
  * so its window opens as an opened company's does. An init that only sets up is followed by the
- * company opened (`startSession`); a sanoma from before `init` refuses it (`USAGE_EXIT`, the
- * folder untouched) and is run as it was then, `pnpm dlx sanoma`, which starts the company as git's
+ * company opened (`startSession`); a sanoma from before `init` refuses it (`WITHOUT_INIT`,
+ * the folder untouched) and is run as it was then, `pnpm dlx sanoma`, which starts the company as git's
  * user. A folder that holds files (an init that got that far, retried) is opened as any other.
  * Its progress: init's stages, then the database answering (`stepOf`).
  */
@@ -157,10 +160,13 @@ export const createSession =
     };
     if (hasFiles(options.repo)) return startSession(reporting);
     report("Starting a new company with sanoma from npm");
-    const init = dlxSanoma(reporting, ["init", "--name", name, "--you", you, "--email", email]);
-    return followedBy(init, ({ code }) => {
+    // Each value joined to its flag: one that starts with "-" is still its value.
+    const init = dlxSanoma(reporting, ["init", `--name=${name}`, `--you=${you}`, `--email=${email}`]);
+    return followedBy(init, ({ code, error }) => {
       if (code === 0) return startSession(reporting);
-      if (code === USAGE_EXIT && !hasFiles(options.repo)) return dlxSanoma(reporting, []);
+      if (code === USAGE_EXIT && WITHOUT_INIT.test(error ?? "") && !hasFiles(options.repo)) {
+        return dlxSanoma(reporting, []);
+      }
       return undefined;
     });
   };

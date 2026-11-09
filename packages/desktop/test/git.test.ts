@@ -280,6 +280,12 @@ describe("a new company", () => {
     await expect(session.ended).resolves.toMatchObject({ code: 143 });
   });
 
+  test("an init that refuses the form's answers ends there, its answers never dropped for git's", async () => {
+    const { session, calls } = await newCompany("refuses");
+    await expect(session.ended).resolves.toMatchObject({ code: 2, error: "--email: not an email address" });
+    expect(calls()).toEqual([INIT]);
+  });
+
   test("a sanoma from before init refuses it, and starts the company as it did then, with no stages", async () => {
     const { port, progress, session, calls } = await newCompany("old");
     await expect(session.ready).resolves.toBe(`http://localhost:${port}`);
@@ -332,7 +338,7 @@ async function newCompany(sanoma: string) {
   return { repo, bin, port, lines, progress, session, calls: () => readFileSync(calls, "utf8").trim().split("\n") };
 }
 const DLX = "--config.minimumReleaseAgeExclude=sanoma --config.minimumReleaseAgeExclude=@sanoma-ai/* dlx sanoma";
-const INIT = `${DLX} init --name Maple Street Studio --you Dana Reyes --email dana@example.com`;
+const INIT = `${DLX} init --name=Maple Street Studio --you=Dana Reyes --email=dana@example.com`;
 const NEW = "Starting a new company with sanoma from npm";
 
 /** A new company's answers, for a session that never runs its init. */

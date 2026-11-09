@@ -3,7 +3,7 @@
 // says which sanoma it is: "init" (the default: `init` reports its stages, then serves), "init-only"
 // (`init` sets up, installing the fake launcher, and exits; `install` then succeeds), "old" (a sanoma
 // from before `init`: it refuses the command with exit 2, writing nothing, and plain `dlx sanoma`
-// starts the company with no stages).
+// starts the company with no stages), "refuses" (`init` refuses its answers with exit 2, writing nothing).
 import { appendFileSync, cpSync, mkdirSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
@@ -15,7 +15,11 @@ if (process.env.FAKE_PNPM_LOG) appendFileSync(process.env.FAKE_PNPM_LOG, `${args
 if (args[0] === "install") process.exit(0);
 const init = args.includes("init");
 if (init && sanoma === "old") {
-  event({ event: "error", message: "Unknown option '--name'" });
+  event({ event: "error", message: "Unknown option '--name'. To specify a positional argument…" });
+  process.exit(2);
+}
+if (init && sanoma === "refuses") {
+  event({ event: "error", message: "--email: not an email address" });
   process.exit(2);
 }
 console.error(`starting a Sanoma company in ${process.cwd()}`);
