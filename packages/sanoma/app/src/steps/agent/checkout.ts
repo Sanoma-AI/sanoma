@@ -7,7 +7,9 @@ import {
   type CheckResult,
   type Draft,
   errorCode,
+  type InstalledAgent,
   type Principal,
+  type ResolvedConfig,
   type SanomaClient,
   type Source,
 } from "sanoma/workflows";
@@ -219,4 +221,32 @@ export async function showCommits(
     id: "draft",
     data: { draft: chat.id, branch: draft.branch, ...diff, checks: checked },
   });
+}
+
+/** The plans a coding agent runs on, by its part's name: a person's own, the company's key. */
+const PLANS = { own: "a person's own plan", onKey: "the company's key" } as const;
+
+/** A coding agent's part for a plan as a turn runs it: its connector's facts, with its id and name. */
+export type TurnAgent<P extends keyof typeof PLANS> = NonNullable<InstalledAgent[P]> & { id: string; title: string };
+
+/**
+ * The coding agent `id`'s part for `plan`, as an installed connector gives it
+ * (`ResolvedConfig.agents`), with its id and name; without one, an error that says so, which the
+ * turn's reply shows.
+ */
+export function agentOn<P extends keyof typeof PLANS>(
+  { agents }: Pick<ResolvedConfig, "agents">,
+  id: string,
+  plan: P,
+): TurnAgent<P> {
+  const agent = agents.get(id);
+  const part = agent?.[plan];
+  if (!part) {
+    throw new Error(
+      agent
+        ? `${agent.title} does not run on ${PLANS[plan]}`
+        : `No connector of this company gives the coding agent ${id}: add the connector that has it to sanoma.config.ts`,
+    );
+  }
+  return { ...part, id, title: agent.title };
 }

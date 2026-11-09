@@ -1,9 +1,11 @@
 {
   "name": "@sanoma-ai/connector-github",
   "version": "0.11.21",
-  "description": "GitHub resources (repositories, branch protection, team membership, deploy keys, collaborators) for Sanoma, read through the OpenTofu provider, and repositories generated, committed to and given deploy keys through Sanoma's GitHub App",
+  "description": "GitHub resources (repositories, branch protection, team membership, deploy keys, collaborators) for Sanoma, read through the OpenTofu provider, and repositories generated, committed to and given deploy keys through Sanoma's GitHub App; and Copilot, a coding agent for the chat on a person's own plan",
   "keywords": [
+    "coding-agent",
     "connector",
+    "copilot",
     "github",
     "opentofu",
     "resources",
@@ -22,8 +24,11 @@
     "dist",
     "logo.svg",
     "logo-dark.svg",
+    "copilot.svg",
+    "copilot-dark.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "MARKS-LICENSE"
   ],
   "type": "module",
   "sideEffects": false,
@@ -75,6 +80,12 @@
   "sanoma": {
     "title": "GitHub",
     "logo": "logo.svg",
-    "logoDark": "logo-dark.svg"
+    "logoDark": "logo-dark.svg",
+    "agent": {
+      "id": "copilot",
+      "title": "Copilot",
+      "mark": "copilot.svg",
+      "markDark": "copilot-dark.svg"
+    }
   }
 }

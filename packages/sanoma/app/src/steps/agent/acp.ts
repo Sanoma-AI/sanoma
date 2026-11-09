@@ -1,13 +1,14 @@
 import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
-import type { Box, Principal, Process } from "sanoma/workflows";
+import type { Box, OwnAgent, Principal, Process } from "sanoma/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "sanoma/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
 import { homeOf, OWN_AGENTS_DIR, personBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut } from "./carrier.ts";
 import {
+  agentOn,
   allowedPaths,
   mustAllow,
   NO_SHELL,
@@ -16,6 +17,7 @@ import {
   type RealPaths,
   realIn,
   showCommits,
+  type TurnAgent,
   turnMessage,
 } from "./checkout.ts";
 import { harnessInstructions } from "./prompt.ts";
@@ -34,77 +36,6 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // Its permission requests, file reads and writes are answered by the checkout rule; the commands
 // it runs through our terminal are its own, in the box. A sign-in it asks for is shown in the chat
 // as the vendor's own flow.
-
-/** How a person signs in to their agent from the chat. */
-type SignIn =
-  /** The agent's own bin with these arguments, run by us with piped stdio, what it prints relayed into the card. */
-  | { run: readonly string[] }
-  /** The agent's terminal sign-in method of this id (`authMethods`, `type: "terminal"`): its own bin with the method's arguments, run as `run` is. */
-  | { method: string }
-  /** `authenticate` with this method: the agent sends the vendor's link and code as a URL elicitation. */
-  | { authenticate: string }
-  /** No sign-in through the chat (the vendor's needs a real terminal): the person runs this bin of the install once on this computer. */
-  | { once: { bin: string; args: readonly string[]; after?: string } };
-
-/** A person's own coding agent, by its ACP entry. */
-interface OwnAgent {
-  /** The vendor's name for it. */
-  title: string;
-  /** What is installed for it, each at the version it was tried with (installed without install scripts). */
-  packages: readonly string[];
-  /** The install's script to run once installed: the vendor's own `postinstall`, which the install skips. */
-  setup?: string;
-  /** Its ACP entry: a bin of the install (`node_modules/.bin`), and its arguments. */
-  bin: string;
-  args: readonly string[];
-  signIn: SignIn;
-}
-
-/** The agents, by the name their engine takes (`acp-<name>`), with the versions spike S3 ran (2026-10-25). */
-export const OWN_AGENTS = {
-  copilot: {
-    title: "Copilot",
-    packages: ["@github/copilot@1.0.103"],
-    bin: "copilot",
-    args: ["--acp"],
-    // Its advertised method (`copilot login`) opens a browser on this machine; the device flow prints a link and a code.
-    signIn: { run: ["login", "--device-code"] },
-  },
-  opencode: {
-    title: "OpenCode",
-    packages: ["opencode-ai@1.19.4"],
-    setup: "node_modules/opencode-ai/postinstall.mjs",
-    bin: "opencode",
-    args: ["acp"],
-    // Its free models need no sign-in; `auth login` prints nothing without a terminal.
-    signIn: { once: { bin: "opencode", args: ["auth", "login"] } },
-  },
-  pi: {
-    title: "Pi",
-    packages: ["pi-acp@0.0.34", "@earendil-works/pi-coding-agent@1.4.0"],
-    bin: "pi-acp",
-    args: [],
-    // Its terminal method (`pi-acp --terminal-login`) starts pi's interactive terminal UI, which prints nothing to a pipe.
-    signIn: { once: { bin: "pi", args: [], after: "/login" } },
-  },
-  "claude-code": {
-    title: "Claude Code",
-    packages: ["@agentclientprotocol/claude-agent-acp@0.95.0"],
-    bin: "claude-agent-acp",
-    args: [],
-    signIn: { method: "claude-ai-login" },
-  },
-  codex: {
-    title: "Codex",
-    packages: ["@agentclientprotocol/codex-acp@2.2.2"],
-    bin: "codex-acp",
-    args: [],
-    signIn: { authenticate: "chat-gpt-device-code" },
-  },
-} satisfies Record<string, OwnAgent>;
-
-/** An agent's name, its engine's being `acp-<name>`. */
-export type OwnAgentName = keyof typeof OWN_AGENTS;
 
 /** What this client says it can do: files and terminals (ours, by the checkout rule), terminal sign-in methods, and links to show. */
 const CAPABILITIES: acp.ClientCapabilities = {
@@ -172,23 +103,22 @@ const SIGN_IN_FAILURES: [said: RegExp, words: string][] = [
 /** Each agent's install under way, by its box and directory: this process's cache, so two turns install it once. */
 const installs = new Map<string, Promise<void>>();
 
-/** The engine for `name` (`acp-<name>`): a turn of a chat through that person's own agent. */
+/** The engine for the agent `id` (`acp-<id>`): a turn of a chat through that person's own agent. */
 export const acpEngine =
-  (name: OwnAgentName): Engine =>
+  (id: string): Engine =>
   (turn) =>
     createUIMessageStream<ChatMessage>({
       onError: errorMessage,
-      execute: ({ writer }) => runTurn(name, turn, writer),
+      execute: ({ writer }) => runTurn(agentOn(turn.step.resolved, id, "own"), turn, writer),
     });
 
 /** Whether `principal` is a person: not an agent, nor acting for someone, nor a visitor. Only a person's own plan is spent. */
 const isPerson = (principal: Principal) =>
   !isVisitor(principal) && !principal.groups?.includes(AGENTS_GROUP) && principal.onBehalfOf === undefined;
 
-async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
+async function runTurn(agent: TurnAgent<"own">, engineTurn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
   const { step, chat, messages } = engineTurn;
   const { by: principal, signal } = step;
-  const agent: OwnAgent = OWN_AGENTS[name];
   if (!isPerson(principal)) {
     throw new Error(`${agent.title} runs on a person's own plan, and ${principal.id} is not a person`);
   }
@@ -211,7 +141,7 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
         const boxHome = await homeOf(box);
         // The person's own agents' HOME, kept across turns in the box: their installs and sign-ins.
         const home = join(boxHome, OWN_AGENTS_DIR);
-        const dir = join(home, name);
+        const dir = join(home, agent.id);
         // A first install under way is waited for even by a new message (it has a time limit of its
         // own): the box's stop would end it.
         const [cloned, installed, shimmed] = await Promise.allSettled([
@@ -261,7 +191,7 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
 
 /** A turn's agent in the box and what it asked for: one ACP connection, its terminals and its sign-in. */
 class AcpTurn {
-  readonly agent: OwnAgent;
+  readonly agent: TurnAgent<"own">;
   readonly relay: Relay;
   readonly signal: AbortSignal;
   readonly box: Box;
@@ -284,7 +214,7 @@ class AcpTurn {
   readonly #terminals = new Map<string, Started>();
 
   constructor(
-    agent: OwnAgent,
+    agent: TurnAgent<"own">,
     relay: Relay,
     signal: AbortSignal,
     {

@@ -272,12 +272,15 @@ export const OpEntrySchema = z.strictObject({
 });
 export type OpEntry = z.infer<typeof OpEntrySchema>;
 
+/** A logo or a mark as a UI shows it: `data:image/svg+xml` URLs for an `<img>`, `dark` for dark backgrounds. */
+const MarkSchema = z.strictObject({ src: z.string(), dark: z.string().optional() });
+
 /** Who a vendor is, from its connector's `VendorInfo`: enough to name it, show its logo and link to its connector. */
 export const VendorEntrySchema = z.strictObject({
   /** The connector's `title`, else the vendor's id. */
   title: z.string(),
   /** The logo as `data:image/svg+xml` URLs, for an `<img>`: `dark` is for dark backgrounds. */
-  logo: z.strictObject({ src: z.string(), dark: z.string().optional() }).optional(),
+  logo: MarkSchema.optional(),
   /** The connector's npm package name. */
   package: z.string().optional(),
   /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
@@ -296,6 +299,23 @@ export const VendorEntrySchema = z.strictObject({
     .optional(),
 });
 export type VendorEntry = z.infer<typeof VendorEntrySchema>;
+
+/**
+ * A coding agent a connector gives the chat (`ConnectorSetup.agent`): who it is, from its
+ * connector's package.json, and the plans it runs on: a person's own (`own`, the chat's
+ * `acp-<id>`), the company's key (`onKey`, `<id>`), with the vendor of the model connector whose
+ * key that takes, which the config may lack.
+ */
+export const AgentEntrySchema = z.strictObject({
+  id: z.string(),
+  /** Its connector's vendor, a key of `vendors`. */
+  vendor: z.string(),
+  title: z.string(),
+  mark: MarkSchema.optional(),
+  own: z.boolean(),
+  onKey: z.strictObject({ model: z.string() }).optional(),
+});
+export type AgentEntry = z.infer<typeof AgentEntrySchema>;
 
 /**
  * The contracts a resource type meets, from its spec: `host`, `database`, `wakeup` and `sandbox`
@@ -393,6 +413,8 @@ export const ConfigDescriptionSchema = z.strictObject({
   ops: z.array(OpEntrySchema),
   /** Every vendor the operations are from, by its id (an `OpEntry`'s `vendor`). */
   vendors: z.record(z.string(), VendorEntrySchema),
+  /** The coding agents the connectors give the chat, in `connectors` order. */
+  agents: z.array(AgentEntrySchema),
   /** The resource types the connectors declare, by `id`. */
   resourceTypes: z.array(ResourceTypeEntrySchema),
   /** The config's collections, by name. */

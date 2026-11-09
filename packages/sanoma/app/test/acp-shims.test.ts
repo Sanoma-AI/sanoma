@@ -11,9 +11,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Box } from "sanoma/workflows";
+import { anthropic } from "@sanoma-ai/connector-anthropic";
+import { type Box, resolveConfig } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { install, OWN_AGENTS, shims } from "../src/steps/agent/acp.ts";
+import { install, shims } from "../src/steps/agent/acp.ts";
+import { agentOn } from "../src/steps/agent/checkout.ts";
 import { boxSession, homeOf } from "../src/steps/agent/box-session.ts";
 import { localBackend } from "../src/steps/agent/local-box.ts";
 
@@ -142,13 +144,16 @@ describe("a person's own agent's install", () => {
   }, 120_000);
 });
 
+/** Claude Code on a person's plan, as the Anthropic connector gives it. */
+const claudeCode = agentOn(resolveConfig({ workflows: [], connectors: [anthropic] }), "claude-code", "own");
+
 describe.runIf(process.env.SANOMA_LIVE === "1" && process.platform === "darwin")("Claude Code on macOS", () => {
   it("keeps what it stores in its own file under the person's home, through the shims", () => {
     const installed = join(scratch, "claude-code");
     const personal = join(scratch, "people/ada");
     mkdirSync(installed, { recursive: true });
     mkdirSync(personal, { recursive: true });
-    execFileSync("pnpm", ["add", "--ignore-scripts", "--ignore-workspace", ...OWN_AGENTS["claude-code"].packages], {
+    execFileSync("pnpm", ["add", "--ignore-scripts", "--ignore-workspace", ...claudeCode.packages], {
       cwd: installed,
       stdio: "ignore",
     });

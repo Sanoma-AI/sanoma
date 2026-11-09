@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { Principal } from "./define.ts";
 import type { Authentication, CallAuthentication } from "./authentication.ts";
 import type { ConnectionSnapshot } from "./connection.ts";
+import type { HarnessV1 } from "@ai-sdk/harness";
 import type { ProviderV4 } from "@ai-sdk/provider";
 import type { z } from "zod";
 import type { Fake } from "./fake.ts";
@@ -147,10 +148,26 @@ export interface VendorInfo {
   package?: string;
   /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
   homepage?: string;
+  /** Who its coding agent is, when it attaches one (`ConnectorSetup.agent`). */
+  agent?: AgentInfo;
+}
+
+/**
+ * Who a connector's coding agent is: its `id` (lowercase letters, digits and dashes, neither `loop`
+ * nor `acp-…`), which the chat's engines are named by, its name as its maker writes it, and its
+ * mark as `VendorInfo.logo` is.
+ */
+export interface AgentInfo {
+  id: string;
+  title: string;
+  mark?: { svg: string; dark?: string };
 }
 
 /** One `<svg>` element, with nothing but whitespace around it: what a logo must be. */
 const SVG_ELEMENT = /^\s*<svg[\s>][\s\S]*<\/svg>\s*$/;
+
+/** What an agent's id may be (`AgentInfo.id`): not `loop`, our own engine's name, nor `acp-…`, a person's plan's. */
+export const AGENT_ID = /^(?!loop$)(?!acp-)[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /** Whether `svg` is a logo as `VendorInfo` takes it: one `<svg>…</svg>` element. */
 export const isSvgElement = (svg: unknown): svg is string => typeof svg === "string" && SVG_ELEMENT.test(svg);
@@ -174,17 +191,29 @@ export function defineConnector<const V extends string, const S extends Specs>(
   specs: S,
   info?: VendorInfo,
 ): Connector<V, S> {
-  // A copy, frozen once checked: changing the caller's object later cannot slip a logo past the check.
-  const logo =
-    info?.logo && Object.freeze(Object.fromEntries(Object.entries(info.logo).filter(([, v]) => v !== undefined)));
-  for (const [variant, svg] of Object.entries(logo ?? {})) {
-    if (!isSvgElement(svg)) {
-      throw new Error(
-        `defineConnector("${vendor}"): logo.${variant} must be inline SVG markup, one <svg>…</svg> element`,
-      );
+  // Copies, frozen once checked: changing the caller's object later cannot slip a logo past the check.
+  const svgs = (what: string, given: VendorInfo["logo"]) => {
+    if (!given) return undefined;
+    const kept = Object.freeze(Object.fromEntries(Object.entries(given).filter(([, v]) => v !== undefined)));
+    for (const [variant, svg] of Object.entries(kept)) {
+      if (!isSvgElement(svg)) {
+        throw new Error(
+          `defineConnector("${vendor}"): ${what}.${variant} must be inline SVG markup, one <svg>…</svg> element`,
+        );
+      }
     }
+    return kept as VendorInfo["logo"];
+  };
+  const logo = svgs("logo", info?.logo);
+  const agent = info?.agent && { ...info.agent, ...(info.agent.mark && { mark: svgs("agent.mark", info.agent.mark) }) };
+  // The chat's engines are named by it: `acp-<id>`, `<id>`.
+  if (agent && !AGENT_ID.test(agent.id)) {
+    throw new Error(
+      `defineConnector("${vendor}"): agent.id must be lowercase letters, digits and dashes, neither loop nor acp-…`,
+    );
   }
-  const vendorInfo = info && Object.freeze({ ...info, ...(logo && { logo: logo as VendorInfo["logo"] }) });
+  const vendorInfo =
+    info && Object.freeze({ ...info, ...(logo && { logo }), ...(agent && { agent: Object.freeze(agent) }) });
   // It becomes a link's href: a whole https URL, so never a `javascript:` one. Checked on the copy kept.
   const homepage: unknown = vendorInfo?.homepage;
   if (homepage !== undefined && (typeof homepage !== "string" || URL.parse(homepage)?.protocol !== "https:"))
@@ -327,7 +356,8 @@ export interface Driver {
  * login. Any may be missing: a workflow using an operation of a connector with no driver is
  * refused, a connector with no fake has none for sandbox runs, one with no login half signs no
  * visitor in, one with no model half gives the app no models, one with no remote half hosts
- * no repository a change is reviewed on, and one with no sandbox half opens no box.
+ * no repository a change is reviewed on, one with no sandbox half opens no box, and one with no
+ * agent gives the chat no coding agent.
  */
 export interface ConnectorSetup {
   /** Auth methods available to named connections; login identity is separate. */
@@ -370,6 +400,70 @@ export interface ConnectorSetup {
    * resource's fields from `context.declared`.
    */
   sandbox?: (context: SandboxContext) => SandboxBackend | Promise<SandboxBackend>;
+  /**
+   * The connector's coding agent, which the app's chat can run: how a person's own plan runs it
+   * and, where it can, how it runs on the company's key. Who it is (its id, title and mark) is
+   * its package.json's, as the vendor's is (`VendorInfo.agent`), which a connector with this part
+   * must say.
+   */
+  agent?: CodingAgent;
+}
+
+/**
+ * A connector's coding agent (`ConnectorSetup.agent`): on a person's own plan (`own`), on the
+ * company's key (`onKey`), or both. The app's chat names it `acp-<id>` on the person's plan and
+ * `<id>` on the company's key, `id` being `VendorInfo.agent`'s.
+ */
+export interface CodingAgent {
+  own?: OwnAgent;
+  onKey?: KeyAgent;
+}
+
+/**
+ * A coding agent on a person's own plan, by its Agent Client Protocol (ACP) entry: installed on
+ * first use in the person's box, without install scripts, signed in by the person.
+ */
+export interface OwnAgent {
+  /** What is installed for it, each at the version it was tried with. */
+  packages: readonly string[];
+  /** The install's script to run once installed, relative to the install: the vendor's own `postinstall`, which the install skips. */
+  setup?: string;
+  /** Its ACP entry: a bin of the install (`node_modules/.bin`), and its arguments. */
+  bin: string;
+  args: readonly string[];
+  signIn: AgentSignIn;
+}
+
+/** How a person signs in to their own coding agent from the chat (`OwnAgent.signIn`). */
+export type AgentSignIn =
+  /** Its own bin with these arguments, run with piped stdio, what it prints relayed into the chat's card. */
+  | { run: readonly string[] }
+  /** The agent's terminal sign-in method of this id (ACP's `authMethods`, `type: "terminal"`): its own bin with the method's arguments, run as `run` is. */
+  | { method: string }
+  /** ACP's `authenticate` with this method: the agent sends the vendor's link and code as a URL elicitation. */
+  | { authenticate: string }
+  /** No sign-in through the chat (the vendor's needs a real terminal): the person runs this bin of the install once on this computer. */
+  | { once: { bin: string; args: readonly string[]; after?: string } };
+
+/**
+ * A coding agent on the company's key, through the AI SDK's `HarnessAgent`. The model it runs on
+ * is another connector's, named by its vendor (`model`) and never imported: the app passes that
+ * connector's key, the variables its driver declares, as the adapter's `auth`.
+ */
+export interface KeyAgent {
+  /** The vendor of the model connector whose `<vendor>/default` and key it runs on, such as `anthropic`. */
+  model: string;
+  /** The variable naming that model's API endpoint, passed on from the app's environment when it sets one (a stand-in's, in tests). */
+  baseUrl?: string;
+  /** Whether it takes the model as `<vendor>/<model-id>` (Pi), or the bare id (a bridge's). */
+  qualified: boolean;
+  /** Whether it runs through a bridge, a child of the session: its first start in a box installs it under the box's home. */
+  bridge: boolean;
+  /**
+   * Its adapter, loaded when first used, on the key as an explicit `auth` record (never the app's
+   * environment or keychain), keeping its own state under `home`, the session's home.
+   */
+  harness(auth: Readonly<Record<string, string>>, home: string): Promise<HarnessV1>;
 }
 
 /** What the app gives a connector's model half (`ConnectorSetup.model`): the secrets, as a login half reads them. */

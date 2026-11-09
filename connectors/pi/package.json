@@ -1,0 +1,71 @@
+{
+  "name": "@sanoma-ai/connector-pi",
+  "version": "0.11.21",
+  "description": "Pi, the coding agent, for Sanoma's chat on a person's own plan or, through the AI SDK, on the company's Anthropic key",
+  "keywords": [
+    "ai-sdk",
+    "coding-agent",
+    "connector",
+    "pi",
+    "sanoma",
+    "sanoma-connector"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/pi#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/pi"
+  },
+  "files": [
+    "dist",
+    "logo.svg",
+    "logo-dark.svg",
+    "README.md",
+    "LICENSE",
+    "MARKS-LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "dependencies": {
+    "@ai-sdk/harness-pi": "1.0.160"
+  },
+  "devDependencies": {
+    "sanoma": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "sanoma": "workspace:*",
+    "zod": "^4"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "sanoma": {
+    "title": "Pi",
+    "logo": "logo.svg",
+    "logoDark": "logo-dark.svg",
+    "agent": {
+      "id": "pi",
+      "title": "Pi"
+    }
+  }
+}
