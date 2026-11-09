@@ -190,14 +190,11 @@ const parse = (argv: string[]) =>
  * as `sanoma init`'s flags say: whether it did. A flag left empty is one not given; an `--email`
  * that is no address is refused before anything is written.
  */
-async function initCompany({ name, you, email }: ReturnType<typeof parse>["values"]): Promise<boolean> {
+async function initCompany(values: ReturnType<typeof parse>["values"]): Promise<boolean> {
+  const [name, you, email] = [values.name, values.you, values.email].map((value) => value?.trim() || undefined);
   const { isEmail, startCompany, whoIsStarting } = await import("./init.ts");
-  if (email?.trim() && !isEmail(email.trim())) throw new UsageError(`--email: "${email}" is not an email address`);
-  return startCompany(process.cwd(), {
-    name: name?.trim() || undefined,
-    creator: () => whoIsStarting({ name: you?.trim(), email: email?.trim() }),
-    log,
-  });
+  if (email && !isEmail(email)) throw new UsageError(`--email: "${email}" is not an email address`);
+  return startCompany(process.cwd(), { name, creator: () => whoIsStarting({ name: you, email }), log });
 }
 
 /** `SANOMA_APP_PORT`, or `fallback` when it is unset. */
