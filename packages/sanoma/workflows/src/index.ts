@@ -90,7 +90,7 @@ export { appFolders, APPS_DIR, declarationFiles, filesUnder, kindDirs } from "./
 // `sanoma` itself (the people types' constructors) is at `sanoma/resources`, for data files.
 // `collection()` itself is at `sanoma/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
 export { isCollection } from "./collection.ts";
-export { type CredentialStatus, credentialsOf } from "./env.ts";
+export { type CredentialStatus, credentialsOf, statusesOf, unconfigured } from "./env.ts";
 export {
   APPLY_WORKFLOW,
   ApplyInput,

@@ -10,8 +10,8 @@ const LogoFile = z.string().regex(/^(?!\/)(?!.*\.\.)[\w./-]+\.svg$/, "a relative
 
 /**
  * The `sanoma` field of a connector's package.json: the vendor's name and its logo files, beside
- * package.json, and its coding agent's id, name and mark files when it has one. The app reads the
- * same field from npm to list connectors not installed.
+ * package.json, and its coding agent's id, name and mark files (the logo's when it gives none) when
+ * it has one. The app reads the same field from npm to list connectors not installed.
  */
 export const SanomaPackageField = z.object({
   title: z.string().min(1),
@@ -31,7 +31,8 @@ export const SanomaPackageField = z.object({
  * A connector's `VendorInfo`, read from its own package.json, the one place it is written: the
  * package's `name` and `homepage`, and the `sanoma` field's `title` and logo files, such as
  * `"sanoma": { "title": "Ghost", "logo": "logo.svg", "logoDark": "logo-dark.svg" }`, with
- * `"agent": { "id", "title", "mark", "markDark" }` for a connector with a coding agent. The app
+ * `"agent": { "id", "title", "mark", "markDark" }` for a connector with a coding agent, whose
+ * mark is the logo when it names none. The app
  * lists connectors not installed from the same field on npm. `moduleUrl` is any module of the
  * package, whose nearest package.json is read: `vendorInfo(import.meta.url)`.
  */
@@ -55,10 +56,11 @@ export function vendorInfo(moduleUrl: string | URL): VendorInfo {
     }
   };
   const svgs = (light: string, dark?: string) => ({ svg: svg(light), ...(dark && { dark: svg(dark) }) });
-  const mark = agent?.mark && svgs(agent.mark, agent.markDark);
+  const logos = logo && svgs(logo, logoDark);
+  const mark = agent?.mark ? svgs(agent.mark, agent.markDark) : logos;
   return {
     title,
-    ...(logo && { logo: svgs(logo, logoDark) }),
+    ...(logos && { logo: logos }),
     package: pkg.name,
     ...(pkg.homepage && { homepage: pkg.homepage }),
     ...(agent && { agent: { id: agent.id, title: agent.title, ...(mark && { mark }) } }),

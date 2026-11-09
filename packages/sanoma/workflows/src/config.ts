@@ -724,30 +724,26 @@ export type InstalledAgent = AgentInfo & CodingAgent & { vendor: string };
 
 /**
  * The coding agents the connectors attach, by the agent's id (`VendorInfo.agent`, which a
- * connector with one must give). One vendor's copies of a connector may repeat theirs, never give
- * another, as `makersOf` holds the other parts; two vendors may not give one id.
+ * connector with one must give), one per vendor as `makersOf` holds the other parts; two vendors
+ * may not give one id.
  */
 function agentsOf(connectors: readonly Connector<any, any>[]): Map<string, InstalledAgent> {
+  const infos = new Map(connectors.map((connector) => [connector[VENDOR].id, connector[VENDOR].info]));
   const agents = new Map<string, InstalledAgent>();
-  for (const connector of connectors) {
-    const { id: vendor, info } = connector[VENDOR];
-    const { agent } = setupOf(connector);
-    if (agent === undefined) continue;
-    if (info?.agent === undefined) {
+  for (const [vendor, agent] of makersOf(connectors, "agent")) {
+    const info = infos.get(vendor)?.agent;
+    if (info === undefined) {
       throw new Error(
         `The "${vendor}" connector attaches a coding agent but does not say who it is: its package.json's "sanoma" field needs an "agent"`,
       );
     }
-    const seen = agents.get(info.agent.id);
-    if (seen && seen.vendor !== vendor) {
+    const seen = agents.get(info.id);
+    if (seen) {
       throw new Error(
-        `Two connectors in \`connectors\` give the coding agent "${info.agent.id}": "${seen.vendor}" and "${vendor}"`,
+        `Two connectors in \`connectors\` give the coding agent "${info.id}": "${seen.vendor}" and "${vendor}"`,
       );
     }
-    if (seen && (seen.own !== agent.own || seen.onKey !== agent.onKey)) {
-      throw new Error(`Two connectors in \`connectors\` attach a coding agent for "${vendor}"; keep one per vendor`);
-    }
-    agents.set(info.agent.id, { ...info.agent, ...agent, vendor });
+    agents.set(info.id, { ...info, ...agent, vendor });
   }
   return agents;
 }
@@ -767,7 +763,8 @@ function makersOf<K extends keyof ConnectorSetup>(
     const vendor = connector[VENDOR].id;
     const seen = makers.get(vendor);
     if (seen && seen !== make) {
-      throw new Error(`Two connectors in \`connectors\` attach a ${key} for "${vendor}"; keep one per vendor`);
+      const part = key === "agent" ? "coding agent" : key;
+      throw new Error(`Two connectors in \`connectors\` attach a ${part} for "${vendor}"; keep one per vendor`);
     }
     makers.set(vendor, make);
   }

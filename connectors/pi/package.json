@@ -65,9 +65,7 @@
     "logoDark": "logo-dark.svg",
     "agent": {
       "id": "pi",
-      "title": "Pi",
-      "mark": "logo.svg",
-      "markDark": "logo-dark.svg"
+      "title": "Pi"
     }
   }
 }

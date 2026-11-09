@@ -226,6 +226,9 @@ export async function showCommits(
 /** The plans a coding agent runs on, by its part's name: a person's own, the company's key. */
 const PLANS = { own: "a person's own plan", onKey: "the company's key" } as const;
 
+/** A coding agent's part for a plan as a turn runs it: its connector's facts, with its id and name. */
+export type TurnAgent<P extends keyof typeof PLANS> = NonNullable<InstalledAgent[P]> & { id: string; title: string };
+
 /**
  * The coding agent `id`'s part for `plan`, as an installed connector gives it
  * (`ResolvedConfig.agents`), with its id and name; without one, an error that says so, which the
@@ -235,7 +238,7 @@ export function agentOn<P extends keyof typeof PLANS>(
   { agents }: Pick<ResolvedConfig, "agents">,
   id: string,
   plan: P,
-): NonNullable<InstalledAgent[P]> & { id: string; title: string } {
+): TurnAgent<P> {
   const agent = agents.get(id);
   const part = agent?.[plan];
   if (!part) {

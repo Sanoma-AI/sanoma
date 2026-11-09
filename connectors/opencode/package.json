@@ -61,9 +61,7 @@
     "logoDark": "logo-dark.svg",
     "agent": {
       "id": "opencode",
-      "title": "OpenCode",
-      "mark": "logo.svg",
-      "markDark": "logo-dark.svg"
+      "title": "OpenCode"
     }
   }
 }

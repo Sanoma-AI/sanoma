@@ -17,6 +17,7 @@ import {
   type RealPaths,
   realIn,
   showCommits,
+  type TurnAgent,
   turnMessage,
 } from "./checkout.ts";
 import { harnessInstructions } from "./prompt.ts";
@@ -35,9 +36,6 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // Its permission requests, file reads and writes are answered by the checkout rule; the commands
 // it runs through our terminal are its own, in the box. A sign-in it asks for is shown in the chat
 // as the vendor's own flow.
-
-/** A person's own coding agent as a turn runs it: its connector's facts (`OwnAgent`), with its name. */
-type OwnTurnAgent = OwnAgent & { title: string };
 
 /** What this client says it can do: files and terminals (ours, by the checkout rule), terminal sign-in methods, and links to show. */
 const CAPABILITIES: acp.ClientCapabilities = {
@@ -111,17 +109,16 @@ export const acpEngine =
   (turn) =>
     createUIMessageStream<ChatMessage>({
       onError: errorMessage,
-      execute: ({ writer }) => runTurn(id, turn, writer),
+      execute: ({ writer }) => runTurn(agentOn(turn.step.resolved, id, "own"), turn, writer),
     });
 
 /** Whether `principal` is a person: not an agent, nor acting for someone, nor a visitor. Only a person's own plan is spent. */
 const isPerson = (principal: Principal) =>
   !isVisitor(principal) && !principal.groups?.includes(AGENTS_GROUP) && principal.onBehalfOf === undefined;
 
-async function runTurn(name: string, engineTurn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
+async function runTurn(agent: TurnAgent<"own">, engineTurn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
   const { step, chat, messages } = engineTurn;
   const { by: principal, signal } = step;
-  const agent = agentOn(step.resolved, name, "own");
   if (!isPerson(principal)) {
     throw new Error(`${agent.title} runs on a person's own plan, and ${principal.id} is not a person`);
   }
@@ -144,7 +141,7 @@ async function runTurn(name: string, engineTurn: EngineTurn, writer: UIMessageSt
         const boxHome = await homeOf(box);
         // The person's own agents' HOME, kept across turns in the box: their installs and sign-ins.
         const home = join(boxHome, OWN_AGENTS_DIR);
-        const dir = join(home, name);
+        const dir = join(home, agent.id);
         // A first install under way is waited for even by a new message (it has a time limit of its
         // own): the box's stop would end it.
         const [cloned, installed, shimmed] = await Promise.allSettled([
@@ -194,7 +191,7 @@ async function runTurn(name: string, engineTurn: EngineTurn, writer: UIMessageSt
 
 /** A turn's agent in the box and what it asked for: one ACP connection, its terminals and its sign-in. */
 class AcpTurn {
-  readonly agent: OwnTurnAgent;
+  readonly agent: TurnAgent<"own">;
   readonly relay: Relay;
   readonly signal: AbortSignal;
   readonly box: Box;
@@ -217,7 +214,7 @@ class AcpTurn {
   readonly #terminals = new Map<string, Started>();
 
   constructor(
-    agent: OwnTurnAgent,
+    agent: TurnAgent<"own">,
     relay: Relay,
     signal: AbortSignal,
     {

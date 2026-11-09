@@ -334,7 +334,7 @@ describe("the chat on a coding agent without its key", () => {
       const chunks: string[] = [];
       for await (const chunk of stream) if (chunk.type === "error") chunks.push(chunk.errorText);
       expect(chunks).toEqual([
-        "anthropic is not configured: ANTHROPIC_API_KEY; set it on the connector page [connector:anthropic]",
+        "anthropic is not configured: ANTHROPIC_API_KEY (an API key, from the API Keys page of the Claude Console); set it on the connector page [connector:anthropic]",
       ]);
       expect(await testApp.client.chats.get(`nokey-${RUN}`)).toMatchObject({ engine: "pi" });
     } finally {

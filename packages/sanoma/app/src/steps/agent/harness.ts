@@ -1,6 +1,6 @@
 import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
-import type { AppStepContext, Box, KeyAgent } from "sanoma/workflows";
+import { type AppStepContext, type Box, statusesOf, unconfigured } from "sanoma/workflows";
 import { errorMessage } from "sanoma/workflows/shared";
 import {
   createUIMessageStream,
@@ -23,6 +23,7 @@ import {
   type RealPaths,
   realIn,
   showCommits,
+  type TurnAgent,
   turnMessage,
 } from "./checkout.ts";
 import { freePort } from "./local-box.ts";
@@ -36,9 +37,6 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // and is one harness session: made, run to its end (its permission requests answered by the
 // checkout rule), destroyed (what it started killed). Then what the agent changed is committed in
 // the box and carried back to the draft (`carryOut`), the box is stopped, and the draft checked.
-
-/** A coding agent on the company's key as a turn runs it: its connector's facts (`KeyAgent`), with its id and name. */
-type KeyTurnAgent = KeyAgent & { id: string; title: string };
 
 /** A bridge's first session in a box, by its runtime and the box's id: it installs the bridge there, so the next ones wait for it. */
 const installing = new Map<string, Promise<unknown>>();
@@ -58,7 +56,7 @@ export const harnessEngine =
       execute: ({ writer }) => runTurn(agentOn(turn.step.resolved, id, "onKey"), turn, writer),
     });
 
-async function runTurn(agent: KeyTurnAgent, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
+async function runTurn(agent: TurnAgent<"onKey">, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
   const { step, chat } = turn;
   // The box chosen and the key first: a turn without either opens no draft.
   const person = await personBox(step);
@@ -107,7 +105,7 @@ async function runTurn(agent: KeyTurnAgent, turn: EngineTurn, writer: UIMessageS
 
 /** The turn's harness session in `sandbox`, run to its end, its permission requests answered by the checkout rule. */
 async function converse(
-  agent: KeyTurnAgent,
+  agent: TurnAgent<"onKey">,
   { step, chat, messages }: EngineTurn,
   writer: UIMessageStreamWriter<ChatMessage>,
   sandbox: HarnessV1NetworkSandboxSession,
@@ -182,31 +180,35 @@ async function converse(
  * tests). Without the connector or a key, `LoadAPIKeyError` says so, with the connector's page
  * when the company has the connector (`noKeyText`).
  */
-async function authFor({ client, resolved }: AppStepContext, agent: KeyTurnAgent): Promise<Record<string, string>> {
+async function authFor(
+  { client, resolved }: AppStepContext,
+  agent: TurnAgent<"onKey">,
+): Promise<Record<string, string>> {
   const { model: vendor, baseUrl, title } = agent;
   if (!resolved.models.has(vendor)) {
     throw new LoadAPIKeyError({
       message: `${title} runs on ${vendor}'s model, and no connector of this company gives it: add ${vendor}'s connector to sanoma.config.ts`,
     });
   }
-  const declared = resolved.driversByVendor.get(vendor)?.env?.shape ?? {};
+  const env = resolved.driversByVendor.get(vendor)?.env;
   // A model connector declares its key in its driver's `env`, as the connector page reads it.
-  if (!Object.keys(declared).length) {
+  const names = Object.keys(env?.shape ?? {});
+  if (!env || !names.length) {
     throw new LoadAPIKeyError({ message: `${title} runs on ${vendor}'s key, and its connector declares none` });
   }
-  const values = await secretValues(client)(Object.keys(declared));
+  const values = await secretValues(client)(names);
+  const why = unconfigured(
+    vendor,
+    statusesOf(env, (name) => values.get(name)),
+  );
+  if (why) throw new LoadAPIKeyError({ message: noKeyText(vendor, why) });
   const auth = Object.fromEntries([...values].filter((entry): entry is [string, string] => !!entry[1]));
-  const missing = Object.keys(declared).filter((name) => !auth[name] && !declared[name]!.safeParse(undefined).success);
-  if (missing.length) {
-    const message = `${vendor} is not configured: ${missing.join(", ")}; set it on the connector page`;
-    throw new LoadAPIKeyError({ message: noKeyText(vendor, message) });
-  }
   const base = baseUrl && process.env[baseUrl];
   return base ? { ...auth, [baseUrl]: base } : auth;
 }
 
 /** The model `<vendor>/default` names, as the agent takes it. */
-async function modelFor(step: AppStepContext, { model: vendor, qualified }: KeyTurnAgent): Promise<string> {
+async function modelFor(step: AppStepContext, { model: vendor, qualified }: TurnAgent<"onKey">): Promise<string> {
   const { modelId } = (await modelRegistry(step)).languageModel(`${vendor}/default`);
   return qualified ? `${vendor}/${modelId}` : modelId;
 }
