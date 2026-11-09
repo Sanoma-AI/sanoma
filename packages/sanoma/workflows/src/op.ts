@@ -167,7 +167,7 @@ export interface AgentInfo {
 const SVG_ELEMENT = /^\s*<svg[\s>][\s\S]*<\/svg>\s*$/;
 
 /** What an agent's id may be (`AgentInfo.id`): not `loop`, our own engine's name, nor `acp-…`, a person's plan's. */
-const AGENT_ID = /^(?!loop$)(?!acp-)[a-z0-9]+(-[a-z0-9]+)*$/;
+export const AGENT_ID = /^(?!loop$)(?!acp-)[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /** Whether `svg` is a logo as `VendorInfo` takes it: one `<svg>…</svg>` element. */
 export const isSvgElement = (svg: unknown): svg is string => typeof svg === "string" && SVG_ELEMENT.test(svg);

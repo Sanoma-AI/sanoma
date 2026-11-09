@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import type { VendorInfo } from "./op.ts";
+import { AGENT_ID, type VendorInfo } from "./op.ts";
 import { upFrom } from "./paths.ts";
 
 /** A logo file's path in the package: relative, never out of it (`..`), an SVG. */
@@ -18,7 +18,12 @@ export const SanomaPackageField = z.object({
   logo: LogoFile.optional(),
   logoDark: LogoFile.optional(),
   agent: z
-    .object({ id: z.string(), title: z.string().min(1), mark: LogoFile.optional(), markDark: LogoFile.optional() })
+    .object({
+      id: z.string().regex(AGENT_ID, "lowercase letters, digits and dashes, neither loop nor acp-…"),
+      title: z.string().min(1),
+      mark: LogoFile.optional(),
+      markDark: LogoFile.optional(),
+    })
     .optional(),
 });
 

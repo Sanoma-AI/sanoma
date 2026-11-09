@@ -14,7 +14,8 @@ import { join } from "node:path";
 import { anthropic } from "@sanoma-ai/connector-anthropic";
 import { type Box, resolveConfig } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { install, ownAgent, shims } from "../src/steps/agent/acp.ts";
+import { install, shims } from "../src/steps/agent/acp.ts";
+import { agentOn } from "../src/steps/agent/checkout.ts";
 import { boxSession, homeOf } from "../src/steps/agent/box-session.ts";
 import { localBackend } from "../src/steps/agent/local-box.ts";
 
@@ -144,7 +145,7 @@ describe("a person's own agent's install", () => {
 });
 
 /** Claude Code on a person's plan, as the Anthropic connector gives it. */
-const claudeCode = ownAgent(resolveConfig({ workflows: [], connectors: [anthropic] }), "claude-code");
+const claudeCode = agentOn(resolveConfig({ workflows: [], connectors: [anthropic] }), "claude-code", "own");
 
 describe.runIf(process.env.SANOMA_LIVE === "1" && process.platform === "darwin")("Claude Code on macOS", () => {
   it("keeps what it stores in its own file under the person's home, through the shims", () => {

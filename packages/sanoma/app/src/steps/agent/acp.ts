@@ -1,13 +1,14 @@
 import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
-import type { Box, OwnAgent, Principal, Process, ResolvedConfig } from "sanoma/workflows";
+import type { Box, OwnAgent, Principal, Process } from "sanoma/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "sanoma/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
 import { homeOf, OWN_AGENTS_DIR, personBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut } from "./carrier.ts";
 import {
+  agentOn,
   allowedPaths,
   mustAllow,
   NO_SHELL,
@@ -104,22 +105,6 @@ const SIGN_IN_FAILURES: [said: RegExp, words: string][] = [
 /** Each agent's install under way, by its box and directory: this process's cache, so two turns install it once. */
 const installs = new Map<string, Promise<void>>();
 
-/**
- * The coding agent `id` on a person's own plan, as an installed connector gives it
- * (`ResolvedConfig.agents`); without one, an error that says so, which the turn's reply shows.
- */
-export function ownAgent({ agents }: Pick<ResolvedConfig, "agents">, id: string): OwnTurnAgent {
-  const agent = agents.get(id);
-  if (!agent?.own) {
-    throw new Error(
-      agent
-        ? `${agent.title} does not run on a person's own plan`
-        : `No connector of this company gives the coding agent ${id}: add the connector that has it to sanoma.config.ts`,
-    );
-  }
-  return { ...agent.own, title: agent.title };
-}
-
 /** The engine for the agent `id` (`acp-<id>`): a turn of a chat through that person's own agent. */
 export const acpEngine =
   (id: string): Engine =>
@@ -136,7 +121,7 @@ const isPerson = (principal: Principal) =>
 async function runTurn(name: string, engineTurn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
   const { step, chat, messages } = engineTurn;
   const { by: principal, signal } = step;
-  const agent = ownAgent(step.resolved, name);
+  const agent = agentOn(step.resolved, name, "own");
   if (!isPerson(principal)) {
     throw new Error(`${agent.title} runs on a person's own plan, and ${principal.id} is not a person`);
   }

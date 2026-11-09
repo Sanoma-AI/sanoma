@@ -724,8 +724,8 @@ export type InstalledAgent = AgentInfo & CodingAgent & { vendor: string };
 
 /**
  * The coding agents the connectors attach, by the agent's id (`VendorInfo.agent`, which a
- * connector with one must give). One vendor's copies of a connector may repeat theirs; two vendors
- * may not give one id.
+ * connector with one must give). One vendor's copies of a connector may repeat theirs, never give
+ * another, as `makersOf` holds the other parts; two vendors may not give one id.
  */
 function agentsOf(connectors: readonly Connector<any, any>[]): Map<string, InstalledAgent> {
   const agents = new Map<string, InstalledAgent>();
@@ -743,6 +743,9 @@ function agentsOf(connectors: readonly Connector<any, any>[]): Map<string, Insta
       throw new Error(
         `Two connectors in \`connectors\` give the coding agent "${info.agent.id}": "${seen.vendor}" and "${vendor}"`,
       );
+    }
+    if (seen && (seen.own !== agent.own || seen.onKey !== agent.onKey)) {
+      throw new Error(`Two connectors in \`connectors\` attach a coding agent for "${vendor}"; keep one per vendor`);
     }
     agents.set(info.agent.id, { ...info.agent, ...agent, vendor });
   }

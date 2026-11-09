@@ -1,6 +1,6 @@
 import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
-import type { AppStepContext, Box, KeyAgent, ResolvedConfig } from "sanoma/workflows";
+import type { AppStepContext, Box, KeyAgent } from "sanoma/workflows";
 import { errorMessage } from "sanoma/workflows/shared";
 import {
   createUIMessageStream,
@@ -15,6 +15,7 @@ import { secretValues } from "../../server/secrets.ts";
 import { boxSession, homeOf, personBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut } from "./carrier.ts";
 import {
+  agentOn,
   allowedPaths,
   NO_SHELL,
   openDraft,
@@ -39,22 +40,6 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 /** A coding agent on the company's key as a turn runs it: its connector's facts (`KeyAgent`), with its id and name. */
 type KeyTurnAgent = KeyAgent & { id: string; title: string };
 
-/**
- * The coding agent `id` on the company's key, as an installed connector gives it
- * (`ResolvedConfig.agents`); without one, an error that says so, which the turn's reply shows.
- */
-function keyAgent({ agents }: Pick<ResolvedConfig, "agents">, id: string): KeyTurnAgent {
-  const agent = agents.get(id);
-  if (!agent?.onKey) {
-    throw new Error(
-      agent
-        ? `${agent.title} does not run on the company's key: choose it on your own plan`
-        : `No connector of this company gives the coding agent ${id}: add the connector that has it to sanoma.config.ts`,
-    );
-  }
-  return { ...agent.onKey, id, title: agent.title };
-}
-
 /** A bridge's first session in a box, by its runtime and the box's id: it installs the bridge there, so the next ones wait for it. */
 const installing = new Map<string, Promise<unknown>>();
 
@@ -70,7 +55,7 @@ export const harnessEngine =
         console.error(`sanoma app: a ${id} turn failed:`, err);
         return errorMessage(err);
       },
-      execute: ({ writer }) => runTurn(keyAgent(turn.step.resolved, id), turn, writer),
+      execute: ({ writer }) => runTurn(agentOn(turn.step.resolved, id, "onKey"), turn, writer),
     });
 
 async function runTurn(agent: KeyTurnAgent, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
@@ -205,6 +190,10 @@ async function authFor({ client, resolved }: AppStepContext, agent: KeyTurnAgent
     });
   }
   const declared = resolved.driversByVendor.get(vendor)?.env?.shape ?? {};
+  // A model connector declares its key in its driver's `env`, as the connector page reads it.
+  if (!Object.keys(declared).length) {
+    throw new LoadAPIKeyError({ message: `${title} runs on ${vendor}'s key, and its connector declares none` });
+  }
   const values = await secretValues(client)(Object.keys(declared));
   const auth = Object.fromEntries([...values].filter((entry): entry is [string, string] => !!entry[1]));
   const missing = Object.keys(declared).filter((name) => !auth[name] && !declared[name]!.safeParse(undefined).success);

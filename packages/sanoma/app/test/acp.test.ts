@@ -30,8 +30,7 @@ import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { type ChatMessage, chatTransport, type EngineName, type SignInCard } from "../src/lib/chat.ts";
-import { ownAgent } from "../src/steps/agent/acp.ts";
-import { boxName } from "../src/steps/agent/checkout.ts";
+import { agentOn, boxName } from "../src/steps/agent/checkout.ts";
 import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's third engine, end to end: a person's
@@ -73,7 +72,7 @@ export const bot = sanoma.agent({ id: "bot" });
 const connectors = [github, opencode, pi, anthropic, openai];
 const testApp = useTestApp({ workflows: [], connectors, root }, { databaseUrl: testDatabaseUrl("acp") });
 /** An agent's facts, as its connector gives them. */
-const agentOf = (id: string) => ownAgent(resolveConfig({ workflows: [], connectors, root }), id);
+const agentOf = (id: string) => agentOn(resolveConfig({ workflows: [], connectors, root }), id, "own");
 
 let dir = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
@@ -433,7 +432,7 @@ describe("the chat on a person's own agent", () => {
 
   it("takes each agent from its connector, and says which is missing or runs on no person's plan", () => {
     expect(agentOf("codex")).toMatchObject({ title: "Codex", bin: "codex-acp" });
-    expect(() => ownAgent(resolveConfig({ workflows: [], connectors: [github], root }), "codex")).toThrow(
+    expect(() => agentOn(resolveConfig({ workflows: [], connectors: [github], root }), "codex", "own")).toThrow(
       "No connector of this company gives the coding agent codex: add the connector that has it to sanoma.config.ts",
     );
   });

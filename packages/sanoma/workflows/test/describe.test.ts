@@ -248,6 +248,14 @@ describe("describeConfig", () => {
       expect(vendorInfo(moduleUrl)).toEqual({ title: "Acme", package: "sanoma-connector-acme" });
       writeFileSync(
         join(root, "package.json"),
+        JSON.stringify({
+          name: "sanoma-connector-acme",
+          sanoma: { title: "Acme", agent: { id: "acp-x", title: "X" } },
+        }),
+      );
+      expect(() => vendorInfo(moduleUrl)).toThrow("lowercase letters, digits and dashes, neither loop nor acp-…");
+      writeFileSync(
+        join(root, "package.json"),
         JSON.stringify({ name: "sanoma-connector-acme", sanoma: { title: "Acme", logo: "logo.svg" } }),
       );
       expect(() => vendorInfo(moduleUrl)).toThrow(
@@ -309,6 +317,11 @@ describe("describeConfig", () => {
     expect(() => resolveConfig({ ...base, connectors: [...base.connectors, openai, twin] })).toThrow(
       'Two connectors in `connectors` give the coding agent "codex": "openai" and "acme"',
     );
+    const other = withSetup(openai, { agent: { own } });
+    expect(() => resolveConfig({ ...base, connectors: [...base.connectors, openai, other] })).toThrow(
+      'Two connectors in `connectors` attach a coding agent for "openai"; keep one per vendor',
+    );
+    expect(() => resolveConfig({ ...base, connectors: [...base.connectors, openai, { ...openai }] })).not.toThrow();
     for (const id of ["loop", "acp-codex", "Codex", "co dex", ""]) {
       expect(() => defineConnector("acme", {}, { agent: { id, title: "Acme" } })).toThrow(
         'defineConnector("acme"): agent.id must be lowercase letters, digits and dashes',
