@@ -986,15 +986,17 @@ describe("the page", () => {
     );
     expect(column).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Send"/);
     // No connector gives a model and no engine is chosen: the empty chat is the ways to connect the
-    // agent, the person's own Claude plan first, an API key on the Anthropic connector to add, and
-    // the composer points to them (chat.test.ts has the rest).
+    // agent, an API key on the Anthropic connector to add, and the composer points to them. Only
+    // the agents its connectors give have a card: GitHub's Copilot, under More agents, and neither
+    // Claude's nor ChatGPT's plan, whose connectors it lacks (packed.test.ts has the template's
+    // Claude card, chat.test.ts the rest).
     expect(column).not.toContain("What should change?");
     expect(column).toContain(">Connect your agent<");
     expect(
       [...(column ?? "").matchAll(/data-slot="item-title"[^>]*>([^<]*)/g)].map((title) => title[1]!.trim()),
-    ).toEqual(["Your Claude plan", "Your ChatGPT plan", "An API key"]);
-    expect(column).toContain(">Recommended<");
-    expect(column).toMatch(/<button[^>]*>Sign in with Claude<\/button>/);
+    ).toEqual(["An API key"]);
+    expect(column).toContain("Other agents (Copilot) are under");
+    expect(column).not.toContain("Sign in with Claude");
     expect(column).toMatch(/<a[^>]*href="\/connectors\?add=%40sanoma-ai%2Fconnector-anthropic"[^>]*>Add key<\/a>/);
     expect(column).toContain(">More agents<");
     expect(column).toContain("Connect your agent above to start.");
@@ -1603,17 +1605,19 @@ describe("the page", () => {
   });
 
   it("opens a new chat on the engine the person chose last, from its cookie: no cards for a plan of their own", async () => {
-    const chosen = await page("/workflows", app.url, { headers: { cookie: "sanoma_engine=acp-claude-code" } });
+    const chosen = await page("/workflows", app.url, { headers: { cookie: "sanoma_engine=acp-copilot" } });
     const column = chosen.text.match(/<aside id="chat" aria-label="Chat"[^>]*>([\s\S]*?)<\/aside>/)?.[1] ?? "";
-    expect(column).toMatch(
-      /<option[^>]*value="acp-claude-code"[^>]*selected=""[^>]*>Claude Code \(your plan\)<\/option>/,
-    );
+    expect(column).toMatch(/<option[^>]*value="acp-copilot"[^>]*selected=""[^>]*>Copilot \(your plan\)<\/option>/);
     expect(column).not.toContain("Connect your agent");
     expect(column).toContain(">What should change?<");
     expect(column).toMatch(/<button(?![^>]*aria-describedby)[^>]*aria-label="Send"/);
-    // An engine the app does not have is no choice: the cards, as with none.
-    const unknown = await page("/workflows", app.url, { headers: { cookie: "sanoma_engine=nonsense" } });
-    expect(unknown.text).toContain(">Connect your agent<");
+    // An engine the app does not have is no choice, nor one of an agent no connector of this
+    // company gives (the cookie is every company's on this computer): the cards, as with none.
+    for (const cookie of ["sanoma_engine=nonsense", "sanoma_engine=acp-claude-code"]) {
+      const unknown = await page("/workflows", app.url, { headers: { cookie } });
+      expect(unknown.text, cookie).toContain(">Connect your agent<");
+      expect(unknown.text, cookie).toMatch(/<option[^>]*value="loop"[^>]*selected=""/);
+    }
   });
 
   it("answers any other path with the app's not-found page", async () => {

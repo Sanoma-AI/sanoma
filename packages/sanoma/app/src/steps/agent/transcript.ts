@@ -43,11 +43,14 @@ export const ASKS_LINE = "Suggested asks:";
 /** The most asks a reply suggests. */
 const MOST_ASKS = 4;
 
-/** `ASKS_LINE` at a line's start (of the whole text), after any markdown the model put before it. */
-const ASKS_AT = /(?<=^|\n)[\t #*_]*suggested asks:/i;
+/** The markdown a model may put before `ASKS_LINE` on its line. */
+const LEAD = "[\\t #*_]*";
+/** `ASKS_LINE` at a line's start, after `LEAD`. */
+const ASKS_AT = new RegExp(`(?<=^|\\n)${LEAD}${ASKS_LINE}`, "i");
 
 /** Whether a line could still become `ASKS_LINE` as more of it comes. */
-const mayBeAsks = (line: string) => ASKS_LINE.toLowerCase().startsWith(line.replace(/^[\t #*_]*/, "").toLowerCase());
+const mayBeAsks = (line: string) =>
+  ASKS_LINE.toLowerCase().startsWith(line.replace(new RegExp(`^${LEAD}`), "").toLowerCase());
 
 /** An ask's line: a list item, its text without the bold or quotes around it. */
 const ASK = /^\s*(?:[-*•]|\d+[.)])\s+(?:\*\*|["“])?(.+?)(?:\*\*|["”])?\s*$/;
@@ -93,11 +96,16 @@ export function suggestedAsks(stream: ReadableStream<UIMessageChunk>): ReadableS
 
 /** What of a text shows with `delta`: up to its asks' line, or else up to what may still become that line, less the blank lines before it. */
 function release(text: Text, delta: string): string {
+  // Its asks' line is looked for from the line the delta goes on with, not in the whole text again.
+  const from = text.all.lastIndexOf("\n") + 1;
   text.all += delta;
-  if (text.asks === undefined) text.asks = ASKS_AT.exec(text.all)?.index;
+  if (text.asks === undefined) {
+    const at = ASKS_AT.exec(text.all.slice(from))?.index;
+    if (at !== undefined) text.asks = from + at;
+  }
   const line = text.all.lastIndexOf("\n") + 1;
   const end = text.asks ?? (mayBeAsks(text.all.slice(line)) ? line : text.all.length);
-  const upTo = Math.max(text.shown, text.all.slice(0, end).trimEnd().length);
+  const upTo = text.shown + text.all.slice(text.shown, end).trimEnd().length;
   const shown = text.all.slice(text.shown, upTo);
   text.shown = upTo;
   return shown;

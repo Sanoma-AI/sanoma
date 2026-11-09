@@ -223,16 +223,24 @@ const userMessage = (text: string): ChatMessage => ({
 });
 
 /**
- * Sends `text` to the chat `id` after `history`, as useChat does: each snapshot of the reply to
- * `onSnapshot`, and the reply as it ended. A stream cut short ends the reply where it was.
+ * Sends `text` (or a message as it is) to the chat `id` after `history`, as useChat does, with
+ * `body`'s fields: each snapshot of the reply to `onSnapshot`, and the reply as it ended. A stream
+ * cut short ends the reply where it was.
  */
-async function send(id: string, history: ChatMessage[], text: string, onSnapshot?: (reply: ChatMessage) => void) {
+async function send(
+  id: string,
+  history: ChatMessage[],
+  text: string | ChatMessage,
+  onSnapshot?: (reply: ChatMessage) => void,
+  body?: object,
+) {
   const stream = await transport().sendMessages({
     trigger: "submit-message",
     chatId: id,
     messageId: undefined,
-    messages: [...history, userMessage(text)],
+    messages: [...history, typeof text === "string" ? userMessage(text) : text],
     abortSignal: undefined,
+    body,
   });
   let reply: ChatMessage | undefined;
   try {
@@ -247,27 +255,10 @@ async function send(id: string, history: ChatMessage[], text: string, onSnapshot
 }
 
 /** The agent's cue to speak first, as the chat column sends it (`isIntro`). */
-const cue = (): ChatMessage => ({
-  id: randomUUID(),
-  role: "user",
-  parts: [{ type: "text", text: "" }],
-  metadata: { intro: true },
-});
+const cue = (): ChatMessage => ({ ...userMessage(""), metadata: { intro: true } });
 
 /** The agent speaks first in the chat `id`, as the chat column asks it: the reply as it ended. */
-async function speak(id: string) {
-  const stream = await transport().sendMessages({
-    trigger: "submit-message",
-    chatId: id,
-    messageId: undefined,
-    messages: [cue()],
-    abortSignal: undefined,
-    body: { engine: "loop", start: true },
-  });
-  let reply: ChatMessage | undefined;
-  for await (const snapshot of readUIMessageStream<ChatMessage>({ stream })) reply = snapshot;
-  return reply;
-}
+const speak = (id: string) => send(id, [], cue(), undefined, { engine: "loop", start: true });
 
 /** A request to the route of the app at `url`, as fetch sends it, from its own origin unless `headers` say otherwise. */
 const post = (body: unknown, headers: Record<string, string> = {}, url = app!.url) =>

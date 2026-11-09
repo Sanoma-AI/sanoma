@@ -28,12 +28,14 @@ import {
   ENGINE_NAMES,
   type EngineName,
   errorParts,
+  installed,
   isIntro,
   MODEL_CONNECTOR,
   onModelConnector,
   ownPlan,
   textOf,
   unfinished,
+  written,
 } from "../../lib/chat.ts";
 import { CHATS_KEY, chatModelQuery, chatQuery, chatsQuery, configQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
@@ -194,10 +196,12 @@ function Conversation({
   const busy = status === "submitted" || status === "streaming";
   // The chat's own engine; a new chat opens on the person's choice (`choice`, which choosing here
   // changes) and keeps it after.
+  // The person's choice is one cookie for every company on this computer: one this company cannot run is not taken.
+  const { data: agents = [] } = useQuery({ ...configQuery(), select: (config) => config.agents });
   const [engine, setEngine] = useState<EngineName>(
     () =>
       (openedOn ??
-        (choice.value !== undefined && Object.hasOwn(ENGINE_NAMES, choice.value)
+        (choice.value !== undefined && Object.hasOwn(ENGINE_NAMES, choice.value) && installed(choice.value, agents)
           ? choice.value
           : "loop")) as EngineName,
   );
@@ -221,9 +225,9 @@ function Conversation({
   };
   const cards = fresh && !busy && !openedOn && (noModel || opening?.choose === true);
   const last = messages.at(-1);
+  const lastId = last?.id ?? "";
   const signedIn =
-    !messages.some((m) => m.role === "user" && !isIntro(m)) &&
-    last?.parts.some((part) => part.type === "data-signIn" && part.data.state === "done");
+    !written(messages) && last?.parts.some((part) => part.type === "data-signIn" && part.data.state === "done");
   // The agent speaks by itself once each time the last message changes: in the person's first
   // chat while it is in view (not one a page opened with a prompt), and after a sign-in it asked for.
   const greet = first && fresh && !openedOn && !opening && model !== undefined && !cards;
@@ -231,12 +235,12 @@ function Conversation({
   const acted = useRef<string>(undefined);
   const act = useEffectEvent(() => {
     if (greet && !document.getElementById("chat")?.checkVisibility()) return;
-    acted.current = last?.id ?? "";
+    acted.current = lastId;
     speak(engine);
   });
   useEffect(() => {
-    if (cue && acted.current !== (last?.id ?? "")) act();
-  }, [cue, last?.id]);
+    if (cue && acted.current !== lastId) act();
+  }, [cue, lastId]);
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4" aria-live="polite">
@@ -247,7 +251,7 @@ function Conversation({
               choose(name);
               if (!ownPlan(name)) return;
               // Spoken here, so the chat does not speak by itself as well.
-              acted.current = last?.id ?? "";
+              acted.current = lastId;
               speak(name);
             }}
           />
@@ -282,10 +286,12 @@ function Conversation({
           draft={opening?.text}
           engine={fresh && !openedOn ? { value: engine, set: choose } : undefined}
           note={
-            cards && noModel ? (
-              <p className="text-muted-foreground">Connect your agent above to start.</p>
-            ) : noModel ? (
-              <ConnectModel vendor={model?.vendor} />
+            noModel ? (
+              cards ? (
+                <p className="text-muted-foreground">Connect your agent above to start.</p>
+              ) : (
+                <ConnectModel vendor={model?.vendor} />
+              )
             ) : undefined
           }
         />

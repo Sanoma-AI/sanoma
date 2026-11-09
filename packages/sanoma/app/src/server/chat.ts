@@ -15,11 +15,11 @@ import {
   type ChatMessage,
   ENGINE_NAMES,
   heldRunOf,
-  isIntro,
   noModelText,
   onModelConnector,
   textOf,
   unfinished,
+  written,
 } from "../lib/chat.ts";
 import { type ActorContext, parse, requireActor, toApiError } from "./core.ts";
 import { chatModel } from "./models.ts";
@@ -91,13 +91,13 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const message: ChatMessage = body.start
       ? { ...sent, parts: [{ type: "text", text: INTRO }], metadata: { intro: true } }
       : sent;
-    const [had, written, model] = await Promise.all([
+    const [had, wrote, model] = await Promise.all([
       chat ? chats.has(chat.id, message.id) : false,
-      chat && body.start ? hasWritten(app.client, chat.id) : false,
+      chat && body.start ? app.client.chats.load(chat.id).then(written) : false,
       onModelConnector(named) ? chatModel(app) : undefined,
     ]);
     if (had) throw invalid(`The chat has a message ${message.id} already`);
-    if (written) throw invalid("The agent speaks first only in a chat you have not written in");
+    if (wrote) throw invalid("The agent speaks first only in a chat you have not written in");
     // A valid message the loop cannot answer yet: refused before the chat opens, as the composer says.
     if (model && !model.ready) throw new ApiError(409, { error: noModelText(model.vendor) });
     if (!chat) {
@@ -126,10 +126,6 @@ async function personMessage(sent: unknown): Promise<ChatMessage> {
   }
   return turn.data;
 }
-
-/** Whether the person has written in the chat: a message of theirs that is not the agent's cue (`isIntro`). */
-const hasWritten = async (client: SanomaClient, chat: string) =>
-  (await client.chats.load(chat)).some((m) => m.role === "user" && !isIntro(m));
 
 /**
  * The reply of the turn `runId` as a UI message stream: the chunks the worker writes
