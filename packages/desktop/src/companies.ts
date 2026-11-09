@@ -94,12 +94,49 @@ export const toReopen = (
   holdsCompany: (dir: string) => boolean = isCompanyFolder,
 ): string[] => companies.filter((c) => c.open && holdsCompany(c.path)).map((c) => c.path);
 
-/** A row of the start window's Recent list: the company, marked when it runs (or is starting) now. */
-export type RecentCompany = Company & { running: boolean };
+/**
+ * Whether a company is live, as its folder says: once its lockfile binds the host its data file
+ * declares (`resources/sanoma/infra.ts#host`), this folder is a drafting copy of it, which runs
+ * at the host's `hostname` when the data file names one. Undefined while it is local.
+ */
+export type Live = { hostname?: string } | undefined;
 
-/** The Recent list, each company marked when it is among `running` (real paths). */
-export const recentOf = (companies: readonly Company[], running: ReadonlySet<string>): RecentCompany[] =>
-  companies.map((c) => ({ ...c, running: running.has(c.path) }));
+/** The lockfile's key for the company's host. */
+const HOST_KEY = "resources/sanoma/infra.ts#host";
+/** The `hostname` a `.host({ … })` declaration names, read as text: the data file is code the shell never runs. */
+const HOSTNAME = /\.host\(\s*\{[^)]*?\bhostname\s*:\s*["'`]([^"'`\s]+)["'`]/;
+
+/** What `file` holds, or undefined when it cannot be read. */
+const textOf = (file: string) => {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+};
+
+/** Whether the company at `path` is live (`Live`): whatever cannot be read leaves it local. */
+export function liveOf(path: string): Live {
+  try {
+    const lock = JSON.parse(textOf(join(path, "resources", "sanoma.lock.json")) ?? "{}") as object;
+    if (!(HOST_KEY in lock)) return undefined;
+  } catch {
+    // A lockfile that is not JSON binds nothing.
+    return undefined;
+  }
+  const hostname = HOSTNAME.exec(textOf(join(path, "resources", "sanoma", "infra.ts")) ?? "")?.[1];
+  return hostname ? { hostname } : {};
+}
+
+/** A row of the start window's Recent list: the company, marked when it runs (or is starting) now, and when it is live. */
+export type RecentCompany = Company & { running: boolean; live: Live };
+
+/** The Recent list, each company marked when it is among `running` (real paths), and when it is live (`liveOf`). */
+export const recentOf = (
+  companies: readonly Company[],
+  running: ReadonlySet<string>,
+  live: (path: string) => Live = liveOf,
+): RecentCompany[] => companies.map((c) => ({ ...c, running: running.has(c.path), live: live(c.path) }));
 
 /** Whether nothing listens on `port` on this machine's loopback address. */
 export function isPortFree(port: number): Promise<boolean> {
@@ -131,10 +168,29 @@ export async function portFor(
   throw new Error("no free port on this machine");
 }
 
-/** The company's name: its `package.json`'s, else its folder's. */
-export function companyName(path: string): string {
+/**
+ * The `name` that `sanoma.config.ts` gives `defineConfig`, read as text: a top-level key, so the
+ * first `name: "…"` after `defineConfig({` that is first in the braces or on a line of its own one
+ * level in.
+ */
+const CONFIG_NAME = /defineConfig\(\s*\{(?:\s*|[\s\S]*?\n[ \t]{1,2})name\s*:\s*("(?:[^"\\\n]|\\.)*")/;
+
+/** The name `sanoma.config.ts` at `path` gives the company, if it gives one. */
+function configName(path: string): string | undefined {
+  const literal = CONFIG_NAME.exec(textOf(join(path, "sanoma.config.ts")) ?? "")?.[1];
   try {
-    const { name } = JSON.parse(readFileSync(join(path, "package.json"), "utf8")) as { name?: unknown };
+    return (literal && (JSON.parse(literal) as string)) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The company's name: the one its `sanoma.config.ts` gives it, else its `package.json`'s, else its folder's. */
+export function companyName(path: string): string {
+  const named = configName(path);
+  if (named) return named;
+  try {
+    const { name } = JSON.parse(textOf(join(path, "package.json")) ?? "{}") as { name?: unknown };
     if (typeof name === "string" && name) return name;
   } catch {
     // No readable package.json: the folder names it.
