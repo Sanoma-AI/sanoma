@@ -40,7 +40,7 @@ import { hasOneUrl } from "#/site-path.ts";
 import { useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
 import { cn, plural } from "#/lib/utils.ts";
-import { Logo } from "./logo.tsx";
+import { Logo } from "#/components/logo.tsx";
 import { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry, SiteEntry } from "sanoma/workflows/describe";
 import { approverLabel, CALL_WORKFLOW, type Tier } from "sanoma/workflows/shared";
