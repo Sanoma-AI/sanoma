@@ -16,7 +16,7 @@ Sanoma is early. This repo contains the runtime, the app and the connectors. You
 - **[Data](packages/sanoma/workflows/README.md#collections).** Define collections in `resources/data.ts` and store them in your business's own Postgres database.
 - **Connectors.** Call services like Stripe, Resend and GitHub through typed APIs. Each workflow declares which operations it can call.
 - **Policies and the ledger.** Write [policies](packages/sanoma/workflows/README.md#policies) in [Cedar](https://docs.cedarpolicy.com) to allow a call, deny it or require someone's approval. The [ledger](packages/sanoma/workflows/README.md#ledger) records every run.
-- **The agent.** Ask for changes in chat. Sanoma's agent edits and tests a draft copy of the repo. You can also work with Claude Code, Codex or another agent. With a Git remote connected, you [publish changes in the app](packages/sanoma/workflows/README.md#changes); new companies require an admin's approval. Without a remote, merge the draft branch by hand.
+- **The agent.** Ask for changes in chat. Sanoma's agent edits and tests a draft copy of the repo. You can also work with Claude Code, Codex or another agent. With a Git remote connected, you [publish changes in the app](packages/sanoma/workflows/README.md#changes); new companies require an admin's approval. Without a remote, saving the draft puts it to work at once, and Undo takes it back.
 
 Run Sanoma locally from the command line or the [desktop app](#desktop-preview), or deploy it to [your own host](packages/sanoma/README.md#hosting-it-yourself), such as Cloudflare with Neon. See [Contents](#contents) for the available connectors.
 
