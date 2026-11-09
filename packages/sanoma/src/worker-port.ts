@@ -166,13 +166,14 @@ export function listenWorkerPort(root: string, { host, port, onWake, ...bundle }
  * one, a worker that never stops itself, since nothing in this process would start it again.
  *
  * On a host that starts the process again on a wake (its own wake route in the environment,
- * `envWakeup`), being done means ending: once the worker stopped itself and no app bundle is
- * building, `exited` settles, `sanoma worker` stops as on a signal, and the container ends with the
- * process. A wake before that wins (the supervisor starts a fresh worker); one after it finds the
- * port closed, so the host starts a fresh process. A build that ends gives the worker one more idle
- * stop (a fresh one when it had stopped), so the deploy that asked has time to take the bundle
- * before the process ends. A fresh worker that fails to start ends the process too: the next wake
- * starts a fresh one.
+ * `envWakeup`), being done means ending: once the supervisor is left with no worker and no app
+ * bundle is building, `exited` settles and `sanoma worker` stops as on a signal, so the container
+ * ends with the process. It resolves when the worker stopped itself, and rejects when a fresh one
+ * failed to start, so the process exits non-zero and the host's next wake starts a fresh one. A
+ * wake before that wins (the supervisor starts a fresh worker); one after it finds the port closed,
+ * so the host starts a fresh process. A build that ends counts as a wake, so the deploy that asked
+ * has a worker's idle checks of time to take the bundle before the process ends. `stop` (a signal:
+ * the host's own stop) registers what the next worker must do first (`WorkerStop.register`).
  */
 export async function runWorker(
   config: SanomaConfig,
@@ -189,25 +190,26 @@ export async function runWorker(
   // Settled before any later request is handled, and the port closes first on the stop that
   // follows, so no wake is answered after this.
   const exited = Promise.withResolvers<void>();
-  const done = () => {
-    if (exits && supervised.stopped && !building) exited.resolve();
-  };
   const supervised = await superviseWorker(config, {
     ...workerOptions(config),
     selfStop: !isLoopback(host),
-    onStopped: done,
+    onEnded(failure) {
+      if (!exits || building) return;
+      if (failure) exited.reject(failure.error);
+      else exited.resolve();
+    },
   });
   try {
     const listening = await listenWorkerPort(rootOf(config), {
       host,
       port: Number(port),
-      onWake: () => supervised.wake().then(done),
+      onWake: () => supervised.wake(),
       token: process.env.SANOMA_WAKEUP_TOKEN,
       checkout: process.env.SANOMA_CHECKOUT,
       log,
       onBuilding(now) {
         building = now;
-        if (!now && exits) void supervised.resume().then(done);
+        if (!now && exits) void supervised.wake();
       },
     });
     log(`the worker's port at ${listening.url}`);
@@ -217,7 +219,7 @@ export async function runWorker(
         try {
           await listening.stop();
         } finally {
-          await supervised.stop();
+          await supervised.stop({ register: exits });
         }
       },
     };

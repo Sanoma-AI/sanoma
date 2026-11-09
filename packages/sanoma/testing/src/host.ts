@@ -738,8 +738,9 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived" }: FakeHost
  * itself when idle with a wakeup, and a server that answers `/healthz`, and `GET /wake` with 204,
  * each one recorded as the running host's `wakes` and handed to the supervisor (the app itself
  * needs its build, which this package does not). On a host that starts it again (this process's
- * environment names the host's wake route, `envWakeup`), it ends once its worker stopped itself
- * (`exited`), its server closed first, so a wake after that is refused, not lost.
+ * environment names the host's wake route, `envWakeup`), it ends once its supervisor has no worker
+ * (`onEnded`: it stopped itself, or a fresh one failed to start) (`exited`), its server closed
+ * first, so a wake after that is refused, not lost.
  */
 export function inProcessHost(config: SanomaConfig, databaseUrl: string, options: SupervisorOptions = {}): StartHost {
   return async ({ port }) => {
@@ -757,9 +758,9 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string, options
     const worker = await superviseWorker(testWorkerConfig(config, databaseUrl), {
       quiet: true,
       ...options,
-      onStopped(stopped) {
-        options.onStopped?.(stopped);
-        if (exits && worker.stopped) void end().then(exited.resolve);
+      onEnded(failure) {
+        options.onEnded?.(failure);
+        if (exits) void end().then(exited.resolve);
       },
     });
     const wakes: Wake[] = [];

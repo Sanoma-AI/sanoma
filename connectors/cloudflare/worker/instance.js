@@ -31,11 +31,23 @@ export const DEPLOYMENT_HEADER = "x-sanoma-deployment";
 export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
 /**
  * How long Cloudflare keeps the container running after the object's last request: its maximum,
- * six hours, so it never decides. The worker ends the container itself, by exiting once it is
- * idle; work inside the container is no request to the object, so a shorter timeout would cut a
- * long run. Without one set, Cloudflare stops it shortly after the object goes quiet.
+ * six hours (`setInactivityTimeout` takes more than 0 and at most 21,600,000 ms, and rejects
+ * above), so it rarely decides. The worker ends the container itself, by exiting once it is idle;
+ * work inside the container is no request to the object, so a shorter timeout would cut a long
+ * run. A run busy longer than this with no request to the object is stopped by the platform's
+ * SIGTERM, and the worker registers its wake as it stops, so the next container resumes it.
+ * Without one set, Cloudflare stops it shortly after the object goes quiet.
  */
 export const INACTIVITY_MS = 6 * 60 * 60 * 1000;
+
+/** Sets the container's inactivity timeout (`INACTIVITY_MS`): a safety net, so a refusal is logged, never a failed start. */
+async function keepRunning(container) {
+  try {
+    await container.setInactivityTimeout(INACTIVITY_MS);
+  } catch (error) {
+    console.error(`setting the container's inactivity timeout failed: ${error?.message ?? error}`);
+  }
+}
 /** The Worker version's metadata binding (`version_metadata`): its `id`, which each upload answers with. */
 export const VERSION_METADATA = "CF_VERSION_METADATA";
 /** The binding that names the object, in the Worker's env. */
@@ -116,7 +128,7 @@ export class Instance {
     this.env = env;
     // An object that restarts (a deploy) starts without the timeout, though its container runs.
     const container = ctx.container;
-    if (container?.running) void ctx.blockConcurrencyWhile(() => container.setInactivityTimeout(INACTIVITY_MS));
+    if (container?.running) void ctx.blockConcurrencyWhile(() => keepRunning(container));
   }
 
   get port() {
@@ -275,7 +287,7 @@ export class Instance {
           .fetch("http://container/healthz", { signal: AbortSignal.timeout(TRY_MS) });
         await res.body?.cancel();
         if (res.ok) {
-          await container.setInactivityTimeout(INACTIVITY_MS);
+          await keepRunning(container);
           this.#ready = true;
           // A container kept from before has no start of this one's to mark.
           if (this.#started) this.#started.answered = true;

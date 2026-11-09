@@ -2,34 +2,29 @@ import type { SanomaConfig } from "./config.ts";
 import type { SelfStop } from "./deadlines.ts";
 import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
-import { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
+import { startWorker, type Worker, type WorkerOptions, type WorkerStop } from "./worker.ts";
 
 // One worker at a time in a process that outlives it. A worker that stops itself when idle (a
 // wakeup declared) cannot launch again, so the next write that needs one, or the wakeup's wake,
-// starts a fresh worker. `sanoma serve` runs its worker through it, and so does the testing
-// kit's host in this process.
+// starts a fresh worker. `sanoma serve` and `sanoma worker` run their worker through it, and so
+// does the testing kit's host in this process.
 
 /** A worker under a supervisor (`superviseWorker`). */
 export interface Supervisor {
-  /** True from the moment the worker stopped itself until a fresh one starts. */
+  /** True from the moment the worker stopped itself, or a fresh one failed to start, until a fresh one starts. */
   readonly stopped: boolean;
   /**
-   * Starts a fresh worker when the last one stopped itself, for a write that needs one (a run's
-   * start, an approval's decision); while one starts or runs, it is heard (below). Resolves once it runs, or
-   * once its failure to start is logged: the next call tries again. Never rejects.
-   */
-  resume(): Promise<void>;
-  /**
-   * A wakeup's `GET /wake`, sent after the write it is for: `resume` when the worker stopped
-   * itself. While one runs, a wake after its last check for being idle began wins over the stop
-   * that check leads to: a fresh worker starts once it stopped, so `onStopped` finds `stopped`
-   * false. Otherwise a no-op while one starts or runs, whose own check sees the write. A wake that
-   * arrives late, twice or for a replaced registration starts a worker that finds nothing to do
-   * and stops again on its own check.
+   * Asks for a worker that looks at the database after this moment: for a write that needs one
+   * (a run's start, an approval's decision, asked once it committed) or a wakeup's `GET /wake`,
+   * in whatever order the two come. With the last worker stopped, a fresh one starts. While one
+   * starts or runs, it is heard: once that one stops itself (its checks may have run before the
+   * write committed), a fresh one starts, whose checks all come after this call, and stops again
+   * on its own when nothing came of it. Resolves once a worker runs, or once its failure to start
+   * is logged and told (`onEnded`): the next call tries again. Never rejects.
    */
   wake(): Promise<void>;
-  /** Stops the worker running or starting, and starts none again. */
-  stop(): Promise<void>;
+  /** Stops the worker running or starting, and starts none again; `register` as `Worker.stop` takes it. */
+  stop(options?: WorkerStop): Promise<void>;
 }
 
 export interface SupervisorOptions extends Omit<WorkerOptions, "onStopped"> {
@@ -38,27 +33,27 @@ export interface SupervisorOptions extends Omit<WorkerOptions, "onStopped"> {
    * would wake the instance the host runs. Default true.
    */
   selfStop?: boolean;
-  /** Told each time the worker stops itself, once a fresh one is starting for a write it heard, or `stopped` is true. */
+  /** Told each time the worker stops itself, once a fresh one is starting for a wake it heard, or `stopped` is true. */
   onStopped?: (stopped: SelfStop) => void;
+  /**
+   * Told each time the supervisor is left with no worker and none starting: the worker stopped
+   * itself and heard no wake, or a fresh one failed to start (`failure`, why). Not after `stop`.
+   */
+  onEnded?: (failure?: { error: unknown }) => void;
 }
 
 /**
  * Starts a worker on `config` that stops itself when idle with a wakeup declared (`onStopped`
- * in `WorkerOptions`), and a fresh one each time `resume` or `wake` asks after it did. Throws
- * when the first does not start. A write heard while a worker starts or runs may land after its last check
- * for being idle, so a worker that stops itself after one is started again at once: it stops
- * again on its own when nothing came of it.
+ * in `WorkerOptions`), and a fresh one each time `wake` asks after it did, or asked while it ran.
+ * Throws when the first does not start.
  */
 export async function superviseWorker(config: SanomaConfig, options: SupervisorOptions = {}): Promise<Supervisor> {
-  const { onStopped, selfStop = true, ...workerOptions } = options;
+  const { onStopped, onEnded, selfStop = true, ...workerOptions } = options;
   let worker: Worker | undefined;
   let starting: Promise<void> | undefined;
   let closed = false;
-  // A write while the worker starts or runs, since it began starting.
+  // A wake while the worker starts or runs, since it began starting.
   let heard = false;
-  // When the last wake while a worker ran came (`performance.now()`): one after the check that
-  // stops it began (`SelfStop.checked`) follows a write that check may not have seen.
-  let woke = -Infinity;
 
   const launch = async () => {
     heard = false;
@@ -69,42 +64,39 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
   const selfStopped = (stopped: SelfStop) => {
     worker = undefined;
     if (closed) return;
-    // Resumed first, so `stopped` is false when `onStopped` looks.
-    if (heard || woke >= stopped.checked) void supervisor.resume();
+    // Read before the wake, whose launch clears it.
+    const again = heard;
+    // Woken first, so `stopped` is false when `onStopped` looks.
+    if (again) void supervisor.wake();
     onStopped?.(stopped);
+    if (!again) onEnded?.();
   };
 
   const supervisor: Supervisor = {
     get stopped() {
       return !closed && !worker && !starting;
     },
-    resume() {
-      if (closed) return Promise.resolve();
-      if (worker) {
-        heard = true;
-        return Promise.resolve();
-      }
-      if (starting) {
-        heard = true;
-        return starting;
-      }
-      return (starting = launch()
-        .catch((err: unknown) => warn(`the worker could not start again: ${errorMessage(err)}`))
-        .finally(() => {
-          starting = undefined;
-        }));
-    },
     wake() {
-      if (supervisor.stopped) return supervisor.resume();
-      if (worker) woke = performance.now();
-      return Promise.resolve();
+      if (closed) return Promise.resolve();
+      if (worker || starting) {
+        heard = true;
+        return starting ?? Promise.resolve();
+      }
+      return (starting = launch().then(
+        () => void (starting = undefined),
+        (error: unknown) => {
+          starting = undefined;
+          warn(`the worker could not start again: ${errorMessage(error)}`);
+          if (!closed) onEnded?.({ error });
+        },
+      ));
     },
-    async stop() {
+    async stop(how) {
       closed = true;
       await starting;
       const running = worker;
       worker = undefined;
-      await running?.stop();
+      await running?.stop(how);
     },
   };
   await launch();

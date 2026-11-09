@@ -385,6 +385,24 @@ describe("the Worker's object", () => {
     expect(container.start).toHaveBeenCalledTimes(2);
   });
 
+  it("starts its container, and keeps one running at its own restart, when Cloudflare refuses the inactivity timeout", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { ctx, container } = stubCtx();
+    container.setInactivityTimeout = async () => {
+      throw new RangeError("durationMs is more than 6 hours");
+    };
+    const object = new Instance(ctx, ENV);
+    await started(object);
+    expect(await (await object.fetch(route("/__sanoma/health"))).json()).toMatchObject({ running: true, ready: true });
+    // An object that restarts beside its running container sets the timeout in its constructor.
+    let blocked: Promise<unknown> | undefined;
+    const restarted = new Instance({ ...ctx, blockConcurrencyWhile: (fn) => (blocked = fn()) }, ENV);
+    await expect(blocked).resolves.toBeUndefined();
+    expect(await (await restarted.fetch(route("/__sanoma/health"))).json()).toMatchObject({ running: true });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("inactivity timeout"));
+    error.mockRestore();
+  });
+
   it("does not count a container that answered and then stopped as a start that failed", async () => {
     const { ctx, container } = stubCtx();
     let stop!: () => void;
