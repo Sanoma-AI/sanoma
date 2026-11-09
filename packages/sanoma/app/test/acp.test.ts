@@ -13,8 +13,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { anthropic } from "@sanoma-ai/connector-anthropic";
+import { github } from "@sanoma-ai/connector-github";
+import { openai } from "@sanoma-ai/connector-openai";
+import { opencode } from "@sanoma-ai/connector-opencode";
+import { pi } from "@sanoma-ai/connector-pi";
 import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
+import { resolveConfig } from "sanoma/workflows";
 import { runEnded } from "sanoma/testing/host";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -24,8 +30,7 @@ import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { type ChatMessage, chatTransport, type EngineName, type SignInCard } from "../src/lib/chat.ts";
-import { OWN_AGENTS, type OwnAgentName } from "../src/steps/agent/acp.ts";
-import { boxName } from "../src/steps/agent/checkout.ts";
+import { agentOn, boxName } from "../src/steps/agent/checkout.ts";
 import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's third engine, end to end: a person's
@@ -63,35 +68,39 @@ export const bot = sanoma.agent({ id: "bot" });
 `,
 );
 
-const testApp = useTestApp({ workflows: [], connectors: [], root }, { databaseUrl: testDatabaseUrl("acp") });
+// Each agent's connector, which gives the chat its agent.
+const connectors = [github, opencode, pi, anthropic, openai];
+const testApp = useTestApp({ workflows: [], connectors, root }, { databaseUrl: testDatabaseUrl("acp") });
+/** An agent's facts, as its connector gives them. */
+const agentOf = (id: string) => agentOn(resolveConfig({ workflows: [], connectors, root }), id, "own");
 
 let dir = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 let app: App | undefined;
 /** A person's own agents' HOME, `.acp` in their box (the local backend's, for the app the root's package.json names). */
 const agentsHome = (person: string) => join(dir, ".sanoma/agent-home/boxes", boxName("acp-test", person), ".acp");
-const install = (agent: OwnAgentName) => join(agentsHome("ada"), agent);
-const logOf = (agent: OwnAgentName) => join(install(agent), "fake.log");
+const install = (agent: string) => join(agentsHome("ada"), agent);
+const logOf = (agent: string) => join(install(agent), "fake.log");
 
 /** Plants the fake as `agent`'s install, as installed: its marker, its bin, and its config. */
-function plant(agent: OwnAgentName, config: FakeConfig) {
+function plant(agent: string, config: FakeConfig) {
   const at = install(agent);
   mkdirSync(join(at, "node_modules/.bin"), { recursive: true });
-  writeFileSync(join(at, "installed.json"), JSON.stringify(OWN_AGENTS[agent].packages));
+  writeFileSync(join(at, "installed.json"), JSON.stringify(agentOf(agent).packages));
   configure(agent, config);
-  const bin = join(at, "node_modules/.bin", OWN_AGENTS[agent].bin);
+  const bin = join(at, "node_modules/.bin", agentOf(agent).bin);
   writeFileSync(bin, `#!/bin/sh\nexec node ${JSON.stringify(fake)} ${JSON.stringify(join(at, "fake.json"))} "$@"\n`);
   chmodSync(bin, 0o755);
 }
 
-const configure = (agent: OwnAgentName, config: FakeConfig) =>
+const configure = (agent: string, config: FakeConfig) =>
   writeFileSync(
     join(install(agent), "fake.json"),
     JSON.stringify({ ...config, code: CODE, log: logOf(agent), other: join(agentsHome("lead"), ".credentials.json") }),
   );
 
 /** What the fake `agent` logged, entry by entry. */
-const logged = (agent: OwnAgentName): Record<string, unknown>[] =>
+const logged = (agent: string): Record<string, unknown>[] =>
   existsSync(logOf(agent))
     ? readFileSync(logOf(agent), "utf8")
         .trim()
@@ -403,7 +412,7 @@ describe("the chat on a person's own agent", () => {
     configure("claude-code", {
       signIn: "terminal",
       mode: "hello",
-      method: OWN_AGENTS["claude-code"].signIn.method,
+      method: (agentOf("claude-code").signIn as { method: string }).method,
       loginFails: "Couldn't save your login. If your Mac's keychain is locked, unlock it and log in again.",
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -420,6 +429,13 @@ describe("the chat on a person's own agent", () => {
       configure("claude-code", { signIn: "none", mode: "hello" });
     }
   }, 60_000);
+
+  it("takes each agent from its connector, and says which is missing or runs on no person's plan", () => {
+    expect(agentOf("codex")).toMatchObject({ title: "Codex", bin: "codex-acp" });
+    expect(() => agentOn(resolveConfig({ workflows: [], connectors: [github], root }), "codex", "own")).toThrow(
+      "No connector of this company gives the coding agent codex: add the connector that has it to sanoma.config.ts",
+    );
+  });
 
   it("is never reached by an agent, which no login admits (the engine refuses one too)", async () => {
     const response = await post(`bot-${RUN}`, "acp-opencode", "bot");

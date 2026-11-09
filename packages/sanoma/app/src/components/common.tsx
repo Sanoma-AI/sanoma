@@ -40,6 +40,7 @@ import { hasOneUrl } from "#/site-path.ts";
 import { useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
 import { cn, plural } from "#/lib/utils.ts";
+import { Logo } from "#/components/logo.tsx";
 import { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry, SiteEntry } from "sanoma/workflows/describe";
 import { approverLabel, CALL_WORKFLOW, type Tier } from "sanoma/workflows/shared";
@@ -132,30 +133,6 @@ const TIER_LABELS: Record<Tier, string> = {
 /** Whose a connector or an app is, as Sanoma's claims say (`connectorTier`, `appTier`). */
 export function TierBadge({ tier }: { tier: Tier }) {
   return <Badge variant={tier === "community" ? "outline" : "secondary"}>{TIER_LABELS[tier]}</Badge>;
-}
-
-/**
- * A logo, 16 px unless `className` sizes it: `src`, and `dark` instead under the dark theme. Only
- * ever an `<img>`, where an SVG's scripts and external references never run or load.
- */
-export function Logo({
-  src,
-  dark,
-  alt,
-  className,
-}: {
-  src: string;
-  dark?: string | undefined;
-  alt: string;
-  className?: string | undefined;
-}) {
-  // A hidden <img> is out of the accessibility tree: one name is read either way.
-  return (
-    <>
-      <img src={src} alt={alt} className={cn("size-4 shrink-0", dark && "dark:hidden", className)} />
-      {dark && <img src={dark} alt={alt} className={cn("hidden size-4 shrink-0 dark:block", className)} />}
-    </>
-  );
 }
 
 /**

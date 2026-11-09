@@ -2452,8 +2452,9 @@ describe("an app configured otherwise", () => {
       await read();
       expect(result.ledger).toEqual([]);
       expect(result.ledgerError).toMatch(/corrupt ledger line/);
-      expect(logged).toHaveBeenCalledOnce();
-      expect(String(logged.mock.calls[0]?.[0])).toContain(`could not read the ledger of run ${runId}`);
+      // Only this log is counted: an earlier describe's worker may still log the runs it cancels.
+      const reads = logged.mock.calls.filter((c) => String(c[0]).includes(`could not read the ledger of run ${runId}`));
+      expect(reads).toHaveLength(1);
     });
   });
 });

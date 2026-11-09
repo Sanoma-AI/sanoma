@@ -15,7 +15,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { once } from "node:events";
 import { createRequire } from "node:module";
 import { constants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -61,7 +60,16 @@ const LEADS = [
   ["Umbrella", "alice@umbrella.test", "researched", "dana", undefined, undefined],
 ] as const;
 
-const stillsDir = parseArgs({ options: { out: { type: "string" } } }).values.out;
+const options = parseArgs({ options: { out: { type: "string" }, intro: { type: "boolean" } } }).values;
+if (options.intro) {
+  if (options.out) throw new Error("--intro and --out are separate recording modes");
+  ensureSanomaBuilt();
+  for (const name of ["ghost", "resend"])
+    ensureBuilt(join(repo, "connectors", name), ["dist/index.js", "dist/fake.js"], ["pnpm", "run", "build"]);
+  await import("./intro.ts");
+  process.exit(process.exitCode ?? 0);
+}
+const stillsDir = options.out;
 
 const started = Date.now();
 const say = (line: string) => console.log(`readme:shots ${((Date.now() - started) / 1000).toFixed(0)}s: ${line}`);
@@ -79,27 +87,29 @@ const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 const exitCodeOf = (signal: (typeof SIGNALS)[number]) => 128 + constants.signals[signal];
 
 // What one run holds, each released by `cleanup`: the work directory, the server's log beside it
-// (kept after a failure), Chrome, ffmpeg, the server and its database.
+// (kept after a failure), Chrome, the server and its database.
 const work = mkdtempSync(join(tmpdir(), "readme-shots-"));
 const serverLog = `${work}.log`;
 let keepLog = false;
 let databaseUrl: URL;
 let chrome: Promise<Browser> | undefined;
 let server: ChildProcess | undefined;
-let ffmpeg: ChildProcess | undefined;
 let database = false;
 let interrupted: (typeof SIGNALS)[number] | undefined;
 let cleaning: Promise<void> | undefined;
 
 // Ctrl-C or a kill: the same cleanup as `finally`, then out with the signal's code (130 for SIGINT).
 // A signal during the cleanup (pnpm passes Ctrl-C on as well) waits for it rather than cutting it short.
+const signalHandlers = new Map<NodeJS.Signals, () => void>();
 for (const signal of SIGNALS) {
-  process.on(signal, () => {
+  const handler = () => {
     if (interrupted) return;
     interrupted = signal;
     say(`${signal}: cleaning up`);
     void cleanup().then(() => process.exit(exitCodeOf(signal)));
-  });
+  };
+  signalHandlers.set(signal, handler);
+  process.on(signal, handler);
 }
 
 try {
@@ -176,13 +186,9 @@ try {
   const stills = readdirSync(captured).filter((file) => file.endsWith(".png"));
   if (stillsDir) say(`wrote ${stillsDir}: ${stills.join(", ")}`);
   else {
-    say("stills taken; making demo.gif");
     stopIfInterrupted();
-    await makeGif(frames, join(captured, "demo.gif"));
-    stopIfInterrupted();
-    const files = ["demo.gif", ...stills];
-    replaceAssets(captured, files);
-    say(`wrote .github/assets: ${files.join(", ")}`);
+    replaceAssets(captured, stills);
+    say(`wrote .github/assets: ${stills.join(", ")}`);
   }
 } catch (err) {
   // A signal's handler runs on the event loop: let one that came during a blocking call (a build)
@@ -198,6 +204,12 @@ try {
 } finally {
   await cleanup();
 }
+// Visual CI keeps its workflow-only fixture; the README gets the launch-desk storyboard.
+if (!stillsDir && !interrupted && !process.exitCode) {
+  for (const [signal, handler] of signalHandlers) process.off(signal, handler);
+  ensureBuilt(join(repo, "connectors/resend"), ["dist/index.js", "dist/fake.js"], ["pnpm", "run", "build"]);
+  await import("./intro.ts");
+}
 
 /** Throws once a signal has come, so nothing is acquired after the cleanup has begun. */
 function stopIfInterrupted(): void {
@@ -205,8 +217,8 @@ function stopIfInterrupted(): void {
 }
 
 /**
- * Closes Chrome (once launched, if it is launching), stops ffmpeg and the server, drops the
- * database and removes the work directory (after ffmpeg, which reads from it) and, unless a failure keeps it, the server's log: each whatever the
+ * Closes Chrome (once launched, if it is launching), stops the server, drops the
+ * database and removes the work directory and, unless a failure keeps it, the server's log: each whatever the
  * others do, and once, for `finally` and a signal alike.
  */
 function cleanup(): Promise<void> {
@@ -220,7 +232,6 @@ function cleanup(): Promise<void> {
             () => {},
           ),
       ],
-      ["stop ffmpeg", () => ffmpeg && stop(ffmpeg)],
       ["stop the server", () => server && stop(server)],
       ["drop the database", () => database && dropDatabase()],
       [`remove ${work}`, () => rmSync(work, { recursive: true, force: true })],
@@ -413,23 +424,6 @@ function hasFfmpeg(): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * The frames at their durations (ffmpeg's concat list), one palette for the whole GIF, looping.
- * ffmpeg runs without blocking the event loop, so a signal's handler runs while it works, and
- * the cleanup stops it.
- */
-async function makeGif(frames: string, out: string): Promise<void> {
-  const filter =
-    "split[a][b];[a]palettegen=max_colors=128:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle";
-  ffmpeg = spawn(
-    "ffmpeg",
-    ["-v", "error", "-y", "-f", "concat", "-i", "frames.txt", "-vf", filter, "-loop", "0", out],
-    { cwd: frames, stdio: "inherit" },
-  );
-  const [code, signal] = (await once(ffmpeg, "close")) as [number | null, NodeJS.Signals | null];
-  if (code !== 0) throw new Error(`readme:shots: ffmpeg failed (${signal ?? `exit ${code}`})`);
 }
 
 function fail(message: string): never {
