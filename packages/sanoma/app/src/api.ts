@@ -16,11 +16,12 @@ import type {
   PreviewRequest,
   Principal,
   RunSummary,
+  SaveView,
 } from "sanoma/workflows";
 import type { ConfigDescription, PermissionsGrid, Span } from "sanoma/workflows/describe";
 import { ConfigDescriptionSchema } from "sanoma/workflows/description";
 import type { RunCheck, Scenario } from "sanoma/workflows/scenario";
-import { EFFECTS, RUN_STATUSES, type Saved } from "sanoma/workflows/shared";
+import { COMMIT_ID, DRAFT_ID, EFFECTS, RUN_STATUSES, type Saved } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { ColumnChange } from "./components/grid/plan.ts";
 
@@ -154,6 +155,25 @@ export type ChangesQuery = z.input<typeof ChangesQuery>;
 export interface ChangeDetail extends ChangeView {
   edits: string[];
 }
+
+/**
+ * A save of a chat's draft as `getSaves` reads it: the client's `SaveView`, and the config's
+ * workflows whose files it saved, by name (none for a save that opened a change).
+ */
+export interface SaveDetail extends SaveView {
+  edits: string[];
+}
+
+/**
+ * What saving a chat's draft takes (`saveDraftFn`): the chat's id, and the draft's commit its card
+ * showed (`head`), or, to undo what it saved, that commit on `main` (`undo`).
+ */
+export const SaveDraftRequest = z.object({
+  id: z.string().regex(DRAFT_ID),
+  head: z.string().regex(COMMIT_ID).optional(),
+  undo: z.string().regex(COMMIT_ID).optional(),
+});
+export type SaveDraftRequest = z.input<typeof SaveDraftRequest>;
 
 /** One run as `getRun` reads it: the run, its ledger, its approvals and a sandbox run's checks. */
 export interface RunDetail {

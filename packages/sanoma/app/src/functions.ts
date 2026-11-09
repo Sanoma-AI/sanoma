@@ -19,6 +19,7 @@ import {
   PreviewQuery,
   ProposeColumnChange,
   RunsQuery,
+  SaveDraftRequest,
   SetCredentialRequest,
 } from "./api.ts";
 import {
@@ -47,6 +48,8 @@ import {
   readStartRun,
   recordHistory,
   runDetail,
+  saveDraft,
+  saves,
   saysWho,
   setCredential,
   signOutUrl,
@@ -136,6 +139,17 @@ export const openChangeFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(z.object({ id: z.string().regex(DRAFT_ID) })))
   .handler(({ data, context }) => openChange(context.app, context.principal, data.id, context.origin));
+
+/** The saves of a chat's draft, by the draft's id, newest first. */
+export const getSaves = createServerFn(READ)
+  .validator(validate(z.object({ id: z.string().min(1) })))
+  .handler(({ data, context }) => saves(context.app, data.id));
+
+/** Saves the person's chat's draft, or undoes what it saved: the save's run id. */
+export const saveDraftFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(SaveDraftRequest))
+  .handler(({ data, context }) => saveDraft(context.app, context.principal, data, context.origin));
 
 /** What the repository's host enforces on main: the Permissions page's line; null without a remote. */
 export const getHostEnforcement = createServerFn(READ).handler(({ context }) => hostEnforcement(context.app));

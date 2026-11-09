@@ -23,7 +23,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
@@ -48,7 +47,17 @@ import { errorBodyOf } from "../api.ts";
 import { appBehindQuery, configQuery, runLink, RUNS_KEY, type SiteCaller } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
-import { ButtonLink, effectBadge, Notice, PageHeader, type PageHeaderProps, Region, Tip, ToneBadge } from "./kit.tsx";
+import {
+  ButtonLink,
+  effectBadge,
+  Notice,
+  PageHeader,
+  type PageHeaderProps,
+  Region,
+  Tip,
+  ToneBadge,
+  When,
+} from "./kit.tsx";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui: the kit's, which
 // `sanoma/ui` exports (./kit.tsx, re-exported so a screen imports both from here), then the app's
@@ -297,62 +306,9 @@ export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
   return tip ? <Tip tip={tip}>{badge}</Tip> : badge;
 }
 
-function ago(ms: number, now: number): string {
-  const s = Math.round((now - ms) / 1000);
-  if (s < 5) return "just now";
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 48) return `${h}h ago`;
-  return new Date(ms).toLocaleDateString();
-}
-
-// One clock for every `When` on the page, ticking every 15 s while any is shown.
-let now: number | undefined;
-const watchers = new Set<() => void>();
-let ticker: ReturnType<typeof setInterval> | undefined;
-
-function watchClock(onTick: () => void) {
-  watchers.add(onTick);
-  if (!ticker) {
-    // A clock read while nothing watched it may be old: catch up now.
-    now = Date.now();
-    ticker = setInterval(() => {
-      now = Date.now();
-      for (const watcher of watchers) watcher();
-    }, 15_000);
-  }
-  return () => {
-    watchers.delete(onTick);
-    if (!watchers.size) {
-      clearInterval(ticker);
-      ticker = undefined;
-    }
-  };
-}
-
-const readClock = () => (now ??= Date.now());
-/** The server, and the browser while it hydrates, know no time: they render the UTC time. */
-const noClock = () => undefined;
-
-/**
- * A time, relative to now in the browser, with the UTC time as its title. The server renders
- * the UTC time, so the page hydrates the same markup whatever the browser's clock and time zone.
- */
 /** A commit by its first 8 characters, the whole id in its tooltip. */
 export function Commit({ sha }: { sha: string }) {
   return <code title={sha}>{sha.slice(0, 8)}</code>;
-}
-
-export function When({ at }: { at: number }) {
-  const clock = useSyncExternalStore(watchClock, readClock, noClock);
-  const utc = utcText(at, { seconds: true });
-  return (
-    <time dateTime={new Date(at).toISOString()} title={utc}>
-      {clock === undefined ? utc : ago(at, clock)}
-    </time>
-  );
 }
 
 /** A workflow's latest run: its status and how long ago it started, or `none` when it has never run. */

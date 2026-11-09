@@ -5,6 +5,7 @@ import {
   ADMIN,
   type AdoptInput,
   type AppStepContext,
+  editsRules,
   errorMessage,
   isRules,
   mayDeclarePeople,
@@ -12,6 +13,8 @@ import {
   type PatchOutput,
   peopleSources,
   remoteFor,
+  type SaveDraftInput,
+  type SaveDraftOutput,
   SanomaError,
   type Source,
   type Written,
@@ -26,11 +29,11 @@ import {
 } from "sanoma/workflows/describe";
 import { TableChangePlan } from "../components/grid/plan.ts";
 
-// A data file's change from the app's own pages, in the worker (the built-ins `adopt` and
-// `patch`): Adopt (a drifted field's value at the vendor) and a form's Save, each written into the
-// checkout (or a draft of it) and committed through the worker's repository, each read, write
-// and commit one of the worker's writes (`AppStepContext.serially`), so two never read the same
-// file and both write it.
+// A change from the app's own pages, in the worker (the built-ins `adopt`, `patch` and
+// `save-draft`): Adopt (a drifted field's value at the vendor) and a form's Save, each written into
+// the checkout (or a draft of it) and committed through the worker's repository, and a chat's
+// draft saved; each read, write and commit one of the worker's writes (`AppStepContext.serially`),
+// so two never read the same file and both write it.
 
 /** The config's root, where its data files are: a config without one has none to write. */
 export function rootOf({ resolved }: Pick<AppStepContext, "resolved">): string {
@@ -186,6 +189,53 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
       );
     }
     return written(step, at.file, text, message);
+  });
+}
+
+/**
+ * A chat's draft saved, as the run's actor, the chat's person (or, for an undo, the saved commit
+ * reverted first in the draft of its own, `undoDraftOf`, left as it is when a retry finds it open).
+ * With a repository that drafts and has a remote a connector's remote half is for, its change is
+ * opened as saved (`ChangeInput.save`), which the policy decides: the change's run id. Otherwise
+ * saving is publishing: the draft at `head` merged into the checkout (`Source.merge`), a change to
+ * the rules only by someone in `admin` (`not_approver` for anyone else, as for a form's Save), the
+ * draft closed, and the worker started again on the files (`reload`). Refused for a draft of
+ * another person's chat, and once the draft has moved on from `head`.
+ */
+export async function saveDraft(
+  step: AppStepContext,
+  { id, title, head, undo, page }: SaveDraftInput,
+): Promise<SaveDraftOutput> {
+  const { client, source, by, reload } = step;
+  if (!source?.merge || !source.revert || !source.closeDraft || !source.draft || !source.diff || !source.drafts) {
+    throw new Error("This instance's repository cannot save a draft");
+  }
+  if (undo === undefined) {
+    if ((await client.chats.get(id))?.person !== by.id)
+      throw new SanomaError("invalid_input", `No draft of yours is ${id}`);
+  } else if (!(await source.drafts()).includes(id)) {
+    await step.serially(() => source.revert!(id, { sha: undo, author: by.id }));
+  }
+  if (await reviewsChanges(step, source)) {
+    const input = { id, title, save: true, ...(page !== undefined && { page }) };
+    return { change: await client.openChange(input, { startedBy: by }) };
+  }
+  return step.serially(async () => {
+    const [diff, draft] = await Promise.all([source.diff!(id), source.draft!(id)]);
+    if (head !== undefined && diff.head !== head) {
+      throw new SanomaError("invalid_input", "The draft has changed since: save it from its latest card");
+    }
+    if ((await editsRules(source.root, draft.root, diff.files)) && by.groups?.includes(ADMIN) !== true) {
+      throw new SanomaError(
+        "not_approver",
+        "A change to the policies or the people waits for an admin, and this company has no remote to review on",
+        { approver: { group: ADMIN } },
+      );
+    }
+    const { revision } = await source.merge!(id, { title, author: by.id });
+    await source.closeDraft!(id);
+    reload?.();
+    return { revision, files: diff.files, running: reload !== undefined };
   });
 }
 
