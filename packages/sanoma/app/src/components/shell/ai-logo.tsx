@@ -1,6 +1,6 @@
 import sanoma from "../../icon-small.svg?url";
-import type { EngineName } from "../../lib/chat.ts";
-import { Logo } from "../logo.tsx";
+import type { EngineName } from "#/lib/chat.ts";
+import { Logo } from "#/components/logo.tsx";
 import claudeCode from "./ai-logos/claude-code.svg?url";
 import claude from "./ai-logos/claude.svg?url";
 import codexDark from "./ai-logos/codex-dark.svg?url";

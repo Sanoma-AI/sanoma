@@ -1,11 +1,9 @@
-// The marks are Vite `?url` imports, whose types the root tsconfig (Node only) leaves out.
-/// <reference types="vite/client" />
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AiLogo } from "../src/components/shell/ai-logo.tsx";
+import { AiLogo, type AiMark } from "../src/components/shell/ai-logo.tsx";
 
-const draw = (mark: Parameters<typeof AiLogo>[0]["mark"], alt?: string) =>
+const draw = (mark: AiMark, alt?: string) =>
   renderToStaticMarkup(createElement(AiLogo, { mark, ...(alt !== undefined && { alt }) }));
 
 describe("AiLogo", () => {
