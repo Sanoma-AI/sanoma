@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import type { PermissionsGrid } from "./grid.ts";
 import { defineConnector, defineDriver, DriverError } from "./op.ts";
+import { COMMIT_ID } from "./shared.ts";
 
 // Where a company's files live, and how a change to them is recorded: a git repository on this
 // machine, or one a host cloned. The runtime's writers (the app's Adopt, apply's lockfile) change
@@ -40,6 +41,19 @@ export interface Source {
   diff?(id: string): Promise<DraftDiff>;
   /** Closes the draft `id`: its checkout removed and its branch deleted, whatever it held; nothing when it is gone. */
   closeDraft?(id: string): Promise<void>;
+  /**
+   * Saves the draft `id` into the checked-out branch: what it changes, merged with what that branch
+   * gained since, as one commit titled `title` by `author` (a squash; the draft stays open). Refused
+   * while the checkout has uncommitted changes to its files, when the draft changes nothing there,
+   * or when the two edit the same lines. The commit.
+   */
+  merge?(id: string, change: { title: string; author: string }): Promise<{ revision: string }>;
+  /**
+   * Commits the undoing of `sha` (a commit of the checked-out branch) on the draft `id`, by
+   * `author`, opening the draft first as `draft` does; refused when a later commit edits the same
+   * lines. The draft's commit after.
+   */
+  revert?(id: string, change: { sha: string; author: string }): Promise<{ revision: string }>;
   /**
    * The draft `id`'s branch as a git bundle (`git bundle create`), for a clone elsewhere (an agent
    * box's) to fetch: its commits since `since`, a commit that clone has, or the whole branch when
@@ -125,10 +139,11 @@ export interface AppMerge {
   conflicts: string[];
 }
 
-/** A draft's change: the files it touches, relative to the root, and git's `--stat` of it. */
+/** A draft's change: the files it touches, relative to the root, git's `--stat` of it, and the branch's commit it was read at. */
 export interface DraftDiff {
   files: string[];
   summary: string;
+  head: string;
 }
 
 /** What `sanoma check` finds in a repo (a draft's too). */
@@ -173,8 +188,6 @@ export const sourceDriver = defineDriver(sourceOps, {
   },
 });
 
-const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
-
 /**
  * The fake of `sanoma.source.resolve`, which a sandbox run calls (`sandboxDrivers`): no git and no
  * network, a full commit id is itself as the driver has it, and any other ref the SHA-1 of
@@ -183,7 +196,7 @@ const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 export const fakeSourceDriver = defineDriver(sourceOps, {
   source: {
     resolve: async ({ url, ref = "main" }) => ({
-      revision: COMMIT.test(ref) ? ref : createHash("sha1").update(`${url}#${ref}`).digest("hex"),
+      revision: COMMIT_ID.test(ref) ? ref : createHash("sha1").update(`${url}#${ref}`).digest("hex"),
       ref,
     }),
   },
@@ -217,7 +230,7 @@ export async function defaultBranch(url: string): Promise<{ revision: string; re
 
 /** The commit `ref` (a branch, a tag, `HEAD`, a full ref or a commit id) names in the repository at `url`. */
 export async function resolveRevision(url: string, ref: string): Promise<string> {
-  if (COMMIT.test(ref)) return ref;
+  if (COMMIT_ID.test(ref)) return ref;
   const stdout = await lsRemote(url, [ref, `${ref}^{}`]);
   const refs = new Map(
     stdout.split("\n").flatMap((line) => {

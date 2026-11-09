@@ -7,11 +7,15 @@ import { defineWorkflow, type Principal, type WorkflowDefinition } from "./defin
 import { AtSchema } from "./description.ts";
 import {
   type ADOPT_WORKFLOW,
+  COMMIT_ID,
   type CONNECT_EXISTING_WORKFLOW,
+  DRAFT_ID,
   FIELD_NAME,
   type GO_LIVE_HOST_WORKFLOW,
   type GO_LIVE_WORKFLOW,
   type PATCH_WORKFLOW,
+  type SAVE_DRAFT_WORKFLOW,
+  undoDraftOf,
   type WorkflowFn,
 } from "./shared.ts";
 import type { Source } from "./source.ts";
@@ -93,6 +97,34 @@ export const ConnectExistingInput = z
   .refine((r) => r.repository || r.project, { message: "Enter a repository, a project's ref, or both" });
 export type ConnectExistingInput = z.infer<typeof ConnectExistingInput>;
 
+/**
+ * A chat's draft saved (`SanomaClient.saveDraft`): the draft `id`, the title its commit or change
+ * takes, the draft's commit the person saw (`head`: refused once the draft has moved on), and the
+ * change's page, which its pull request's status links. With `undo`, a saved commit undone
+ * instead: reverted in its own draft (`undoDraftOf`, which `id` must be), then saved the same way.
+ */
+export const SaveDraftInput = z
+  .object({
+    id: z.string().regex(DRAFT_ID),
+    title: z.string().min(1),
+    head: z.string().regex(COMMIT_ID).optional(),
+    undo: z.string().regex(COMMIT_ID).optional(),
+    page: z.string().url().optional(),
+  })
+  .refine(({ id, undo }) => undo === undefined || id === undoDraftOf(undo), {
+    message: "An undo is saved from its own draft",
+    path: ["id"],
+  });
+export type SaveDraftInput = z.infer<typeof SaveDraftInput>;
+
+/**
+ * What a save lands as: the change opened (its run id), when the repository has a remote; else the
+ * commit on `main`, the files it changed (relative to the root), and whether the instance runs it
+ * now (`running`: its worker started again on it; false where nothing can, until the instance
+ * starts again).
+ */
+export type SaveDraftOutput = { change: string } | { revision: string; files: string[]; running: boolean };
+
 /** A data file written, relative to the root, and its commit, when the worker has a repository. */
 export interface Written {
   file: string;
@@ -137,6 +169,12 @@ export interface AppStepContext {
   resolved: ResolvedConfig;
   by: Principal;
   runId: string;
+  /**
+   * Loads the company's files again and runs them, a moment after it is asked
+   * (`WorkerOptions.reload`): what a save without a remote asks once it merged. Absent where nothing
+   * can, as on a worker run alone.
+   */
+  reload?: () => void;
 }
 
 /**
@@ -174,6 +212,8 @@ export interface AppSteps {
     step: AppStepContext,
     input: ConnectExistingInput,
   ): Promise<Omit<ConnectExistingOutput, "runId"> & { apply: ApplyInput }>;
+  /** A chat's draft saved: merged into `main` and run, without a remote; its change opened, with one. */
+  saveDraft(step: AppStepContext, input: SaveDraftInput): Promise<SaveDraftOutput>;
   /**
    * A chat turn: the reply to the person's message, by the chat's engine, written to the chat's
    * transcript and, as it streams, to its chunks (`Chats.append`, then `Chats.end`). It writes its
@@ -211,6 +251,7 @@ export interface AppApi {
   goLive: WorkflowFn<GoLiveInput, GoLiveOutput>;
   goLiveHost: WorkflowFn<GoLiveHostInput, GoLiveOutput>;
   connectExisting: WorkflowFn<ConnectExistingInput, ConnectExistingOutput>;
+  saveDraft: WorkflowFn<SaveDraftInput, SaveDraftOutput>;
 }
 
 /** The built-in workflows of the app's actions, over `runner`: `resolveConfig` adds them to every config. */
@@ -256,6 +297,14 @@ export function appWorkflows(runner: AppRunner): WorkflowDefinition<any, any>[] 
       input: ConnectExistingInput,
       uses: [],
       run: async (_ctx, input): Promise<ConnectExistingOutput> => runner.stepThenApply("connectExisting", input),
+    }),
+    defineWorkflow({
+      name: "save-draft" satisfies typeof SAVE_DRAFT_WORKFLOW,
+      title: "Save a draft",
+      trigger: "manual",
+      input: SaveDraftInput,
+      uses: [],
+      run: async (_ctx, input) => runner.step("saveDraft", input),
     }),
   ];
 }

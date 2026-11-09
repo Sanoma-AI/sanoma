@@ -108,6 +108,8 @@ export {
   type GoLiveOutput,
   PatchInput,
   type PatchOutput,
+  SaveDraftInput,
+  type SaveDraftOutput,
   type Written,
 } from "./app-workflows.ts";
 export { type FollowOutput } from "./follow-workflow.ts";
@@ -128,6 +130,7 @@ export {
   runtimeHold,
   touchesOf,
 } from "./change.ts";
+export { editsRules } from "./change-steps.ts";
 export { isDirect } from "./direct.ts";
 export {
   DRIFT_WORKFLOW,
@@ -290,6 +293,7 @@ export {
   SanomaClient,
   type RunsFilter,
   type RunSummary,
+  type SaveView,
   type StartOptions,
   type StoredSecret,
 } from "./client.ts";

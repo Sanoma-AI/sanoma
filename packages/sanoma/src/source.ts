@@ -25,7 +25,7 @@ import {
   readApps,
   type Source,
 } from "sanoma/workflows";
-import { APP_NAME } from "sanoma/workflows/shared";
+import { APP_NAME, COMMIT_ID } from "sanoma/workflows/shared";
 import type { SanomaEvent } from "./events.ts";
 
 const run = promisify(execFile);
@@ -141,9 +141,6 @@ async function fetchSource(cwd: string, url: string, ref?: string): Promise<stri
 const behindIn = async (cwd: string, from: string, folder: string) =>
   Number(await gitIn(cwd, ["rev-list", "--count", `HEAD..${from}`, "--", `apps/${folder}`, "package.json"]));
 
-/** A commit's id, as a bundle's `since` must be: never an option or a revision range. */
-const COMMIT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
-
 /** `use` of a file of its own in a temporary directory, deleted after. */
 async function inTemp<T>(use: (file: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), "sanoma-bundle-"));
@@ -254,6 +251,9 @@ async function keepOurs(cwd: string, paths: string[]): Promise<void> {
  * A draft takes an app (`git merge --allow-unrelated-histories` of its source) and updates one
  * (a merge of its source's default branch); `behind` fetches an app's source into the checkout.
  * A draft's branch travels to an agent box's clone and back as a git bundle (`bundle`, `unbundle`).
+ * A draft is saved (`merge`) as one commit on the checked-out branch, its tree made by
+ * `git merge-tree` so a conflict never reaches the live checkout, which then fast-forwards; a
+ * saved commit is undone (`revert`) by a `git revert` committed in a draft, saved the same way.
  */
 export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: string } = {}): Source {
   const git = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(root, args, env);
@@ -279,7 +279,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
     );
   };
 
-  return {
+  const source: Source = {
     root,
     commit: commitIn(root),
     head: (ref) => head(ref),
@@ -446,16 +446,59 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
     },
     drafts: async () => [...(await listed())].flatMap(([id, here]) => (here ? [id] : [])).toSorted(),
     async diff(id) {
+      // The branch's commit first, so the files and the summary are of the one commit.
+      const tip = await head(`refs/heads/${branchOf(id)}`);
       // Three dots: from where the branch left the checked-out one, so what was merged since is not shown.
       // No renames, so a moved file's old path is a file too; no colour, whatever the user's config.
-      const range = `HEAD...${branchOf(id)}`;
+      const range = `HEAD...${tip}`;
       const [names, summary] = await Promise.all([
         git(["diff", "--no-renames", "--name-only", "-z", range, "--"]),
         git(["diff", "--no-renames", "--no-color", "--stat", range, "--"]),
       ]);
-      return { files: pathsOf(names), summary };
+      return { files: pathsOf(names), summary, head: tip };
+    },
+    async merge(id, { title, author }) {
+      // Not under a check still running in it.
+      await checkingAt.get(draftAt(id));
+      return serial(async () => {
+        if (await git(["status", "--porcelain", "--untracked-files=no"])) {
+          throw new Error("The live checkout has uncommitted changes: commit or discard them first");
+        }
+        const tip = await head(`refs/heads/${branchOf(id)}`);
+        // Merged as git would, without touching the checkout: the tree, or the files both sides edit.
+        const tree = await git(["merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", tip]).catch(
+          (err: { code?: unknown; stdout?: string }) => {
+            if (err.code !== 1) throw err;
+            const both = err.stdout?.trim().split("\n").slice(1).join(", ");
+            throw new Error(`The draft ${id} and what was saved since it began both change ${both}`);
+          },
+        );
+        if (tree === (await git(["rev-parse", "HEAD^{tree}"]))) {
+          throw new Error(`The draft ${id} changes nothing here`);
+        }
+        const commit = await git(["commit-tree", tree, "-p", "HEAD", "-m", title], {
+          GIT_AUTHOR_NAME: `${author} via Sanoma`,
+        });
+        await git(["merge", "--quiet", "--ff-only", commit]);
+        return { revision: commit };
+      });
+    },
+    async revert(id, { sha, author }) {
+      if (!COMMIT_ID.test(sha)) throw new Error(`Not a commit's id: ${JSON.stringify(sha)}`);
+      const { root: at } = await source.draft!(id);
+      await checkingAt.get(at);
+      return serial(async () => {
+        await gitIn(at, ["revert", "--no-edit", sha], { GIT_AUTHOR_NAME: `${author} via Sanoma` }).catch(
+          async (err: { stderr?: string; message: string }) => {
+            await gitIn(at, ["revert", "--abort"]).catch(() => undefined);
+            throw new Error(`${sha.slice(0, 7)} cannot be undone here: ${err.stderr?.trim() || err.message}`);
+          },
+        );
+        return { revision: await head("HEAD", at) };
+      });
     },
   };
+  return source;
 }
 
 /** How long a check may take before it is stopped and its result is that. */

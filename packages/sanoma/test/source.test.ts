@@ -247,6 +247,7 @@ describe("localGitSource's drafts", () => {
     expect(committed?.revision).toBe(await source.head(draft.branch));
     expect(git("log", "-1", "--format=%an|%s", draft.branch)).toBe("agent via Sanoma|Add a laptop step");
     expect(await source.diff!("laptop-step")).toEqual({
+      head: committed!.revision,
       files: ["README.md", "workflows/offboard.ts"],
       summary: expect.stringMatching(
         /README\.md +\| 2 \+\+\n.*workflows\/offboard\.ts +\| 1 \+\n 2 files changed, 3 insertions\(\+\)$/s,
@@ -437,6 +438,69 @@ describe("localGitSource's drafts", () => {
     } finally {
       rmSync(remote, { recursive: true, force: true });
     }
+  });
+
+  it("saves a draft as one commit on main, merged with what main gained since, and undoes it in another draft", async () => {
+    const source = localGitSource(dir);
+    const draft = await source.draft!("welcome");
+    mkdirSync(join(draft.root, "workflows"));
+    writeFileSync(join(draft.root, "workflows", "welcome.ts"), "export const welcome = 1;\n");
+    await draft.commit({ paths: ["workflows/welcome.ts"], message: "Add welcome", author: "agent" });
+    writeFileSync(join(draft.root, "workflows", "welcome.ts"), "export const welcome = 2;\n");
+    await draft.commit({ paths: ["workflows/welcome.ts"], message: "Edit welcome", author: "agent" });
+    expect((await source.diff!("welcome")).head).toBe(await source.head(draft.branch));
+    // Main moved on meanwhile, in another file.
+    writeFileSync(join(dir, "other.ts"), "export const other = 1;\n");
+    git("add", "other.ts");
+    git("commit", "--quiet", "-m", "Other");
+    const before = await source.head();
+
+    const { revision } = await source.merge!("welcome", { title: "Welcome a new client", author: "dana" });
+    expect(revision).toBe(await source.head());
+    expect(git("rev-parse", "HEAD~1")).toBe(before);
+    expect(git("log", "-1", "--format=%an|%s|%D")).toBe("dana via Sanoma|Welcome a new client|HEAD -> main");
+    expect(git("show", "--name-only", "--format=", "HEAD")).toBe("workflows/welcome.ts");
+    expect(readFileSync(join(dir, "workflows", "welcome.ts"), "utf8")).toBe("export const welcome = 2;\n");
+    expect(existsSync(join(dir, "other.ts"))).toBe(true);
+    expect(status()).toBe("");
+    // The draft stays open until it is closed; saved again, it changes nothing.
+    await expect(source.merge!("welcome", { title: "Again", author: "dana" })).rejects.toThrow(
+      "The draft welcome changes nothing here",
+    );
+
+    const undone = await source.revert!("undo-welcome", { sha: revision, author: "dana" });
+    expect(undone.revision).toBe(await source.head("draft/undo-welcome"));
+    expect(git("log", "-1", "--format=%an|%s", "draft/undo-welcome")).toBe(
+      'dana via Sanoma|Revert "Welcome a new client"',
+    );
+    expect((await source.diff!("undo-welcome")).files).toEqual(["workflows/welcome.ts"]);
+    await source.merge!("undo-welcome", { title: "Undo Welcome a new client", author: "dana" });
+    expect(existsSync(join(dir, "workflows", "welcome.ts"))).toBe(false);
+    expect(status()).toBe("");
+    await expect(source.revert!("x", { sha: "HEAD~1", author: "dana" })).rejects.toThrow("Not a commit's id");
+  });
+
+  it("refuses to save a draft that conflicts with main, or over uncommitted changes, leaving the checkout as it was", async () => {
+    const source = localGitSource(dir);
+    const draft = await source.draft!("readme");
+    writeFileSync(join(draft.root, "README.md"), "# acme, by the draft\n");
+    await draft.commit({ paths: ["README.md"], message: "Draft's readme", author: "agent" });
+    writeFileSync(join(dir, "README.md"), "# acme, on main\n");
+    await expect(source.merge!("readme", { title: "Readme", author: "dana" })).rejects.toThrow(
+      "The live checkout has uncommitted changes",
+    );
+    git("commit", "--quiet", "-am", "Main's readme");
+    const before = await source.head();
+    await expect(source.merge!("readme", { title: "Readme", author: "dana" })).rejects.toThrow(
+      "The draft readme and what was saved since it began both change README.md",
+    );
+    expect(await source.head()).toBe(before);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toBe("# acme, on main\n");
+    expect(status()).toBe("");
+    // Undoing a commit a later one edits the same lines of: refused, the draft as it was.
+    const first = git("rev-list", "--max-parents=0", "HEAD");
+    await expect(source.revert!("undo-first", { sha: first, author: "dana" })).rejects.toThrow(/cannot be undone here/);
+    expect(git("-C", join(dir, ".sanoma", "drafts", "undo-first"), "status", "--porcelain")).toBe("");
   });
 });
 

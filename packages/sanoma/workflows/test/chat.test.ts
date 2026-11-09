@@ -82,6 +82,7 @@ describe("a chat turn, on a worker with the app's steps", () => {
     goLive: failing,
     goLiveHost: failing,
     connectExisting: failing,
+    saveDraft: failing,
     chat,
   };
   const app = useTestApp(config(), { databaseUrl: freshDatabase("chat_turns"), source, app: steps });

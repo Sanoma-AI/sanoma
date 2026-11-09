@@ -105,6 +105,13 @@ export interface WorkerOptions {
   /** The company's repository, which apply commits the lockfile to; the launcher passes its checkout. */
   source?: Source;
   /**
+   * Loads the company's files again and runs them in a worker of their own, in place of this one, a
+   * moment after it is asked: what a save without a remote asks once it merged into the checkout
+   * (`AppStepContext.reload`). `sanoma serve` passes it; without it, the saved code runs once the
+   * instance starts again.
+   */
+  reload?: () => void;
+  /**
    * The app's own actions (`sanoma/app/steps`), which its built-in workflows run (Adopt, a
    * form's Save, going live, connecting an existing repository, a chat's turn): the launcher passes
    * them. Without them, a run of one fails, saying this worker runs none of them (`NO_APP_STEPS`,
@@ -200,6 +207,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     fakes: resolved.fakes,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     ...(options.source && { source: options.source }),
+    ...(options.reload && { reload: options.reload }),
     ...(appSteps && { appSteps }),
     client: () =>
       (client ??= SanomaClient.connect(config, { appVersion: resolved.version }).catch((err: unknown) => {

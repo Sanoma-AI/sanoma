@@ -297,15 +297,32 @@ export const CALL_WORKFLOW = "call";
  */
 export const CHANGE_WORKFLOW = "change";
 
-/**
- * The draft a change's run is of: `change:<id>` (its first run) or `change:<id>~<n>` (a later
- * one); undefined for any other run id.
- */
-export const changeIdOf = (runId: string): string | undefined => CHANGE_RUN.exec(runId)?.[1];
-
 /** What a draft's id may be (`ChangeInput.id`), the part of its branch and its change's run ids after `draft/` and `change:`. */
 export const DRAFT_ID = /^[\w-]{1,64}$/;
-const CHANGE_RUN = new RegExp(`^change:(${DRAFT_ID.source.slice(1, -1)})(?:~\\d+)?$`);
+
+/** The draft a run id of `prefix` is of: `<prefix>:<id>` (its first run) or `<prefix>:<id>~<n>` (a later one); undefined for any other. */
+const draftRunOf = (prefix: string) => {
+  const run = new RegExp(`^${prefix}:(${DRAFT_ID.source.slice(1, -1)})(?:~\\d+)?$`);
+  return (runId: string): string | undefined => run.exec(runId)?.[1];
+};
+
+/** The draft a change's run is of: `change:<id>` or `change:<id>~<n>`; undefined for any other run id. */
+export const changeIdOf = draftRunOf("change");
+
+/**
+ * A draft saved (`app-workflows.ts`), started by `SanomaClient.saveDraft`: without a remote,
+ * merged into `main` and run at once; with one, its change opened, which the policy decides.
+ */
+export const SAVE_DRAFT_WORKFLOW = "save-draft";
+
+/** The draft a save's run is of: `save:<id>` or `save:<id>~<n>`; undefined for any other run id. */
+export const saveIdOf = draftRunOf("save");
+
+/** A commit's full id, as git names it (SHA-1, or SHA-256). */
+export const COMMIT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+/** The draft the undoing of the saved commit `sha` is made in: `undo-<its first 12 characters>`. */
+export const undoDraftOf = (sha: string) => `undo-${sha.slice(0, 12)}`;
 
 /** Opens a change: its draft's branch pushed and a pull request opened for it. */
 export const CHANGE_OPEN = "sanoma.change.open";
@@ -420,6 +437,7 @@ export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   GO_LIVE_WORKFLOW,
   GO_LIVE_HOST_WORKFLOW,
   CONNECT_EXISTING_WORKFLOW,
+  SAVE_DRAFT_WORKFLOW,
 ]);
 
 /**

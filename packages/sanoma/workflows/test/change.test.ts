@@ -250,6 +250,29 @@ describe("the change workflow", () => {
     ).rejects.toMatchObject({ code: "invalid_input" });
   });
 
+  it("publishes a saved change as its drafter when the policy lets them decide it, and asks Publish otherwise", async () => {
+    const save = (id: string, by: string) =>
+      app.client.openChange({ id, title: `Save ${id}`, page: page(id), save: true }, { startedBy: by });
+    // Allowed, Publish the drafter's: their Save is their Publish.
+    repo.edit("saved", { "notes/saved.md": "\n" });
+    const saved = await save("saved", "alice");
+    expect(await app.client.result(saved)).toMatchObject({ outcome: "merged" });
+    expect((await app.client.change("saved"))!.approvals[0]).toMatchObject({
+      status: "approved",
+      decidedBy: "alice",
+      note: "Saved",
+    });
+    // Held for admin, which the drafter is not in: Publish waits for ada.
+    repo.edit("saved-rules", { "policies/saved.cedar": "\n" });
+    const held = await save("saved-rules", "alice");
+    await waitFor(pending(() => app.client, held));
+    await app.client.decide(held, { decision: "approve", by: { id: "ada" } });
+    expect(await app.client.result(held)).toMatchObject({ outcome: "merged" });
+    // Held for admin, and the drafter is its only member: nobody else could, so it is theirs.
+    repo.edit("admin-rules", { "policies/admin.cedar": "\n" });
+    expect(await app.client.result(await save("admin-rules", "ada"))).toMatchObject({ outcome: "merged" });
+  });
+
   it("closes the change when Publish is rejected", async () => {
     repo.edit("rejected", { "notes/no.md": "\n" });
     const runId = await open("rejected");

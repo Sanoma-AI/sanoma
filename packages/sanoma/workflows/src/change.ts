@@ -54,7 +54,9 @@ export type ChangeFacts = z.infer<typeof ChangeFacts>;
 /**
  * What opening a change takes: its draft's id, and the pull request's title, body and the change
  * page's link; for a change to a collection's columns, its plan as the app drafted it, which the
- * change's review shows (`ChangeState.plan`): JSON the runtime carries and does not read.
+ * change's review shows (`ChangeState.plan`): JSON the runtime carries and does not read. `save`
+ * when the person who opens it saved it: their Publish of its first head, given once the policy
+ * lets them decide it (`ChangeSteps.publishOnSave`).
  */
 export const ChangeInput = z.object({
   id: z.string().regex(DRAFT_ID),
@@ -62,6 +64,7 @@ export const ChangeInput = z.object({
   body: z.string().optional(),
   page: z.string().url().optional(),
   plan: z.json().optional(),
+  save: z.boolean().optional(),
 });
 export type ChangeInput = z.infer<typeof ChangeInput>;
 
