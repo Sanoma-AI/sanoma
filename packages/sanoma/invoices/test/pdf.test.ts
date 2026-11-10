@@ -9,8 +9,10 @@ import { renderInvoice } from "sanoma/invoices/pdf";
 import { content, example } from "./helpers.ts";
 
 describe("invoice PDF", () => {
-  it("renders extractable text and exact totals", async () => {
+  it("renders extractable text and exact totals, the same bytes each time", async () => {
     const file = await renderInvoice(example());
+    // A run that resumes renders again, and sends what it sent before.
+    expect((await renderInvoice(example())).bytes).toEqual(file.bytes);
     expect(file.mediaType).toBe("application/pdf");
     expect(new TextDecoder().decode(file.bytes.subarray(0, 5))).toBe("%PDF-");
     expect(file.summary.dueMinor).toBe(22500);

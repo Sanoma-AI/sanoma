@@ -57,7 +57,7 @@ A failure is an `InvoiceValidationError`, `code: "invalid_invoice"`, with serial
 
 `renderInvoice(input, options?)` validates the invoice and returns `{ bytes, mediaType: "application/pdf", filename, summary }`: the file's bytes, a safe file name from the invoice number (`invoice-INV-001.pdf`) and the totals. It loads the renderer at its first call, so a module that imports it (a workflow's file, which the worker loads at its start) loads no PDF engine. In a browser it uses React-pdf's browser build, which a site's bundle picks by itself: load the page that renders on demand, since the renderer is large.
 
-The layout follows `presentation`: `paper` (`A4` or `LETTER`) and `accent` (a six-digit hex color). It repeats the header, the column headings and the page numbers on every page, keeps each line on one page, and lets long notes run on. The PDF's dates are the issue date's, so the same invoice renders the same text; byte-identical files are not promised.
+The layout follows `presentation`: `paper` (`A4` or `LETTER`) and `accent` (a six-digit hex color). It repeats the header, the column headings and the page numbers on every page, keeps each line on one page, and lets long notes run on. The PDF's dates are the issue date's, so the same invoice renders the same file with the same renderer: a run that resumes and renders again attaches the bytes it sent before. Another version of React-pdf may change the bytes.
 
 The font is the built-in Helvetica: printable ASCII, Latin-1 and the WinAnsi punctuation in `src/pdf.ts`. Other text, emoji and other scripts among it, is an `unsupported_text` issue. Nothing is fetched at render time.
 
