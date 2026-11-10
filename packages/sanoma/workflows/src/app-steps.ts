@@ -32,6 +32,7 @@ export async function stepContext(run: Run, { config, resolved }: WorkerApp): Pr
   return {
     client: await state.client(),
     ...(state.source && { source: state.source }),
+    ...(state.reload && { reload: state.reload }),
     serially: state.serially,
     config,
     resolved,

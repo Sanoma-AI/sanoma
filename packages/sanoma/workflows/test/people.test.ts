@@ -101,6 +101,7 @@ describe("the people types", () => {
       "go-live",
       "go-live-host",
       "connect-existing",
+      "save-draft",
       "chat",
       "call",
     ]);

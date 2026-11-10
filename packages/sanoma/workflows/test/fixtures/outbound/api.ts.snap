@@ -36,6 +36,7 @@ interface CompanyApi {
     body?: string;
     page?: string;
     plan?: unknown;
+    save?: string;
   }, unknown>;
   /** A chat turn: the workflow `chat`, built in. */
   chat: WorkflowFn<{
@@ -108,6 +109,15 @@ interface CompanyApi {
       a: string;
     } | "none")[];
     other: unknown;
+  }, unknown>;
+  /** Save a draft: the workflow `save-draft`, built in. */
+  saveDraft: WorkflowFn<{
+    id: string;
+    title: string;
+    head?: string;
+    undo?: string;
+    chat?: string;
+    page?: string;
   }, unknown>;
   /** acme: the operations a person may call directly. */
   acme: {

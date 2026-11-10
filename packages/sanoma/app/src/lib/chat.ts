@@ -18,13 +18,15 @@ import type { LoopTools } from "../steps/agent/tools.ts";
  * The draft card's data, the `data-draft` part an engine writes (one per reply, by the id
  * `draft`, updated in place) whenever the chat's draft changes: the draft's id (its branch's
  * `draft/<id>`, the chat's id; every engine writes it, but a card saved before it did lacks it),
- * its branch, its committed change (`Source.diff`) and, once it ran, the checks since the last edit.
+ * its branch, its committed change (`Source.diff`: its files, git's summary and the commit it is at,
+ * `head`, which a card saved before it carried one lacks) and, once it ran, the checks since the last edit.
  */
 export interface DraftCard {
   draft?: string;
   branch: string;
   files: string[];
   summary: string;
+  head?: string;
   checks?: CheckResult;
 }
 

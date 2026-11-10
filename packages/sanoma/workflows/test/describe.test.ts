@@ -517,6 +517,7 @@ describe("a workflow's name in a site's api", () => {
         [[1, 1, 'A site calls this workflow api.outboundNext, as workflow "outbound-next" is: rename it']],
       ],
       ["patch", []],
+      ["save-draft", []],
       ["then", [[1, 1, "A site calls this workflow api.then, which a promise would take for its own: rename it"]]],
     ]);
   });
