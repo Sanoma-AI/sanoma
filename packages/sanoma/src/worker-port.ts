@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { IngressRoute } from "sanoma/app";
-import { errorMessage, isLoopback, type SanomaConfig, startWorker, superviseWorker } from "sanoma/workflows";
+import { envWakeup, errorMessage, isLoopback, type SanomaConfig, startWorker, superviseWorker } from "sanoma/workflows";
 import { APP_BUNDLE_HEADER, APP_BUNDLE_PATH } from "sanoma/workflows/shared";
 import { listenRoutes } from "./listen.ts";
 import { rootOf, type Stoppable, wakeRoute, workerOptions } from "./serve.ts";
@@ -52,6 +52,8 @@ export interface AppBundleOptions {
   log: (line: string) => void;
   /** Default: a child process. */
   run?: Run;
+  /** Told when a build is queued with none under way (true), and when the last one queued ends (false). */
+  onBuilding?: (building: boolean) => void;
 }
 
 /** A commit id, short or full (SHA-1 or SHA-256). */
@@ -78,11 +80,19 @@ const answered = (status: number, body: unknown) =>
  * 200 with the bundle (`AppBundle`) as JSON, the file kept for the process's lifetime. A failed
  * build answers 500 with why, once, and the next ask builds again.
  */
-export function appBundleRoute({ root, token, checkout, log, run = runChild }: AppBundleOptions): IngressRoute {
+export function appBundleRoute({
+  root,
+  token,
+  checkout,
+  log,
+  run = runChild,
+  onBuilding,
+}: AppBundleOptions): IngressRoute {
   const expected = token && digest(`Bearer ${token}`);
   const answers = new Map<string, Answer | "building">();
   // One build at a time: each is a Vite build of the whole app, on a container's memory.
   let queue = Promise.resolve();
+  let queued = 0;
 
   const build = async (revision: string): Promise<Answer> => {
     if (!checkout) throw new Error("SANOMA_CHECKOUT is not set: the app bundle is built in the runtime image");
@@ -110,13 +120,17 @@ export function appBundleRoute({ root, token, checkout, log, run = runChild }: A
       const answer = answers.get(revision);
       if (answer === undefined) {
         answers.set(revision, "building");
+        if (queued++ === 0) onBuilding?.(true);
         queue = queue
           .then(() => build(revision))
           .catch((err: unknown): Answer => {
             log(`building the app bundle at ${revision} failed: ${errorMessage(err)}`);
             return { status: 500, body: JSON.stringify({ error: errorMessage(err) }) };
           })
-          .then((built) => void answers.set(revision, built));
+          .then((built) => {
+            answers.set(revision, built);
+            if (--queued === 0) onBuilding?.(false);
+          });
       }
       if (answer === undefined || answer === "building") return answered(202, { building: revision });
       if (answer.status === 500) answers.delete(revision);
@@ -150,15 +164,41 @@ export function listenWorkerPort(root: string, { host, port, onWake, ...bundle }
  * (`superviseWorker`: beyond loopback, it stops itself when nothing can run soon and a wake starts
  * it again) and its port on `SANOMA_APP_HOST` (default 127.0.0.1) and `PORT` once it runs. Without
  * one, a worker that never stops itself, since nothing in this process would start it again.
+ *
+ * On a host that starts the process again on a wake (its own wake route in the environment,
+ * `envWakeup`), being done means ending: once the supervisor is left with no worker and no app
+ * bundle is building, `exited` settles and `sanoma worker` stops as on a signal, so the container
+ * ends with the process. It resolves when the worker stopped itself, and rejects when a fresh one
+ * failed to start, so the process exits non-zero and the host's next wake starts a fresh one. A
+ * wake before that wins (the supervisor starts a fresh worker); one after it finds the port closed,
+ * so the host starts a fresh process. A build that ends counts as a wake, so the deploy that asked
+ * has a worker's idle checks of time to take the bundle before the process ends. `stop` (a signal:
+ * the host's own stop) registers what the next worker must do first (`WorkerStop.register`).
  */
-export async function runWorker(config: SanomaConfig, log: (line: string) => void): Promise<Stoppable> {
+export async function runWorker(
+  config: SanomaConfig,
+  log: (line: string) => void,
+): Promise<Stoppable & { exited?: Promise<void> }> {
   const port = process.env.PORT;
   if (!port) {
     const worker = await startWorker(config, workerOptions(config));
     return { stop: () => worker.stop() };
   }
   const host = process.env.SANOMA_APP_HOST || "127.0.0.1";
-  const supervised = await superviseWorker(config, { ...workerOptions(config), selfStop: !isLoopback(host) });
+  const exits = envWakeup(process.env) !== undefined;
+  let building = false;
+  // Settled before any later request is handled, and the port closes first on the stop that
+  // follows, so no wake is answered after this.
+  const exited = Promise.withResolvers<void>();
+  const supervised = await superviseWorker(config, {
+    ...workerOptions(config),
+    selfStop: !isLoopback(host),
+    onEnded(failure) {
+      if (!exits || building) return;
+      if (failure) exited.reject(failure.error);
+      else exited.resolve();
+    },
+  });
   try {
     const listening = await listenWorkerPort(rootOf(config), {
       host,
@@ -167,14 +207,19 @@ export async function runWorker(config: SanomaConfig, log: (line: string) => voi
       token: process.env.SANOMA_WAKEUP_TOKEN,
       checkout: process.env.SANOMA_CHECKOUT,
       log,
+      onBuilding(now) {
+        building = now;
+        if (!now && exits) void supervised.wake();
+      },
     });
     log(`the worker's port at ${listening.url}`);
     return {
+      ...(exits && { exited: exited.promise }),
       async stop() {
         try {
           await listening.stop();
         } finally {
-          await supervised.stop();
+          await supervised.stop({ register: exits });
         }
       },
     };

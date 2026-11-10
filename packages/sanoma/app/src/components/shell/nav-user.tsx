@@ -6,6 +6,7 @@ import { BuildingsIcon } from "@phosphor-icons/react/dist/csr/Buildings";
 import { DesktopIcon } from "@phosphor-icons/react/dist/csr/Desktop";
 import { MoonIcon } from "@phosphor-icons/react/dist/csr/Moon";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { SunIcon } from "@phosphor-icons/react/dist/csr/Sun";
 import { UserIcon } from "@phosphor-icons/react/dist/csr/User";
 import { UserCircleGearIcon } from "@phosphor-icons/react/dist/csr/UserCircleGear";
@@ -27,13 +28,15 @@ import {
 } from "#/components/ui/dropdown-menu.tsx";
 import { useActor } from "../../actor.ts";
 import { useDensity } from "../density.tsx";
+import { useChatPrompt } from "./chat-prompt.ts";
 
 /**
  * Who you are, the theme and the density, at the foot of the bar: your initials, your name, your
  * groups (and whom you act for, as an agent) and where the name comes from read out to assistive
  * tech and shown atop the menu, with Sign out when the login has one. In the desktop shell's
  * window, the companies open there too (`useDesktopCompanies`), this one checked: another switches
- * the window to it, and Add company… shows the shell's start screen. The menu renders only once
+ * the window to it, and Add company… shows the shell's start screen. Agent… opens the chat on the
+ * agents to connect, to change which one a new chat opens on. The menu renders only once
  * opened, in the browser, so the stored theme never reaches the server's markup.
  */
 export function NavUser() {
@@ -41,6 +44,7 @@ export function NavUser() {
   const { theme, setTheme } = useTheme();
   const { compact, setCompact } = useDensity();
   const companies = useDesktopCompanies();
+  const chat = useChatPrompt();
   const shownCompany = companies?.find((company) => company.shown)?.id ?? "";
   const setDensity = (value: string) => setCompact(value === "compact");
   // Under the name: why the deployment could not say, or where the name comes from; nothing
@@ -103,6 +107,12 @@ export function NavUser() {
             <DropdownMenuSeparator />
           </>
         )}
+        {/* No chat column on a phone. */}
+        <DropdownMenuItem className="max-md:hidden" onClick={() => chat.chooseAgent()}>
+          <SparkleIcon aria-hidden="true" />
+          Agent…
+        </DropdownMenuItem>
+        <DropdownMenuSeparator className="max-md:hidden" />
         {signOut && (
           <>
             <DropdownMenuItem onClick={() => void signOutAt(signOut)}>

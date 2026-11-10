@@ -207,7 +207,7 @@ export function checkSchedule({ name, trigger }: Pick<WorkflowDefinition, "name"
 
 /**
  * The earliest next fire, strictly after `from`, of the config's scheduled workflows; undefined
- * when none is on a schedule: the deadline a schedule sets for a worker that stops when quiet.
+ * when none is on a schedule: the deadline a schedule sets for a worker that stops when idle.
  */
 export function nextScheduledFire(resolved: Pick<ResolvedConfig, "workflows">, from: Date): Date | undefined {
   let earliest: Date | undefined;

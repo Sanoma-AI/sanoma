@@ -1,5 +1,5 @@
 import type { ChatTurnContext, ChatTurnInput, ChatTurnOutput } from "sanoma/workflows";
-import type { ChatMessage, EngineName } from "../../lib/chat.ts";
+import { type ChatMessage, engineOf } from "../../lib/chat.ts";
 import { settle } from "../../server/chat.ts";
 import { acpEngine } from "./acp.ts";
 import { harnessEngine } from "./harness.ts";
@@ -11,20 +11,20 @@ import { type Engine, persist } from "./transcript.ts";
 // chat and wrote the message before it started the turn's run on its id (`server/chat.ts`); the
 // run waited for the turn before it.
 
+/** The app's own engines, by the name a chat's row keeps: our loop. */
+export const ENGINES: { readonly loop: Engine } = { loop };
+
 /**
- * The engines, by the name a chat's row keeps (`ENGINE_NAMES`): our loop, the coding agents through
- * `HarnessAgent` on the company's key, and a person's own over ACP.
+ * The engine of the agent and plan a chat's row names (`engineOf`): our loop (`ENGINES`), or a
+ * coding agent of an installed connector (`ResolvedConfig.agents`), on a person's own plan over
+ * ACP or on the company's key through `HarnessAgent`. An agent no connector gives fails its turn
+ * with a reply that says so.
  */
-export const ENGINES: Readonly<Record<EngineName, Engine>> = {
-  loop,
-  pi: harnessEngine("pi"),
-  "claude-code": harnessEngine("claude-code"),
-  "acp-copilot": acpEngine("copilot"),
-  "acp-opencode": acpEngine("opencode"),
-  "acp-pi": acpEngine("pi"),
-  "acp-claude-code": acpEngine("claude-code"),
-  "acp-codex": acpEngine("codex"),
-};
+function engineRunning(name: string): Engine {
+  const { agent, plan } = engineOf(name);
+  if (agent === "loop") return ENGINES.loop;
+  return plan === "own" ? acpEngine(agent) : harnessEngine(agent);
+}
 
 /**
  * The turn: the transcript, read from the chat's store, with what the turn before left unfinished
@@ -38,8 +38,6 @@ export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise
   const { chats } = step.client;
   const found = await chats.get(input.chat);
   if (!found) throw new Error(`No chat ${input.chat}`);
-  const named = found.engine as EngineName;
-  if (!Object.hasOwn(ENGINES, named)) throw new Error(`No engine ${named}: the chat opened on one this app lacks`);
   const stored = (await chats.load(found.id)) as ChatMessage[];
   const at = stored.findIndex((m) => m.id === input.message);
   const message = stored[at];
@@ -58,6 +56,10 @@ export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise
     return { interrupted: true };
   }
   await chats.upsert(found.id, [message, ...next], { last: true });
-  const reply = await persist(step, found, ENGINES[named]({ chat: found, messages: [...history, message], step }));
+  const reply = await persist(
+    step,
+    found,
+    engineRunning(found.engine)({ chat: found, messages: [...history, message], step }),
+  );
   return reply === undefined ? {} : { reply };
 }

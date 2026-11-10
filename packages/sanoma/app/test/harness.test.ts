@@ -14,6 +14,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { anthropic } from "@sanoma-ai/connector-anthropic";
+import { pi } from "@sanoma-ai/connector-pi";
 import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeSandbox } from "sanoma/testing/sandbox";
@@ -24,7 +25,7 @@ import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
-import { type ChatMessage, chatTransport, type EngineName } from "../src/lib/chat.ts";
+import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
 import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's second engine, end to end: an existing
@@ -170,7 +171,7 @@ const sandbox = fakeSandbox(realpathSync(mkdtempSync(join(tmpdir(), "sanoma-harn
 const testApp = useTestApp(
   {
     workflows: [],
-    connectors: [anthropic, sandbox.connector],
+    connectors: [anthropic, pi, sandbox.connector],
     root,
     secrets: { bindings: { ANTHROPIC_API_KEY: { env: "ANTHROPIC_API_KEY" } } },
   },
@@ -236,7 +237,7 @@ afterAll(async () => {
 });
 
 /** Opens the chat `id` on `engine` with `text`, as the chat column does: the reply's stream. */
-const opening = (id: string, engine: EngineName, text: string) =>
+const opening = (id: string, engine: string, text: string) =>
   chatTransport(new URL("/api/chat", app!.url).href, () => ({
     [ACTOR_HEADER]: "ada",
     origin: new URL(app!.url).origin,
@@ -250,14 +251,14 @@ const opening = (id: string, engine: EngineName, text: string) =>
   });
 
 /** Opens the chat `id` on `engine` with `text`; the reply as it ended. */
-async function send(id: string, engine: EngineName, text: string) {
+async function send(id: string, engine: string, text: string) {
   const stream = await opening(id, engine, text);
   let reply: ChatMessage | undefined;
   for await (const snapshot of readUIMessageStream<ChatMessage>({ stream })) reply = snapshot;
   return reply;
 }
 
-const engines: [EngineName, string, boolean][] = [
+const engines: [string, string, boolean][] = [
   ["pi", "Pi", true],
   ["claude-code", "Claude Code", process.env.SANOMA_LIVE === "1"],
 ];
@@ -333,7 +334,7 @@ describe("the chat on a coding agent without its key", () => {
       const chunks: string[] = [];
       for await (const chunk of stream) if (chunk.type === "error") chunks.push(chunk.errorText);
       expect(chunks).toEqual([
-        "anthropic is not configured: ANTHROPIC_API_KEY; set it on the connector page [connector:anthropic]",
+        "anthropic is not configured: ANTHROPIC_API_KEY (an API key, from the API Keys page of the Claude Console); set it on the connector page [connector:anthropic]",
       ]);
       expect(await testApp.client.chats.get(`nokey-${RUN}`)).toMatchObject({ engine: "pi" });
     } finally {

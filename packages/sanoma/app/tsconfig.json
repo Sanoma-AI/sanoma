@@ -6,5 +6,5 @@
     // TypeScript, Vite and the shadcn CLI all read.)
     "customConditions": ["sanoma-source"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "test/*.test.tsx", "vite.config.ts"]
 }

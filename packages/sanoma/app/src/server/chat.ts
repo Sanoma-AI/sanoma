@@ -13,14 +13,15 @@ import { ApiError } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import {
   type ChatMessage,
-  ENGINE_NAMES,
+  enginesHere,
   heldRunOf,
   noModelText,
   onModelConnector,
   textOf,
   unfinished,
+  written,
 } from "../lib/chat.ts";
-import { type ActorContext, parse, requireActor, toApiError } from "./core.ts";
+import { type ActorContext, appConfig, parse, requireActor, toApiError } from "./core.ts";
 import { chatModel } from "./models.ts";
 
 // The operator agent's chat, as the app answers it: a turn is a run of the built-in `chat`, which
@@ -28,7 +29,7 @@ import { chatModel } from "./models.ts";
 // and the transcript to the database. The app checks the message, opens the chat, writes the
 // message to its transcript, starts the turn (`SanomaClient.startTurn`, which tells a turn under
 // way to stop) and streams the chunks back as the worker writes them; a code pasted on a sign-in
-// card goes to the run as a message.
+// card goes to the run as a message. A chat may begin with the agent speaking first (`start`).
 
 /** A person's message, as a chat takes it: its id (the browser's, which names the turn's run) and its text. */
 const PersonMessage = z.object({
@@ -37,13 +38,19 @@ const PersonMessage = z.object({
   parts: z.array(z.object({ type: z.literal("text"), text: z.string() })).min(1),
 });
 
-/** What the browser sends: the chat's id (its own, for a new chat) and the person's new message. */
+/** What the browser sends: the chat's id (its own, for a new chat) and the person's new message, or with `start` the agent's cue. */
 const ChatRequest = z.object({
   id: ChatTurnInput.shape.chat,
   message: z.unknown(),
   /** The engine a new chat opens on; a chat keeps the one it opened on. */
   engine: z.string().default("loop"),
+  /** The agent speaks first, in a chat the person has not written in yet: the message is its cue, whose text is `INTRO`. */
+  start: z.literal(true).optional(),
 });
+
+/** What the agent is asked when it speaks first: the text of the turn's message, which the chat never shows (`isIntro`). */
+export const INTRO =
+  "Introduce yourself to me in a few plain sentences: that you make the changes to this company when I ask, and what you read in it (its workflows, connectors and people). Then suggest up to four things I could ask you first, for a business like this one.";
 
 /**
  * How soon the reply's stream looks again for the chunks the worker writes, in ms: `POLL_MS` while
@@ -62,7 +69,10 @@ const STATUS_MS = 2_000;
  * (so a turn that fails keeps it), starts the turn's run on its id and answers with
  * the reply's stream, read from the database as the worker writes it (`replyStream`). A chat of
  * someone else is a 404; a turn of the loop while it has no model (`chatModel`), a 409 before
- * the chat opens.
+ * the chat opens. A `start` is the agent speaking first: the message sent is its cue, written as
+ * `INTRO` and marked (`isIntro`), in a new chat titled "Getting started" or one with no message of
+ * the person's yet (a sign-in it asked for has just finished, say), a 400 otherwise; and never
+ * while the loop has no model.
  */
 export async function postChat(request: Request, context: ActorContext & { site?: string }): Promise<Response> {
   const { app } = context;
@@ -73,28 +83,28 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const { chats } = app.client;
     const chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
+    // A chat keeps its engine, whose turn says what it lacks; a new one opens only on one the composer offers here.
+    if (!chat) {
+      const here = enginesHere(appConfig(app)).map((engine) => engine.name);
+      if (!here.includes(body.engine))
+        throw invalid(`No engine ${body.engine} here: the engines are ${here.join(", ")}`);
+    }
     const named = chat?.engine ?? body.engine;
-    if (!Object.hasOwn(ENGINE_NAMES, named)) {
-      throw invalid(`No engine ${named}: the engines are ${Object.keys(ENGINE_NAMES).join(", ")}`);
-    }
-    // A new one, by the person. The transcript, written by the worker, is not validated again.
-    const checked = await safeValidateUIMessages<ChatMessage>({ messages: [body.message] });
-    if (!checked.success) throw invalid(`Not a chat message: ${checked.error.message}`);
-    // As a chat takes it: the person's text, under an id of letters, digits, _ and -.
-    const turn = PersonMessage.safeParse(checked.data[0]);
-    if (!turn.success) {
-      throw invalid(`A chat takes the person's messages, as text: ${turn.error.issues[0]?.message ?? "not one"}`);
-    }
-    const message = turn.data;
-    const [had, model] = await Promise.all([
+    const sent = await personMessage(body.message);
+    const message: ChatMessage = body.start
+      ? { ...sent, parts: [{ type: "text", text: INTRO }], metadata: { intro: true } }
+      : sent;
+    const [had, wrote, model] = await Promise.all([
       chat ? chats.has(chat.id, message.id) : false,
+      chat && body.start ? app.client.chats.load(chat.id).then(written) : false,
       onModelConnector(named) ? chatModel(app) : undefined,
     ]);
     if (had) throw invalid(`The chat has a message ${message.id} already`);
+    if (wrote) throw invalid("The agent speaks first only in a chat you have not written in");
     // A valid message the loop cannot answer yet: refused before the chat opens, as the composer says.
     if (model && !model.ready) throw new ApiError(409, { error: noModelText(model.vendor) });
     if (!chat) {
-      const title = textOf(message, " ").trim().slice(0, 80) || "A chat";
+      const title = body.start ? "Getting started" : textOf(message, " ").trim().slice(0, 80) || "A chat";
       await chats.open({ id: body.id, person: principal.id, engine: body.engine, title });
     }
     // In the transcript before the turn starts, so a turn that fails at once keeps it; the run is
@@ -106,6 +116,18 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const { status, body } = toApiError(err, "a chat turn");
     return Response.json(body, { status });
   }
+}
+
+/** The person's new message, checked (a 400 for one a chat does not take). The transcript, written by the worker, is not validated again. */
+async function personMessage(sent: unknown): Promise<ChatMessage> {
+  const checked = await safeValidateUIMessages<ChatMessage>({ messages: [sent] });
+  if (!checked.success) throw invalid(`Not a chat message: ${checked.error.message}`);
+  // As a chat takes it: the person's text, under an id of letters, digits, _ and -.
+  const turn = PersonMessage.safeParse(checked.data[0]);
+  if (!turn.success) {
+    throw invalid(`A chat takes the person's messages, as text: ${turn.error.issues[0]?.message ?? "not one"}`);
+  }
+  return turn.data;
 }
 
 /**

@@ -19,10 +19,18 @@
       }
     ]
   },
-  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist", "**/generated", "packages/sanoma/bridge/src/gen"],
+  "ignorePatterns": [
+    "**/node_modules",
+    "**/.sanoma",
+    "**/dist",
+    "**/generated",
+    "packages/sanoma/bridge/src/gen",
+    ".agents/skills",
+    ".claude/skills"
+  ],
   "overrides": [
     {
-      "files": ["packages/sanoma/app/src/components/ui/**"],
+      "files": ["packages/sanoma/app/src/components/ui/**", "packages/sanoma/app/src/lib/highlighter.tsx"],
       "rules": {
         "eslint/no-shadow": "off",
         "eslint/no-underscore-dangle": "off"
