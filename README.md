@@ -199,7 +199,7 @@ git push origin <sha>:refs/heads/release/<version>
 gh workflow run release.yml --ref release/<version>   # or Actions → Release → Run workflow
 ```
 
-The workflow requires a `release/*` branch, a commit on `main` with passing CI, and a passing release check. Its job summary lists the commit and versions it will publish. It runs `pnpm publish -r` in dependency order and skips versions already on npm.
+The workflow requires a `release/*` branch, a commit on `main` with passing CI, and a passing release check. Its job summary lists the commit and versions it will publish. It runs `pnpm publish -r` in dependency order and skips versions already on npm. Once they are public it pushes the runtime image, and `packages/sanoma/template` to [Sanoma-AI/company-template](https://github.com/Sanoma-AI/company-template)'s `main` at the released versions with a lockfile, which Sanoma Cloud's sign-up makes companies from; that job needs the `COMPANY_TEMPLATE_TOKEN` secret, a fine-grained token with contents write on that repository alone.
 
 If one package fails to publish, publishing stops. Check the publish log to see which versions reached npm, fix the failure and rerun the workflow on the same branch. It publishes the remaining versions from the same commit. Changing a package that is already public requires a new version.
 

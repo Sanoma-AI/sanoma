@@ -47,6 +47,10 @@ beforeAll(async () => {
   vi.stubEnv(FAKE_WEBHOOK_SECRET, SECRET);
   ensureSanomaBuilt();
   await git.commit();
+  // Gone live: its apply binds the host, which a push to main then deploys.
+  await testApp.client.applyReport(
+    await testApp.client.apply({ only: ["resources/infra.ts#app"] }, { startedBy: "alice" }),
+  );
   app = await startApp(testApp.config, { port: 0, source: source.source });
   const snapshot = await appSnapshot(testApp.config);
   portable = appHandler(
@@ -91,7 +95,7 @@ describe("POST /webhooks/<vendor>", () => {
     expect(more).toEqual([]);
     expect(await testApp.client.result(runId!)).toEqual({ followed: "main", deploy: `deploy:${head}` });
     const runs = await testApp.client.runs({ workflow: "apply" });
-    expect(runs.map((r) => r.runId)).toEqual([`deploy:${head}`]);
+    expect(runs.map((r) => r.runId).filter((id) => id.startsWith("deploy:"))).toEqual([`deploy:${head}`]);
     const report = await testApp.client.applyReport(`deploy:${head}`);
     expect(report.results).toEqual([expect.objectContaining({ id: "resources/infra.ts#app", status: "done" })]);
   });

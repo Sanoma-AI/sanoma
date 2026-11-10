@@ -8,12 +8,14 @@ import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
@@ -24,6 +26,7 @@ import { APP_NAME, problemLine, serverEntries, SITE_NAME, siteKey } from "sanoma
 import type { InlineConfig, Logger, Plugin, PluginOption, ViteDevServer } from "vite";
 import { CONTENT_TYPES, type ContentProblem, contentTypes, readContent, STYLESHEET_FILE } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
+import { hasExtension, pageUrl } from "./site-path.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 
@@ -151,6 +154,135 @@ export function sitesOf(repo: string): { sites: string[]; refused: string[] } {
   return { sites, refused };
 }
 
+/** A site's file served untouched: `<site>/public/<under>`, at `path`, `/sites/<key>/<under>`. */
+interface PublicFile {
+  path: string;
+  under: string;
+  file: string;
+}
+
+/** A public file's path under its folder, by segment: refused, as a dotfile or dot-folder (`buildKey` leaves them out) or an empty segment, it is none. */
+const servedParts = (under: string) => {
+  const parts = under.split("/");
+  return parts.every((part) => part !== "" && !part.startsWith(".")) ? parts : undefined;
+};
+
+/**
+ * A repo's public files: every file under a site's `public/` (`sites/<name>/public/`, an app's
+ * `apps/<app>/sites/<name>/public/`; `sitesUnder`), read from disk as it is now, a link not followed.
+ */
+async function publicFiles(repo: string): Promise<PublicFile[]> {
+  const { sitesUnder } = await import("sanoma/workflows/describe");
+  return sitesUnder(repo)
+    .flatMap(({ name, dir }) => {
+      const folder = join(repo, dir, "public");
+      if (!existsSync(folder)) return [];
+      return readdirSync(folder, { recursive: true, withFileTypes: true }).flatMap((entry) => {
+        const file = join(entry.parentPath, entry.name);
+        const under = relative(folder, file).split(sep).join("/");
+        return entry.isFile() && servedParts(under) ? [{ path: `/sites/${name}/${under}`, under, file }] : [];
+      });
+    })
+    .toSorted((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * The public file at `path` (`/sites/<key>/<under>`, decoded) and its size, looked for on disk as it
+ * is now, a link not followed: a root site's (`sites/<name>/public/`) or an app's site's
+ * (`apps/<app>/sites/<name>/public/`). The dev server's, on every request it maps there.
+ */
+export function publicFileAt(repo: string, path: string): { file: string; size: number } | undefined {
+  const parts = path.startsWith("/sites/") ? servedParts(path.slice("/sites/".length)) : undefined;
+  if (!parts) return undefined;
+  for (const [site, under] of [
+    [["sites", parts[0]!], parts.slice(1)],
+    [["apps", parts[0]!, "sites", parts[1] ?? ""], parts.slice(2)],
+  ]) {
+    const folder = join(repo, ...site!, "public");
+    const file = join(folder, ...under!);
+    const stat = lstatSync(file, { throwIfNoEntry: false });
+    if (stat?.isFile() && realpathSync(file) === join(realpathSync(folder), ...under!))
+      return { file, size: stat.size };
+  }
+  return undefined;
+}
+
+/** The sites' public folders, from the repo: built already, so no tool looks into them for its own sources. */
+const PUBLIC_DIRS = ["sites/*/public", "apps/*/sites/*/public"];
+
+/** What a site's own host answers itself, never a public file there: its robots.txt, sitemap, login, server functions, prerendered pages and the build's files, and nothing under `sites/`. */
+const OWN_PATHS = /^(robots\.txt|sitemap\.xml|(assets|auth|sites|_serverFn|__sanoma)\/.*)$/;
+
+/** The most a public file holds: Cloudflare's limit on one of a Worker's assets, 25 MiB. */
+const MAX_PUBLIC_FILE = 25 * 1024 * 1024;
+
+/**
+ * Why each of `files` cannot be served, a line each: a name with no extension (the Worker looks
+ * among its assets only for such a path), a path the site's own host answers itself (`OWN_PATHS`),
+ * a page's path, which the page keeps, another file's path (an app's site's beside a root site's),
+ * or a size over `MAX_PUBLIC_FILE`.
+ */
+async function refusedPublicFiles(repo: string, files: readonly PublicFile[]): Promise<string[]> {
+  if (!files.length) return [];
+  const { sitePagePaths } = await import("sanoma/workflows/describe");
+  const pages = new Set(sitePagePaths(repo).map(pageUrl));
+  const seen = new Set<string>();
+  return files.flatMap(({ path, under, file }) => {
+    const name = relative(repo, file).split(sep).join("/");
+    const twice = seen.has(path);
+    seen.add(path);
+    if (!hasExtension(under)) return [`${name}: a public file's name has an extension, such as mount.js`];
+    if (OWN_PATHS.test(under)) return [`${name}: /${under} on the site's own host is the app's`];
+    if (pages.has(path)) return [`${name}: ${path} is a page's path`];
+    if (twice) return [`${name}: ${path} is another public file's path`];
+    if (statSync(file).size > MAX_PUBLIC_FILE) return [`${name}: a public file is 25 MiB at most`];
+    return [];
+  });
+}
+
+/**
+ * `sanoma:public`: each site's public files (`publicFiles`) copied into the client build as they
+ * are, at the path each is served at, so a host serves them as it serves the build's own files.
+ * A file that cannot be served (`refusedPublicFiles`) fails the build.
+ */
+function publicPlugin(repo: string): Plugin {
+  let files: PublicFile[] = [];
+  return {
+    name: "sanoma:public",
+    apply: "build",
+    applyToEnvironment: (env) => env.name === "client",
+    async buildStart() {
+      files = await publicFiles(repo);
+      const refused = await refusedPublicFiles(repo, files);
+      if (refused.length) throw new Error(`A site's public file cannot be served:\n  ${refused.join("\n  ")}`);
+    },
+    generateBundle() {
+      for (const { path, file } of files) {
+        this.emitFile({ type: "asset", fileName: path.slice(1), source: readFileSync(file) });
+      }
+    },
+  };
+}
+
+/**
+ * `sanoma:public-unscanned`: a stylesheet that imports Tailwind told not to look for classes in the
+ * sites' public files, which are built already: Tailwind otherwise scans the whole repo, or a
+ * site's folder (`source("./")`).
+ */
+function publicUnscanned(repo: string): Plugin {
+  const not = PUBLIC_DIRS.map((dir) => `@source not ${specifier(join(repo, dir))};`);
+  return {
+    name: "sanoma:public-unscanned",
+    enforce: "pre",
+    transform: {
+      filter: { id: /\.css(\?|$)/, code: "tailwindcss" },
+      // A stylesheet's own text, not a module made of it (`?url`, `?raw`), which Tailwind skips too.
+      handler: (code, id) =>
+        /[?&](worker|sharedworker|raw|url)\b/.test(id) ? undefined : `${code}\n${not.join("\n")}\n`,
+    },
+  };
+}
+
 /**
  * Writes the sites' generated files: `sites/__virtual.ts`, `.sanoma/app/tsconfig.json` (the route
  * generator reads `sites/tsconfig.json`, and so the file it extends, when it loads the listing)
@@ -219,6 +351,8 @@ function siteTsconfig(root: string) {
       "../content.ts",
       join(src, "env.d.ts"),
     ],
+    // A site's public files are served as they are: never type-checked.
+    exclude: PUBLIC_DIRS.map((dir) => `../../${dir}`),
   };
 }
 
@@ -374,7 +508,9 @@ export function repoConfig(repo: string, bundle?: PluginOption[]): InlineConfig 
       ...(bundle ?? []),
       contentPlugin(repo),
       sitesPlugin(repo),
+      publicPlugin(repo),
       stylesheetPlugin(),
+      publicUnscanned(repo),
       tailwindcss(),
       tanstackStart({
         srcDirectory,
@@ -671,8 +807,14 @@ export async function appDevServer(
     optimizeDeps: {
       // Shipped as source, compiled with the pages.
       exclude: ["sanoma"],
-      // Every page, so the first visit finds the dependencies optimized, not a reload to do it.
-      entries: [`${src}/routes/**/*.tsx`, "sites/**/*.tsx", "apps/*/sites/**/*.tsx"],
+      // Every page, so the first visit finds the dependencies optimized, not a reload to do it; never
+      // a site's public files, which are served as they are.
+      entries: [
+        `${src}/routes/**/*.tsx`,
+        "sites/**/*.tsx",
+        "apps/*/sites/**/*.tsx",
+        ...PUBLIC_DIRS.map((dir) => `!${dir}/**`),
+      ],
     },
   });
   const ssr = server.environments.ssr;

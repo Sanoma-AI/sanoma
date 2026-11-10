@@ -166,6 +166,18 @@ export const APP_BUNDLE_PATH = "/__sanoma/app-bundle";
 /** The header every answer of that route carries, so a host tells them from its own errors. */
 export const APP_BUNDLE_HEADER = "x-sanoma-app-bundle";
 
+/**
+ * A name made a slug: accents dropped, lower case, each run of anything but letters and digits one
+ * dash, none at either end; empty for a name in another script. Each caller bounds its length.
+ */
+export const slugged = (name: string): string =>
+  name
+    .normalize("NFKD")
+    .replaceAll(/\p{M}/gu, "")
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "");
+
 /** Where a host with a `hostname` serves the app (`HostSpec`'s `hostname`): `https://<hostname>`. */
 export const hostnameUrl = (hostname: string): string => `https://${hostname}`;
 

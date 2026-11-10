@@ -171,6 +171,12 @@ function sectionAfter(html: string, title: string) {
  */
 const siteClass = ["tracking", "[0.37em]"].join("-");
 
+/** A class only a site's public file names, put together as `siteClass` is: Tailwind never looks there. */
+const publicClass = ["tracking", "[0.53em]"].join("-");
+
+/** A file of the fixture's `sites/hello/public/demo/`. */
+const demoFile = (name: string) => readFileSync(join(fixtureDir, "sites", "hello", "public", "demo", name));
+
 /**
  * `/sites/hello/styled`: the site's class, and `hidden`, which the app's bar overrides with
  * `md:flex`; its `sites/hello/style.css` linked from its head.
@@ -205,6 +211,9 @@ describe("a company's app with its sites", () => {
       '[data-site="hello"] { --primary: red; }',
     ].join("\n"),
     "sites/hello/routes/styled.tsx": styledPage,
+    // Beside the fixture's public files: one naming a class, and one tsc would refuse; neither read.
+    "sites/hello/public/demo/classes.js": `export const classes = "${publicClass}";\n`,
+    "sites/hello/public/demo/typed.ts": 'export const typed: number = "served as it is";\n',
     "sites/hello/routes/missing.tsx": sitePage(
       "/sites/hello/missing",
       'import { RunForm } from "sanoma/site";',
@@ -753,6 +762,42 @@ describe("a company's app with its sites", () => {
     expect((await at(startRun, "hello.localhost", { method: "POST", headers: SAME_ORIGIN })).status).toBe(404);
   });
 
+  it("serves a site's public files as they are, at /sites/<name>/ and at the root of its own host, never another site's there", async () => {
+    for (const [name, type] of [
+      ["mount.js", "text/javascript; charset=utf-8"],
+      ["demo.css", "text/css; charset=utf-8"],
+      ["pixel.png", "image/png"],
+    ] as const) {
+      // In the client's files untouched: no hash in the name, the bytes the same.
+      expect(readFileSync(join(result.distDir, "client", "sites", "hello", "demo", name)), name).toEqual(
+        demoFile(name),
+      );
+      const response = await fetch(new URL(`/sites/hello/demo/${name}`, app.url));
+      expect(
+        [response.status, response.headers.get("content-type"), response.headers.get("cache-control")],
+        name,
+      ).toEqual([200, type, "no-cache"]);
+      expect(Buffer.from(await response.arrayBuffer()), name).toEqual(demoFile(name));
+      const own = await at(`/demo/${name}`, "hello.localhost", { method: "HEAD" });
+      expect([own.status, own.headers["content-type"]], name).toEqual([200, type]);
+    }
+    expect((await at("/demo/mount.js", "hello.localhost")).body).toBe(demoFile("mount.js").toString());
+    // Not under /sites/ on a site's own host, its own or another's, nor at another site's root.
+    expect((await at("/sites/hello/demo/mount.js", "hello.localhost")).status).toBe(404);
+    expect((await at("/sites/hello/demo/mount.js", "intl.localhost")).status).toBe(404);
+    expect((await at("/%73ites/hello/demo/mount.js", "intl.localhost")).status).toBe(404);
+    expect((await at("/..%2Fhello/demo/mount.js", "intl.localhost")).status).toBe(404);
+    expect((await at("/demo/mount.js", "intl.localhost")).status).toBe(404);
+    // Tailwind looked for classes everywhere in the repo but there.
+    const css = readdirSync(join(result.distDir, "client", "assets")).filter((file) => file.endsWith(".css"));
+    expect(css.length).toBeGreaterThan(0);
+    for (const file of css) {
+      expect(readFileSync(join(result.distDir, "client", "assets", file), "utf8"), file).not.toContain(
+        "letter-spacing:.53em",
+      );
+    }
+  });
+
   it("runs a public page's loader as anonymous whatever the staff login's cookie or header says, and as the visitor its login verifies", async () => {
     const client = await SanomaClient.connect(config);
     try {
@@ -1040,6 +1085,26 @@ describe("a build that fails, or leaves a site out", () => {
     });
     await expect(buildApp(repo)).rejects.toThrow(
       "More than one page claims /sites/hello/: sites/hello/routes/index.tsx, sites/hello/routes/(again)/index.tsx",
+    );
+  });
+
+  it("refuses a public file with no extension, at a path the site's own host answers itself, or at a page's path", async () => {
+    const repo = company({
+      "sites/hello/public/notes": "no extension\n",
+      "sites/hello/public/robots.txt": "User-agent: *\n",
+      "sites/hello/public/assets/app.js": "export {};\n",
+      "sites/hello/routes/feed[.]xml.tsx": sitePage("/sites/hello/feed[.]xml", "", '"Feed"'),
+      "sites/hello/public/feed.xml": "<feed/>\n",
+      "sites/hello/public/demo/fine.js": "export {};\n",
+    });
+    await expect(buildApp(repo)).rejects.toThrow(
+      [
+        "A site's public file cannot be served:",
+        "  sites/hello/public/assets/app.js: /assets/app.js on the site's own host is the app's",
+        "  sites/hello/public/feed.xml: /sites/hello/feed.xml is a page's path",
+        "  sites/hello/public/notes: a public file's name has an extension, such as mount.js",
+        "  sites/hello/public/robots.txt: /robots.txt on the site's own host is the app's",
+      ].join("\n"),
     );
   });
 

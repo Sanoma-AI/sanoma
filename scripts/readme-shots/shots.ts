@@ -356,7 +356,7 @@ async function appUrl(child: ChildProcess): Promise<string> {
   const url = await waitFor(
     () => {
       if (child.exitCode !== null || child.signalCode !== null) throw new Error("sanoma serve exited first");
-      return /^acme at (\S+);/m.exec(readFileSync(serverLog, "utf8"))?.[1];
+      return / at (\S+); ctrl-c to stop$/m.exec(readFileSync(serverLog, "utf8"))?.[1];
     },
     Boolean,
     60_000,

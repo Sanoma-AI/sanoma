@@ -6,14 +6,14 @@
 // resources/people.ts declares, and each operation's input as `context.input`.
 // A `permit` is only for a public site's visitors: its principal `in Sanoma::Group::"visitors"` or `== Sanoma::Principal::"anonymous"`.
 
-// Publishing or sending waits for someone in editor, unless someone in editor asked for it, or
-// it is a sign-in code the runtime's agent `login` sends (the built-in `login-code` workflow).
-@id("editor-reviews")
-@hold("editor")
+// Sending or publishing waits for someone in admin, unless someone in admin asked for it, or it
+// is a sign-in code the runtime's agent `login` sends (the built-in `login-code` workflow).
+@id("admin-reviews")
+@hold("admin")
 @title("Review before it goes out")
 forbid (
   principal,
   action in [Sanoma::Action::"effect:publish", Sanoma::Action::"effect:send"],
   resource
 )
-unless { principal in Sanoma::Group::"editor" || principal == Sanoma::Principal::"login" };
+unless { principal in Sanoma::Group::"admin" || principal == Sanoma::Principal::"login" };

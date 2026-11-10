@@ -46,8 +46,8 @@ How you work:
 ${COMMON_RULES}`;
 
 /** Who the agent acts for, in which company and chat. */
-const actingFor = (appName: string, principal: Principal, chat: Chat) =>
-  `The company: ${appName}. You act for ${principal.id}. This chat is ${chat.id}.`;
+const actingFor = (company: string, principal: Principal, chat: Chat) =>
+  `The company: ${company}. You act for ${principal.id}. This chat is ${chat.id}.`;
 
 /** Each vendor's title, its first connector's, as the app's pages name it. */
 function vendorTitles(config: SanomaConfig): Map<string, string> {
@@ -86,7 +86,7 @@ export function harnessInstructions(
 ): string {
   const sections = [
     HARNESS_RULES,
-    actingFor(step.resolved.appName, principal, chat),
+    actingFor(step.resolved.name, principal, chat),
     atAGlance(step, vendorTitles(step.config)),
   ];
   // Whole messages, the latest first, until the limit (the latest one always).
@@ -114,7 +114,7 @@ function spoken(message: ChatMessage): string {
 export async function instructions(step: AppStepContext, principal: Principal, chat: Chat): Promise<string> {
   const { config, resolved } = step;
   const titles = vendorTitles(config);
-  const sections = [RULES, actingFor(resolved.appName, principal, chat), atAGlance(step, titles)];
+  const sections = [RULES, actingFor(resolved.name, principal, chat), atAGlance(step, titles)];
   const [guide, drafts] = await Promise.all([companyGuide(step), openDrafts(step, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
   const ops = [...resolved.ops.values()].toSorted((a, b) => a.id.localeCompare(b.id));

@@ -1,7 +1,7 @@
 import { personsOf, principalOf } from "sanoma/workflows/shared";
 import type { ConfigDescription } from "sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Avatar, AvatarFallback } from "#/components/ui/avatar.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import {
@@ -33,12 +33,17 @@ const NO_SIGN_IN = "On this machine, whoever is here is the company. No sign-in.
 /**
  * There is no login with the default resolver. The name is kept in this browser and sent with
  * every change. Rendered (and loaded) only under that resolver, while no name is stored. When
- * the data files declare people, you pick one of them, as only they are let in; until then, any
- * name goes.
+ * the data files declare people, you pick one of them, as only they are let in, or are the one
+ * they declare without being asked (a new company's founder); until then, any name goes.
  */
 export default function WhoAreYou() {
   const { setActor } = useActor();
   const { data: people } = useSuspenseQuery({ ...configQuery(), select: selectPeople });
+  const only = people.length === 1 ? people[0]!.id : undefined;
+  useEffect(() => {
+    if (only) setActor(only);
+  }, [only, setActor]);
+  if (only) return null;
   return (
     // No way out but a name: every change needs one. Open, with no onOpenChange, so neither
     // Escape nor a press outside closes it.
