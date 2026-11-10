@@ -182,7 +182,7 @@ let notice: StartState["notice"];
 const archWarning = () => archWarnings(app.runningUnderARM64Translation);
 
 /** Whether the company runs or is starting now. */
-const isLive = (path: string) => running.has(path) || opening.has(path);
+const runsNow = (path: string) => running.has(path) || opening.has(path);
 /** The companies running or starting now, by real path. */
 const runningNow = () => new Set([...running.keys(), ...opening.keys()]);
 
@@ -550,7 +550,7 @@ async function begin(path: string, beginAs?: Begin) {
   // Stopped a moment ago (Company → Stop takes it out of the window at once): its session is ending.
   const ending = running.get(path);
   if (ending?.stopping) await ending.session.ended;
-  if (isLive(path) || quitting) return;
+  if (runsNow(path) || quitting) return;
   if (beginAs) beginnings.set(path, beginAs);
   const added = !inWindow.has(path);
   const views = viewsFor(path);
@@ -842,11 +842,15 @@ async function saveIdentity(typed: Identity): Promise<string | undefined> {
   const env = gitEnv(process.env);
   const known = await identityOf(homedir(), env);
   if (known.name && known.email) return undefined;
-  return setIdentity({ name: known.name || typed.name, email: known.email || typed.email }, env).then(
+  return setIdentityProblem({ name: known.name || typed.name, email: known.email || typed.email }, env);
+}
+
+/** Sets git's global `user.name` and `user.email` to `who`; why it could not, in one line. */
+const setIdentityProblem = (who: Identity, env: NodeJS.ProcessEnv): Promise<string | undefined> =>
+  setIdentity(who, env).then(
     () => undefined,
     (err: unknown) => `git could not save your name and email: ${messageOf(err)}`,
   );
-}
 
 /**
  * Whether git has someone to commit as from `cwd`: `user.name` and `user.email`, asked for once on
@@ -862,12 +866,7 @@ async function identityReady(cwd: string): Promise<boolean> {
     const value = await askFor({ kind: "identity", ...typed, problem });
     if (!isIdentity(value)) return false;
     typed = value;
-    problem =
-      identityProblem(value) ??
-      (await setIdentity(value, env).then(
-        () => undefined,
-        (err: unknown) => `git could not save it: ${messageOf(err)}`,
-      ));
+    problem = identityProblem(value) ?? (await setIdentityProblem(value, env));
     if (!problem) return true;
   }
 }
@@ -955,8 +954,7 @@ async function newCompany(): Promise<void> {
   for (;;) {
     const value = await askFor(newCompanyForm(typed, parent, problem));
     if (!isNewCompanyAnswer(value)) return;
-    typed = { name: value.name, you: value.you, email: value.email };
-    parent = value.parent;
+    ({ parent, ...typed } = value);
     const target = newCompanyTarget(typed.name, parent);
     if ("problem" in target) {
       problem = target.problem;

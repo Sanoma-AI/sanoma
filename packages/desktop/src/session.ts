@@ -91,7 +91,8 @@ export function startSession(options: SessionOptions): Session {
 /**
  * What a company's page says of a session that ended on its own, in a sentence and in two words.
  * With only an exit code, the shell still knows what it was doing: `phase` says the app had
- * answered, `progress` how far a copy got.
+ * answered, `progress` how far a copy got. A new company's init that refuses the form's answers
+ * says why in its own sentence.
  */
 export function failureOf(
   exit: Exit,
@@ -100,13 +101,13 @@ export function failureOf(
   const how = exit.signal ?? `exit code ${exit.code}`;
   const ready = phase === "running";
   const settingUp = kind === "new" && !ready;
-  const message =
-    exit.code === USAGE_EXIT
-      ? `The company's configuration has a problem (${exit.error ?? "the details below say what"}). Fix it, then start again.`
-      : (exit.error ??
-        (settingUp
-          ? `Setting up stopped before the app opened (${how}). The details below say why. Start again picks up where it stopped.`
-          : `The company stopped (${how}).`));
+  const badConfig = exit.code === USAGE_EXIT && !(settingUp && exit.error);
+  const message = badConfig
+    ? `The company's configuration has a problem (${exit.error ?? "the details below say what"}). Fix it, then start again.`
+    : (exit.error ??
+      (settingUp
+        ? `Setting up stopped before the app opened (${how}). The details below say why. Start again picks up where it stopped.`
+        : `The company stopped (${how}).`));
   const copying = kind === "clone" && progress.at(-1) === CLONING;
   const pill = ready ? "Stopped" : settingUp ? "Not set up" : copying ? "Not copied" : "Did not start";
   return { message, pill };

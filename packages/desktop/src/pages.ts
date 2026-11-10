@@ -64,9 +64,8 @@ export interface Step {
 /**
  * The start's steps, all of them from the beginning: the one the session reported last is under
  * way, and those before it are done (a copy from GitHub that is there already skips its first, a
- * new company tried again in a folder that got that far its first two). A report no step has (a
- * launcher without `stage` events says nothing until its database answers) moves nothing. Done
- * all through once only Got it holds the app back.
+ * new company tried again in a folder that got that far its first two). Done all through once
+ * only Got it holds the app back.
  */
 export function stepsOf({
   kind,
@@ -75,10 +74,9 @@ export function stepsOf({
   warning,
 }: Pick<CompanyState, "kind" | "phase" | "progress" | "warning">): Step[] {
   const steps = STEPS[kind];
-  const reported = progress.findLast((said) => steps.some((step) => step.reportedBy === said));
   const now = Math.max(
     0,
-    steps.findIndex((step) => step.reportedBy === reported),
+    steps.findIndex((step) => step.reportedBy === progress.at(-1)),
   );
   const waiting = phase === "running" && warning;
   return steps.map(({ label }, index) => ({

@@ -510,6 +510,13 @@ export default defineConfig({
     expect(companyName(repo)).toBe("acme");
     writeFileSync(
       config,
+      `export default defineConfig({\n\tconnectors: [defineConnection(neon, {\n\t\tname: "x",\n\t})],\n});\n`,
+    );
+    expect(companyName(repo)).toBe("acme");
+    writeFileSync(config, `export default defineConfig({\n\tconnectors: [],\n\tname: "Tabbed",\n});\n`);
+    expect(companyName(repo)).toBe("Tabbed");
+    writeFileSync(
+      config,
       `export default defineConfig({\n  connectors: [],\n});\n\nconst x = defineConnection(neon, {\n  name: "cloud",\n});\n`,
     );
     expect(companyName(repo)).toBe("acme");

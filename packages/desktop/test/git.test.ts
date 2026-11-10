@@ -242,12 +242,12 @@ describe("a new company", () => {
     expect(stepOf(stage("people", "start"))).toBe(ADDING_YOU);
     expect(stepOf(stage("install", "start"))).toBe(INSTALLING);
     expect(stepOf(stage("database", "start"))).toBe(STARTING);
-    expect(stepOf(stage("database", "done"))).toBe(OPENING);
     expect(stepOf(eventLine({ event: "database", how: "created" }))).toBe(OPENING);
     // Part of a step, a stage it does not know, a stage whose fields do not hold, or no event.
     for (const other of [
       stage("git", "start"),
       stage("people", "done"),
+      stage("database", "done"),
       stage("later", "start"),
       stage("template", "begun"),
       eventLine({ event: "stage", status: "start" }),
@@ -265,17 +265,7 @@ describe("a new company", () => {
     expect(existsSync(join(repo, "sanoma.config.ts"))).toBe(true);
     expect(Object.keys(shims("node", "pnpm")).every((name) => existsSync(join(bin, name)))).toBe(true);
     expect(lines).toContain(`env ${port} 1 ${bin}`);
-    // Each once, though the database's stage and its event both say it answered.
     expect(progress).toEqual([NEW, FROM_TEMPLATE, ADDING_YOU, INSTALLING, STARTING, OPENING]);
-    await session.stop();
-    await expect(session.ended).resolves.toMatchObject({ code: 143 });
-  });
-
-  test("opens the company an init that only sets up leaves, with its own launcher", async () => {
-    const { port, progress, session, calls } = await newCompany("init-only");
-    await expect(session.ready).resolves.toBe(`http://localhost:${port}`);
-    expect(calls()).toEqual([INIT, "install --prefer-offline"]);
-    expect(progress).toEqual([NEW, FROM_TEMPLATE, ADDING_YOU, INSTALLING, STARTING]);
     await session.stop();
     await expect(session.ended).resolves.toMatchObject({ code: 143 });
   });
@@ -284,15 +274,6 @@ describe("a new company", () => {
     const { session, calls } = await newCompany("refuses");
     await expect(session.ended).resolves.toMatchObject({ code: 2, error: "--email: not an email address" });
     expect(calls()).toEqual([INIT]);
-  });
-
-  test("a sanoma from before init refuses it, and starts the company as it did then, with no stages", async () => {
-    const { port, progress, session, calls } = await newCompany("old");
-    await expect(session.ready).resolves.toBe(`http://localhost:${port}`);
-    expect(calls()).toEqual([INIT, DLX]);
-    expect(progress).toEqual([NEW, OPENING]);
-    await session.stop();
-    await expect(session.ended).resolves.toMatchObject({ code: 143 });
   });
 
   test("opens a folder that holds files as any other, as Start again after an init that got that far does", async () => {

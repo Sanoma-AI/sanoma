@@ -121,10 +121,10 @@ const textOf = (file: string) => {
 /** Whether the company at `path` is live (`Live`): whatever cannot be read leaves it local. */
 export function liveOf(path: string): Live {
   try {
-    const lock = JSON.parse(textOf(join(path, "resources", "sanoma.lock.json")) ?? "{}") as object;
+    const lock = JSON.parse(readFileSync(join(path, "resources", "sanoma.lock.json"), "utf8")) as object;
     if (!(HOST_KEY in lock)) return undefined;
   } catch {
-    // A lockfile that is not JSON binds nothing.
+    // A lockfile that is missing or not JSON binds nothing.
     return undefined;
   }
   const hostname = HOSTNAME.exec(textOf(join(path, "resources", "sanoma", "infra.ts")) ?? "")?.[1];
@@ -176,7 +176,7 @@ export async function portFor(
  * first `name: "…"` after `defineConfig({` that is first in the braces or on a line of its own one
  * level in, before the line that closes it with `})`.
  */
-const CONFIG_NAME = /defineConfig\(\s*\{(?:\s*|(?:(?!\n\}\))[\s\S])*?\n[ \t]{1,2})name\s*:\s*("(?:[^"\\\n]|\\.)*")/;
+const CONFIG_NAME = /defineConfig\(\s*\{(?:\s*|(?:(?!\n\}\))[\s\S])*?\n(?: {2}|\t))name\s*:\s*("(?:[^"\\\n]|\\.)*")/;
 
 /** The name `sanoma.config.ts` at `path` gives the company, if it gives one. */
 function configName(path: string): string | undefined {
@@ -193,7 +193,7 @@ export function companyName(path: string): string {
   const named = configName(path);
   if (named) return named;
   try {
-    const { name } = JSON.parse(textOf(join(path, "package.json")) ?? "{}") as { name?: unknown };
+    const { name } = JSON.parse(readFileSync(join(path, "package.json"), "utf8")) as { name?: unknown };
     if (typeof name === "string" && name) return name;
   } catch {
     // No readable package.json: the folder names it.

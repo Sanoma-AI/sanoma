@@ -22,7 +22,7 @@ const FORMS = {
   clone: { title: "Copy a company from GitHub", first: () => "clone-url" },
   identity: {
     title: "Who makes the changes?",
-    lede: "Each change is signed with a name and an email address. A new company also lists you as its first person.",
+    lede: "Each change is signed with a name and an email address.",
     first: (ask) => (ask.name ? "identity-email" : "identity-name"),
   },
 };

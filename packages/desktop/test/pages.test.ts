@@ -64,8 +64,6 @@ describe("a start's steps", () => {
     expect(
       statuses({ kind: "new", progress: [NEW, FROM_TEMPLATE, ADDING_YOU, INSTALLING, STARTING, OPENING] }),
     ).toEqual(["done", "done", "done", "done", "now"]);
-    // A launcher without stages: setting up, until its database answers.
-    expect(statuses({ kind: "new", progress: [NEW, OPENING] })).toEqual(["done", "done", "done", "done", "now"]);
   });
 
   test("a new company tried again, in a folder that got that far, picks up at the install", () => {
@@ -77,10 +75,6 @@ describe("a start's steps", () => {
       "now",
       "next",
     ]);
-  });
-
-  test("a report no step has moves nothing", () => {
-    expect(statuses({ progress: [INSTALLING, STARTING, OPENING] })).toEqual(["done", "now"]);
   });
 
   test("a copy from GitHub has one more in front, done when the copy is there already", () => {
@@ -204,6 +198,17 @@ describe("why a session ended", () => {
       pill: "Did not start",
     });
     expect(failureOf(exit({ code: 2 }), opened).message).toContain("the details below say what");
+  });
+
+  test("a new company's init that refuses the form's answers says why in its own words", () => {
+    const refused = exit({ code: 2, error: "--email: not an email address" });
+    expect(failureOf(refused, { kind: "new", phase: "starting", progress: [] })).toEqual({
+      message: "--email: not an email address",
+      pill: "Not set up",
+    });
+    expect(failureOf(exit({ code: 2 }), { kind: "new", phase: "starting", progress: [] }).message).toContain(
+      "the details below say what",
+    );
   });
 
   test("with only an exit code, a new company that never answered says it was setting up", () => {

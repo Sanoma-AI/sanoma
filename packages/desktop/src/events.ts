@@ -25,27 +25,21 @@ export const isEventLine = (line: string) => recordOf(line) !== undefined;
  */
 export const isDatabaseEvent = (line: string) => recordOf(line)?.event === "database";
 
-/** A stage of a new company's `sanoma init`, begun or done: `template`, `people`, `git`, `install`, `database`. */
-export interface Stage {
-  stage: string;
-  status: "start" | "done";
-}
-
 /**
- * The stage a line of `sanoma init` reports, `{"sanoma":1,"event":"stage","stage":…,"status":"start"|"done"}`;
- * undefined for any other line, or one with fields that do not hold.
+ * The stage a line of `sanoma init` begins, `{"sanoma":1,"event":"stage","stage":…,"status":"start"}`:
+ * `template`, `people`, `git`, `install` or `database`. Undefined for any other line.
  */
-export function stageOf(line: string): Stage | undefined {
+export function startedStage(line: string): string | undefined {
   const record = recordOf(line);
-  if (record?.event !== "stage" || typeof record.stage !== "string") return undefined;
-  const { stage, status } = record;
-  return status === "start" || status === "done" ? { stage, status } : undefined;
+  return record?.event === "stage" && record.status === "start" && typeof record.stage === "string"
+    ? record.stage
+    : undefined;
 }
 
 /**
  * The event a line carries that the shell acts on: `{"sanoma":1,"event":"ready","url":…,"sites":{…}}`
  * or `{"sanoma":1,"event":"error","message":…}`. Undefined for any other line, another event
- * (`database`, `isDatabaseEvent`; `stage`, `stageOf`) or one with fields that do not hold.
+ * (`database`, `isDatabaseEvent`; `stage`, `startedStage`) or one with fields that do not hold.
  */
 export function eventOf(
   line: string,
