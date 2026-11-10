@@ -50,28 +50,26 @@ export const presentationSchema = z
   })
   .default({ template: "standard", paper: "A4", accent: "#245648" });
 
-/** Shared by industry inputs; values are explicit, with no clock or customer-store lookup. */
-export const invoiceFields = {
-  schemaVersion: z.literal(1).default(1),
-  number: text(80),
-  issuedOn: dateSchema,
-  dueOn: dateSchema.optional(),
-  servicePeriod: periodSchema.optional(),
-  issuer: partySchema,
-  recipient: partySchema,
-  serviceAddress: addressSchema.optional(),
-  currency: currencySchema,
-  locale: z.enum(["en-US", "en-GB", "de-DE", "fr-FR"]).default("en-US"),
-  discount: decimalSchema.default("0"),
-  taxPercent: decimalSchema.refine((value) => Number(value) <= 100, "Tax percentage must be at most 100").default("0"),
-  paid: decimalSchema.default("0"),
-  notes: z.string().trim().max(4000).optional(),
-  presentation: presentationSchema,
-};
-
+/** Every value is explicit: no clock, and no lookup of a customer or a number. */
 export const invoiceSchema = z
   .strictObject({
-    ...invoiceFields,
+    schemaVersion: z.literal(1).default(1),
+    number: text(80),
+    issuedOn: dateSchema,
+    dueOn: dateSchema.optional(),
+    servicePeriod: periodSchema.optional(),
+    issuer: partySchema,
+    recipient: partySchema,
+    serviceAddress: addressSchema.optional(),
+    currency: currencySchema,
+    locale: z.enum(["en-US", "en-GB", "de-DE", "fr-FR"]).default("en-US"),
+    discount: decimalSchema.default("0"),
+    taxPercent: decimalSchema
+      .refine((value) => Number(value) <= 100, "Tax percentage must be at most 100")
+      .default("0"),
+    paid: decimalSchema.default("0"),
+    notes: z.string().trim().max(4000).optional(),
+    presentation: presentationSchema,
     lines: z.array(lineSchema).min(1).max(200),
     details: z
       .array(z.strictObject({ label: text(80), value: text(4000) }))

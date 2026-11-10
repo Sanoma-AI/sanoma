@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import { currencyPrecision, invoiceSchema, type Currency, type Invoice, type InvoiceLine } from "./schema.ts";
 
 export interface InvoiceIssue {
@@ -51,18 +52,22 @@ function safe(value: bigint, path: InvoiceIssue["path"]): number {
   return Number(value);
 }
 
+/** `value` as `schema` parses it, or an `InvoiceValidationError` naming each field that fails, never its value. */
+export function validated<T extends z.ZodType>(schema: T, value: unknown): z.output<T> {
+  const result = schema.safeParse(value);
+  if (result.success) return result.data;
+  throw new InvoiceValidationError(
+    result.error.issues.map((issue) => ({
+      code: issue.code,
+      path: issue.path.map((part) => (typeof part === "number" ? part : String(part))),
+      message: issue.message,
+    })),
+  );
+}
+
 /** Computes after runtime validation. Tax applies to the rounded subtotal less the flat discount. */
 export function calculateInvoice(input: unknown): CalculatedInvoice {
-  const result = invoiceSchema.safeParse(input);
-  if (!result.success)
-    throw new InvoiceValidationError(
-      result.error.issues.map((issue) => ({
-        code: issue.code,
-        path: issue.path.map((part) => (typeof part === "number" ? part : String(part))),
-        message: issue.message,
-      })),
-    );
-  const invoice = result.data;
+  const invoice = validated(invoiceSchema, input);
   const precision = currencyPrecision[invoice.currency];
   const scale = 10n ** BigInt(precision);
   const amount = (value: string) => {

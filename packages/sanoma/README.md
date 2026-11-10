@@ -189,6 +189,10 @@ A folder under `sites/` with a `routes/` directory is a site: TanStack Router fi
 - The dev server listens on this machine only: with `SANOMA_APP_HOST` naming another, `sanoma` builds the sites and serves the build, as `sanoma app` does.
 - A public site (`defineSite({ public: true })`) answers at the root of `<name>.localhost` on the app's port, with hot updates too, as its visitors see it ([public sites](app/README.md#public-sites)); `sanoma`, `sanoma serve` and `sanoma app` print each one's address after they start (`www: http://www.localhost:3000`). Browsers send `*.localhost` to this machine with no setup.
 
+## Invoices
+
+`sanoma/invoices` is an invoice's shape and exact arithmetic (zod only), and `sanoma/invoices/pdf` its PDF (`renderInvoice`, in Node and in a browser). Both are plain functions a workflow or a site's page imports: no connector, nothing stored. Rendering needs `@react-pdf/renderer` installed beside `sanoma`; a company that never renders needs nothing more. See [`sanoma/invoices`](invoices/README.md).
+
 ## Generated files
 
 | File                                                  | Written by                                | Commit it                                 |

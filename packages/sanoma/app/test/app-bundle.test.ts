@@ -64,13 +64,32 @@ export default defineWorkflow({
 });
 `;
 
-/** A copy of the fixture company, with the app installed as a company installs it, one person declared, and a workflow file. */
+/**
+ * A workflow file that renders an invoice: the bundle carries it for its declarations, and the PDF
+ * renderer it loads at a render is left out (`OPTIONAL`), as for a company that never installed it.
+ */
+const INVOICE = `import { defineWorkflow, z } from "sanoma";
+import { invoiceSchema } from "sanoma/invoices";
+import { renderInvoice } from "sanoma/invoices/pdf";
+
+export default defineWorkflow({
+  name: "render-invoice",
+  title: "Render an invoice",
+  trigger: "manual",
+  input: z.object({ invoice: invoiceSchema }),
+  uses: [],
+  run: async (_ctx, { invoice }) => (await renderInvoice(invoice)).filename,
+});
+`;
+
+/** A copy of the fixture company, with the app installed as a company installs it, one person declared, and workflow files. */
 function company(): { repo: string; config: ReturnType<typeof defineConfig> } {
   const repo = mkdtempSync(join(tmpdir(), "sanoma-bundle-"));
   temporary.push(repo);
   cpSync(fixtureDir, repo, { recursive: true });
   write(join(repo, "resources", "people.ts"), PEOPLE);
   write(join(repo, "workflows", "nightly.ts"), NIGHTLY);
+  write(join(repo, "workflows", "render-invoice.ts"), INVOICE);
   mkdirSync(join(repo, "node_modules"));
   symlinkSync(join(appDir, ".."), join(repo, "node_modules", "sanoma"));
   return { repo, config: defineConfig({ ...fixture, root: repo, file: join(repo, "sanoma.config.ts"), databaseUrl }) };
@@ -249,6 +268,10 @@ describe("buildAppBundle", () => {
     expect(code).toContain('tidied: "nightly"');
     // Only package.json says it.
     expect(code).toContain("Fixture login");
+    // A workflow that renders an invoice, without the PDF renderer (`OPTIONAL`).
+    expect(code).toContain("Render an invoice");
+    // React-pdf's standard fonts, which only its code names.
+    expect(code).not.toContain("Courier-BoldOblique");
   });
 
   it("answers /healthz", async () => {

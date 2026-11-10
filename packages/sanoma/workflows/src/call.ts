@@ -46,6 +46,7 @@ import {
   errorMessage,
   fitsOp,
   isBatch,
+  isRecord,
   LOGIN_CODE_WORKFLOW,
   problemLine,
   type Saved,
@@ -81,10 +82,15 @@ const LOGIN_CODE_BODY = ["text", "html"];
  */
 export function recorded(op: Op, value: unknown, workflow?: string): unknown {
   const hidden = [...(op.opaque ?? []), ...(workflow === LOGIN_CODE_WORKFLOW ? LOGIN_CODE_BODY : [])];
-  if (!hidden.length || typeof value !== "object" || value === null || Array.isArray(value)) return value;
-  const out: Record<string, unknown> = { ...value };
-  for (const name of hidden) if (out[name] !== undefined) out[name] = `<${name}>`;
-  return out;
+  return hidden.reduce((out, path) => hide(out, path.split(".")), value);
+}
+
+/** `value` with the field at `path` as `"<name>"`, in each item of a list it meets on the way. */
+function hide(value: unknown, path: string[]): unknown {
+  if (Array.isArray(value)) return value.map((item) => hide(item, path));
+  const [name, ...rest] = path;
+  if (!isRecord(value) || value[name!] === undefined) return value;
+  return { ...value, [name!]: rest.length ? hide(value[name!], rest) : `<${name}>` };
 }
 
 /** How many times an idempotent operation is tried. */

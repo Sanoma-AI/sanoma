@@ -12,5 +12,5 @@ Source of the Resend connector: the operation definitions and the `resend.domain
 | [`resources.ts`](resources.ts) | The `./resources` entry: `resend.domain`, for data files                                                                                                        |
 | [`index.ts`](index.ts)         | The package root: `resend` with its driver, fake and steps attached (`withSetup`)                                                                               |
 | [`driver.ts`](driver.ts)       | `resendDriver`: calls Resend through the generated client and maps failures to `DriverError`                                                                    |
-| [`fake.ts`](fake.ts)           | `fakeResend`: an in-memory Resend for tests that emails nothing, with sending domains (`verifyDomain`, `failDomain`)                                            |
+| [`fake.ts`](fake.ts)           | `fakeResend`: an in-memory Resend for tests that emails nothing, keeping each email's attachments, with sending domains (`verifyDomain`, `failDomain`)          |
 | [`steps.ts`](steps.ts)         | `resendSteps`: Resend's steps for Gherkin tests (`defineSteps`)                                                                                                 |

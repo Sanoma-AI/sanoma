@@ -146,7 +146,7 @@ export function ApprovalDetails({
         </ItemGroup>
       ) : null}
       {approval.requestedBy === "policy" && approval.input !== undefined && (
-        <Expandable label="The held call's input" value={approval.input} />
+        <Expandable label="The held call's input" value={approval.input} redacted />
       )}
       {approval.refused.length > 0 && (
         <Disclosure label={`${plural(approval.refused.length, "message")} ignored`}>

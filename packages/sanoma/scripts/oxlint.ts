@@ -3,7 +3,8 @@
 // installer lays out), made of:
 // - the runtime's `workflows/oxlint.json` (its overrides for `workflows/**`), with an entry for `sanoma`
 //   derived from `sanoma/workflows`'s (the same names), each other entry of `sanoma` that file does
-//   not name refused, and the plugin (`date`) loaded from this package's `dist/`;
+//   not name refused but those that compute locally (`LOCAL_ENTRIES`), and the
+//   plugin (`date`) loaded from this package's `dist/`;
 // - an override for `sites/**`: a site is client code, importing none of `sanoma`'s server entries
 //   (`serverEntries`: its `exports` but the client ones) and no runtime, connector or environment of
 //   its own (the plugin's `site-file` says the rest);
@@ -12,7 +13,7 @@
 // Each entry is named exactly: a path `exports` does not list does not resolve.
 import { readFileSync, writeFileSync } from "node:fs";
 import { REMEDY } from "../src/site-lint.ts";
-import { serverEntries } from "../workflows/src/shared.ts";
+import { LOCAL_ENTRIES, serverEntries } from "../workflows/src/shared.ts";
 
 type Json = Record<string, any>;
 const read = (path: string): Json => JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
@@ -29,7 +30,12 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
   if (rule === undefined) return override;
   const [severity, { paths, patterns }] = rule;
   const author = paths.find((p) => p.name === `${own}/workflows`)!;
-  const named = new Set([own, ...paths.map((p) => p.name), ...patterns.flatMap((p) => p.group as string[])]);
+  const named = new Set([
+    own,
+    ...LOCAL_ENTRIES,
+    ...paths.map((p) => p.name),
+    ...patterns.flatMap((p) => p.group as string[]),
+  ]);
   return {
     ...override,
     rules: {

@@ -136,6 +136,13 @@ describe("resendDriver", () => {
       expect(sent[0]!.body).toEqual({ to: [to, to], from, subject: "s", text: "Hello" });
     });
 
+    it("sends the files attached, their bytes as base64 text", async () => {
+      play("send-an-email");
+      const attachments = [{ filename: "invoice-INV-001.pdf", content: "JVBERi0xLjQK" }];
+      await email({ to, from, subject: "Invoice", text: "Attached", attachments }, 9);
+      expect(sent[0]!.body).toEqual({ to, from, subject: "Invoice", text: "Attached", attachments });
+    });
+
     it("refuses an email with no sender, or an empty one, without calling Resend", async () => {
       for (const sender of [{}, { from: "" }]) {
         await expect(email({ to, ...sender, subject: "s", text: "Hello" }, 7)).rejects.toMatchObject({

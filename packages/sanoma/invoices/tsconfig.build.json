@@ -1,0 +1,15 @@
+{
+  // A part of sanoma, built by `tsc -b`: it references no other part.
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.build.tsbuildinfo",
+    "noEmit": false,
+    "composite": true,
+    "sourceMap": true,
+    "rewriteRelativeImportExtensions": true,
+    "paths": {}
+  },
+  "include": ["src"]
+}

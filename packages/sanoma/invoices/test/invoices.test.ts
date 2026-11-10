@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  calculateInvoice,
-  cleaningInvoice,
-  formatMoney,
-  InvoiceValidationError,
-  petSittingInvoice,
-  type InvoiceInput,
-} from "../src/index.ts";
-import { commercialCleaningExample, petSittingExample, residentialCleaningExample } from "../src/examples.ts";
+import { calculateInvoice, formatMoney, InvoiceValidationError, type InvoiceInput } from "sanoma/invoices";
+import { example } from "./helpers.ts";
 
 const invoice = (overrides: Partial<InvoiceInput> = {}): InvoiceInput => ({
   number: "INV-1",
@@ -18,46 +11,28 @@ const invoice = (overrides: Partial<InvoiceInput> = {}): InvoiceInput => ({
   lines: [{ description: "Work", unit: "hour", quantity: "1", unitPrice: "100" }],
   ...overrides,
 });
-function validationFailure(action: () => unknown) {
+/** The issues `calculateInvoice` refuses `input` with. */
+function issues(input: unknown) {
   let failure: unknown;
   try {
-    action();
+    calculateInvoice(input);
   } catch (error) {
     failure = error;
   }
   expect(failure).toBeInstanceOf(InvoiceValidationError);
   return (failure as InvoiceValidationError).issues;
 }
-const issues = (input: unknown) => validationFailure(() => calculateInvoice(input));
 
-describe("industry normalization", () => {
-  it("uses one calculation for pet sitting, residential and commercial cleaning", () => {
-    expect(calculateInvoice(petSittingInvoice(petSittingExample)).totals.dueMinor).toBe(18000);
-    expect(calculateInvoice(cleaningInvoice(residentialCleaningExample)).totals.dueMinor).toBe(24000);
-    const commercial = calculateInvoice(cleaningInvoice(commercialCleaningExample));
-    expect(commercial.totals.dueMinor).toBe(96000);
-    expect(commercial.invoice.recipient.address?.lines).toEqual(["20 Billing Avenue"]);
-    expect(commercial.invoice.serviceAddress?.lines).toEqual(["30 Office Street"]);
-    expect(commercial.lines[0]?.unit).toBe("visit");
-  });
-  it("does not mutate input or infer prices or dates", () => {
-    const input = structuredClone(petSittingExample);
+describe("the invoice's shape", () => {
+  it("keeps the billing and service addresses apart, applies defaults and leaves the input as it was", () => {
+    const input = example();
     const before = JSON.stringify(input);
-    expect(petSittingInvoice(input)).toEqual(petSittingInvoice(input));
+    const result = calculateInvoice(input);
+    expect(result.totals.dueMinor).toBe(22500);
+    expect(result.invoice.recipient.address?.lines).toEqual(["20 Billing Avenue"]);
+    expect(result.invoice.serviceAddress?.lines).toEqual(["30 Office Street"]);
+    expect(result.invoice).toMatchObject({ schemaVersion: 1, locale: "en-US", taxPercent: "0" });
     expect(JSON.stringify(input)).toBe(before);
-    expect(petSittingInvoice(input).lines[0]?.unitPrice).toBe("25");
-  });
-  it("reports business validation in the same error format as schema failures", () => {
-    expect(() => cleaningInvoice({ ...residentialCleaningExample, dueOn: "2026-10-29" })).toThrow(
-      InvoiceValidationError,
-    );
-    const errors = validationFailure(() =>
-      petSittingInvoice({
-        ...petSittingExample,
-        services: [{ service: "visit", quantity: "999999", unitPrice: "999999999" }],
-      }),
-    );
-    expect(errors[0]?.path).toEqual(["services", 0, "unitPrice"]);
   });
 });
 
