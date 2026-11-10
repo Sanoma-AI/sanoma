@@ -225,11 +225,20 @@ export default defineWorkflow({
     }
   }, 180_000);
 
-  it("reports a scenario step that does not hold", async () => {
+  it("reports a scenario step that does not hold, and a world that is not one", async () => {
     const feature = join(dir, "scenarios/hello/hello.feature");
     writeFileSync(feature, readFileSync(feature, "utf8").replace("And the run succeeds", "And the run fails"));
-    const { problems } = await check(await load(), { databaseUrl, log: () => {} });
-    expect(problems).toContain("A post goes out › the run fails: the run finished");
+    const world = join(dir, "scenarios/world.feature");
+    writeFileSync(world, "Feature: World\n  Scenario: A blog\n    Then the run succeeds\n");
+    try {
+      const { problems } = await check(await load(), { databaseUrl, log: () => {} });
+      expect(problems).toContain("A post goes out › the run fails: the run finished");
+      expect(problems).toContain(
+        'scenarios/world.feature › did not load: scenarios/world.feature:3: "the run succeeds" checks a run, but the world is one Scenario of Givens alone, which seed the company a demo opens on',
+      );
+    } finally {
+      rmSync(world);
+    }
   }, 180_000);
 
   it("lints sites/ when there is one", async () => {
