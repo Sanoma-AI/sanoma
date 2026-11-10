@@ -281,6 +281,25 @@ describe("buildAppBundle", () => {
     expect(await response.text()).toBe(Buffer.from(script!.content, "base64").toString());
   });
 
+  it("serves a site's public files from the Worker's assets: at its domain's root to anyone, under /sites/<name>/ behind the staff sign-in", async () => {
+    for (const [name, type] of [
+      ["mount.js", /^text\/javascript/],
+      ["demo.css", /^text\/css/],
+      ["pixel.png", /^image\/png$/],
+    ] as const) {
+      // Among the assets as the build left them: the trim of the Worker's modules does not reach them.
+      const asset = bundle.assets.find(({ path }) => path === `/sites/hello/demo/${name}`);
+      expect(asset, name).toBeDefined();
+      const response = await get(`https://hello.example/demo/${name}`);
+      expect([response.status, response.headers.get("content-type")], name).toEqual([200, expect.stringMatching(type)]);
+      expect(Buffer.from(await response.arrayBuffer()), name).toEqual(Buffer.from(asset!.content, "base64"));
+    }
+    // On the app's host only for a person signed in, as the site's pages are there.
+    expect((await secure(`https://${HOSTNAME}/sites/hello/demo/mount.js`)).status).toBe(401);
+    // Nothing under /sites/ on a site's own host.
+    expect((await get("https://intl.example/sites/hello/demo/mount.js")).status).toBe(404);
+  });
+
   it("renders a page on the Worker, and its robots.txt", async () => {
     expect(await (await get("https://hello.example/")).text()).toContain("Hello from the hello site");
     expect(await (await get("https://hello.example/robots.txt")).text()).toContain(

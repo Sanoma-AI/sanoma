@@ -347,10 +347,9 @@ async function builtResponder(distDir: string): Promise<Responder> {
   return {
     entry,
     files: async (request) => {
-      const file = staticFile(files, request);
-      if (!file) return undefined;
-      const body = request.method === "HEAD" ? null : (Readable.toWeb(createReadStream(file.path)) as ReadableStream);
-      return new Response(body, { headers: file.headers });
+      const path = filePath(request);
+      const file = path === undefined ? undefined : files.get(path);
+      return file && fileResponse(request, file);
     },
     ...(stylesheet && { stylesheet }),
     close: async () => {},
@@ -366,16 +365,27 @@ async function devResponder(
   server: ReturnType<typeof createServer>,
   sockets: WeakMap<Request, { req: IncomingMessage; res: ServerResponse }>,
 ): Promise<Responder> {
-  const { appDevServer } = await import("./build.ts");
+  const { appDevServer, publicFiles } = await import("./build.ts");
   const dev = await appDevServer(repo, server, onFileChange);
+  /** A site's public file at the request's path, looked for on disk as it is now. */
+  const publicFile = async (request: Request): Promise<StaticFile | undefined> => {
+    const path = filePath(request);
+    const found = path?.startsWith("/sites/") ? publicFiles(repo).find((file) => file.path === path) : undefined;
+    return found && { path: found.file, headers: fileHeaders(found.under, (await stat(found.file)).size) };
+  };
   return {
-    files: (request) =>
-      new Promise((done, fail) => {
-        const { req, res } = sockets.get(request)!;
+    files: async (request) => {
+      const own = await publicFile(request);
+      if (own) return fileResponse(request, own);
+      // A request the handler made, for a public site's own file at its host's root: that alone.
+      const socket = sockets.get(request);
+      if (!socket) return undefined;
+      return new Promise((done, fail) => {
         // Vite answers what it serves itself without calling next; the adapter then sends nothing.
-        res.once("close", () => done(new Response(null)));
-        dev.middlewares(req, res, (err) => (err ? fail(err) : done(undefined)));
-      }),
+        socket.res.once("close", () => done(new Response(null)));
+        dev.middlewares(socket.req, socket.res, (err) => (err ? fail(err) : done(undefined)));
+      });
+    },
     entry: { fetch: async (request, opts) => (await dev.serverEntry()).fetch(request, opts) },
     close: () =>
       dev.close().catch((err: unknown) => console.error("sanoma app: closing the dev server also failed:", err)),
@@ -395,11 +405,22 @@ const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".map": "application/json; charset=utf-8",
+  ".xml": "application/xml; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".pdf": "application/pdf",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".avif": "image/avif",
   ".ico": "image/x-icon",
   ".webp": "image/webp",
+  ".woff": "font/woff",
   ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
   ".txt": "text/plain; charset=utf-8",
 };
 
@@ -409,9 +430,9 @@ interface StaticFile {
 }
 
 /**
- * The built client's files by URL path, read once at boot: the build does not change while the
- * app runs, and only a file found here is ever served. Vite names everything under assets/ by
- * content hash, so those never change; anything else is revalidated on every use.
+ * The built client's files by URL path, the sites' public files among them (`/sites/<key>/…`),
+ * read once at boot: the build does not change while the app runs, and only a file found here is
+ * ever served.
  */
 async function staticFiles(clientDir: string): Promise<Map<string, StaticFile>> {
   const files = new Map<string, StaticFile>();
@@ -423,31 +444,41 @@ async function staticFiles(clientDir: string): Promise<Map<string, StaticFile>> 
     if (!entry.isFile()) continue;
     const path = join(entry.parentPath, entry.name);
     const rel = relative(clientDir, path).split(sep).join("/");
-    files.set(`/${rel}`, {
-      path,
-      headers: {
-        "content-type": TYPES[extname(path)] ?? "application/octet-stream",
-        "content-length": String((await stat(path)).size),
-        "cache-control": rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache",
-        "x-content-type-options": "nosniff",
-      },
-    });
+    files.set(`/${rel}`, { path, headers: fileHeaders(rel, (await stat(path)).size) });
   }
   // An empty directory is as unbuilt as a missing one.
   if (files.size === 0) throw notBuilt(clientDir);
   return files;
 }
 
-/** The built file a request names, if any. Server functions are never files. */
-function staticFile(files: Map<string, StaticFile>, request: Request): StaticFile | undefined {
+/**
+ * A file's headers, by its path from the client's files (`rel`): Vite names everything under
+ * assets/ by content hash, so those never change; anything else (a site's public file among them)
+ * is revalidated on every use.
+ */
+const fileHeaders = (rel: string, size: number): Record<string, string> => ({
+  "content-type": TYPES[extname(rel)] ?? "application/octet-stream",
+  "content-length": String(size),
+  "cache-control": rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache",
+  "x-content-type-options": "nosniff",
+});
+
+/** The path a request asks a file at, decoded: a GET's or a HEAD's, never a server function's. */
+function filePath(request: Request): string | undefined {
   const { pathname } = new URL(request.url);
   if ((request.method !== "GET" && request.method !== "HEAD") || pathname.startsWith("/_serverFn/")) return undefined;
   try {
-    return files.get(decodeURIComponent(pathname));
+    return decodeURIComponent(pathname);
   } catch {
     return undefined;
   }
 }
+
+/** `file` as the answer to `request`: its bytes, streamed, but for a HEAD. */
+const fileResponse = (request: Request, file: StaticFile) =>
+  new Response(request.method === "HEAD" ? null : (Readable.toWeb(createReadStream(file.path)) as ReadableStream), {
+    headers: file.headers,
+  });
 
 function urlHost({ address, family }: AddressInfo): string {
   if (address === "0.0.0.0" || address === "::") return "localhost";

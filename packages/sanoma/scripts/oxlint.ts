@@ -117,7 +117,8 @@ const config = {
   categories: root.categories,
   env: root.env,
   rules: Object.fromEntries(Object.entries(root.rules as Json).filter(([name]) => !name.startsWith("vitest/"))),
-  ignorePatterns: (root.ignorePatterns as string[]).filter((p) => p.startsWith("**/")),
+  // A site's public files are served as they are: never linted.
+  ignorePatterns: [...(root.ignorePatterns as string[]).filter((p) => p.startsWith("**/")), "**/sites/*/public"],
   overrides: [...overrides, sites],
 };
 

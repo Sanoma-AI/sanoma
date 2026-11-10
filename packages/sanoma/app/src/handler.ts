@@ -58,7 +58,9 @@ export interface AppHandlerOptions {
   entry: ServerEntry;
   /**
    * What the host answers itself, after the login let the request through and before Start: a
-   * built file. Undefined for a request it has nothing for.
+   * built file, a site's public file among them at `/sites/<key>/<path>`. Undefined for a request
+   * it has nothing for. On a public site's host it is asked a second time, by a request of the
+   * handler's own at `/sites/<site>/<path>`, for the site's public file at the host's root.
    */
   files?: (request: Request) => Promise<Response | undefined>;
   /** The built kit's stylesheet's path (`AppContext.stylesheet`). */
@@ -164,11 +166,11 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
       const answered =
         seoFile(request, entry, origin, () => latest.published) ??
         (await front.handle?.(request)) ??
-        (await served(request, (app) => ({
-          app: { ...app, site: entry.name, login: front },
-          site: entry.name,
-          origin,
-        })));
+        (await served(
+          request,
+          (app) => ({ app: { ...app, site: entry.name, login: front }, site: entry.name, origin }),
+          entry.name,
+        ));
       return asked === entry.domain ? answered : withHeader(answered, "x-robots-tag", "noindex");
     }
     // Then the login sees every request (pages, server functions and files alike): its own
@@ -180,8 +182,23 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
    * What the host has for the request, else Start's answer, in the context `asked` makes of the
    * snapshot as it is now: a file never waits for the snapshot to be checked.
    */
-  const served = async (request: Request, asked: (app: AppContext) => RequestContext) =>
-    (await options.files?.(request)) ?? (await options.entry.fetch(request, { context: asked(await contextOf()) }));
+  const served = async (request: Request, asked: (app: AppContext) => RequestContext, site?: string) =>
+    (await fileFor(request, site)) ?? (await options.entry.fetch(request, { context: asked(await contextOf()) }));
+
+  /**
+   * The host's file for the request. On a public site's host (`site`), the build's files, then the
+   * site's public files at its root (`/<path>` is `/sites/<site>/<path>`), and nothing under
+   * `/sites/`, where the app's host has every site's.
+   */
+  async function fileFor(request: Request, site: string | undefined): Promise<Response | undefined> {
+    if (site === undefined) return options.files?.(request);
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/sites/")) return undefined;
+    const found = await options.files?.(request);
+    if (found || (request.method !== "GET" && request.method !== "HEAD")) return found;
+    url.pathname = `/sites/${site}${url.pathname}`;
+    return options.files?.(new Request(url, { method: request.method, headers: request.headers }));
+  }
 
   return {
     context,

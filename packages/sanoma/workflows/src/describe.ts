@@ -89,7 +89,15 @@ export {
 // The apps under `apps/`, with what their `app.ts` declares.
 export { crossAppImports, readApps } from "./apps.ts";
 // What the sites call, read from their source: a workflow's Used by.
-export { readSites, siteContentPages, siteDomains, siteIcons, siteLocales, sitesUnder } from "./sites.ts";
+export {
+  readSites,
+  siteContentPages,
+  siteDomains,
+  siteIcons,
+  siteLocales,
+  sitePagePaths,
+  sitesUnder,
+} from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
 export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
 // The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.
