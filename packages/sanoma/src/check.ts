@@ -166,13 +166,19 @@ async function typecheck(root: string, log: (line: string) => void, project = "t
   return tsc.code === 0 ? [] : tscProblems(tsc);
 }
 
-/** oxlint in the root, on its `.oxlintrc.json` (written when missing), over the directories that exist. */
+/** oxlint in the root, on its `.oxlintrc.json` (written when missing), over the directories that exist, but a site's public files, served as they are. */
 async function lint(root: string, log: (line: string) => void): Promise<string[]> {
   const dirs = LINTED.filter((dir) => existsSync(join(root, dir)));
   if (!dirs.length) return [];
   if (writeOxlintrc(root)) log("wrote .oxlintrc.json");
   log(`oxlint ${dirs.join(" ")}`);
-  return oxlintProblems(await run(binOf("oxlint"), ["--deny-warnings", "-f", "json", ...dirs], root));
+  return oxlintProblems(
+    await run(
+      binOf("oxlint"),
+      ["--deny-warnings", "--ignore-pattern", "**/sites/*/public/**", "-f", "json", ...dirs],
+      root,
+    ),
+  );
 }
 
 /**
