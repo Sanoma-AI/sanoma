@@ -18,6 +18,8 @@ export const APPROVALS_EVENT = "approvals";
 export const topicOf = (approvalId: string) => approvalId;
 /** The DBOS event an approval's decision is published on, as its decided `ApprovalState`, once made. */
 export const decisionEventOf = (approvalId: string) => `approval:${approvalId}`;
+/** The id of the next approval `run` asks: `approval-<n>`, numbered from 1. */
+export const nextApprovalId = (run: Pick<Run, "approvals">) => `approval-${run.approvals.length + 1}`;
 /**
  * The idempotency key a decision message is sent with, so a retried send queues it once. DBOS
  * scopes the key per run, not per topic, so it names the approval too: one message id reused
@@ -103,7 +105,7 @@ export async function awaitApproval(
   const { covers } = req;
   const all = run.approvals;
   const state: ApprovalState = {
-    id: `approval-${all.length + 1}`,
+    id: nextApprovalId(run),
     title,
     approver: req.approver,
     ...(req.links === undefined ? {} : { links: req.links }),

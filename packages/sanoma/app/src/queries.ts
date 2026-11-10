@@ -24,6 +24,7 @@ import {
   type PreviewQuery,
   RUNS_LIMIT,
   type RunsQuery,
+  type SaveDraftRequest,
   type ScenariosResponse,
   type StartRunRequest,
   type StartRunResponse,
@@ -52,6 +53,7 @@ import {
   getRemote,
   getRun,
   getRuns,
+  getSaves,
   getScenarios,
   getPeopleSignIns,
   getSetupStatus,
@@ -60,6 +62,7 @@ import {
   openChangeFn,
   previewFn,
   callFn,
+  saveDraftFn,
   startRunFn,
 } from "./functions.ts";
 import { type Api, createApi, type UntypedApi } from "./api-client.ts";
@@ -625,8 +628,8 @@ export const changesQuery = (query: ChangesQuery = {}) =>
   });
 
 /**
- * The change of the draft `id` (`getChange`), null when it has none, under RUNS_KEY, so Publish
- * and Send for review refresh it: polled as `changePoll` says, a draft with none every 30 s (a
+ * The change of the draft `id` (`getChange`), null when it has none, under RUNS_KEY, so Publish,
+ * Save and Review refresh it: polled as `changePoll` says, a draft with none every 30 s (a
  * change may open from elsewhere).
  */
 export const changeQuery = (id: string) =>
@@ -655,13 +658,40 @@ export function useOpenChange() {
   });
 }
 
+/**
+ * The saves of the draft `id` (`getSaves`), newest first, under RUNS_KEY: polled while one has not
+ * ended, which outlives the worker starting again on what it saved.
+ */
+export const savesQuery = (id: string) =>
+  queryOptions({
+    queryKey: [...RUNS_KEY, "saves", id],
+    queryFn: () => getSaves({ data: { id } }),
+    refetchInterval: runsRefetchInterval(POLL_MS),
+  });
+
+/**
+ * Saves a chat's draft, or undoes what it saved (`saveDraftFn`), then refreshes the runs, so its
+ * card follows the save; says so only when it could not start.
+ */
+export function useSaveDraft() {
+  const save = useServerFn(saveDraftFn);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: SaveDraftRequest) => save({ data }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: RUNS_KEY }),
+    onError: (err, { undo }) =>
+      toast.error(`Could not ${undo ? "undo" : "save"} it: ${errorBodyOf(err)?.error ?? errorMessage(err)}`),
+  });
+}
+
 /** What the repository's host enforces on main (`getHostEnforcement`): asked again after 5 minutes at most. */
 export const hostEnforcementQuery = () =>
   queryOptions({ queryKey: ["host-enforcement"], queryFn: () => getHostEnforcement(), staleTime: 5 * 60_000 });
 
 /**
- * Whether the repository has a remote: the bar's Changes. Read once per page load: it rarely
- * changes (going live adds one), and the root loader waits for it on every navigation.
+ * Whether the repository's remote is one changes are reviewed on (`getRemote`): the bar's Changes,
+ * a draft's Review. Read once per page load: it rarely changes (going live adds one), and the root
+ * loader waits for it on every navigation.
  */
 export const remoteQuery = () =>
   queryOptions({ queryKey: ["remote"], queryFn: () => getRemote(), staleTime: Number.POSITIVE_INFINITY });

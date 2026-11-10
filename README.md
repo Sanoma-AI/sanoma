@@ -45,7 +45,7 @@ Try asking:
 
 > Build an internal page where teammates can submit a request with a title, description and due date. Store the requests and show them in a list.
 
-The agent edits a draft branch and runs checks. Inspect the draft before accepting it. To send it for review and publish from the app, connect a Git remote; a new company's policy requires an admin's approval. Without a remote, merge the draft branch by hand. [How changes are reviewed and published →](packages/sanoma/workflows/README.md#changes)
+The agent edits a draft branch and runs checks. Inspect the draft before accepting it. To send it for review and publish from the app, connect a Git remote; a new company's policy requires an admin's approval. Without a remote, saving the draft puts it to work at once, and Undo takes it back. [How changes are reviewed and published →](packages/sanoma/workflows/README.md#changes)
 
 ## From a coworker's request to a running tool
 

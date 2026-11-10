@@ -318,8 +318,9 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
       return [...drafts.keys()].toSorted();
     },
     async diff(id) {
-      const files = [...draftAt(id).files.keys()].toSorted();
-      return { files, summary: `${files.length} files changed` };
+      const draft = draftAt(id);
+      const files = [...draft.files.keys()].toSorted();
+      return { files, summary: `${files.length} files changed`, head: draft.head };
     },
     async closeDraft(id) {
       closed.push(id);

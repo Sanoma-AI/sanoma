@@ -10,7 +10,7 @@ import type {
   MergeInput,
 } from "./change.ts";
 import { ADMIN, ChangeInput, initialChangeState } from "./change.ts";
-import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
+import { type Approver, defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { errorCode, isRunControlError, type SanomaError } from "./errors.ts";
 import { approverLabel, type CHANGE_WORKFLOW, errorMessage } from "./shared.ts";
 import type { CheckResult } from "./source.ts";
@@ -35,6 +35,12 @@ export interface ChangeSteps {
   queued(number: number): Promise<ChangeEvent | undefined>;
   /** Withdraws every approval of the run approved for the merge, saying `reason`: none lifts a hold on a newer head. */
   retire(reason: string): Promise<void>;
+  /**
+   * For a change opened by Save, in a round at the head saved (`ChangeInput.save`): approves the
+   * Publish about to be asked of `approver` as the run's actor, when they may decide it (`mayDecide`, the run's own actor
+   * allowed only while nobody else could). Nothing when they may not: Publish waits as asked.
+   */
+  publishOnSave(approver: Approver): Promise<void>;
   /** After the merge: the checkout follows `main`, then apply on the declared hosts, as a run of its own this one waits for. */
   deploy(sha: string): Promise<ChangeDeploy>;
   /** After an apply on the hosts: drift on them, as a run of its own; undefined with no host. */
@@ -131,6 +137,8 @@ export function changeWorkflow(
         if (told === undefined && blocked === undefined) {
           try {
             await show({ phase: "waiting" });
+            // Save is the person's Publish of the head they saved, and of no other.
+            if (input.save === opened.head) await steps.publishOnSave(decision.approver!);
             await ctx.approval(PUBLISH, {
               approver: decision.approver!,
               covers: [ops.change.merge],
