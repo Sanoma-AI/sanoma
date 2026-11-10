@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,8 +92,15 @@ describe("sanoma serve with sites", () => {
 });
 
 describe("sanoma check with sites", () => {
-  it("passes the fixture: the sites built and type-checked with the app", async () => {
+  it("passes the fixture: the sites built and type-checked with the app, never reading a site's public files", async () => {
     dir = copyFixture(fixture);
+    // Served as they are: what the lint and tsc would refuse in a site's own files.
+    mkdirSync(join(dir, "sites/hello/public/demo"), { recursive: true });
+    writeFileSync(
+      join(dir, "sites/hello/public/demo/mount.js"),
+      'export const pg = require("pg");\nexport const key = process.env.KEY;\n',
+    );
+    writeFileSync(join(dir, "sites/hello/public/demo/typed.ts"), 'export const typed: number = "served as it is";\n');
     const ok = await runCli(dir, ["check"], env);
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
     expect(ok.stderr).toContain("build hello");
@@ -281,6 +288,24 @@ describe("sanoma with sites: the dev server", () => {
     expect(own.body.replaceAll("<!-- -->", "")).toContain("Hello from the hello site");
     expect(own.body).not.toContain('aria-label="Sections"');
     expect(existsSync(join(repo, ".sanoma/app/build"))).toBe(false);
+  }, 60_000);
+
+  it("serves a site's public files from disk as they are saved, at /sites/<name>/ and at the root of its own host", async () => {
+    const text = 'export const mounted = "from disk";\n';
+    mkdirSync(join(repo, "sites/hello/public/demo"), { recursive: true });
+    writeFileSync(join(repo, "sites/hello/public/demo/mount.js"), text);
+    const app = await fetch(`${url}/sites/hello/demo/mount.js`);
+    expect([app.status, app.headers.get("content-type"), await app.text()]).toEqual([
+      200,
+      "text/javascript; charset=utf-8",
+      text,
+    ]);
+    const own = await rawGet(`${url}/demo/mount.js`, `hello.localhost:${new URL(url).port}`);
+    expect([own.status, own.body]).toEqual([200, text]);
+    expect((await rawGet(`${url}/sites/hello/demo/mount.js`, `hello.localhost:${new URL(url).port}`)).status).toBe(404);
+    // A link is not followed, as the build leaves it out: a folder linked to outside the site is no public file.
+    symlinkSync(join(repo, "workflows"), join(repo, "sites/hello/public/linked"));
+    expect((await fetch(`${url}/sites/hello/linked/hello.ts`)).status).not.toBe(200);
   }, 60_000);
 
   it("writes .sanoma/api.ts at start, and again when a workflow changes", async () => {

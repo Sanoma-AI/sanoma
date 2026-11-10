@@ -390,13 +390,27 @@ describe("the change workflow's deploy on a declared host", () => {
     repo.remove();
   });
 
+  const hostId = "resources/infra.ts#app";
+
+  it("deploys no host the lockfile does not bind: going live makes it", async () => {
+    repo.edit("early", { "notes/early.md": "\n" });
+    const runId = await app.client.openChange({ id: "early", title: "Before going live" }, { startedBy: "alice" });
+    await waitFor(pending(() => app.client, runId));
+    await app.client.decide(runId, { decision: "approve", by: { id: "alice" } });
+    const report = (await app.client.result(runId, 60_000)) as ChangeReport;
+    expect(report).toMatchObject({ outcome: "merged", deploy: { follow: { revision: expect.any(String) } } });
+    expect(report.deploy).not.toHaveProperty("apply");
+    expect(await app.client.runs({ workflow: "apply" })).toEqual([]);
+  });
+
   it("applies the hosts after the merge, waits for it, and reads them back", async () => {
+    // Gone live: its apply binds the host.
+    await app.client.applyReport(await app.client.apply({ only: [hostId] }, { startedBy: "alice" }));
     repo.edit("ship", { "workflows/ship.ts": "// ship it\n" });
     const runId = await app.client.openChange({ id: "ship", title: "Ship it" }, { startedBy: "alice" });
     await waitFor(pending(() => app.client, runId));
     await app.client.decide(runId, { decision: "approve", by: { id: "alice" } });
     const report = (await app.client.result(runId, 60_000)) as ChangeReport;
-    const hostId = "resources/infra.ts#app";
     expect(report).toMatchObject({
       outcome: "merged",
       deploy: { follow: { revision: expect.any(String) }, apply: { runId: `${runId}:deploy`, hosts: [hostId] } },
@@ -406,6 +420,6 @@ describe("the change workflow's deploy on a declared host", () => {
     const applied = await app.client.applyReport(`${runId}:deploy`);
     expect(applied.results).toEqual([expect.objectContaining({ id: hostId, status: "done" })]);
     // The checkout follows main first, so the hosts applied are the merged ones.
-    expect(repo.follows).toEqual([{ url: remote.url, token: expect.any(String), ref: "main" }]);
+    expect(repo.follows.at(-1)).toEqual({ url: remote.url, token: expect.any(String), ref: "main" });
   });
 });

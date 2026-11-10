@@ -9,7 +9,6 @@ import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { phaseLabel } from "#/lib/changes.ts";
 import type { DraftCard } from "#/lib/chat.ts";
-import { companyOf } from "#/lib/names.ts";
 import { CHANGE_TONE } from "#/lib/tone.ts";
 import { plural } from "#/lib/utils.ts";
 import { changeQuery, configQuery, remoteQuery, savesQuery, useOpenChange, useSaveDraft } from "#/queries.ts";
@@ -108,7 +107,7 @@ function Save({ draft, id }: { draft: DraftCard; id: string }) {
   const review = useOpenChange();
   if (error) return <>Could not read how it was saved: {error.message}</>;
   if (!read) return null;
-  const company = companyOf(config.appName).name;
+  const company = config.name;
   if (saved) return <Saved chat={id} saved={saved} company={company} remote={remote} />;
   if (doing) return <>Saving…</>;
   const why =

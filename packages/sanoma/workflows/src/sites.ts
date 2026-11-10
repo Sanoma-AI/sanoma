@@ -203,6 +203,14 @@ export function siteContentPages(root: string): Record<string, string> {
 }
 
 /**
+ * Every page's path of every site under `root` (`SitePage.path`), read as `readSites` reads them:
+ * what the app's build keeps a site's public files clear of.
+ */
+export function sitePagePaths(root: string): string[] {
+  return sitesUnder(root).flatMap(({ dir }) => [...pagesOf(readSiteFiles(root, dir)).keys()]);
+}
+
+/**
  * Each site's languages (`defineSite({ locales })`, the first its default) under `root`, by name,
  * for the sites whose `site.ts` gives them without a problem there: what the app's build gives
  * its router (`virtual:sanoma/locales`). Loaded as `readSites` loads them.

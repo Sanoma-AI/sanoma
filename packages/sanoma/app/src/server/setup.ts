@@ -273,7 +273,7 @@ export async function manifestPage(
     org ? `https://github.com/organizations/${org}/settings/apps/new` : "https://github.com/settings/apps/new",
   );
   to.searchParams.set("state", state);
-  const manifest = JSON.stringify(githubManifest(url.origin, `Sanoma ${snapshot.description.appName}`.slice(0, 34)));
+  const manifest = JSON.stringify(githubManifest(url.origin, `Sanoma ${snapshot.description.name}`.slice(0, 34)));
   const html =
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Create the GitHub App · Sanoma</title></head>` +
     `<body style="font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem">` +

@@ -58,9 +58,11 @@ export interface AppHandlerOptions {
   entry: ServerEntry;
   /**
    * What the host answers itself, after the login let the request through and before Start: a
-   * built file. Undefined for a request it has nothing for.
+   * built file, a site's public file among them at `/sites/<key>/<path>`. On a public site's host,
+   * `site`, its own public files at the root (`publicPath`) and no other site's. Undefined for a
+   * request it has nothing for.
    */
-  files?: (request: Request) => Promise<Response | undefined>;
+  files?: (request: Request, site?: string) => Promise<Response | undefined>;
   /** The built kit's stylesheet's path (`AppContext.stylesheet`). */
   stylesheet?: string;
 }
@@ -164,11 +166,11 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
       const answered =
         seoFile(request, entry, origin, () => latest.published) ??
         (await front.handle?.(request)) ??
-        (await served(request, (app) => ({
-          app: { ...app, site: entry.name, login: front },
-          site: entry.name,
-          origin,
-        })));
+        (await served(
+          request,
+          (app) => ({ app: { ...app, site: entry.name, login: front }, site: entry.name, origin }),
+          entry.name,
+        ));
       return asked === entry.domain ? answered : withHeader(answered, "x-robots-tag", "noindex");
     }
     // Then the login sees every request (pages, server functions and files alike): its own
@@ -180,8 +182,9 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
    * What the host has for the request, else Start's answer, in the context `asked` makes of the
    * snapshot as it is now: a file never waits for the snapshot to be checked.
    */
-  const served = async (request: Request, asked: (app: AppContext) => RequestContext) =>
-    (await options.files?.(request)) ?? (await options.entry.fetch(request, { context: asked(await contextOf()) }));
+  const served = async (request: Request, asked: (app: AppContext) => RequestContext, site?: string) =>
+    (await options.files?.(request, site)) ??
+    (await options.entry.fetch(request, { context: asked(await contextOf()) }));
 
   return {
     context,

@@ -89,7 +89,15 @@ export {
 // The apps under `apps/`, with what their `app.ts` declares.
 export { crossAppImports, readApps } from "./apps.ts";
 // What the sites call, read from their source: a workflow's Used by.
-export { readSites, siteContentPages, siteDomains, siteIcons, siteLocales, sitesUnder } from "./sites.ts";
+export {
+  readSites,
+  siteContentPages,
+  siteDomains,
+  siteIcons,
+  siteLocales,
+  sitePagePaths,
+  sitesUnder,
+} from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
 export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
 // The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.
@@ -293,6 +301,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       default: d.default,
     })),
     appName: resolved.appName,
+    name: resolved.name,
     version: resolved.version,
     workflows,
     ops,
@@ -346,7 +355,7 @@ function loginProblems(resolved: ResolvedConfig, people: readonly PeopleResource
   const { sender, from } = resolved.login;
   const agent = principalOf(LOGIN_AGENT, people)!;
   const run = { id: "check", workflow: LOGIN_CODE_WORKFLOW, approvals: [] };
-  const decision = decideCall(resolved.policy, sender, codeMail(from, resolved.appName), agent, run);
+  const decision = decideCall(resolved.policy, sender, codeMail(from, resolved.name), agent, run);
   if (decision.kind === "allow") return [];
   const does = decision.kind === "deny" ? "denies" : "holds";
   const by = decision.reasons?.length ? ` (${decision.reasons.join(", ")})` : "";

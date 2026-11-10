@@ -9,7 +9,9 @@
   },
   "dependencies": {
     "@sanoma-ai/connector-anthropic": "latest",
-    "@sanoma-ai/connector-ghost": "latest",
+    "@sanoma-ai/connector-github": "latest",
+    "@sanoma-ai/connector-resend": "latest",
+    "@sanoma-ai/connector-sanoma-cloud": "latest",
     "sanoma": "latest"
   },
   "engines": {

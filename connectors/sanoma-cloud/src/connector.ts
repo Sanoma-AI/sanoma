@@ -6,7 +6,7 @@ import {
   type OpSpec,
   vendorInfo,
 } from "sanoma/workflows";
-import { DOMAIN_NAME, SITE_KEY } from "sanoma/workflows/shared";
+import { DOMAIN_NAME, SITE_KEY, slugged } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 /*
@@ -51,13 +51,6 @@ export function repositoryKey(source: unknown): string | undefined {
   const repository = repositoryOf(source);
   return repository && `${repository.owner}/${repository.name}`.toLowerCase();
 }
-
-/** A name made a slug: lower case, each run of other characters a dash. */
-const slugged = (name: string) =>
-  name
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-+|-+$/g, "");
 
 /**
  * A host's slug, as a declaration gives it: its `name`, else `<slug>` of its `hostname` (or the
