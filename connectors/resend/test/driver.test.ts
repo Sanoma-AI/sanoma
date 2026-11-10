@@ -3,7 +3,6 @@ import { type CallContext, memorySecrets } from "sanoma/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { resendDriver } from "../src/driver.ts";
-import { resendOps } from "../src/connector.ts";
 import { fakeResend } from "../src/fake.ts";
 import { audience, from, replayOptions } from "./replay.ts";
 
@@ -105,19 +104,6 @@ describe("resendDriver", () => {
           message: expect.stringContaining("needs `from`"),
         });
     }
-  });
-
-  it("has the fake keep the files an email attached, whose bytes the ledger leaves out", async () => {
-    const fake = fakeResend();
-    const attachments = [{ filename: "invoice-INV-001.pdf", content: "JVBERi0xLjQK" }];
-    const { id } = (await fake.driver.ops["emails.send"]!(
-      { to, from, subject: "s", text: "Hi", attachments },
-      call,
-    )) as {
-      id: string;
-    };
-    expect(fake.state.emails[id]?.attachments).toEqual(attachments);
-    expect(resendOps.emails.send.opaque).toEqual(["attachments.content"]);
   });
 
   it("fails a 422 for good, with Resend's status and error name", async () => {

@@ -59,7 +59,7 @@ A failure is an `InvoiceValidationError`, `code: "invalid_invoice"`, with serial
 
 The layout follows `presentation`: `paper` (`A4` or `LETTER`) and `accent` (a six-digit hex color). It repeats the header, the column headings and the page numbers on every page, keeps each line on one page, and lets long notes run on. The PDF's dates are the issue date's, so the same invoice renders the same text; byte-identical files are not promised.
 
-The font is the built-in Helvetica: printable ASCII, Latin-1 and the WinAnsi punctuation in `src/render-contract.ts`. Other text, emoji and other scripts among it, is an `unsupported_text` issue. Nothing is fetched at render time.
+The font is the built-in Helvetica: printable ASCII, Latin-1 and the WinAnsi punctuation in `src/pdf.ts`. Other text, emoji and other scripts among it, is an `unsupported_text` issue. Nothing is fetched at render time.
 
 A logo is `{ logo: { mediaType: "image/png", base64 } }` as the second argument: base64 bytes, never a URL or a data URI, of a non-interlaced 8-bit RGB or RGBA PNG, up to 256 KiB and 1024 pixels a side. Its compressed pixels are bounded before decoding, its CRCs checked and its metadata stripped; color-key transparency (`tRNS`) is refused, so use RGBA.
 

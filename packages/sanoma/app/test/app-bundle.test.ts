@@ -268,10 +268,7 @@ describe("buildAppBundle", () => {
     expect(code).toContain('tidied: "nightly"');
     // Only package.json says it.
     expect(code).toContain("Fixture login");
-  });
-
-  it("carries a workflow that renders an invoice, without the PDF renderer", () => {
-    const code = bundle.modules.map(({ content }) => Buffer.from(content, "base64").toString()).join("\n");
+    // A workflow that renders an invoice, without the PDF renderer (`OPTIONAL`).
     expect(code).toContain("Render an invoice");
     // React-pdf's standard fonts, which only its code names.
     expect(code).not.toContain("Courier-BoldOblique");

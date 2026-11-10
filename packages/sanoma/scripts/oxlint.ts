@@ -3,7 +3,7 @@
 // installer lays out), made of:
 // - the runtime's `workflows/oxlint.json` (its overrides for `workflows/**`), with an entry for `sanoma`
 //   derived from `sanoma/workflows`'s (the same names), each other entry of `sanoma` that file does
-//   not name refused but those that compute locally (`LOCAL_ENTRIES`: `sanoma/invoices`), and the
+//   not name refused but those that compute locally (`LOCAL_ENTRIES`), and the
 //   plugin (`date`) loaded from this package's `dist/`;
 // - an override for `sites/**`: a site is client code, importing none of `sanoma`'s server entries
 //   (`serverEntries`: its `exports` but the client ones) and no runtime, connector or environment of

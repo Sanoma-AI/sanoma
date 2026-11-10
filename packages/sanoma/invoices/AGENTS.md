@@ -4,15 +4,14 @@ An invoice's shape, its arithmetic and its PDF: `sanoma/invoices` (`src/index.ts
 
 ## Contents
 
-| Path                                               | What it is                                                                                                             |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| [`src/schema.ts`](src/schema.ts)                   | `invoiceSchema` and its parts, and the types                                                                           |
-| [`src/calculate.ts`](src/calculate.ts)             | `calculateInvoice` (exact decimal arithmetic), `formatMoney` and `InvoiceValidationError`                              |
-| [`src/index.ts`](src/index.ts)                     | `sanoma/invoices`: the two above, zod only                                                                             |
-| [`src/render-contract.ts`](src/render-contract.ts) | `prepareInvoice` (glyphs, bounds, the logo, the file name), `pdfLimits`, `pdfOptionsSchema` and `InvoiceRenderError`   |
-| [`src/logo.ts`](src/logo.ts)                       | `validateLogo`: a bounded, sanitized PNG                                                                               |
-| [`src/pdf.ts`](src/pdf.ts)                         | `sanoma/invoices/pdf`: `renderInvoice` and the document, in `createElement`                                            |
-| [`test/`](test/)                                   | The arithmetic and validation, the PDF in Node and in a Vite browser build, and a workflow that renders and emails one |
+| Path                                   | What it is                                                                                                                                         |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`src/schema.ts`](src/schema.ts)       | `invoiceSchema` and its parts, and the types                                                                                                       |
+| [`src/calculate.ts`](src/calculate.ts) | `calculateInvoice` (exact decimal arithmetic), `formatMoney` and `InvoiceValidationError`                                                          |
+| [`src/index.ts`](src/index.ts)         | `sanoma/invoices`: the two above, zod only                                                                                                         |
+| [`src/logo.ts`](src/logo.ts)           | `validateLogo`: a bounded, sanitized PNG                                                                                                           |
+| [`src/pdf.ts`](src/pdf.ts)             | `sanoma/invoices/pdf`: the PDF's limits and checks (glyphs, bounds, the logo, the file name), the document in `createElement`, and `renderInvoice` |
+| [`test/`](test/)                       | The arithmetic and validation, the PDF in Node and in a Vite browser build, and a workflow that renders and emails one                             |
 
 ## Boundaries
 

@@ -330,16 +330,12 @@ export function ItemTime({ at }: { at: number }) {
 const REDACTED = "\uE000";
 
 /**
- * `value` with each field the ledger never shows replaced by `REDACTED`: a field, at any depth, that
- * holds its own name as `"<name>"`, as the runtime records an operation's `opaque` field and a
- * sign-in mail's body (`recorded`), so any other string that looks like one is left as it is.
+ * Each field the ledger never shows as `REDACTED`: a field, at any depth, that holds its own name as
+ * `"<name>"`, as the runtime records an operation's `opaque` field and a sign-in mail's body
+ * (`recorded`), so any other string that looks like one is left as it is.
  */
-function redact(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redact);
-  if (typeof value !== "object" || value === null) return value;
-  return Object.fromEntries(
-    Object.entries(value).map(([key, field]) => [key, field === `<${key}>` ? REDACTED : redact(field)]),
-  );
+function redact(this: unknown, key: string, field: unknown): unknown {
+  return !Array.isArray(this) && field === `<${key}>` ? REDACTED : field;
 }
 
 /**
@@ -348,7 +344,7 @@ function redact(value: unknown): unknown {
  */
 export function Json({ value, redacted = false }: { value: unknown; redacted?: boolean | undefined }) {
   const parts = useMemo(() => {
-    const text = JSON.stringify(redacted ? redact(value) : value, null, 2) ?? "undefined";
+    const text = JSON.stringify(value, redacted ? redact : undefined, 2) ?? "undefined";
     return redacted ? text.split(`"${REDACTED}"`) : [text];
   }, [value, redacted]);
   return (

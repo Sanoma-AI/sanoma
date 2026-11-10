@@ -42,6 +42,7 @@ describe("invoice PDF in a browser build", () => {
     const [browser, node] = await Promise.all([browserRender(invoice), renderInvoice(invoice)]);
     expect(browser.summary).toEqual(node.summary);
     expect(browser.filename).toBe(node.filename);
-    expect(await content(browser.bytes)).toEqual(await content(node.bytes));
+    const [browserPages, nodePages] = await Promise.all([content(browser.bytes), content(node.bytes)]);
+    expect(browserPages).toEqual(nodePages);
   });
 });

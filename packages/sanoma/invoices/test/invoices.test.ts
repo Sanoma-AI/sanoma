@@ -11,17 +11,17 @@ const invoice = (overrides: Partial<InvoiceInput> = {}): InvoiceInput => ({
   lines: [{ description: "Work", unit: "hour", quantity: "1", unitPrice: "100" }],
   ...overrides,
 });
-function validationFailure(action: () => unknown) {
+/** The issues `calculateInvoice` refuses `input` with. */
+function issues(input: unknown) {
   let failure: unknown;
   try {
-    action();
+    calculateInvoice(input);
   } catch (error) {
     failure = error;
   }
   expect(failure).toBeInstanceOf(InvoiceValidationError);
   return (failure as InvoiceValidationError).issues;
 }
-const issues = (input: unknown) => validationFailure(() => calculateInvoice(input));
 
 describe("the invoice's shape", () => {
   it("keeps the billing and service addresses apart, applies defaults and leaves the input as it was", () => {

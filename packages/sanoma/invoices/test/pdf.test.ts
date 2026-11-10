@@ -116,13 +116,6 @@ describe("invoice PDF", () => {
   });
 });
 
-/** `sanoma/invoices/pdf` loaded afresh over `renderer`, what its `import("@react-pdf/renderer")` gives at a render. */
-async function over(renderer: () => object) {
-  vi.resetModules();
-  vi.doMock("@react-pdf/renderer", renderer);
-  return (await import("sanoma/invoices/pdf")).renderInvoice;
-}
-
 describe("the renderer", () => {
   afterEach(() => {
     vi.doUnmock("@react-pdf/renderer");
@@ -149,10 +142,12 @@ describe("the renderer", () => {
   });
 
   it("reports a renderer's failure as render_failed, without its details", async () => {
-    const render = await over(async () => ({
+    vi.resetModules();
+    vi.doMock("@react-pdf/renderer", async () => ({
       ...(await vi.importActual<object>("@react-pdf/renderer")),
       pdf: () => ({ toBlob: () => Promise.reject(new Error("private customer data")) }),
     }));
+    const { renderInvoice: render } = await import("sanoma/invoices/pdf");
     const failure = render(example());
     await expect(failure).rejects.toMatchObject({ name: "InvoiceRenderError", code: "render_failed" });
     await expect(failure).rejects.not.toThrow(/private/);

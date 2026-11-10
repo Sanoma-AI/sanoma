@@ -24,7 +24,7 @@ const AUTHOR_PACKAGES: readonly string[] = ["sanoma/workflows", "sanoma"];
 
 /**
  * The packages a workflow may import from at all: the author packages, `sanoma`'s entries that
- * compute locally (`sanoma/invoices`, any of their names), connectors and zod.
+ * compute locally (`LOCAL_ENTRIES`, any of their names), connectors and zod.
  */
 const ALLOWED_PACKAGE = new RegExp(
   `^(${[...AUTHOR_PACKAGES, ...LOCAL_ENTRIES, "@sanoma-ai/connector-[a-z0-9-]+", "zod"].join("|")})$`,
@@ -65,9 +65,8 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
 
 /**
  * Checks a workflow file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
- * type from `sanoma/workflows` or `sanoma`, `LOCAL_ENTRIES` (`sanoma/invoices`), `@sanoma-ai/connector-<vendor>`,
- * `zod`, and relative files. With
- * `filename`, a relative import must stay inside the file's nearest `workflows/` directory, or its
+ * type from `sanoma/workflows` or `sanoma`, `LOCAL_ENTRIES`, `@sanoma-ai/connector-<vendor>`,
+ * `zod`, and relative files. With `filename`, a relative import must stay inside the file's nearest `workflows/` directory, or its
  * own directory when it has none; the one file outside it a workflow may import is the company's
  * `resources/data.ts`, its collections (by real path). No
  * `instanceof` against the runtime's error classes: read `errorCode(err)`.

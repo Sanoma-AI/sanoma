@@ -120,7 +120,7 @@ describe("recorded", () => {
     },
   }).message.send;
 
-  it("records an opaque field by its name, and a dotted path's in each item of a list on the way", () => {
+  it("records an opaque field by its name, in each item of a list on the way", () => {
     const files = [
       { name: "a.pdf", bytes: "JVBERi0=" },
       { name: "b.pdf", bytes: "JVBERi1=" },
@@ -136,6 +136,7 @@ describe("recorded", () => {
     // What is not there stays as it is: no field made up, and a value that is no object.
     expect(recorded(mail, { to: "ada@example.com" })).toEqual({ to: "ada@example.com" });
     expect(recorded(mail, "text")).toBe("text");
+    expect(recorded(mail, [{ id: "m1", handle: "secret" }])).toEqual([{ id: "m1", handle: "<handle>" }]);
   });
 });
 

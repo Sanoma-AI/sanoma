@@ -38,7 +38,7 @@ const COMPATIBILITY_FLAGS = ["nodejs_compat"];
  * `worker/missing.js`, whose every use throws: DBOS's optional dependencies, required lazily only
  * with tracing or OTLP logs on (measured on workerd for #428: DBOSClient bundles without exactly
  * these, and enqueues), the runtime's source tools, which parse and format the company's files, and
- * the PDF renderer.
+ * an optional peer a workflow's file imports.
  */
 const OPTIONAL: readonly string[] = [
   "@opentelemetry/api",
