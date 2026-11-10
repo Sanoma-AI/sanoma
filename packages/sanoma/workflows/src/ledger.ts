@@ -10,11 +10,11 @@ import { type Db, lazyDb, pgCode } from "./db.ts";
 import { ledger } from "./db/company.ts";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
-import { shown, warn } from "./log.ts";
+import { warn } from "./log.ts";
 import type { Effect, SignInMethod } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
 import type { Run } from "./run.ts";
-import { errorMessage } from "./shared.ts";
+import { errorMessage, shown } from "./shared.ts";
 
 /**
  * The audit record of a run: who started it, every operation call with the policy's

@@ -3,7 +3,7 @@ import { createRequire, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { collectionIn } from "./collection.ts";
-import { callerFile } from "./define.ts";
+import { callerFile } from "./company-file.ts";
 import { defineApp, defineSite } from "./definitions.ts";
 import { foldedInto } from "./folded.ts";
 import { type Connector, VENDOR } from "./op.ts";

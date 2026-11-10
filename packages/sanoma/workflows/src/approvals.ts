@@ -4,7 +4,7 @@ import { type ApprovalRequest, type ApprovalResult, type ApprovalState, Principa
 import { RejectedError, WithdrawnError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
-import type { Placed } from "./call.ts";
+import type { Placed } from "./ctx.ts";
 import { recordSandboxChecks, type Run } from "./run.ts";
 import { readPeople } from "./resources.ts";
 import { approverLabel, isVisitor, OWN_CHANGE, refusalOf } from "./shared.ts";

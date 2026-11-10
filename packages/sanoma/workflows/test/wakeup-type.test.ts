@@ -24,7 +24,7 @@ import {
   type SanomaConfig,
   type Secrets,
 } from "../src/index.ts";
-import { fakeSanomaWakeup } from "../src/fake.ts";
+import { fakeSanomaWakeup } from "../src/wakeup-fake.ts";
 import { sanomaWakeupDriver } from "../src/wakeup-driver.ts";
 import { mintInstanceToken, startWakeupService } from "../src/wakeup-service.ts";
 import { wakeup } from "../src/wakeup-type.ts";

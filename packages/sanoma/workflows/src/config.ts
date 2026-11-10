@@ -40,19 +40,16 @@ import { importWorkflow } from "./import-workflow.ts";
 import { connectWorkflow } from "./connect-workflow.ts";
 import { storeMoveDriver, storeMoveOps } from "./store-move.ts";
 import { migrateStoreWorkflow } from "./store-move-workflow.ts";
-import {
-  type Collection,
-  collectionsConnector,
-  collectionsDriver,
-  collectionsFake,
-  isCollection,
-} from "./collection.ts";
+import { type Collection, collectionsConnector, collectionsFake, isCollection } from "./collection.ts";
+import { collectionsDriver } from "./collection-driver.ts";
 import { lazyDb, type LazyDb } from "./db.ts";
 import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
-import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
+import { callerFile } from "./company-file.ts";
+import type { Use, WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
 import { statusesOf, unconfigured } from "./env.ts";
-import { type Fake, fakeSanomaWakeup } from "./fake.ts";
+import type { Fake } from "./fake.ts";
+import { fakeSanomaWakeup } from "./wakeup-fake.ts";
 import { peopleConnector } from "./person.ts";
 import type { LedgerStore } from "./ledger.ts";
 import {
@@ -65,7 +62,9 @@ import {
   type DriverEnv,
   type DriverFn,
   isOp,
+  indexConnectors,
   keepsInput,
+  makersOf,
   type Op,
   checkConnector,
   setupOf,
@@ -749,29 +748,6 @@ function agentsOf(connectors: readonly Connector<any, any>[]): Map<string, Insta
 }
 
 /**
- * What the connectors' setups attach under `key` (`withSetup`), by vendor id in `connectors`
- * order. One vendor's connectors may name one maker, as copies of one connector do, never two.
- */
-function makersOf<K extends keyof ConnectorSetup>(
-  connectors: readonly Connector<any, any>[],
-  key: K,
-): Map<string, NonNullable<ConnectorSetup[K]>> {
-  const makers = new Map<string, NonNullable<ConnectorSetup[K]>>();
-  for (const connector of connectors) {
-    const make = setupOf(connector)[key];
-    if (make === undefined) continue;
-    const vendor = connector[VENDOR].id;
-    const seen = makers.get(vendor);
-    if (seen && seen !== make) {
-      const part = key === "agent" ? "coding agent" : key;
-      throw new Error(`Two connectors in \`connectors\` attach a ${part} for "${vendor}"; keep one per vendor`);
-    }
-    makers.set(vendor, make);
-  }
-  return makers;
-}
-
-/**
  * What the runtime reads from `config`'s root that a bundle carries where the files are not
  * (`useRootSnapshot`): the app's name and versions as `resolved` has them, the policy files with
  * the policies `resolved` checked from them, and the people the data files declare.
@@ -988,21 +964,6 @@ async function readDeclared(
     ...(leftOut.size > 0 && { leftOut: [...leftOut] }),
     problems,
   };
-}
-
-function indexConnectors(list: Connector<any, any>[]) {
-  const map = new Map<string, Op>();
-  for (const connector of list) {
-    for (const resource of Object.values(connector as Record<string, Record<string, unknown>>)) {
-      for (const op of Object.values(resource)) {
-        if (!isOp(op)) continue;
-        const seen = map.get(op.id);
-        if (seen && seen !== op) throw new Error(`Two connectors in \`connectors\` declare ${op.id}`);
-        map.set(op.id, op);
-      }
-    }
-  }
-  return map;
 }
 
 /**

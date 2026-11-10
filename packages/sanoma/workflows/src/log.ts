@@ -69,14 +69,3 @@ export const dbosLogger: DLogger = {
     else console.error(entry);
   },
 };
-
-/** A value as JSON, or as a string when it isn't JSON, cut to `max` characters, for a message. */
-export function shown(value: unknown, max = Number.POSITIVE_INFINITY): string {
-  let text: string;
-  try {
-    text = JSON.stringify(value) ?? String(value);
-  } catch {
-    text = String(value);
-  }
-  return text.length > max ? `${text.slice(0, max)}…` : text;
-}

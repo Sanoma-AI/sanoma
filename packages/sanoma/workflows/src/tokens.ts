@@ -1,13 +1,19 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { pgCode, type Db } from "./db.ts";
 import { apiTokens } from "./db/company.ts";
 import type { Principal } from "./define.ts";
-import { generateSecret, tokenHash as hashOf } from "./secret.ts";
+import { generateSecret } from "./secret.ts";
 
 // The api tokens, in the config's database beside the runtime's other tables: a caller of a
 // public site's api (`callFn`) with `Authorization: Bearer sca_…` is the principal `token:<id>`,
 // a visitor, with the row's groups. Only a token's SHA-256 is kept; the token is shown once, at mint.
+
+/**
+ * A bearer token's sha256, hex: all a table keeps of one (the wakeup service's, the api tokens). A
+ * token is found by its hash (a unique index), so the secret itself is never compared.
+ */
+export const tokenHash = (token: string): string => createHash("sha256").update(token).digest("hex");
 
 /** What every token starts with, so a bearer that is not one is told at a glance. */
 const PREFIX = "sca_";
@@ -25,7 +31,7 @@ const groupsOf = (groups: readonly string[]) => [...new Set(groups)].toSorted();
 const registrationOf = (input: TokenRegistration) => {
   if (!input.id || !input.subject || !/^sca_[A-Za-z0-9_-]{43}$/.test(input.token))
     throw new Error("Invalid token registration");
-  return { ...input, hash: hashOf(input.token), groups: groupsOf(input.groups) };
+  return { ...input, hash: tokenHash(input.token), groups: groupsOf(input.groups) };
 };
 
 /** The api tokens' store, `SanomaClient.tokens`. */
@@ -55,7 +61,7 @@ export function tokenStore(db: () => Promise<Db>): Tokens {
   return {
     async mint({ id = randomUUID(), subject, groups }) {
       const token = newApiToken();
-      await (await db()).insert(apiTokens).values({ id, hash: hashOf(token), subject, groups: [...groups] });
+      await (await db()).insert(apiTokens).values({ id, hash: tokenHash(token), subject, groups: [...groups] });
       return { id, token };
     },
     async register(input) {
@@ -102,7 +108,7 @@ export function tokenStore(db: () => Promise<Db>): Tokens {
       )
         .select({ id: apiTokens.id, subject: apiTokens.subject, groups: apiTokens.groups })
         .from(apiTokens)
-        .where(active(eq(apiTokens.hash, hashOf(token))));
+        .where(active(eq(apiTokens.hash, tokenHash(token))));
       if (!row) return undefined;
       return { principal: { id: `token:${row.id}`, groups: row.groups }, subject: row.subject };
     },
@@ -125,7 +131,7 @@ export function memoryTokens(): Tokens {
     async mint({ id = randomUUID(), subject, groups }) {
       if (rows.has(id)) throw new Error(`A token with the id ${id} exists`);
       const token = newApiToken();
-      rows.set(id, { hash: hashOf(token), subject, groups: [...groups], revoked: false });
+      rows.set(id, { hash: tokenHash(token), subject, groups: [...groups], revoked: false });
       return { id, token };
     },
     async register(input) {
@@ -147,7 +153,7 @@ export function memoryTokens(): Tokens {
       if (row) row.revoked = true;
     },
     async resolve(token) {
-      const hash = hashOf(token);
+      const hash = tokenHash(token);
       for (const [id, row] of rows) {
         if (row.hash === hash && !row.revoked) {
           return { principal: { id: `token:${id}`, groups: [...row.groups] }, subject: row.subject };
