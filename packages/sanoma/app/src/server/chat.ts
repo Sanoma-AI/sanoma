@@ -13,7 +13,7 @@ import { ApiError } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import {
   type ChatMessage,
-  ENGINE_NAMES,
+  enginesHere,
   heldRunOf,
   noModelText,
   onModelConnector,
@@ -21,7 +21,7 @@ import {
   unfinished,
   written,
 } from "../lib/chat.ts";
-import { type ActorContext, parse, requireActor, toApiError } from "./core.ts";
+import { type ActorContext, appConfig, parse, requireActor, toApiError } from "./core.ts";
 import { chatModel } from "./models.ts";
 
 // The operator agent's chat, as the app answers it: a turn is a run of the built-in `chat`, which
@@ -83,10 +83,13 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const { chats } = app.client;
     const chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
-    const named = chat?.engine ?? body.engine;
-    if (!Object.hasOwn(ENGINE_NAMES, named)) {
-      throw invalid(`No engine ${named}: the engines are ${Object.keys(ENGINE_NAMES).join(", ")}`);
+    // A chat keeps its engine, whose turn says what it lacks; a new one opens only on one the composer offers here.
+    if (!chat) {
+      const here = enginesHere(appConfig(app)).map((engine) => engine.name);
+      if (!here.includes(body.engine))
+        throw invalid(`No engine ${body.engine} here: the engines are ${here.join(", ")}`);
     }
+    const named = chat?.engine ?? body.engine;
     const sent = await personMessage(body.message);
     const message: ChatMessage = body.start
       ? { ...sent, parts: [{ type: "text", text: INTRO }], metadata: { intro: true } }

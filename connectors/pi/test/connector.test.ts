@@ -14,7 +14,15 @@ it("is a connector with no operations that gives the chat Pi, on a person's own 
   expect(ops.filter((op) => op.vendor === "pi")).toEqual([]);
   // Anthropic's by contract: the connector imports none, and a config without it still describes Pi.
   expect(agents).toEqual([
-    { id: "pi", vendor: "pi", title: "Pi", mark: vendors.pi?.logo, own: true, onKey: { model: "anthropic" } },
+    {
+      id: "pi",
+      vendor: "pi",
+      title: "Pi",
+      mark: vendors.pi?.logo,
+      own: true,
+      once: true,
+      onKey: { model: "anthropic" },
+    },
   ]);
   expect(resolveConfig(company).agents.get("pi")).toMatchObject({
     own: { bin: "pi-acp", signIn: { once: { bin: "pi", args: [], after: "/login" } } },

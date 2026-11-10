@@ -10,7 +10,7 @@ it("is a connector with no operations that gives the chat OpenCode, on a person'
   expect(vendors.opencode).toMatchObject({ title: "OpenCode", package: "@sanoma-ai/connector-opencode", fake: false });
   expect(ops.filter((op) => op.vendor === "opencode")).toEqual([]);
   expect(agents).toEqual([
-    { id: "opencode", vendor: "opencode", title: "OpenCode", mark: vendors.opencode?.logo, own: true },
+    { id: "opencode", vendor: "opencode", title: "OpenCode", mark: vendors.opencode?.logo, own: true, once: true },
   ]);
   expect(resolveConfig(company).agents.get("opencode")?.own).toMatchObject({
     bin: "opencode",
