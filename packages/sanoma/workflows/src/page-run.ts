@@ -155,7 +155,9 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
 
   let current = await make();
   for (const wf of workflows) {
-    refuseUnfaked(`Workflow "${wf.name}" uses`, opIdsOf(wf), current.drivers, { workflow: wf.name });
+    refuseUnfaked(opIdsOf(wf), current.drivers, (missing, why) => `Workflow "${wf.name}" uses ${missing}, but ${why}`, {
+      workflow: wf.name,
+    });
   }
   let runs = new Map<string, PageRun>();
   let started = 0;

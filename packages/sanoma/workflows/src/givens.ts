@@ -28,23 +28,21 @@ export interface GivenTarget {
 }
 
 /**
- * Refuses the operations among `ids` that no fake's driver in `drivers` implements, as what
- * `subject` says calls them (`Workflow "x" uses`, `Scenario "y" seeds`): `invalid_input` with
- * `data` and the ones `missing`. A sandbox run's, a world's and a page's workflows' one check.
+ * Refuses the operations among `ids` that no fake's driver in `drivers` implements:
+ * `invalid_input` with `data` and the ones `missing`, its message `said` of them (listed) and
+ * `why`, "no fake its connectors attach implements them". A sandbox run's, a world's and a
+ * page's workflows' one check.
  */
 export function refuseUnfaked(
-  subject: string,
   ids: Iterable<string>,
   drivers: ReadonlyMap<string, unknown>,
+  said: (missing: string, why: string) => string,
   data: Record<string, unknown>,
 ): void {
   const missing = [...new Set(ids)].filter((id) => !drivers.has(id));
   if (missing.length === 0) return;
-  throw new SanomaError(
-    "invalid_input",
-    `${subject} ${missing.join(", ")}, but no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`,
-    { ...data, missing },
-  );
+  const why = `no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`;
+  throw new SanomaError("invalid_input", said(missing.join(", "), why), { ...data, missing });
 }
 
 /** True for a fake that holds resources (`ResourceFake`, as `sanoma/internal/bridge`'s `tfFake` is). */
@@ -118,12 +116,10 @@ export function seedResource(
 export async function applyGivens(scenario: Pick<Scenario, "name" | "given">, target: GivenTarget): Promise<Seeds> {
   const { name, given } = scenario;
   refuseUnfaked(
-    `Scenario "${name}" seeds`,
     given.flatMap((g) => ("op" in g ? [g.op] : [])),
     target.drivers,
-    {
-      scenario: name,
-    },
+    (missing, why) => `Scenario "${name}" seeds ${missing}, but ${why}`,
+    { scenario: name },
   );
   const plain = missingResourceFake(scenario, target.fakes);
   if (plain) throw plain;

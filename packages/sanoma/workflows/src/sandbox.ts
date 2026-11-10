@@ -95,7 +95,12 @@ export async function seedSandbox(run: Run, name: string, input: unknown): Promi
       // which `applyGivens` checks.
       const uses =
         run.workflow === CALL_WORKFLOW ? [CallInput.parse(input).op] : opIdsOf(state.workflows.get(run.workflow)!);
-      refuseUnfaked(`A sandbox run of ${run.workflow} calls`, uses, drivers, { scenario: name });
+      refuseUnfaked(
+        uses,
+        drivers,
+        (missing, why) => `A sandbox run of ${run.workflow} has no fake for ${missing}: ${why}`,
+        { scenario: name },
+      );
       /** The run's fake of `vendor`, or of the account `ref` selects. */
       const fakeOf = (vendor: string, ref?: ConnectionRef) => {
         const selected = select(vendor, ref);
