@@ -52,8 +52,8 @@ export const loadGoLive = (queryClient: QueryClient) =>
   ]);
 
 /**
- * Going live, on Hosting while no host and no database are declared, or once its repository is
- * bound until its host is: connect GitHub and the config's vendors, choose where the company goes,
+ * Going live on accounts of the company's own, on Hosting while the company is Local (`?own` where
+ * `infra.ts` declares Sanoma Cloud): connect GitHub and the config's vendors, choose where the company goes,
  * then apply the repository and the database, push this repository to the new one, and apply the
  * host. Each step shows once the one before is done; it reads how far it is from the files, the
  * lockfile and the runs, so it picks up where it was. What it cannot read fails it alone, said in
@@ -160,7 +160,7 @@ function GoLiveSteps() {
         {progress.infra !== null ? (
           <>
             <p className="text-muted-foreground">
-              <code>resources/sanoma/infra.ts</code> declares the repository, its deploy key, the database and the host:
+              <code>resources/sanoma/infra.ts</code> declares where it goes:
             </p>
             <pre className="overflow-x-auto rounded-lg border p-3 text-xs">{progress.infra}</pre>
           </>
@@ -368,14 +368,18 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
   );
 }
 
-/** An apply run as going live follows it: what it waits on (with its plan), what failed, or its status. */
-function RunStatus({ run }: { run: GoLiveRun }) {
+/**
+ * A run as going live follows it (an apply, or going live's own before it started one): what it
+ * waits on (with its plan), what failed, or its status.
+ */
+export function RunStatus({ run }: { run: GoLiveRun }) {
   const failed = run.results?.filter((r) => r.status === "failed") ?? [];
   return (
     <div className="flex flex-col gap-3">
       <p className="flex flex-wrap items-center gap-2">
-        Apply is <ToneBadge tone={failed.length ? "bad" : RUN_TONE[run.status]}>{run.status}</ToneBadge>
-        <Link {...runLink({ runId: run.runId, workflow: "apply" })}>Open the run</Link>
+        {run.workflow === APPLY_WORKFLOW ? "Apply" : "Going live"} is{" "}
+        <ToneBadge tone={failed.length ? "bad" : RUN_TONE[run.status]}>{run.status}</ToneBadge>
+        <Link {...runLink(run)}>Open the run</Link>
       </p>
       {run.pending && (
         <>
@@ -420,10 +424,10 @@ function ApplyAgain({ only }: { only: string[] }) {
   );
 }
 
-/** Pushes this repository to the new one, then starts apply on the host. */
-function PushButton() {
+/** The built-in `go-live-host`: this repository pushed to the new one, then apply started on the host. */
+export function useGoLiveHost() {
   const queryClient = useQueryClient();
-  const mutation = useMutation({
+  return useMutation({
     mutationFn: () => appApi.goLiveHost({}),
     onSuccess: async () => {
       toast.success("Pushed, and started apply on the host");
@@ -431,6 +435,11 @@ function PushButton() {
     },
     onError: (err) => toast.error(errorBodyOf(err)?.error ?? err.message),
   });
+}
+
+/** Pushes this repository to the new one, then starts apply on the host. */
+function PushButton() {
+  const mutation = useGoLiveHost();
   return (
     <div className="flex flex-col gap-2">
       <p className="text-muted-foreground">

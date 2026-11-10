@@ -2,8 +2,10 @@ import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { github as githubConnector } from "@sanoma-ai/connector-github";
 import { resend } from "@sanoma-ai/connector-resend";
+import { cloud } from "@sanoma-ai/connector-sanoma-cloud";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { neon } from "@sanoma-ai/connector-neon";
 import { fakeResend } from "@sanoma-ai/connector-resend/fake";
@@ -23,6 +25,7 @@ import {
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { credentials, databaseOn } from "sanoma/workflows/db";
+import { GO_LIVE_HOST_WORKFLOW } from "sanoma/workflows/shared";
 import { secret } from "sanoma/resources";
 import { eq, inArray } from "drizzle-orm";
 import { Client } from "pg";
@@ -42,6 +45,9 @@ import { GITHUB_APP, githubManifest, mintWakeupToken, setSetupToken, setupStatus
 // Connecting GitHub and the vendors (/hosting/connect): the GitHub App's manifest page, its callback
 // against a GitHub of msw handlers, the keys stored encrypted, and the status the page shows.
 // Needs Postgres and the built app, as app.test.ts does.
+
+/** The template a new company starts from, which declares Sanoma Cloud. */
+const TEMPLATE = fileURLToPath(new URL("../../template/", import.meta.url));
 
 const root = mkdtempSync(join(tmpdir(), "sanoma-setup-"));
 // Declared, so storing the App's keys admits who asked.
@@ -577,7 +583,7 @@ describe("Hosting", () => {
     expect(withApp).not.toContain("Or connect the GitHub App");
   });
 
-  it("puts the repository the host clones, the database and the host in cards, every other resource under Other resources, and going live again until the host is applied", async () => {
+  it("puts the repository the host clones, the database and the host in cards, every other resource under Other resources, and going live's steps until the host is bound", async () => {
     const live = mkdtempSync(join(tmpdir(), "sanoma-hosting-"));
     mkdirSync(join(live, "resources", "sanoma"), { recursive: true });
     writeFileSync(
@@ -619,11 +625,14 @@ export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", 
       // The fake host is long-lived: always on, and no Wakeup asked for.
       expect(card("Host")).toMatch(/>Lifetime<.*?>Always on</s);
       expect(card("Host")).not.toContain("No connected wakeup");
-      // The other repository under Other resources; no people, and no going live.
+      // The other repository under Other resources; no people. Declared is not live: nothing is
+      // bound, so the company is Local and going live's steps show, on accounts of its own.
       expect(page).toContain(">Other resources</h2>");
       expect(page).toContain('href="/hosting?resource=resources%2Fsanoma%2Finfra.ts%23docs"');
       expect(page).not.toContain("resources%2Fpeople.ts%23alice");
-      expect(page).not.toContain(">1. Connect</h2>");
+      expect(page).toContain(">1. Connect</h2>");
+      expect(page).not.toContain(">Ready to go live</h2>");
+      expect(page).toContain(">Local</span>");
     } finally {
       await hosted.close();
     }
@@ -643,7 +652,90 @@ export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", 
       expect(page).toContain("<h2>Repository</h2>");
     } finally {
       await resumed.close();
+    }
+    // The host bound: Live, and this computer's copy is the drafting copy; going live is done.
+    writeFileSync(
+      join(live, "resources", "sanoma.lock.json"),
+      JSON.stringify({
+        "resources/sanoma/infra.ts#repo": { type: "github.repository", id: "R_kgDOrepo0001" },
+        "resources/sanoma/infra.ts#host": { type: "testhost.app", id: "acme-ops" },
+      }),
+    );
+    const bound = await startApp(
+      defineConfig({ ...config, connectors: [githubConnector, supabase, host.connector], root: live }),
+      { port: 0 },
+    );
+    try {
+      const page = await html("/hosting", bound.url);
+      expect(page).not.toContain(">1. Connect</h2>");
+      expect(page).toContain(">Live · drafting copy</span>");
+      expect(page).toContain("Live · drafting copy: the company runs online");
+      expect(page).toContain("<h2>Host</h2>");
+    } finally {
+      await bound.close();
       rmSync(live, { recursive: true, force: true });
+    }
+  });
+
+  it("is ready to go live where the template declares Sanoma Cloud and nothing is bound, with going live on the company's own accounts a link away", async () => {
+    const local = mkdtempSync(join(tmpdir(), "sanoma-hosting-"));
+    mkdirSync(join(local, "resources", "sanoma"), { recursive: true });
+    writeFileSync(
+      join(local, "resources", "sanoma", "infra.ts"),
+      readFileSync(join(TEMPLATE, "resources", "sanoma", "infra.ts"), "utf8").replaceAll("company", "acme"),
+    );
+    writeFileSync(join(local, "resources", "people.ts"), readFileSync(join(root, "resources", "people.ts")));
+    const started = await startApp(defineConfig({ ...config, connectors: [githubConnector, cloud], root: local }), {
+      port: 0,
+    });
+    try {
+      const page = await html("/hosting", started.url);
+      expect(page).toContain(">Local</span>");
+      expect(page).toContain(">Ready to go live</h2>");
+      expect(page).toContain("answering at <code>acme.sanoma.work</code>");
+      expect(page).toContain('href="/hosting?own=true"');
+      expect(page).not.toContain(">1. Connect</h2>");
+      // The declared database and host in their cards, unbound, the host's address once applied.
+      expect(page).toMatch(/<h2>Host<\/h2>(?:(?!<h2>)[\s\S])*>acme\.sanoma\.work<.*?once applied/s);
+      const own = await html("/hosting?own=true", started.url);
+      expect(own).toContain(">1. Connect</h2>");
+      expect(own).not.toContain(">Ready to go live</h2>");
+      // Home's last step is not done: the company is not online.
+      expect(await html("/", started.url)).toMatch(/>[1-4] of 5 done</);
+    } finally {
+      await started.close();
+      rmSync(local, { recursive: true, force: true });
+    }
+  });
+
+  it("says going live while its run goes on, and Go live failed, with Retry and Ask the agent, once it failed", async () => {
+    const going = defineConfig({ ...config, databaseUrl: testDatabaseUrl("setup_state") });
+    const started = await startApp(going, { port: 0 });
+    const runs = await SanomaClient.connect(going);
+    try {
+      // Queued, no worker to take it: going live.
+      const runId = await runs.start(GO_LIVE_HOST_WORKFLOW, {}, { startedBy: { id: "alice" } });
+      const deploying = await html("/hosting", started.url);
+      expect(deploying).toContain(">Going live…</span>");
+      expect(deploying).toContain(">Going live</h2>");
+      expect(deploying).toContain(">The repository<");
+      expect(deploying).toMatch(/Going live is <span[^>]*>.*?queued/s);
+      // A worker without the app's steps fails it: going live failed, and why.
+      const worker = await startWorker(going);
+      try {
+        await runs.result(runId).catch(() => undefined);
+      } finally {
+        await worker.stop();
+      }
+      const failed = await html("/hosting", started.url);
+      expect(failed).toContain(">Go live failed</span>");
+      expect(failed).toContain(">Go live failed</h2>");
+      expect(failed).toMatch(/>Retry</);
+      expect(failed).toContain(">Ask the agent<");
+      expect(failed).not.toContain(">1. Connect</h2>");
+    } finally {
+      await runs.close();
+      await started.close();
     }
   });
 

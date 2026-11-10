@@ -9,19 +9,29 @@ import {
   APPLY_WORKFLOW,
   credentialReady,
   DRIFT_WORKFLOW,
+  errorMessage,
   exportSpan,
-  hostnameUrl,
   isEnded,
   problemAt,
 } from "sanoma/workflows/shared";
-import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  useQueryErrorResetBoundary,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
+import { CatchBoundary, createFileRoute, type ErrorComponentProps, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
 import { NotePencilIcon } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { ScanIcon } from "@phosphor-icons/react/dist/csr/Scan";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, Suspense, useMemo } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.tsx";
@@ -30,7 +40,16 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { boxless } from "#/lib/chat.ts";
 import { DRIFT_TONE } from "#/lib/tone.ts";
-import { type AppConfig, DECLARE_BOX, errorBodyOf, INFRA, noWakeup } from "../../api.ts";
+import {
+  type AppConfig,
+  type CompanyState,
+  DECLARE_BOX,
+  errorBodyOf,
+  type GoLiveRun,
+  INFRA,
+  noWakeup,
+} from "../../api.ts";
+import { ChatButton } from "../../components/chat-button.tsx";
 import {
   ButtonLink,
   CardHeading,
@@ -45,6 +64,7 @@ import {
   PanelCard,
   plural,
   Problems,
+  Region,
   SectionTitle,
   ShortId,
   ToneBadge,
@@ -53,14 +73,15 @@ import {
 } from "../../components/common.tsx";
 import { DeclarationForm } from "../../components/declaration-form.tsx";
 import { type Adopt, FieldDiff } from "../../components/field-diff.tsx";
-import { GoLive, loadGoLive } from "../../components/go-live.tsx";
+import { GoLive, loadGoLive, RunStatus, useGoLiveHost } from "../../components/go-live.tsx";
+import { ReadyToGoLive } from "../../components/go-live-cloud.tsx";
 import { startRunFn } from "../../functions.ts";
 import {
+  companyStateQuery,
   configQuery,
   credentialsFor,
   credentialsQuery,
   driftReportQuery,
-  goLiveProgressQuery,
   hostDerivedQuery,
   HostingSearch,
   isPeople,
@@ -73,17 +94,28 @@ import {
 
 export const Route = createFileRoute("/hosting/")({
   validateSearch: HostingSearch,
-  loader: async ({ context: { queryClient } }) => {
+  loaderDeps: ({ search: { own } }) => ({ own: own === true }),
+  loader: async ({ context: { queryClient }, deps: { own } }) => {
     if (!import.meta.env.SSR) void loadCode();
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const drift = driftOf(config);
-    await Promise.all([
+    // The state, asking the host whether it answers; a failed read is said in the panel's place.
+    const [state] = await Promise.all([
+      queryClient.query({ ...companyStateQuery({ force: true }), staleTime: "static" }).catch(() => undefined),
       drift && loadLastCheck(queryClient, drift),
-      slotsOf(config).goingLive && loadGoLive(queryClient),
     ]);
+    if (state && panelOf(state, own) === "goLive") await loadGoLive(queryClient);
   },
   component: HostingPage,
 });
+
+/**
+ * Hosting's panel for the company's state: Ready to go live while it is Local and `infra.ts`
+ * declares Sanoma Cloud (unless `own`), going live on its own accounts while it is Local
+ * otherwise, and the state's own while it is going live, failed or live.
+ */
+const panelOf = ({ state, declared }: CompanyState, own: boolean) =>
+  state !== "local" ? state : declared === "cloud" && !own ? "ready" : "goLive";
 
 /** The slots on top of Hosting, each a contract a resource type meets (`capabilities`), in the order they show. */
 const SLOTS = [
@@ -97,10 +129,8 @@ type Slot = (typeof SLOTS)[number];
 
 /**
  * Which declared resource fills each slot: the first whose type meets its contract, the
- * repository being the one the host names (its `refs`) when the host names one. Whether the
- * company is declared live (a host or a database is), and whether going live's steps show: while
- * it is not, and while going live is between its first apply and its host's. Whether a Wakeup
- * starts the host again (`woken`).
+ * repository being the one the host names (its `refs`) when the host names one; and whether a
+ * Wakeup starts the host again (`woken`).
  */
 function slotsOf(config: ConfigDescription) {
   const capabilities = new Map(config.resourceTypes.map((t) => [t.id, t.capabilities ?? []]));
@@ -115,17 +145,10 @@ function slotsOf(config: ConfigDescription) {
       first(slot.capability);
     return resource ? [{ ...slot, resource }] : [];
   });
-  const live = host !== undefined || first("database") !== undefined;
-  // Going live past its first apply (its repository bound, its host not yet): the push and the
-  // host's apply are still to do, and only going live's steps do them.
-  const byId = (id: string) => config.resources.find((r) => r.id === id);
-  const infraHost = byId(`${INFRA}#host`);
-  const pushing =
-    infraHost !== undefined && infraHost.binding === undefined && byId(`${INFRA}#repo`)?.binding !== undefined;
   // A declared Wakeup that names this host (its `inputs.host` reference), not one for another host.
   const woken =
     host !== undefined && config.resources.some((r) => meets(r, "wakeup") && Object.values(r.refs).includes(host.id));
-  return { filled, live, goingLive: !live || pushing, woken };
+  return { filled, woken };
 }
 
 /** The built-in drift workflow's name, when the config has it: its connectors declare resource types. */
@@ -190,11 +213,11 @@ function problemsOf(problems: ResourceProblem[], report: DriftReport | undefined
 }
 
 /**
- * Where the company runs, and the rest of what the data files declare at vendors: the repository,
- * database, host and wakeup on top, each with the latest drift check's verdict; then every other
- * resource (people are on People, collections on Data), the lockfile's orphans and what is wrong
- * in the files; and the declaration itself in its file. While no host and no database are
- * declared, or going live has bound the repository but not yet the host, going live's steps show first.
+ * Where the company runs, and the rest of what the data files declare at vendors: the panel for
+ * the company's state first (`StatePanel`), then the repository, database, host and wakeup, each
+ * with the latest drift check's verdict; then every other resource (people are on People,
+ * collections on Data), the lockfile's orphans and what is wrong in the files; and the declaration
+ * itself in its file.
  */
 function HostingPage() {
   const { data: config } = useSuspenseQuery(configQuery());
@@ -242,7 +265,7 @@ function Hosting({
   action?: ReactNode;
   children: ReactNode;
 }) {
-  const { resource: selected, edit } = Route.useSearch();
+  const { resource: selected, edit, own } = Route.useSearch();
   const slots = useMemo(() => slotsOf(config), [config]);
   const results = useMemo(() => new Map(report?.resources.map((r) => [r.id, r])), [report]);
   const rows = useMemo(() => {
@@ -262,7 +285,7 @@ function Hosting({
     <>
       <CrumbHeader action={action} />
       {children}
-      {slots.goingLive && <GoLive />}
+      <StatePanel own={own === true} />
       {boxless(config) && <Notice>{DECLARE_BOX}.</Notice>}
       {slots.filled.length > 0 && (
         <div className="grid gap-(--gap-region) md:grid-cols-2 2xl:grid-cols-4">
@@ -310,8 +333,9 @@ function Hosting({
           </div>
         </section>
       ) : (
+        // On this computer, nothing declared is the panel's: going live declares it.
         slots.filled.length === 0 &&
-        slots.live && (
+        config.place === "live" && (
           <Nothing title="No resources declared">
             Declare them in data files under <code>resources/</code>, beside the config.
           </Nothing>
@@ -517,37 +541,221 @@ function HostDerivedFacts({ id }: { id: string }) {
 }
 
 /**
- * Where the host answers, from the last apply that made or changed it (going live's progress),
- * once it does; and the hostname it declares, beside it until an apply serves the app there.
+ * Where the host answers once it serves (the company's state, which asked it whether it does);
+ * until then the hostname it declares, once applied.
  */
 function HostServes({ hostname }: { hostname: string | undefined }) {
-  const { data } = useQuery(goLiveProgressQuery());
+  const { data } = useQuery(companyStateQuery({ force: true }));
   const host = data?.host;
-  // Where it serves not known (loading, or failed): the hostname shown, never said to be pending.
-  const pending = data !== undefined && hostname !== undefined && host?.url !== hostnameUrl(hostname);
-  const shown = hostname !== undefined && (pending || data === undefined);
-  if (!host && !shown) return null;
+  if (host && (data.state === "live" || data.lines.some((l) => l.line === "host" && l.done))) {
+    return (
+      <Fact label="Serves">
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <ExternalLink href={host.url}>{host.url}</ExternalLink>
+          {host.healthy !== undefined && (
+            <ToneBadge tone={host.healthy ? "ok" : "off"}>{host.healthy ? "healthy" : "not answering"}</ToneBadge>
+          )}
+        </span>
+      </Fact>
+    );
+  }
+  if (hostname === undefined) return null;
+  return (
+    <Fact label="Hostname">
+      <span className="inline-flex flex-wrap items-center gap-2">
+        <code className="text-xs">{hostname}</code>
+        {/* Not known yet (loading, or failed): the hostname shown, never said to be pending. */}
+        {data && <span className="text-muted-foreground">once applied</span>}
+      </span>
+    </Fact>
+  );
+}
+
+/**
+ * The panel for the company's state (`panelOf`), above the slots; what it cannot read fails it
+ * alone, said in its place.
+ */
+function StatePanel({ own }: { own: boolean }) {
+  return (
+    <CatchBoundary getResetKey={() => "state"} errorComponent={StateFailed}>
+      <Suspense fallback={<Skeleton className="h-24 w-full" />}>
+        <StatePanelOf own={own} />
+      </Suspense>
+    </CatchBoundary>
+  );
+}
+
+/** The panel's place when the company's state could not be read. */
+function StateFailed({ error, reset }: ErrorComponentProps) {
+  const { reset: refetch } = useQueryErrorResetBoundary();
+  return (
+    <Notice variant="destructive">
+      Could not read where the company is: {errorMessage(error)}{" "}
+      <Button
+        variant="outline"
+        size="xs"
+        onClick={() => {
+          refetch();
+          reset();
+        }}
+      >
+        Try again
+      </Button>
+    </Notice>
+  );
+}
+
+function StatePanelOf({ own }: { own: boolean }) {
+  const { data: state } = useSuspenseQuery(companyStateQuery({ force: true }));
+  switch (panelOf(state, own)) {
+    case "ready":
+      return <ReadyToGoLive />;
+    case "goLive":
+      return <GoLive />;
+    case "deploying":
+      return <GoingLive state={state} />;
+    case "failed":
+      return <GoLiveFailed run={state.run!} />;
+    case "live":
+      return <Live state={state} />;
+  }
+}
+
+/** Each line of going live's progress, as the panel says it. */
+const LINE_WORDS: Record<CompanyState["lines"][number]["line"], string> = {
+  repository: "The repository",
+  database: "The database",
+  host: "The host",
+  signIn: "Answering, for you to sign in",
+};
+
+/** While going live runs: what it has made, line by line, and its run, with what it waits on. */
+function GoingLive({ state }: { state: CompanyState }) {
+  return (
+    <Region title="Going live">
+      <ul className="flex flex-col gap-1.5">
+        {state.lines.map(({ line, done }) => (
+          <li key={line} className="flex items-center gap-2">
+            {done ? (
+              <CheckCircleIcon aria-label="Done" weight="fill" className="size-4 text-tone-ok-foreground" />
+            ) : (
+              <Spinner aria-label="Not yet" className="size-4 text-muted-foreground" />
+            )}
+            {LINE_WORDS[line]}
+          </li>
+        ))}
+      </ul>
+      {state.run && <RunStatus run={state.run} />}
+    </Region>
+  );
+}
+
+/** Going live's run failed: why, Retry (going live's push and host again) and Ask the agent, with the error. */
+function GoLiveFailed({ run }: { run: GoLiveRun }) {
+  const retry = useGoLiveHost();
+  const why = [run.error, ...(run.results ?? []).flatMap((r) => (r.status === "failed" ? [`${r.id}: ${r.error}`] : []))]
+    .filter(Boolean)
+    .join("; ");
+  return (
+    <Region title="Go live failed">
+      <RunStatus run={run} />
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => retry.mutate()} disabled={retry.isPending}>
+          {retry.isPending ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <ArrowClockwiseIcon aria-hidden="true" data-icon="inline-start" />
+          )}
+          Retry
+        </Button>
+        <ChatButton
+          size="default"
+          variant="outline"
+          prompt={`Going live failed${why ? `: ${why}` : ""}. What went wrong, and how do I fix it?`}
+        >
+          Ask the agent
+        </ChatButton>
+      </div>
+    </Region>
+  );
+}
+
+/**
+ * Live: a warning while the host does not answer; on a hosted instance, how to open the company
+ * on a Mac; on this computer, that it is the drafting copy of a company that runs online.
+ */
+function Live({ state }: { state: CompanyState }) {
+  const { data: place } = useSuspenseQuery({ ...configQuery(), select: (config) => config.place });
+  const { host } = state;
   return (
     <>
-      {host && (
-        <Fact label="Serves">
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <ExternalLink href={host.url}>{host.url}</ExternalLink>
-            <ToneBadge tone={host.healthy ? "ok" : "off"}>{host.healthy ? "healthy" : "not answering yet"}</ToneBadge>
-          </span>
-        </Fact>
+      {host?.healthy === false && (
+        <Notice variant="destructive">
+          The host is not answering at <ExternalLink href={host.url}>{host.url}</ExternalLink>.
+        </Notice>
       )}
-      {shown && (
-        <Fact label="Hostname">
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <code className="text-xs">{hostname}</code>
-            {pending && <span className="text-muted-foreground">once applied</span>}
-          </span>
-        </Fact>
+      {state.draftingCopy && (
+        <Notice>
+          Live · drafting copy: the company runs online
+          {host && (
+            <>
+              {" "}
+              at <ExternalLink href={host.url}>{host.url}</ExternalLink>
+            </>
+          )}
+          . This computer holds a copy of it, where you draft changes.
+        </Notice>
       )}
+      {place === "live" && <OpenOnYourMac />}
     </>
   );
 }
+
+/** Where the desktop app is downloaded from: the latest release. */
+const DESKTOP_DOWNLOAD = "https://github.com/Sanoma-AI/sanoma/releases/latest";
+
+/**
+ * On a hosted instance: the company opened on a Mac, with the desktop app's Copy from GitHub, from
+ * the repository the host runs when one is declared.
+ */
+function OpenOnYourMac() {
+  const { data: repository } = useSuspenseQuery({ ...configQuery(), select: declaredRepository });
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardHeading>Open on your Mac</CardHeading>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <p>
+          Download the Sanoma app, then choose Copy from GitHub…
+          {repository ? (
+            <>
+              {" "}
+              with <code>{repository}</code>
+            </>
+          ) : (
+            " with the company's repository"
+          )}
+          . The copy on your Mac is where you draft changes; saved, they go live here.
+        </p>
+        <div>
+          <ButtonLink variant="outline">
+            <a href={DESKTOP_DOWNLOAD} target="_blank" rel="noreferrer">
+              Download Sanoma
+              <ArrowSquareOutIcon aria-hidden="true" data-icon="inline-end" />
+            </a>
+          </ButtonLink>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The repository the host runs, as `owner/name`, when `infra.ts` declares it (`repo`). */
+const declaredRepository = (config: AppConfig) => {
+  const { owner, name } = config.resources.find((r) => r.id === `${INFRA}#repo`)?.desired ?? {};
+  return typeof owner === "string" && typeof name === "string" ? `${owner}/${name}` : undefined;
+};
 
 /** When the resources were last checked, by which run, what it found, and a check under way. */
 function LastCheck({

@@ -1,5 +1,5 @@
-// The shell's preferences kept in cookies (the chat column's, the engine a new chat opens on, and
-// the density's for density.tsx),
+// The shell's preferences kept in cookies (the chat column's, the engine a new chat opens on, Home's
+// setup card hidden, and the density's for density.tsx),
 // so the server renders them from the first paint: the root's loader reads them (`readPrefs` in
 // routes/__root.tsx, which imports this module statically, so it stays this small) and the
 // chrome writes them.
@@ -23,6 +23,9 @@ export const chatPref = (value: string | undefined): ChatPref =>
  * chose, in the empty chat's cards or the composer.
  */
 export const ENGINE_COOKIE = "sanoma_engine";
+
+/** The cookie Home's setup card is hidden by (`hidden`), unset until its Hide is pressed. */
+export const HOME_SETUP_COOKIE = "sanoma_home_setup";
 
 /** The width from which the chat column sits beside the page rather than over it (Tailwind's `lg`). */
 export const BESIDE_PAGE = "(min-width: 64rem)";

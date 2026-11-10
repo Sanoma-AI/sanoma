@@ -3,6 +3,7 @@ import { ClientOnly, Link, trimPathRight, useRouterState } from "@tanstack/react
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
 import { CloudIcon } from "@phosphor-icons/react/dist/csr/Cloud";
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/csr/GitPullRequest";
+import { HouseIcon } from "@phosphor-icons/react/dist/csr/House";
 import { KeyIcon } from "@phosphor-icons/react/dist/csr/Key";
 import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
@@ -20,8 +21,8 @@ import { siteOf } from "#/lib/locales.ts";
 import { type Site, useSites } from "#/lib/sites.ts";
 import type { Tone } from "#/lib/tone.ts";
 import { cn } from "#/lib/utils.ts";
-import type { AppConfig, Place } from "../../api.ts";
-import { configQuery, pendingOf, remoteQuery, waitingRunsQuery } from "../../queries.ts";
+import type { AppConfig, CompanyPhase } from "../../api.ts";
+import { companyStateQuery, configQuery, pendingOf, remoteQuery, waitingRunsQuery } from "../../queries.ts";
 import { Tip, toneBadge } from "../kit.tsx";
 import { SiteIcon } from "../site-icon.tsx";
 import { NavUser } from "./nav-user.tsx";
@@ -41,8 +42,9 @@ type Section = {
   also?: string;
 };
 
-/** What happens, across the company's apps: Sanoma's own pages. */
+/** What happens, across the company's apps: Sanoma's own pages, Home first. */
 const WORK: Section[] = [
+  { to: "/", label: "Home", icon: HouseIcon },
   { to: "/inbox", label: "Inbox", icon: TrayIcon },
   { to: "/changes", label: "Changes", icon: GitPullRequestIcon, when: "changes" },
   { to: "/workflows", label: "Workflows", icon: TreeStructureIcon },
@@ -80,7 +82,7 @@ const siteTile = ({ title, icon, pages }: Site, isPublic: boolean, lit: boolean)
 });
 
 /**
- * The bar's groups, split by a short rule: Inbox and Workflows; the company's sites, a group for
+ * The bar's groups, split by a short rule: Home, Inbox and Workflows; the company's sites, a group for
  * the root's and then one for each app's, by the app's name (a site with no page it can link to
  * left out); then Setup. Changes shows when the repository has a remote (a change is reviewed
  * there); Data with collections, or with sites, its page leading to theirs; Permissions with a
@@ -128,8 +130,8 @@ const ACTIVE = { "data-active": true } as const;
 
 /**
  * The bar, on the `sidebar` surface: Chat, which folds and unfolds the chat column (`chat`; left
- * out in the phone's sheet, which has no column), the groups (`useGroups`), and at its foot what
- * the open window is (`PlaceBadge`) above the user menu.
+ * out in the phone's sheet, which has no column), the groups (`useGroups`), and at its foot the
+ * company's state (`StateBadge`) above the user menu.
  */
 export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () => void }; className?: string }) {
   const groups = useGroups();
@@ -166,7 +168,14 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
             <ul className="flex w-full flex-col gap-1.5">
               {group.map(({ to, label, icon, lit }) => (
                 <li key={to}>
-                  <Link to={to} activeProps={ACTIVE} data-active={lit || undefined} className={ITEM}>
+                  <Link
+                    to={to}
+                    // Home is lit on its own page only, not on every page under `/`.
+                    activeOptions={{ exact: to === "/" }}
+                    activeProps={ACTIVE}
+                    data-active={lit || undefined}
+                    className={ITEM}
+                  >
                     <span className={cn(TILE, "relative")}>
                       {icon}
                       {to === "/inbox" && <InboxCount />}
@@ -180,7 +189,7 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
         ))}
       </nav>
       <div className="mt-auto flex flex-col items-center gap-2">
-        <PlaceBadge />
+        <StateBadge />
         <NavUser />
       </div>
     </div>
@@ -192,35 +201,35 @@ function Rule() {
   return <div aria-hidden="true" className="my-1 h-px w-9 shrink-0 bg-border" />;
 }
 
-/** What the badge reads from the config: where this instance is. */
-const selectPlace = ({ place, databaseHost }: AppConfig) => ({ place, databaseHost });
+/** What the badge's tip reads from the config: its database's host. */
+const selectDatabaseHost = ({ databaseHost }: AppConfig) => databaseHost;
 
-/** Each place's badge: its words and its tone. */
-const PLACES: Record<Place, { label: string; tone: Tone }> = {
-  "this-computer": { label: "This computer", tone: "idle" },
+/** Each state's badge: its words and its tone. */
+const STATES: Record<CompanyPhase, { label: string; tone: Tone }> = {
+  local: { label: "Local", tone: "idle" },
+  deploying: { label: "Going live…", tone: "waiting" },
+  failed: { label: "Go live failed", tone: "bad" },
   live: { label: "Live", tone: "ok" },
 };
 
 /**
- * What the open window is, from what this instance connects to (`placeOf`): This computer or
- * Live, its tip the database's host and nothing more (the default socket's is none, an unreadable URL's unknown).
+ * The company's state (`companyStateQuery`, which never asks the host): Local, Going live…, Go
+ * live failed or Live, and Live · drafting copy for a live company's copy on this computer; its
+ * tip the database's host and nothing more (the default socket's is none, an unreadable URL's
+ * unknown). Nothing while the state cannot be read.
  */
-function PlaceBadge() {
-  const { data } = useSuspenseQuery({ ...configQuery(), select: selectPlace });
-  const { label, tone } = PLACES[data.place];
+function StateBadge() {
+  const { data: databaseHost } = useSuspenseQuery({ ...configQuery(), select: selectDatabaseHost });
+  const { data: company } = useQuery(companyStateQuery());
+  if (!company) return null;
+  const { label, tone } = STATES[company.state];
   return (
-    <Tip
-      tip={
-        data.databaseHost === undefined
-          ? "Database host unknown"
-          : `Database on ${data.databaseHost || "a local socket"}`
-      }
-    >
+    <Tip tip={databaseHost === undefined ? "Database host unknown" : `Database on ${databaseHost || "a local socket"}`}>
       <Badge
         tabIndex={0}
         className={cn(toneBadge({ tone }), "h-auto max-w-full rounded-md text-center text-bar whitespace-normal")}
       >
-        {label}
+        {company.state === "live" && company.draftingCopy ? `${label} · drafting copy` : label}
       </Badge>
     </Tip>
   );
