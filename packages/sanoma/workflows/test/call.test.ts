@@ -14,6 +14,7 @@ import {
   memoryLedger,
   withSetup,
 } from "../src/index.ts";
+import { recorded } from "../src/call.ts";
 import { defineFake } from "../src/fake.ts";
 import announce from "./fixtures/announce.ts";
 import fanout, { fakeStats, stats } from "./fixtures/fanout.ts";
@@ -105,6 +106,37 @@ const edit = defineWorkflow({
   input: z.object({ id: z.string() }),
   uses: [notes.note.update],
   run: async (ctx, { id }) => ctx.notes.note.update({ id, text: "hi" }),
+});
+
+describe("recorded", () => {
+  const mail = defineConnector("mail", {
+    message: {
+      send: {
+        effect: "send",
+        input: z.object({ to: z.string(), files: z.array(z.object({ name: z.string(), bytes: z.string() })) }),
+        output: z.object({ id: z.string(), handle: z.string() }),
+        opaque: ["files.bytes", "handle"],
+      },
+    },
+  }).message.send;
+
+  it("records an opaque field by its name, and a dotted path's in each item of a list on the way", () => {
+    const files = [
+      { name: "a.pdf", bytes: "JVBERi0=" },
+      { name: "b.pdf", bytes: "JVBERi1=" },
+    ];
+    expect(recorded(mail, { to: "ada@example.com", files })).toEqual({
+      to: "ada@example.com",
+      files: [
+        { name: "a.pdf", bytes: "<bytes>" },
+        { name: "b.pdf", bytes: "<bytes>" },
+      ],
+    });
+    expect(recorded(mail, { id: "m1", handle: "secret" })).toEqual({ id: "m1", handle: "<handle>" });
+    // What is not there stays as it is: no field made up, and a value that is no object.
+    expect(recorded(mail, { to: "ada@example.com" })).toEqual({ to: "ada@example.com" });
+    expect(recorded(mail, "text")).toBe("text");
+  });
 });
 
 describe("a call that fails", () => {

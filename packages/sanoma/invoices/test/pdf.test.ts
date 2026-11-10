@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { crc32 } from "node:zlib";
 import { encode } from "fast-png";
 import { InvoiceValidationError } from "sanoma/invoices";
@@ -127,11 +130,22 @@ describe("the renderer", () => {
   });
 
   it("says what to install when the company has no renderer, after validating the input", async () => {
-    const render = await over(() => {
-      throw new Error("Cannot find package '@react-pdf/renderer'");
-    });
-    await expect(render({ ...example(), number: "" })).rejects.toMatchObject({ code: "invalid_invoice" });
-    await expect(render(example())).rejects.toThrow(/needs @react-pdf\/renderer: install it beside sanoma/);
+    // Node itself, as the worker loads the source, with `@react-pdf/renderer` resolving to no package.
+    const script = `
+      import { registerHooks } from "node:module";
+      registerHooks({ resolve: (specifier, context, next) =>
+        next(specifier === "@react-pdf/renderer" ? "@react-pdf/renderer-absent" : specifier, context) });
+      const { renderInvoice } = await import("sanoma/invoices/pdf");
+      const failure = (input) => renderInvoice(input).then(() => "rendered", (error) => error.code ?? error.message);
+      console.log(JSON.stringify([await failure({}), await failure(${JSON.stringify(example())})]));`;
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      ["--conditions=sanoma-source", "--input-type=module", "--eval", script],
+      { cwd: fileURLToPath(new URL(".", import.meta.url)) },
+    );
+    const [invalid, missing] = JSON.parse(stdout) as string[];
+    expect(invalid).toBe("invalid_invoice");
+    expect(missing).toMatch(/needs @react-pdf\/renderer: install it beside sanoma/);
   });
 
   it("reports a renderer's failure as render_failed, without its details", async () => {

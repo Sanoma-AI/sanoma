@@ -109,7 +109,7 @@ function invoiceDocument(
 
   const { invoice, lines, totals } = calculated;
   // French Intl formatting uses a narrow NBSP absent from Helvetica's WinAnsi set.
-  const money = (minor: number) => formatMoney(minor, invoice.currency, invoice.locale).replaceAll(" ", " ");
+  const money = (minor: number) => formatMoney(minor, invoice.currency, invoice.locale).replaceAll("\u202f", "\u00a0");
   const unitPrice = (decimal: string) => {
     const [whole, fraction = ""] = decimal.split(".");
     const digits = Math.max(currencyPrecision[invoice.currency], fraction.length);
@@ -122,7 +122,7 @@ function invoiceDocument(
       .formatToParts(BigInt(whole!))
       .map((part) => (part.type === "fraction" ? fraction.padEnd(digits, "0") : part.value))
       .join("")
-      .replaceAll(" ", " ");
+      .replaceAll("\u202f", "\u00a0");
   };
   const accent = { borderColor: invoice.presentation.accent };
   const date = new Date(`${invoice.issuedOn}T00:00:00.000Z`);
@@ -255,9 +255,11 @@ export async function renderInvoice(input: InvoiceInput, options?: PdfOptions): 
   let renderer: Renderer;
   try {
     renderer = await import("@react-pdf/renderer");
-  } catch {
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== "ERR_MODULE_NOT_FOUND") throw error;
     throw new Error(
       "renderInvoice needs @react-pdf/renderer: install it beside sanoma (`pnpm add @react-pdf/renderer`)",
+      { cause: error },
     );
   }
   try {

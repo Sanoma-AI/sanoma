@@ -164,8 +164,8 @@ export const resendOps = defineConnector(
             message: "an email needs `html`, `text` or both, not empty",
           }),
         output: z.object({ id: z.string() }),
-        // The files' bytes stay out of the ledger, which records `"<attachments>"`.
-        opaque: ["attachments"],
+        // The files' bytes stay out of the ledger, which keeps each one's name and `content: "<content>"`.
+        opaque: ["attachments.content"],
       },
     },
   },

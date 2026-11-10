@@ -18,7 +18,7 @@ describe("a workflow that sends an invoice", () => {
     expect(describeConfig(config).workflows.find(({ name }) => name === "send-invoice")?.problems).toEqual([]);
   });
 
-  it("renders the PDF and attaches it, which the ledger records by name only", async () => {
+  it("renders the PDF and attaches it, whose name the ledger keeps and bytes leave out", async () => {
     const runId = await app.client.start(
       sendInvoice,
       { invoice: example(), to: "alex@example.com" },
@@ -31,6 +31,9 @@ describe("a workflow that sends an invoice", () => {
     const pages = await content(Uint8Array.from(Buffer.from(attachment!.content, "base64")));
     expect(pages[0]?.text).toContain("$225.00");
     const [called] = (await app.client.ledger(runId)).filter((record) => record.type === "op.called");
-    expect(called).toMatchObject({ op: "resend.emails.send", input: { attachments: "<attachments>" } });
+    expect(called).toMatchObject({
+      op: "resend.emails.send",
+      input: { attachments: [{ filename: "invoice-INV-001.pdf", content: "<content>" }] },
+    });
   });
 });

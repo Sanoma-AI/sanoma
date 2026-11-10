@@ -81,10 +81,17 @@ const LOGIN_CODE_BODY = ["text", "html"];
  */
 export function recorded(op: Op, value: unknown, workflow?: string): unknown {
   const hidden = [...(op.opaque ?? []), ...(workflow === LOGIN_CODE_WORKFLOW ? LOGIN_CODE_BODY : [])];
-  if (!hidden.length || typeof value !== "object" || value === null || Array.isArray(value)) return value;
-  const out: Record<string, unknown> = { ...value };
-  for (const name of hidden) if (out[name] !== undefined) out[name] = `<${name}>`;
-  return out;
+  if (Array.isArray(value)) return value;
+  return hidden.reduce((out, path) => hide(out, path.split(".")), value);
+}
+
+/** `value` with the field at `path` as `"<name>"`: a path of several names goes into each item of a list on its way. */
+function hide(value: unknown, [name, ...rest]: string[]): unknown {
+  if (Array.isArray(value)) return value.map((item) => hide(item, [name!, ...rest]));
+  if (typeof value !== "object" || value === null) return value;
+  const field = (value as Record<string, unknown>)[name!];
+  if (field === undefined) return value;
+  return { ...value, [name!]: rest.length ? hide(field, rest) : `<${name}>` };
 }
 
 /** How many times an idempotent operation is tried. */

@@ -33,7 +33,7 @@ defineWorkflow({
 });
 ```
 
-`emails.send` takes `to` (an address, or a list of 1 to 50), `from` (required, see below), `subject`, `html`, `text` or both (Resend makes the text from the HTML when there is none), and optional `attachments`, each `{ filename, content }` with the file's bytes base64-encoded (Resend takes up to 40 MB an email, encoded), and returns the email's `{ id }`. The ledger records `attachments` as `"<attachments>"`, never the files:
+`emails.send` takes `to` (an address, or a list of 1 to 50), `from` (required, see below), `subject`, `html`, `text` or both (Resend makes the text from the HTML when there is none), and optional `attachments`, each `{ filename, content }` with the file's bytes base64-encoded (Resend takes up to 40 MB an email, encoded), and returns the email's `{ id }`. The ledger keeps each attachment's `filename` and records its `content` as `"<content>"`, never the file:
 
 ```ts
 defineWorkflow({

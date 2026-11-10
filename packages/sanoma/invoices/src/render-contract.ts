@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { calculateInvoice, InvoiceValidationError, type InvoiceIssue, type InvoiceTotals } from "./calculate.ts";
+import {
+  calculateInvoice,
+  InvoiceValidationError,
+  validated,
+  type InvoiceIssue,
+  type InvoiceTotals,
+} from "./calculate.ts";
 import { validateLogo } from "./logo.ts";
 
 export const pdfLimits = {
@@ -41,15 +47,7 @@ const supportedText =
 
 export function prepareInvoice(input: unknown, options: unknown = {}) {
   const calculated = calculateInvoice(input);
-  const parsed = pdfOptionsSchema.safeParse(options);
-  if (!parsed.success)
-    throw new InvoiceValidationError(
-      parsed.error.issues.map((issue) => ({
-        code: issue.code,
-        path: issue.path.map((part) => (typeof part === "number" ? part : String(part))),
-        message: issue.message,
-      })),
-    );
+  const { logo: png } = validated(pdfOptionsSchema, options);
   const issues: InvoiceIssue[] = [];
   let characters = 0;
   function inspect(value: unknown, path: InvoiceIssue["path"]) {
@@ -90,7 +88,7 @@ export function prepareInvoice(input: unknown, options: unknown = {}) {
   if (characters > pdfLimits.textCharacters)
     issues.push({ code: "too_much_text", path: [], message: "Keep the invoice below 30,000 text characters." });
   if (issues.length) throw new InvoiceValidationError(issues);
-  const logo = parsed.data.logo ? validateLogo(parsed.data.logo.base64) : undefined;
+  const logo = png ? validateLogo(png.base64) : undefined;
   const slug =
     calculated.invoice.number
       .replace(/[^a-zA-Z0-9_-]+/g, "-")
