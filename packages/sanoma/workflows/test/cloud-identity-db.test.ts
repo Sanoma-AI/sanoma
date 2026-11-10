@@ -12,7 +12,7 @@ const hour = (hours: number) => sql`clock_timestamp() + ${`${hours} hours`}::int
 const pool = lazyDb(url, "identity-broker-tests");
 afterAll(() => pool.close());
 
-it("persists hash-only generations, bounds overlap, and gives the broker no enrollment mutation authority", async () => {
+it("persists hash-only generations, with or without an end, and gives the broker no enrollment mutation authority", async () => {
   const db = await pool.db();
   // This file has its own task-isolated database; rebuild only its broker test schema.
   await db.execute(sql`DROP SCHEMA IF EXISTS sanoma_identity CASCADE`);
@@ -36,7 +36,8 @@ it("persists hash-only generations, bounds overlap, and gives the broker no enro
     });
     await db.insert(identityCredentials).values([
       { hash: old.hash, deployment: id, generation: 1, validUntil: hour(1) },
-      { hash: next.hash, deployment: id, generation: 2, validUntil: hour(2) },
+      // No end: valid until retired or revoked.
+      { hash: next.hash, deployment: id, generation: 2 },
     ]);
     await expect(
       db
