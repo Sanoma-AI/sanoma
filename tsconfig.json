@@ -43,13 +43,15 @@
     "connectors/*/test",
     "scripts/*.ts"
   ],
-  // The app's routes and components (JSX, DOM) are checked by packages/sanoma/app/tsconfig.json
-  // (`typecheck:ui`). Its Node entry, src/index.ts, is still checked here through its tests.
+  // The app's routes and components (JSX, DOM), and the test that draws them in a DOM, are checked
+  // by packages/sanoma/app/tsconfig.json (`typecheck:ui`). Its Node entry, src/index.ts, is still
+  // checked here through its tests.
   // The invoice package checks its JSX document and browser adapter in its own tsconfig.
   // A fixture's sites, and its apps', are checked as a company's are, by the tsconfig sanoma writes beside them
   // when a test builds them.
   "exclude": [
     "packages/sanoma/app/src",
+    "packages/sanoma/app/test/*.test.tsx",
     "packages/invoices",
     "**/test/fixtures/*/sites",
     "**/test/fixtures/*/apps/*/sites"
