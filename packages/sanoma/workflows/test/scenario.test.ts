@@ -664,8 +664,6 @@ describe("the world", () => {
       (err: unknown) => (err as Error).message,
     );
   };
-  /** A world whose one scenario has these steps after its first Given. */
-  const worldWith = (steps: string) => `${WORLD}${steps}`;
   const IS = "but the world is one Scenario of Givens alone, which seed the company a demo opens on";
 
   it("loads its name and Givens, a collection's records and a vendor's objects, and is no scenario", async () => {
@@ -708,27 +706,23 @@ describe("the world", () => {
   });
 
   it("refuses a When, a Then, a fault, a decision and who is acting, at its line", async () => {
-    expect(await refused(worldWith("    When inspect runs\n"))).toBe(
-      `scenarios/world.feature:9: "inspect runs" is a When, ${IS}`,
+    expect(await refused(WORLD + "    When inspect runs\n")).toBe(
+      `scenarios/world.feature:9: "inspect runs" runs a workflow, ${IS}`,
     );
-    expect(await refused(worldWith("    Then the run succeeds\n"))).toBe(
-      `scenarios/world.feature:9: "the run succeeds" is a Then, ${IS}`,
+    expect(await refused(WORLD + "    Then the run succeeds\n")).toBe(
+      `scenarios/world.feature:9: "the run succeeds" checks a run, ${IS}`,
     );
-    // A Then refused as one, though it matches no step.
-    expect(await refused(worldWith("    Then nothing\n"))).toBe(
-      `scenarios/world.feature:9: "nothing" is a Then, ${IS}`,
-    );
-    expect(await refused(worldWith("    And github.repository.import fails once\n"))).toBe(
+    expect(await refused(WORLD + "    And github.repository.import fails once\n")).toBe(
       `scenarios/world.feature:9: "github.repository.import fails once" injects a fault, ${IS}`,
     );
-    expect(await refused(worldWith('    And "Read a product" is approved by finance\n'))).toBe(
+    expect(await refused(WORLD + '    And "Read a product" is approved by finance\n')).toBe(
       `scenarios/world.feature:9: ""Read a product" is approved by finance" decides an approval, ${IS}`,
     );
-    expect(await refused(worldWith("    And anonymous is acting\n"))).toBe(
+    expect(await refused(WORLD + "    And anonymous is acting\n")).toBe(
       `scenarios/world.feature:9: "anonymous is acting" says who is acting, ${IS}`,
     );
     // A Given that matches no step is refused as any scenario's is.
-    expect(await refused(worldWith("    And the sky is blue\n"))).toMatch(
+    expect(await refused(WORLD + "    And the sky is blue\n")).toMatch(
       /^scenarios\/world\.feature:9: no step matches "the sky is blue"/,
     );
   });

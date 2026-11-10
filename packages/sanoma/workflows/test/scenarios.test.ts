@@ -114,7 +114,7 @@ describe("runScenarios", () => {
           scenario: "scenarios/world.feature",
           step: "did not load",
           message:
-            'scenarios/world.feature:3: "announce runs" is a When, but the world is one Scenario of Givens alone, which seed the company a demo opens on',
+            'scenarios/world.feature:3: "announce runs" runs a workflow, but the world is one Scenario of Givens alone, which seed the company a demo opens on',
         },
         { scenario: "Launch on time", step: "the run fails", message: "the run finished" },
       ]);

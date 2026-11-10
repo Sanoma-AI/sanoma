@@ -234,7 +234,7 @@ export default defineWorkflow({
       const { problems } = await check(await load(), { databaseUrl, log: () => {} });
       expect(problems).toContain("A post goes out › the run fails: the run finished");
       expect(problems).toContain(
-        'scenarios/world.feature › did not load: scenarios/world.feature:3: "the run succeeds" is a Then, but the world is one Scenario of Givens alone, which seed the company a demo opens on',
+        'scenarios/world.feature › did not load: scenarios/world.feature:3: "the run succeeds" checks a run, but the world is one Scenario of Givens alone, which seed the company a demo opens on',
       );
     } finally {
       rmSync(world);
