@@ -59,6 +59,7 @@ describe("sanoma serve", () => {
         "go-live-host",
         "hello",
         "patch",
+        "save-draft",
       ]);
       // On a config without problems: startApp warns about any it finds in the files before it listens.
       expect(output().stderr).not.toContain("the config's files have problems");

@@ -1,5 +1,5 @@
-// A person's or a company's name as the pages shorten it, the same on the sign-in pages (server
-// HTML) and in the app.
+// A person's or a company's name as the pages show and shorten it, the same on the sign-in pages
+// (server HTML) and in the app.
 
 /** Two initials of a name: its first two words' first letters, or a single word's first two. */
 export function initialsOf(name: string): string {
@@ -10,3 +10,14 @@ export function initialsOf(name: string): string {
 
 /** A name's first word, as a sentence calls someone ("Opening it signs Sam in"). */
 export const firstWordOf = (name: string): string => name.split(/\s+/).find(Boolean) ?? name;
+
+/** A company as a page names it: its name, and two initials for its mark. */
+export interface Company {
+  name: string;
+  initials: string;
+}
+
+/** The company named `name` (`resolved.name`, already for people to read), with its initials. */
+export function companyOf(name: string): Company {
+  return { name, initials: initialsOf(name) };
+}

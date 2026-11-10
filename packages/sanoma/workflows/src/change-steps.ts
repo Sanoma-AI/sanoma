@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { withdrawApprovals } from "./approvals.ts";
+import { type ApprovalMessage, nextApprovalId, topicOf, withdrawApprovals } from "./approvals.ts";
 import { decide } from "./call.ts";
 import {
   ADMIN,
@@ -23,7 +23,7 @@ import type { DriftReport } from "./drift.ts";
 import { isRunControlError } from "./errors.ts";
 import { warn } from "./log.ts";
 import { inside } from "./paths.ts";
-import { peopleSources } from "./resources.ts";
+import { peopleSources, readPeople } from "./resources.ts";
 import { runNow, type Run } from "./run.ts";
 import {
   AGENTS,
@@ -33,6 +33,7 @@ import {
   CHANGE_TOPIC,
   DRIFT_WORKFLOW,
   errorMessage,
+  mayDecide,
 } from "./shared.ts";
 import type { CheckResult, RemoteHalf } from "./source.ts";
 
@@ -44,6 +45,22 @@ import type { CheckResult, RemoteHalf } from "./source.ts";
 
 /** True when the file at `path` is a people file (`mayDeclarePeople`), one `readPeople` would load; false when there is none. */
 const fileDeclaresPeople = async (path: string) => mayDeclarePeople(await readFile(path, "utf8").catch(() => ""));
+
+/**
+ * Whether a draft at `draft` whose change edits `files` (relative to the root) edits the rules, as
+ * the planner's `rules` fact says: a policy or the template's people file by its path (`isRules`),
+ * a people file as main at `root` has it or as the draft makes it (one added, edited or emptied),
+ * or a file main's people are read from (a helper a people file imports).
+ */
+export async function editsRules(root: string, draft: string, files: readonly string[]): Promise<boolean> {
+  const people = await Promise.all(
+    files
+      .filter((file) => file.startsWith("resources/"))
+      .flatMap((file) => [join(root, file), join(draft, file)].map(fileDeclaresPeople)),
+  );
+  const sources = peopleSources(root);
+  return people.includes(true) || touchesOf(files).some(isRules) || files.some((file) => sources.has(file));
+}
 
 /** Which events win when several wait: one that ends the change over one that plans it again. */
 const WEIGHT: Record<ChangeEvent["kind"], number> = { commits: 0, close: 1, closed: 2, merged: 3 };
@@ -176,20 +193,12 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
             .map((r) => r.workflowID)
             .filter((runId) => runId !== run.id)
             .toSorted();
-          // A people file as main has it or as the draft makes it: one added, edited or emptied.
-          const people = await Promise.all(
-            files
-              .filter((file) => file.startsWith("resources/"))
-              .flatMap((file) => [join(source.root, file), join(draft.root, file)].map(fileDeclaresPeople)),
-          );
-          const sources = peopleSources(source.root);
           return {
             touches,
             strandedRuns: stranded.length,
             stranded,
             checksOk: check.ok,
-            // Or a file main's people are read from: a helper a people file imports.
-            rules: people.includes(true) || touches.some(isRules) || files.some((file) => sources.has(file)),
+            rules: await editsRules(source.root, draft.root, files),
           };
         },
         { name: "change:plan" },
@@ -230,6 +239,22 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     queued: (number) => drain(runNow("A change step"), () => settled(number)),
 
     retire: (reason) => withdrawApprovals(runNow("A change step"), CHANGE_MERGE, reason),
+
+    async publishOnSave(approver) {
+      const run = runNow("A change step");
+      // As Publish's decision would be checked from the run's own actor, on the people declared now.
+      const may = await DBOS.runStep(
+        async () => {
+          const { people, problems } = readPeople(run.state.root);
+          return !problems.length && mayDecide({ approver }, run.actor, run, people);
+        },
+        { name: "change:saved" },
+      );
+      if (!may) return;
+      // Publish is the run's next approval: its decision waits on its topic until it is asked.
+      const decision: ApprovalMessage = { decision: "approve", by: run.actor, note: "Saved" };
+      await DBOS.send(run.id, decision, topicOf(nextApprovalId(run)));
+    },
 
     async deploy() {
       const run = runNow("A change step");

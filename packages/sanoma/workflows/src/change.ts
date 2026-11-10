@@ -9,6 +9,7 @@ import {
   ADMIN,
   CHANGE_MERGE,
   CHANGE_WORKFLOW,
+  COMMIT_ID,
   CONNECT_WORKFLOW,
   DRAFT_ID,
   errorMessage,
@@ -54,7 +55,10 @@ export type ChangeFacts = z.infer<typeof ChangeFacts>;
 /**
  * What opening a change takes: its draft's id, and the pull request's title, body and the change
  * page's link; for a change to a collection's columns, its plan as the app drafted it, which the
- * change's review shows (`ChangeState.plan`): JSON the runtime carries and does not read.
+ * change's review shows (`ChangeState.plan`): JSON the runtime carries and does not read. `save`,
+ * the head the person who opens it saved: their Publish of a round planned at that head, given
+ * once the policy lets them decide it (`ChangeSteps.publishOnSave`); a round at any other head asks
+ * Publish as usual.
  */
 export const ChangeInput = z.object({
   id: z.string().regex(DRAFT_ID),
@@ -62,6 +66,7 @@ export const ChangeInput = z.object({
   body: z.string().optional(),
   page: z.string().url().optional(),
   plan: z.json().optional(),
+  save: z.string().regex(COMMIT_ID).optional(),
 });
 export type ChangeInput = z.infer<typeof ChangeInput>;
 

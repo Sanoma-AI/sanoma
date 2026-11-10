@@ -1,5 +1,5 @@
 import type { CheckResult } from "sanoma/workflows";
-import { changeIdOf } from "sanoma/workflows/shared";
+import { changeIdOf, undoDraftOf } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import type { DraftCard } from "../src/lib/chat.ts";
@@ -221,6 +221,8 @@ describe("the Changes section", () => {
 });
 
 const passing: CheckResult = { ok: true, problems: [], warnings: [] };
+const HEAD = "a".repeat(40);
+const SHA = "c".repeat(40);
 const card = (checks?: CheckResult): DraftCard => ({
   draft: "card",
   branch: "draft/card",
@@ -238,12 +240,13 @@ describe("the draft card", () => {
     edits: [],
     state: { phase: "waiting", decision: { answer: "hold", approver: { group: "admin" } } },
   };
-  it("offers Send for review once the checks pass, and says why not before", async () => {
+  it("offers Save to the company and Review once the checks pass, and says why not before", async () => {
     const unchecked = await renderDraftCard(card(), { change: null });
     // Disabled, yet focusable, so its tip still shows.
     expect(unchecked).toMatch(
-      /<button(?=[^>]*data-disabled="")[^>]*aria-disabled="true"[^>]*>Send for review<\/button>/,
+      /<button(?=[^>]*data-disabled="")[^>]*aria-disabled="true"[^>]*>Save to Maple Street Studio<\/button>/,
     );
+    expect(unchecked).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Review<\/button>/);
     expect(unchecked).toContain("Run the checks first: ask the agent to check the draft.");
     const failing = await renderDraftCard(
       card({ ok: false, problems: ["workflows/refund.ts:1:1: no"], warnings: [] }),
@@ -251,37 +254,115 @@ describe("the draft card", () => {
         change: null,
       },
     );
-    expect(failing).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Send for review<\/button>/);
+    expect(failing).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Save to Maple Street Studio<\/button>/);
     expect(failing).toContain("The checks fail: fix what they find first.");
     const empty = await renderDraftCard({ ...card(passing), files: [], summary: "" }, { change: null });
     expect(empty).toContain("Nothing is committed on the draft yet.");
     const ready = await renderDraftCard(card(passing), { change: null });
-    expect(ready).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Send for review<\/button>/);
-    expect(ready).not.toContain("Merge the branch to apply it.");
+    expect(ready).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Save to Maple Street Studio<\/button>/);
+    expect(ready).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Review<\/button>/);
+    expect(ready).not.toContain("Merge the branch");
   });
 
-  it("shows the change's phase and Open the review once it has one, Send for review again once it has ended", async () => {
+  it("shows the change's phase and Open the review once it has one, Save again once it has ended unpublished", async () => {
     const html = await renderDraftCard(card(passing), { change: waiting });
     expect(html).toContain("Waiting for admin");
     expect(html).toMatch(/<a [^>]*href="\/changes\/card"[^>]*>Open the review<\/a>/);
-    expect(html).not.toContain("Send for review");
+    expect(html).not.toContain("Save to");
     const closed = await renderDraftCard(card(passing), {
       change: { ...waiting, status: "finished", state: { phase: "closed" } },
     });
     expect(closed).toContain("Closed");
     expect(closed).toContain("Open the review");
-    expect(closed).toContain("Send for review");
-    // A published draft is in main: nothing to send again.
+    expect(closed).toContain("Save to Maple Street Studio");
+    // A published draft is saved: who published it, Open the workflow and Undo.
     const merged = await renderDraftCard(card(passing), {
-      change: { ...waiting, status: "finished", state: { phase: "merged" } },
+      change: {
+        ...waiting,
+        status: "finished",
+        edits: ["refund"],
+        approvals: [{ status: "approved", decidedBy: "ada", decidedAt: 1_000 }],
+        state: { phase: "merged", merged: { sha: SHA } },
+      },
+      others: { [undoDraftOf(SHA)]: [] },
     });
-    expect(merged).toContain("Published");
-    expect(merged).not.toContain("Send for review");
+    expect(merged).toContain("Saved by ada, ");
+    expect(merged).toMatch(/<a [^>]*href="\/workflows\/refund"[^>]*>Open the workflow<\/a>/);
+    expect(merged).toMatch(/<button[^>]*>Undo<\/button>/);
+    expect(merged).not.toContain("Save to");
   });
 
-  it("keeps merging by hand without a remote", async () => {
-    const html = await renderDraftCard(card(passing), { remote: false });
-    expect(html).toContain("Merge the branch to apply it.");
-    expect(html).not.toContain("Send for review");
+  it("saves without a remote: Save to the company, then who saved it, Open the workflow and Undo", async () => {
+    const draft = { ...card(passing), head: HEAD };
+    const ready = await renderDraftCard(draft, { remote: false });
+    expect(ready).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Save to Maple Street Studio<\/button>/);
+    expect(ready).not.toContain(">Review<");
+    expect(ready).toContain("Saving puts it to work on this computer. You can undo it.");
+    const save = (status: string, extra: object = {}) => ({
+      runId: "save:card",
+      workflow: "save-draft",
+      status,
+      startedBy: { id: "dana" },
+      createdAt: 0,
+      updatedAt: 1_000,
+      approvals: [],
+      input: { id: "card", title: "Refunds", head: HEAD },
+      edits: ["refund"],
+      ...extra,
+    });
+    expect(await renderDraftCard(draft, { remote: false, saves: [save("running")] })).toContain("Saving…");
+    const failed = await renderDraftCard(draft, {
+      remote: false,
+      saves: [save("failed", { error: "The draft has changed since: save it from its latest card" })],
+    });
+    expect(failed).toContain("Could not save it: The draft has changed since: save it from its latest card");
+    expect(failed).toContain("Save to Maple Street Studio");
+    const output = { revision: SHA, files: ["workflows/refund.ts"], running: true };
+    const saved = await renderDraftCard(draft, {
+      remote: false,
+      saves: [save("finished", { output })],
+      others: { [undoDraftOf(SHA)]: [] },
+    });
+    expect(saved).toContain("Saved by dana, ");
+    expect(saved).toContain("It&#x27;s part of Maple Street Studio.");
+    expect(saved).toMatch(/<a [^>]*href="\/workflows\/refund"[^>]*>Open the workflow<\/a>/);
+    expect(saved).toMatch(/<button[^>]*>Undo<\/button>/);
+    // A save of an earlier commit of the draft is not this card's.
+    expect(
+      await renderDraftCard(
+        { ...draft, head: "b".repeat(40) },
+        { remote: false, saves: [save("finished", { output })] },
+      ),
+    ).toContain("Save to Maple Street Studio");
+    // On an instance that does not start again on its own, it runs after a restart.
+    const waits = await renderDraftCard(draft, {
+      remote: false,
+      saves: [save("finished", { output: { ...output, running: false } })],
+    });
+    expect(waits).toContain("and runs once Sanoma starts again.");
+    expect(waits).not.toContain("on this computer only");
+    // Saved here, but an origin that reviews nothing refused the push of main.
+    const unpushed = await renderDraftCard(draft, {
+      remote: false,
+      saves: [save("finished", { output: { ...output, notPushed: "git push to origin failed: ! [rejected]" } })],
+    });
+    expect(unpushed).toContain("It&#x27;s saved on this computer only: git push to origin failed: ! [rejected]");
+    // Undone: who undid it.
+    const undone = await renderDraftCard(draft, {
+      remote: false,
+      saves: [save("finished", { output })],
+      others: {
+        [undoDraftOf(SHA)]: [save("finished", { startedBy: { id: "ada" }, output: { ...output, revision: HEAD } })],
+      },
+    });
+    expect(undone).toContain("Undone by ada, ");
+    expect(undone).not.toMatch(/>Undo<\/button>/);
+  });
+
+  it("asks a card from before cards named their draft to draft again", async () => {
+    const { draft: _, ...old } = card(passing);
+    const html = await renderDraftCard(old, { remote: false });
+    expect(html).toContain("Ask the agent to draft this again to save it.");
+    expect(html).not.toContain("Save to");
   });
 });

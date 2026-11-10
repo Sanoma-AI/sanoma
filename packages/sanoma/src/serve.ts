@@ -20,6 +20,7 @@ import {
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "sanoma/workflows/describe";
 import { domainsOf, UsageError } from "sanoma/workflows/shared";
 import type { WakeupService } from "sanoma/workflows/wakeup-service";
+import { loadConfig } from "./config.ts";
 import { siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
 
@@ -263,22 +264,51 @@ export async function appOptions(
   return { ...options, login: staffLogin(betterAuthStaffLogin, social), social };
 }
 
+/** How long a reload waits after it is asked (`WorkerOptions.reload`): the save that asked it ends first. */
+const RELOAD_MS = 1_000;
+
 /**
  * The sites' build, the worker under a supervisor (`superviseWorker`), the wakeup service when
  * the config runs it (`wakeup: true`), then the app, serving `/wake` and the service's routes, in
  * this process. A worker that stopped itself starts again on a wake, or on a write from the app
- * (`AppOptions.onWrite`: a run's start, an approval's decision), never on a page read. `stop`
- * stops the app, the service, then the worker.
+ * (`AppOptions.onWrite`: a run's start, an approval's decision), never on a page read. A draft
+ * saved into the checkout asks the worker to reload (`WorkerOptions.reload`): a moment later the
+ * company's files are loaded again (`loadConfig`'s `fresh`) and, once they resolve, the app and
+ * the worker stop and start again on them, the app on the same port; files that do not load or
+ * resolve are logged and change nothing, and ones that fail to start are logged and the old
+ * started again in their place. `stop` stops the app, the service, then the worker.
  */
 export async function serve(config: SanomaConfig, serveOptions: ServeOptions): Promise<Served> {
   // Read and built before the worker starts, so a mistake in the variables or a site starts nothing.
   const options = await appStart(config, serveOptions);
+  /** The files the app and the worker run, and what the app started with: the first, then a reload's. */
+  let running = { config, options };
   const { log } = serveOptions;
   // An app on this machine alone is not the instance the host runs: its worker never stops
   // itself (its wakeup would wake that instance).
   const here = isLoopback(options.host ?? "127.0.0.1");
-  const supervised = await superviseWorker(config, { ...workerOptions(config), selfStop: !here });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let reloading = Promise.resolve();
+  // Set once `stop` begins: a reload asked after it starts nothing.
+  let closed = false;
+  const reload = () => {
+    if (closed) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      reloading = reloading
+        .then(restart)
+        .catch((err: unknown) => log(`could not start again on the saved files: ${errorMessage(err)}`));
+    }, RELOAD_MS);
+  };
+  const supervise = (files: SanomaConfig) =>
+    superviseWorker(files, { ...workerOptions(files), selfStop: !here, reload });
+  let supervised = await supervise(config);
   let wakeup: WakeupService | undefined;
+  const start = (files: SanomaConfig, started: AppOptions) =>
+    served(files, { ...started, onWrite: () => void supervised.wake() }, [
+      wakeRoute({ log, onWake: () => supervised.wake() }),
+      ...(wakeup?.routes ?? []),
+    ]);
   let app: Served;
   try {
     if (config.wakeup === true) {
@@ -286,19 +316,50 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
       const { startWakeupService } = await import("sanoma/workflows/wakeup-service");
       wakeup = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
     }
-    app = await served(config, { ...options, onWrite: () => void supervised.wake() }, [
-      wakeRoute({ log, onWake: () => supervised.wake() }),
-      ...(wakeup?.routes ?? []),
-    ]);
+    app = await start(config, options);
   } catch (err) {
     await wakeup?.stop().catch(() => {});
     await supervised.stop().catch(() => {});
     throw err;
   }
+  const restart = async () => {
+    if (closed) return;
+    const { config: files } = await loadConfig(dirname(running.config.file!), { fresh: true });
+    const resolved = resolveConfig(files);
+    if (resolved.policyProblems.length)
+      throw new Error(`the policies do not hold: ${resolved.policyProblems.join("; ")}`);
+    // The port it was given, or with any free port (0) the one it took; a URL names no port that is its scheme's.
+    const port = serveOptions.port || Number(new URL(app.url).port);
+    const next = { config: files, options: await appStart(files, { ...serveOptions, port, resolved }) };
+    if (closed) return;
+    const startOn = async (on: typeof running) => {
+      supervised = await supervise(on.config);
+      app = await start(on.config, on.options);
+    };
+    await app.stop();
+    await supervised.stop();
+    try {
+      await startOn(next);
+    } catch (err) {
+      // Started again on the files as they were, which ran a moment ago.
+      await supervised.stop().catch(() => {});
+      await startOn({ ...running, options: { ...running.options, port } });
+      throw err;
+    }
+    running = next;
+    log(`${resolved.appName} started again on the saved files`);
+  };
   return {
-    url: app.url,
-    sites: app.sites,
+    get url() {
+      return app.url;
+    },
+    get sites() {
+      return app.sites;
+    },
     async stop() {
+      closed = true;
+      clearTimeout(timer);
+      await reloading;
       try {
         await app.stop();
       } finally {

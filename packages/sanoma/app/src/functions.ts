@@ -19,6 +19,7 @@ import {
   PreviewQuery,
   ProposeColumnChange,
   RunsQuery,
+  SaveDraftRequest,
   SetCredentialRequest,
 } from "./api.ts";
 import {
@@ -46,7 +47,10 @@ import {
   preview,
   readStartRun,
   recordHistory,
+  remoteOf,
   runDetail,
+  saveDraft,
+  saves,
   saysWho,
   setCredential,
   signOutUrl,
@@ -126,16 +130,28 @@ export const getChange = createServerFn(READ)
   .validator(validate(z.object({ id: z.string().min(1) })))
   .handler(({ data, context }) => change(context.app, data.id));
 
-/** Whether the repository has a remote, where its changes are reviewed: the bar's Changes. */
-export const getRemote = createServerFn(READ).handler(
-  ({ context }) => context.app.snapshot.repository?.remote !== undefined,
-);
+/**
+ * Whether the repository's remote is one a connector reviews changes on (`remoteOf`), as Save and
+ * a form's Save decide: the bar's Changes, a draft's Review, a column change waiting for admin.
+ */
+export const getRemote = createServerFn(READ).handler(({ context }) => remoteOf(context.app) !== undefined);
 
 /** Sends the person's chat's draft for review: its change opened, its run's id. */
 export const openChangeFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(z.object({ id: z.string().regex(DRAFT_ID) })))
   .handler(({ data, context }) => openChange(context.app, context.principal, data.id, context.origin));
+
+/** The saves of a chat's draft, by the draft's id, newest first. */
+export const getSaves = createServerFn(READ)
+  .validator(validate(z.object({ id: z.string().regex(DRAFT_ID) })))
+  .handler(({ data, context }) => saves(context.app, data.id));
+
+/** Saves the person's chat's draft, or undoes what it saved: the save's run id. */
+export const saveDraftFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(SaveDraftRequest))
+  .handler(({ data, context }) => saveDraft(context.app, context.principal, data, context.origin));
 
 /** What the repository's host enforces on main: the Permissions page's line; null without a remote. */
 export const getHostEnforcement = createServerFn(READ).handler(({ context }) => hostEnforcement(context.app));

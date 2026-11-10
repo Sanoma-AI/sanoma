@@ -5,6 +5,7 @@ import {
   ADMIN,
   type AdoptInput,
   type AppStepContext,
+  editsRules,
   errorMessage,
   isRules,
   mayDeclarePeople,
@@ -12,6 +13,8 @@ import {
   type PatchOutput,
   peopleSources,
   remoteFor,
+  type SaveDraftInput,
+  type SaveDraftOutput,
   SanomaError,
   type Source,
   type Written,
@@ -26,11 +29,11 @@ import {
 } from "sanoma/workflows/describe";
 import { TableChangePlan } from "../components/grid/plan.ts";
 
-// A data file's change from the app's own pages, in the worker (the built-ins `adopt` and
-// `patch`): Adopt (a drifted field's value at the vendor) and a form's Save, each written into the
-// checkout (or a draft of it) and committed through the worker's repository, each read, write
-// and commit one of the worker's writes (`AppStepContext.serially`), so two never read the same
-// file and both write it.
+// A change from the app's own pages, in the worker (the built-ins `adopt`, `patch` and
+// `save-draft`): Adopt (a drifted field's value at the vendor) and a form's Save, each written into
+// the checkout (or a draft of it) and committed through the worker's repository, and a chat's
+// draft saved; each read, write and commit one of the worker's writes (`AppStepContext.serially`),
+// so two never read the same file and both write it.
 
 /** The config's root, where its data files are: a config without one has none to write. */
 export function rootOf({ resolved }: Pick<AppStepContext, "resolved">): string {
@@ -177,16 +180,101 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
   }
   return step.serially(async () => {
     const { before, text } = await edited(root);
-    const rules = isRules(at.file) || mayDeclarePeople(before) || peopleSources(root).has(at.file);
-    if (rules && by.groups?.includes(ADMIN) !== true) {
-      throw new SanomaError(
-        "not_approver",
-        `A change to ${at.file} waits for an admin, and this company has no remote to review on`,
-        { approver: { group: ADMIN } },
-      );
-    }
+    if (isRules(at.file) || mayDeclarePeople(before) || peopleSources(root).has(at.file)) adminOnly(by, at.file);
     return written(step, at.file, text, message);
   });
+}
+
+/** A repository that saves drafts: one that opens, lists, reads, merges, reverts and closes them. */
+type SavingSource = Source &
+  Required<Pick<Source, "draft" | "drafts" | "diff" | "merge" | "saved" | "revert" | "closeDraft">>;
+
+const savesDrafts = (source: Source | undefined): source is SavingSource =>
+  !!source?.draft &&
+  !!source.drafts &&
+  !!source.diff &&
+  !!source.merge &&
+  !!source.saved &&
+  !!source.revert &&
+  !!source.closeDraft;
+
+/**
+ * A chat's draft saved, as the run's actor, the chat's person (or, for an undo of a commit their
+ * `chat` saved, that commit reverted first in the draft of its own, `undoDraftOf`, left as it is
+ * when a retry finds it open). With a remote a connector reviews changes on, its change is opened
+ * as saved at `head` (`ChangeInput.save`), which the policy decides: the change's run id. Otherwise
+ * saving is publishing: the draft at `head` merged into the checkout and closed (`Source.merge`),
+ * a change to the rules only by someone in `admin` (`not_approver` for anyone else, as for a
+ * form's Save), `main` pushed to `origin` when there is one (a push that fails is said in the
+ * output, never the save's failure), and the worker started again on the files (`reload`). A run
+ * that merged already (cut short after it) answers with that commit. Refused for a draft of
+ * another person's chat, a commit their chat did not save, and once the draft has moved on from
+ * `head`.
+ */
+export async function saveDraft(
+  step: AppStepContext,
+  { id, title, head, undo, chat = id, page }: SaveDraftInput,
+): Promise<SaveDraftOutput> {
+  const { client, source, by, reload, runId } = step;
+  if (!savesDrafts(source)) throw new Error("This instance's repository cannot save a draft");
+  if ((await client.chats.get(chat))?.person !== by.id) {
+    throw new SanomaError("invalid_input", `No draft of yours is ${chat}`);
+  }
+  if (undo !== undefined && !(await client.savedAs(chat, undo))) {
+    throw new SanomaError("invalid_input", `${undo.slice(0, 7)} is not a commit your chat ${chat} saved`);
+  }
+  /** What a merge landed as: `main` pushed to `origin` when it has one, then the worker started again on it. */
+  const landed = async ({ revision, files }: { revision: string; files: string[] }) => {
+    const notPushed =
+      source.pushOrigin && (await source.remoteUrl?.()) !== undefined
+        ? await source.pushOrigin().then(() => undefined, errorMessage)
+        : undefined;
+    reload?.();
+    return { revision, files, running: reload !== undefined, ...(notPushed !== undefined && { notPushed }) };
+  };
+  const merged = await source.saved(runId);
+  if (merged) return landed(merged);
+  if (undo !== undefined && !(await source.drafts()).includes(id)) {
+    // A revert that fails closes its draft, so a retry reverts again.
+    await step.serially(() =>
+      source.revert(id, { sha: undo, author: by.id }).catch(async (err: unknown) => {
+        await source.closeDraft(id);
+        throw err;
+      }),
+    );
+  }
+  /** The draft's change, as long as it is still at `head`, the commit the person saved. */
+  const saving = async () => {
+    const diff = await source.diff(id);
+    if (head !== undefined && diff.head !== head) {
+      throw new SanomaError("invalid_input", "The draft has changed since: save it from its latest card");
+    }
+    return diff;
+  };
+  if (await reviewsChanges(step, source)) {
+    const input = { id, title, save: (await saving()).head, ...(page !== undefined && { page }) };
+    return { change: await client.openChange(input, { startedBy: by }) };
+  }
+  const saved = await step.serially(async () => {
+    const [diff, draft] = await Promise.all([saving(), source.draft(id)]);
+    if (await editsRules(source.root, draft.root, diff.files)) adminOnly(by, "the policies or the people");
+    const { revision } = await source.merge(id, { head: diff.head, title, author: by.id, run: runId });
+    return { revision, files: diff.files };
+  });
+  return landed(saved);
+}
+
+/**
+ * Refuses (`not_approver`) a change to the rules (`what` it edits) by someone outside `admin`:
+ * without a remote, nothing would review it.
+ */
+function adminOnly(by: AppStepContext["by"], what: string): void {
+  if (by.groups?.includes(ADMIN) === true) return;
+  throw new SanomaError(
+    "not_approver",
+    `A change to ${what} waits for an admin, and this company has no remote to review on`,
+    { approver: { group: ADMIN } },
+  );
 }
 
 /**

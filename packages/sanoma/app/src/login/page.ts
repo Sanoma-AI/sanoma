@@ -1,4 +1,4 @@
-import { initialsOf } from "../lib/names.ts";
+import type { Company } from "../lib/names.ts";
 
 // What a login answers before the app's own pages: a small page of its own, or JSON for the page's
 // server functions and any change. The page has the app's look without its shell: it links the
@@ -9,17 +9,6 @@ export const wantsJson = (request: Request) =>
   new URL(request.url).pathname.startsWith("/_serverFn/") || (request.method !== "GET" && request.method !== "HEAD");
 
 export const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-
-/** A company as a page names it: its name, and two initials for its mark. */
-export interface Company {
-  name: string;
-  initials: string;
-}
-
-/** The company named `name` (`resolved.name`, already for people to read), with its initials. */
-export function companyOf(name: string): Company {
-  return { name, initials: initialsOf(name) };
-}
 
 /** What a small page shows around its card: the kit's stylesheet, the company and a line under the card. */
 export interface PageFrame {

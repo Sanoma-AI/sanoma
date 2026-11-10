@@ -56,6 +56,8 @@ export interface WorkerState {
   scenarios?: URL;
   /** The worker's `source`, when it was given one. */
   source?: Source;
+  /** The worker's `reload` (`WorkerOptions.reload`), when it was given one. */
+  reload?: () => void;
   /** The app's steps (`WorkerOptions.app`): what the app's built-ins run; none without them. */
   appSteps?: WorkerApp;
   /**

@@ -33,7 +33,7 @@ import { PEOPLE, pageOf, publishedAgain, publishOf, renderDraftCard } from "./fi
 // The life of a change, end to end, as a person drives it through the app: the sanoma package's
 // fixture company in its own git repository (`localGitSource`), cloned from a bare repository the
 // fake host serves (`fakeRemote` with an `origin`). A chat's draft loosens a hold and adds a group;
-// its card offers Send for review once `sanoma check` passes on it; the change waits for admin,
+// its card offers Save and Review once `sanoma check` passes on it; the change waits for admin,
 // as its review, the Inbox and the Permissions page show; a new commit asks Publish again; admin
 // publishes, the host squash-merges and the checkout follows main. Another change is rejected,
 // and closed. Needs Postgres (`pnpm db:up`) and builds the packages the fixture loads.
@@ -142,7 +142,7 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
   let runId = "";
   let draft: Awaited<ReturnType<typeof drafted>>;
 
-  it("offers Send for review on the draft's card once sanoma check passes on the draft", async () => {
+  it("offers Save and Review on the draft's card once sanoma check passes on the draft", async () => {
     draft = await drafted("rules", TITLE, { "policies/hello.cedar": ADMIN_SKIPS, "resources/people.ts": WITH_SUPPORT });
     // The card as the agent's turn writes it: the draft's diff and its checks, as the app runs them.
     const card = {
@@ -164,7 +164,8 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
       remote: context.snapshot.repository?.remote !== undefined,
       change: await change(context, "rules"),
     });
-    expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Send for review<\/button>/);
+    expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Save to Maple Street Studio<\/button>/);
+    expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Review<\/button>/);
   });
 
   it("sends it for review: a pull request on the host, the change checked and waiting for admin", async () => {
