@@ -10,6 +10,9 @@
   "dependencies": {
     "@sanoma-ai/connector-anthropic": "latest",
     "@sanoma-ai/connector-github": "latest",
+    "@sanoma-ai/connector-openai": "latest",
+    "@sanoma-ai/connector-opencode": "latest",
+    "@sanoma-ai/connector-pi": "latest",
     "@sanoma-ai/connector-resend": "latest",
     "@sanoma-ai/connector-sanoma-cloud": "latest",
     "sanoma": "latest"
