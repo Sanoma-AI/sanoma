@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { crossAppImports, readApps } from "../src/apps.ts";
 import { collection } from "../src/collection.ts";
 import { describeConfig, generateApi, readPeople, schemaOf, schemaText } from "../src/describe.ts";
 import { lintWorkflow } from "../src/lint.ts";
 import { loadScenarios } from "../src/scenario.ts";
-import { appOfFile } from "../src/paths.ts";
+import { appOfFile } from "../src/company-file.ts";
 import { apiNameOf, domainsOf, siteDir } from "../src/shared.ts";
 import { resolveConfig } from "../src/index.ts";
 import { rootWith } from "./harness.ts";
@@ -56,6 +56,16 @@ describe("apps", () => {
     });
     expect(appOfFile(join(merged, "apps/crm/workflows/a.ts"))).toBe("crm");
     expect(appOfFile(join(merged, "node_modules/x/apps/y/z.ts"))).toBeUndefined();
+  });
+
+  it("reads a file's app from its path from the root where there is no Node: a page's build names it so", () => {
+    const builtin = vi.spyOn(process, "getBuiltinModule").mockReturnValue(undefined as never);
+    try {
+      expect(appOfFile("apps/crm/resources/data.ts")).toBe("crm");
+      expect(appOfFile("resources/data.ts")).toBeUndefined();
+    } finally {
+      builtin.mockRestore();
+    }
   });
 
   it("names an app's site by its key, in a host's domains too", () => {

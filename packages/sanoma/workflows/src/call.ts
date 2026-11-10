@@ -1,21 +1,23 @@
 import type { ConnectionRef, ConnectionSnapshot } from "./connection.ts";
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
-import { awaitApproval, type CheckedApproval } from "./approvals.ts";
+import { awaitApproval } from "./approvals.ts";
 import { offsetOf } from "./ast.ts";
+import { scriptPath } from "./company-file.ts";
 import {
-  AllMembers,
-  type ApprovalState,
-  type ApprovalRequest,
-  type Principal,
-  ApprovalRequestSchema,
-  SleepFor,
-  type SleepRequest,
-  SleepUntil,
-  type StartedBy,
-  scriptPath,
-  type Use,
-  type WorkflowDefinition,
-} from "./define.ts";
+  type Call,
+  callsOf,
+  checkApproval,
+  checkSleep,
+  ctxOf,
+  inputOf,
+  opCalled,
+  outputsOf,
+  type Placed,
+  recorded,
+  targetOf,
+  untilOf,
+} from "./ctx.ts";
+import { AllMembers, type ApprovalState, type Principal, type WorkflowDefinition } from "./define.ts";
 import {
   causes,
   errorCode,
@@ -28,8 +30,7 @@ import {
 } from "./errors.ts";
 import type { Collection } from "./collection.ts";
 import { currentGroup, entry, type LedgerBody, skipped, write, writeFailure } from "./ledger.ts";
-import { shown } from "./log.ts";
-import { type CallContext, isOp, type Op } from "./op.ts";
+import type { CallContext, Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
 import { allowAll, type Decision, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, StartHold, WorkerState } from "./run.ts";
@@ -42,12 +43,9 @@ import {
   CALL_WORKFLOW,
   CHANGE_MERGE,
   DATA_VENDOR,
-  entryOpsOf,
   errorMessage,
   fitsOp,
   isBatch,
-  isRecord,
-  LOGIN_CODE_WORKFLOW,
   problemLine,
   type Saved,
   WORKFLOW_ACTION,
@@ -71,26 +69,6 @@ const takenByDbos = (err: unknown) =>
  */
 export function isInfrastructureError(err: unknown, state: Pick<WorkerState, "stopped">): boolean {
   return takenByDbos(err) || (state.stopped && errorCode(err) === undefined);
-}
-
-/** The fields of a mail a `login-code` run sends that the ledger never shows: its body, which holds the code. */
-const LOGIN_CODE_BODY = ["text", "html"];
-
-/**
- * The value as the ledger records it: each of the operation's `opaque` fields as `"<name>"`, and
- * in a run of `workflow` `login-code`, the mail's `text` and `html` too, so no colleague reads another's code.
- */
-export function recorded(op: Op, value: unknown, workflow?: string): unknown {
-  const hidden = [...(op.opaque ?? []), ...(workflow === LOGIN_CODE_WORKFLOW ? LOGIN_CODE_BODY : [])];
-  return hidden.reduce((out, path) => hide(out, path.split(".")), value);
-}
-
-/** `value` with the field at `path` as `"<name>"`, in each item of a list it meets on the way. */
-function hide(value: unknown, path: string[]): unknown {
-  if (Array.isArray(value)) return value.map((item) => hide(item, path));
-  const [name, ...rest] = path;
-  if (!isRecord(value) || value[name!] === undefined) return value;
-  return { ...value, [name!]: rest.length ? hide(value[name!], rest) : `<${name}>` };
 }
 
 /** How many times an idempotent operation is tried. */
@@ -147,85 +125,23 @@ function refuseIfEnded(run: Run) {
 }
 
 /**
- * Where a call is, as its records say: its outline node's `path`, and the step's name, as the
- * outline resolved it (`OutlineNode`'s `name`), or for a call the outline could not name, the
- * operation a computed id called, or an approval's title that is no literal.
- */
-export interface Placed {
-  node: string;
-  name: string;
-}
-
-/** The step's name the outline gives a call's node: none for a computed op without one, or an approval's title that is no literal. */
-const named = (node: CallNode) => ("name" in node ? node.name : undefined);
-
-/**
- * The run's `ctx`: the operations and built-ins its workflow `uses`, and nothing else. Every
- * member that writes a record is placed in the outline where the workflow calls it (`placeCall`)
- * and goes through the run's queue (`serial`), its records carrying the node and the step's
- * name; `ctx.now()` only reads the clock, queued, and `ctx.runId` is a value. `ctx.all` alone
- * skips the queue: it makes no DBOS call or record itself, it only calls its members, whose ctx
- * calls are queued. Queued, it would hold the queue until its members settled, and their calls,
- * queued behind it, would never start.
+ * The run's `ctx` on DBOS (`ctxOf`): every member that writes a record is placed in the outline
+ * where the workflow calls it (`placeCall`) and goes through the run's queue (`serial`), its
+ * records carrying the node and the step's name; `ctx.now()` only reads DBOS's clock, queued.
+ * `ctx.all` alone skips the queue: it makes no DBOS call or record itself, it only calls its
+ * members, whose ctx calls are queued. Queued, it would hold the queue until its members
+ * settled, and their calls, queued behind it, would never start.
  */
 export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
-  const uses = wf.uses as readonly Use[];
-  /** A member placed where it is called, then `call`ed with its node. A refusal rejects, as a member's failure always has. */
-  const placed = (what: string, call: (node: CallNode, ...args: any[]) => Promise<unknown>) =>
-    async function member(...args: unknown[]) {
-      return call(placeCall(run, member, what), ...args);
-    };
-  const members: Record<string, any> = {};
-  for (const op of uses.filter(isOp)) {
-    // By the id's segments: an app's collection, `data.crm.contacts.get`, is `ctx.data.crm.contacts.get`.
-    const group = op.id
-      .split(".")
-      .slice(0, -1)
-      .reduce<Record<string, any>>((at, key) => (at[key] ??= {}), members);
-    group[op.name] = placed(op.id, (node, input, options?: { connection?: ConnectionRef }) =>
-      serial(run, () =>
-        callOp(run, op.id, input, { node: node.path, name: named(node) ?? op.id }, options?.connection),
-      ),
-    );
-  }
-  members.runId = run.id;
-  members.now = () => serial(run, () => DBOS.now());
-  if (uses.includes("approval")) {
-    members.approval = placed("approval", (node, title: string, req: ApprovalRequest) =>
-      serial(run, () =>
-        awaitApproval(run, title, checkApproval(title, req), { node: node.path, name: named(node) ?? title }),
-      ),
-    );
-  }
-  if (uses.includes("sleep")) {
-    members.sleep = placed("sleep", (node, req) =>
-      // The outline names every sleep.
-      serial(run, () => sleep(run, req, { node: node.path, name: named(node)! })),
-    );
-  }
-  if (uses.includes("all")) members.all = placed("all", (node, list) => all(run, list, node.path));
-  return guarded(members, "ctx", wf.name, { startedBy: startedByOf(run.actor) });
-}
-
-/** Who started the run, as `ctx.startedBy` shows it: a plain frozen record, whose absent fields read as undefined. */
-const startedByOf = ({ id, email, github, subject }: Principal): StartedBy =>
-  Object.freeze({ id, ...(email && { email }), ...(github && { github }), ...(subject && { subject }) });
-
-/** `members`, each object in it included, refusing any member not in it (`strict`), with `plain`'s as they are. */
-function guarded(
-  members: Record<string, unknown>,
-  path: string,
-  workflow: string,
-  plain: Record<string, unknown> = {},
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(members)) {
-    out[key] =
-      typeof value === "object" && value !== null
-        ? guarded(value as Record<string, unknown>, `${path}.${key}`, workflow)
-        : value;
-  }
-  return strict({ ...out, ...plain }, path, workflow);
+  return ctxOf(wf, run, {
+    place: (member, what) => placeCall(run, member, what),
+    op: (op, input, at, connection) => serial(run, () => callOp(run, op.id, input, at, connection)),
+    now: () => serial(run, () => DBOS.now()),
+    approval: (title, req, at) => serial(run, () => awaitApproval(run, title, checkApproval(title, req), at)),
+    sleep: (req, at) => serial(run, () => sleep(run, req, at)),
+    // Placed, so it has its node.
+    all: (list, at) => all(run, list, at.node!),
+  });
 }
 
 /** Where a `ctx` member was called from, as a stack frame says. */
@@ -289,48 +205,6 @@ function notInOutline(run: Run, what: string, site: CallSite | undefined, why: s
     { call: `ctx.${what}`, site: where, workflow: run.workflow },
   );
 }
-
-/** Refuses anything not declared in `uses`, with a message that says so. */
-function strict<T extends object>(obj: T, path: string, workflow: string): T {
-  return new Proxy(obj, {
-    get(target, key, receiver) {
-      if (typeof key === "symbol" || key === "then" || key in target) return Reflect.get(target, key, receiver);
-      throw new Error(`${path}.${key} is not available: add it to \`uses\` in workflow "${workflow}"`);
-    },
-  });
-}
-
-/** The resource instance the call acts on, from the operation's `target`, when it declares one. */
-export function targetOf(op: Op, input: unknown): { target?: string } {
-  if (!op.target) return {};
-  const target: unknown = op.target(input);
-  if (typeof target !== "string") {
-    throw new Error(`${op.id}: \`target\` returned ${typeof target}, not a string`);
-  }
-  return { target };
-}
-
-/** One call as the policy decides it and the ledger records it: an operation and its parsed input. */
-export interface Call {
-  op: Op;
-  input: unknown;
-}
-
-/**
- * The calls a call makes: a collection's `saveMany` (`isBatch`) makes one per entry, the
- * collection's `save` or `delete` with the entry as its input, and these are what the policy
- * decides and the ledger records, so a record's history reads the same whether it was saved
- * alone or in a batch; any other call makes itself.
- */
-export function callsOf(op: Op, input: unknown, ops: ReadonlyMap<string, Op>): Call[] {
-  if (!isBatch(op)) return [{ op, input }];
-  const { records, deletes } = input as { records: unknown[]; deletes: unknown[] };
-  const [save, remove] = entryOpsOf(op).map((id) => ops.get(id)!);
-  return [...records.map((e) => ({ op: save!, input: e })), ...deletes.map((e) => ({ op: remove!, input: e }))];
-}
-
-/** The outputs of the calls a call made, from its output: a batch's, one per entry, in order. */
-export const outputsOf = (op: Op, output: unknown): unknown[] => (isBatch(op) ? (output as unknown[]) : [output]);
 
 /** The key of the record a collection's `save` or `delete` acts on. */
 const keyOf = (op: Op, input: unknown, collection: Collection): string =>
@@ -618,7 +492,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
       workflow: run.workflow,
     });
   }
-  const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
+  const parsed = inputOf(op, input);
   // The calls this one makes (a batch's entries), each decided and recorded on its own.
   const calls = callsOf(op, parsed, run.state.ops);
   // The call's identity (its ledger seq and id, and the driver's idempotency key) is taken
@@ -663,12 +537,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
       entry(
         run,
         {
-          type: "op.called",
-          op: c.op.id,
+          ...opCalled(c, run.workflow),
           ...place,
-          ...targetOf(c.op, c.input),
-          effect: c.op.effect,
-          input: recorded(c.op, c.input, run.workflow),
           decision: decided[i]!,
           ...(connection && { connection }),
           ...outcome(i),
@@ -781,21 +651,6 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
 }
 
 /**
- * Checks a `ctx.approval` request before any DBOS call, so a bad one fails the run with
- * `invalid_input`: who may decide it, and the operations it covers, as ids (none unless named).
- */
-function checkApproval(title: string, req: ApprovalRequest): CheckedApproval {
-  const checked = parseOrThrow(ApprovalRequestSchema, req, `ctx.approval("${title}")`, { title });
-  return { ...checked, covers: checked.covers ?? [] };
-}
-
-/** Checks a sleep request before any DBOS call, so a bad one fails the run with `invalid_input`. */
-function checkSleep(req: unknown): SleepRequest {
-  const timed = typeof req === "object" && req !== null && "until" in req;
-  return parseOrThrow(timed ? SleepUntil : SleepFor, req, `ctx.sleep(${shown(req)})`);
-}
-
-/**
  * Calls the members one after another, each awaited before the next starts, each inside its
  * group (`currentGroup`), so every record its calls write carries it. The first failure stops
  * the group and is rethrown as it is. The id is the run's next `seq` when ctx.all begins, which
@@ -834,17 +689,7 @@ async function sleep(run: Run, raw: unknown, at: Placed) {
   const req = checkSleep(raw);
   const seq = run.seq++;
   const started = await DBOS.now();
-  const until =
-    "until" in req
-      ? typeof req.until === "number"
-        ? req.until
-        : Date.parse(req.until)
-      : started +
-        (req.ms ?? 0) +
-        (req.seconds ?? 0) * 1_000 +
-        (req.minutes ?? 0) * 60_000 +
-        (req.hours ?? 0) * 3_600_000 +
-        (req.days ?? 0) * 86_400_000;
+  const until = untilOf(req, started);
   const ms = until - started;
   await write(run, entry(run, { type: "sleep.started", ...at, until }, { seq, at: started }));
   // A time already past waits not at all, and adds no sleep step. A sandbox run never waits.

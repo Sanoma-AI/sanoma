@@ -1,4 +1,3 @@
-import { Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import type { z } from "zod";
 import type { Principal } from "./define.ts";
 import { CALL_WORKFLOW, errorMessage } from "./shared.ts";
@@ -73,9 +72,11 @@ export function causes(err: unknown): Error[] {
  * the run, another process took it over, the worker is shutting down, the run is not
  * deterministic) and `run_ended` (a call queued after the run's body ended). Looked for in the
  * error and its causes. A workflow that goes on past a failed call, as `drift` does, rethrows these.
+ * DBOS's errors are told by the code each carries (`dbosErrorCode`), read as a property: this
+ * module imports no DBOS, since a page's runtime (`page-run.ts`) uses it too.
  */
 export const isRunControlError = (err: unknown): boolean =>
-  causes(err).some((e) => e instanceof DBOSErrors.DBOSError || errorCode(e) === "run_ended");
+  causes(err).some((e) => own<number>(e, "dbosErrorCode", "number") !== undefined || errorCode(e) === "run_ended");
 
 /** Thrown into the run when the policy denies an operation call. The run fails with it. */
 export class PolicyDeniedError extends SanomaError {

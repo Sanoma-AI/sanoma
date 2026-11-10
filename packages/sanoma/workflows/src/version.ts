@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
-import { upFrom } from "./paths.ts";
+import { upFrom } from "./company-file.ts";
 import manifest from "../../package.json" with { type: "json" };
 
 /**

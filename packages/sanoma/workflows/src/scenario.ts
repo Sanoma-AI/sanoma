@@ -12,7 +12,7 @@ import {
   type Step as GherkinStep,
 } from "@cucumber/messages";
 import type { z } from "zod";
-import { targetOf } from "./call.ts";
+import { targetOf } from "./ctx.ts";
 import type { RunSummary, SanomaClient } from "./client.ts";
 import type { Approver, Principal } from "./define.ts";
 import type { ResolvedConfig } from "./config.ts";

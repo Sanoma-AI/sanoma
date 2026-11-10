@@ -740,3 +740,42 @@ export function defineDriver<V extends string, S extends Specs>(
     ...(options.authentication && { authentication: Object.freeze([...options.authentication]) }),
   });
 }
+
+/**
+ * What the connectors' setups attach under `key` (`withSetup`), by vendor id in `connectors`
+ * order. One vendor's connectors may name one maker, as copies of one connector do, never two.
+ */
+export function makersOf<K extends keyof ConnectorSetup>(
+  connectors: readonly Connector<any, any>[],
+  key: K,
+): Map<string, NonNullable<ConnectorSetup[K]>> {
+  const makers = new Map<string, NonNullable<ConnectorSetup[K]>>();
+  for (const connector of connectors) {
+    const make = setupOf(connector)[key];
+    if (make === undefined) continue;
+    const vendor = connector[VENDOR].id;
+    const seen = makers.get(vendor);
+    if (seen && seen !== make) {
+      const part = key === "agent" ? "coding agent" : key;
+      throw new Error(`Two connectors in \`connectors\` attach a ${part} for "${vendor}"; keep one per vendor`);
+    }
+    makers.set(vendor, make);
+  }
+  return makers;
+}
+
+/** The connectors' operations by id, refusing two connectors that declare one id with different operations. */
+export function indexConnectors(list: readonly Connector<any, any>[]) {
+  const map = new Map<string, Op>();
+  for (const connector of list) {
+    for (const resource of Object.values(connector as Record<string, Record<string, unknown>>)) {
+      for (const op of Object.values(resource)) {
+        if (!isOp(op)) continue;
+        const seen = map.get(op.id);
+        if (seen && seen !== op) throw new Error(`Two connectors in \`connectors\` declare ${op.id}`);
+        map.set(op.id, op);
+      }
+    }
+  }
+  return map;
+}

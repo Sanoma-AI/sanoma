@@ -1,4 +1,3 @@
-import { createHash, randomBytes } from "node:crypto";
 import { DriverError } from "./op.ts";
 
 // Secrets are named, never written: `secret("NAME")` in a data file is a marker for a value in
@@ -81,14 +80,16 @@ export function secretsForInput(input: unknown, secrets: Secrets, creates: reado
   };
 }
 
-/** A value for a secret with `generate`: 32 random bytes, base64url. */
-export const generateSecret = (): string => randomBytes(32).toString("base64url");
-
 /**
- * A bearer token's sha256, hex: all a table keeps of one (the wakeup service's, the api tokens). A
- * token is found by its hash (a unique index), so the secret itself is never compared.
+ * A value for a secret with `generate`: 32 random bytes, base64url without padding. Web Crypto's
+ * `getRandomValues`, which Node and a browser both have: a page's runtime (`page-run.ts`) makes
+ * secrets in memory too.
  */
-export const tokenHash = (token: string): string => createHash("sha256").update(token).digest("hex");
+export const generateSecret = (): string =>
+  btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
 
 /** `T` with each secret marker's place holding its value: what `resolveSecrets` returns. */
 export type Resolved<T> = T extends Secret

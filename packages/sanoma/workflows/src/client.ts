@@ -27,22 +27,11 @@ import {
   topicOf,
   withdrawalRefusal,
 } from "./approvals.ts";
-import {
-  beforeOf,
-  type Call,
-  callsOf,
-  decideCall,
-  decideStart,
-  decisionOf,
-  deniedKeys,
-  outputsOf,
-  recorded,
-  startHoldOf,
-  targetOf,
-} from "./call.ts";
+import { beforeOf, decideCall, decideStart, decisionOf, deniedKeys, startHoldOf } from "./call.ts";
+import { type Call, callsOf, inputOf, opCalled, outputsOf, recorded } from "./ctx.ts";
 import { type Chats, chatStore } from "./chats.ts";
 import { type Tokens, tokenStore } from "./tokens.ts";
-import { collectionsDriver } from "./collection.ts";
+import { collectionsDriver } from "./collection-driver.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import { readStoreMoves, type StoreMove } from "./store-move.ts";
@@ -510,7 +499,7 @@ export class SanomaClient {
     }
     const fn = drivers.get(op.id);
     if (!fn) throw new SanomaError("invalid_input", `${op.id} has no driver: the connector package must attach one`);
-    const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
+    const parsed = inputOf(op, input);
     const connection = await this.config.connections.select(op.vendor, options.connection, actor.id);
     const selected = connection && {
       $connection: connection.id,
@@ -615,11 +604,7 @@ export class SanomaClient {
         at,
         actor,
         workflow: CALL_WORKFLOW,
-        type: "op.called",
-        op: c.op.id,
-        ...targetOf(c.op, c.input),
-        effect: c.op.effect,
-        input: recorded(c.op, c.input),
+        ...opCalled(c),
         decision: decisions[i]!,
         ...(context.connection && { connection: context.connection }),
         ...outcome(i),

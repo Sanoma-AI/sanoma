@@ -10,11 +10,12 @@ import { type Db, lazyDb, pgCode } from "./db.ts";
 import { ledger } from "./db/company.ts";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
-import { shown, warn } from "./log.ts";
+import { warn } from "./log.ts";
 import type { Effect, SignInMethod } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
 import type { Run } from "./run.ts";
-import { errorMessage } from "./shared.ts";
+import { errorMessage, shown } from "./shared.ts";
+import { recordOf } from "./ctx.ts";
 
 /**
  * The audit record of a run: who started it, every operation call with the policy's
@@ -492,21 +493,12 @@ export function entry(
   body: LedgerBody,
   opts: { seq?: number; key?: string; at?: number } = {},
 ): LedgerRecord {
-  const seq = opts.seq ?? run.seq++;
-  const record = {
-    v: 1,
-    app: run.state.app,
-    id: `${run.id}:${body.type}:${opts.key ?? seq}`,
-    runId: run.id,
-    seq,
+  return recordOf(run, run.state.app, body, {
+    seq: opts.seq ?? run.seq++,
     at: opts.at ?? Date.now(),
-    actor: run.actor,
-    workflow: run.workflow,
-    ...body,
-  } as LedgerRecord;
-  const group = currentGroup.getStore();
-  if (group) record.group = group;
-  return record;
+    key: opts.key,
+    group: currentGroup.getStore(),
+  });
 }
 
 // Waits between tries of a failed append. Safe to repeat: append is idempotent by id.

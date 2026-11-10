@@ -7,7 +7,7 @@ import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "./wakeup-service.t
 import { wakeupOps } from "./wakeup-type.ts";
 
 // `sanoma.wakeup`'s operations over a wakeup service (`WakeupApi`): the driver's call it over
-// HTTP (plain `fetch`, the service has no SDK), the fake's (`fakeSanomaWakeup` in `fake.ts`)
+// HTTP (plain `fetch`, the service has no SDK), the fake's (`fakeSanomaWakeup` in `wakeup-fake.ts`)
 // answer from its state. Both go through `wakeupCalls`, so they plan, post the token and refuse
 // alike. `config.ts` puts the two together as the built-in `sanomaWakeup`.
 

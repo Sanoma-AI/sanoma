@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { AGENT_ID, type VendorInfo } from "./op.ts";
-import { upFrom } from "./paths.ts";
+import { upFrom } from "./company-file.ts";
 
 /** A logo file's path in the package: relative, never out of it (`..`), an SVG. */
 const LogoFile = z.string().regex(/^(?!\/)(?!.*\.\.)[\w./-]+\.svg$/, "a relative path to an .svg file in the package");

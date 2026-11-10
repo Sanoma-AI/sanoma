@@ -4,7 +4,8 @@ import { type Db, databaseOn, openPool, underPreparationLock } from "./db.ts";
 import { applyMigrations, WAKEUP_MIGRATIONS } from "./db/migrate.ts";
 import { wakeupAccounts, wakeupInstances } from "./db/wakeup.ts";
 import { info, warn } from "./log.ts";
-import { generateSecret, tokenHash as hashOf } from "./secret.ts";
+import { generateSecret } from "./secret.ts";
+import { tokenHash } from "./tokens.ts";
 import { errorMessage } from "./shared.ts";
 
 /*
@@ -184,7 +185,7 @@ async function insertAccount(db: Db, label: string): Promise<{ id: string; token
   if (!label.trim()) throw new Error("An account's label must not be empty");
   const id = randomUUID();
   const token = newToken("swa_");
-  await db.insert(wakeupAccounts).values({ id, tokenHash: hashOf(token), label });
+  await db.insert(wakeupAccounts).values({ id, tokenHash: tokenHash(token), label });
   return { id, token };
 }
 
@@ -231,7 +232,7 @@ export async function startWakeupService({
     const [row] = await db
       .select({ id: wakeupAccounts.id })
       .from(wakeupAccounts)
-      .where(and(eq(wakeupAccounts.tokenHash, hashOf(token)), isNull(wakeupAccounts.revokedAt)));
+      .where(and(eq(wakeupAccounts.tokenHash, tokenHash(token)), isNull(wakeupAccounts.revokedAt)));
     return row?.id ?? problem(401, "the token is no account's");
   }
 
@@ -259,7 +260,7 @@ export async function startWakeupService({
     const sameUrl = eq(wakeupInstances.url, checked.url);
     const [row] = await db
       .insert(wakeupInstances)
-      .values({ id, accountId, url: checked.url, tokenHash: hashOf(token) })
+      .values({ id, accountId, url: checked.url, tokenHash: tokenHash(token) })
       .onConflictDoUpdate({
         target: wakeupInstances.tokenHash,
         set: {
@@ -286,7 +287,7 @@ export async function startWakeupService({
       .select({ id: wakeupInstances.id })
       .from(wakeupInstances)
       .innerJoin(wakeupAccounts, live)
-      .where(eq(wakeupInstances.tokenHash, hashOf(token)));
+      .where(eq(wakeupInstances.tokenHash, tokenHash(token)));
     const id = found?.id;
     if (!id) return problem(401, "the token is no instance's");
     const given = await jsonBody(request);

@@ -3,25 +3,22 @@ import { indexDrivers, sandboxDrivers } from "./config.ts";
 import { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
 import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
-import { connectionFakes, type Fake, type ResourceFake } from "./fake.ts";
+import { connectionFakes } from "./fake.ts";
+import { applyGivens, refuseUnfaked } from "./givens.ts";
 import type { ConnectionCatalog, ConnectionRef, ConnectionSnapshot } from "./connection.ts";
-import { entry, type LedgerRecord, write } from "./ledger.ts";
+import { entry, write } from "./ledger.ts";
 import type { DriverFn } from "./op.ts";
 import type { Run } from "./run.ts";
 import { memorySecrets } from "./secret.ts";
 import { writeRunChecks } from "./db.ts";
 import { warn } from "./log.ts";
-import { check, type Given, loadScenarios, type RunChecks, type Scenario } from "./scenario.ts";
+import { check, loadScenarios, type RunChecks } from "./scenario.ts";
 import { errorMessage, notLoaded } from "./shared.ts";
 
 /*
  * What a worker does for a sandbox run, imported only when it starts one: kept apart from
  * `scenario.ts`, which the app reads too, because it needs DBOS and the ledger.
  */
-
-/** True for a fake that holds resources (`ResourceFake`, as `sanoma/internal/bridge`'s `tfFake` is). */
-const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & ResourceFake =>
-  "override" in fake && "put" in fake && "remove" in fake;
 
 /** Declared accounts get synthetic identities in each run; no production metadata or secrets are read. */
 export function sandboxConnection(catalog: ConnectionCatalog, runId: string) {
@@ -45,64 +42,6 @@ export function sandboxConnection(catalog: ConnectionCatalog, runId: string) {
       definition: revision,
     };
   };
-}
-
-/**
- * The error a sandbox run of the scenario fails with when it seeds a resource of a vendor whose
- * fake (one of `fakes`, by vendor) holds none, or whose connector attaches no fake; undefined
- * when every vendor it seeds a resource of has a `ResourceFake`. Pure.
- */
-export function missingResourceFake(
-  scenario: Pick<Scenario, "name" | "given">,
-  fakes: ReadonlyMap<string, Fake<unknown>>,
-): SanomaError | undefined {
-  const plain = scenario.given.filter((g): g is Extract<Given, { resource: string }> => {
-    if (!("resource" in g)) return false;
-    const fake = fakes.get(g.vendor);
-    return !fake || !holdsResources(fake);
-  });
-  if (plain.length === 0) return undefined;
-  const resources = [...new Set(plain.map((g) => g.resource))];
-  const vendors = [...new Set(plain.map((g) => g.vendor))];
-  const why = vendors.map((v) =>
-    fakes.has(v) ? `${v}'s fake holds no resources (it is not a tfFake)` : `${v}'s connector attaches no fake`,
-  );
-  return new SanomaError(
-    "invalid_input",
-    `Scenario "${scenario.name}" seeds ${resources.join(", ")}, but ${why.join("; ")}`,
-    {
-      scenario: scenario.name,
-      resources,
-    },
-  );
-}
-
-/**
- * Seeds one resource into the run's own fake of its vendor: put with its fields, or removed.
- * A seed the fake refuses (a field the provider's shape lacks, say) fails the scenario, naming
- * the step, as the other seed-time refusals do.
- */
-export function seedResource(
-  scenario: string,
-  copy: ResourceFake,
-  given: Extract<Given, { resource: string }>,
-): Extract<LedgerRecord, { type: "scenario.seeded" }>["seeds"][number] {
-  const { resource, type, name } = given;
-  try {
-    if ("gone" in given) {
-      copy.remove(type, name);
-      return { resource, name, gone: true };
-    }
-    copy.put(type, name, given.fields);
-    return { resource, name, fields: given.fields };
-  } catch (err) {
-    throw new SanomaError(
-      "invalid_input",
-      `Scenario "${scenario}" cannot seed ${resource} "${name}" ("${given.step}"): ${errorMessage(err)}`,
-      { scenario, step: given.step, resource, name },
-      { cause: err },
-    );
-  }
 }
 
 /**
@@ -152,52 +91,35 @@ export async function seedSandbox(run: Run, name: string, input: unknown): Promi
         { sandbox: true },
       );
       // The built-in call workflow selects exactly one operation. Other direct operations
-      // (including live connection mutations) need no fake unless this scenario calls them.
+      // (including live connection mutations) need no fake unless this scenario calls them,
+      // which `applyGivens` checks.
       const uses =
         run.workflow === CALL_WORKFLOW ? [CallInput.parse(input).op] : opIdsOf(state.workflows.get(run.workflow)!);
-      const seeding = scenario.given.flatMap((g) => ("op" in g ? [g.op] : []));
-      const missing = [...new Set([...uses, ...seeding])].filter((id) => !drivers.has(id));
-      if (missing.length) {
-        throw new SanomaError(
-          "invalid_input",
-          `A sandbox run of ${run.workflow} has no fake for ${missing.join(", ")}: no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`,
-          { scenario: name, missing },
-        );
-      }
-      const plain = missingResourceFake(scenario, fakes);
-      if (plain) throw plain;
-      const seeded: Extract<LedgerRecord, { type: "scenario.seeded" }>["seeds"] = [];
-      for (const [i, given] of scenario.given.entries()) {
-        if ("fault" in given) continue;
-        if ("op" in given) {
-          const connection = select(state.ops.get(given.op)!.vendor, given.connection);
-          const call = {
-            idempotencyKey: `${run.id}:seed:${i}`,
-            runId: run.id,
-            opId: given.op,
-            attempt: 1,
-            secrets,
-            connection,
-          };
-          const output = await drivers.get(given.op)!(given.input, call);
-          seeded.push({ op: given.op, input: given.input, output });
-          continue;
-        }
-        // Checked above: the vendor's fake holds resources.
-        const selected = select(given.vendor, given.connection);
-        const fake = selected
-          ? named.get(given.vendor)!.account({ vendor: given.vendor, $connection: selected.id })
-          : fakes.get(given.vendor)!;
-        seeded.push(seedResource(name, fake as Fake<unknown> & ResourceFake, given));
-      }
-      for (const given of scenario.given) {
-        if ("fault" in given) {
-          const vendor = state.ops.get(given.op)!.vendor;
-          const selected = select(vendor, given.connection);
-          const fake = selected ? named.get(vendor)!.account({ vendor, $connection: selected.id }) : fakes.get(vendor)!;
-          fake[given.fault](given.op);
-        }
-      }
+      refuseUnfaked(
+        uses,
+        drivers,
+        (missing, why) => `A sandbox run of ${run.workflow} has no fake for ${missing}: ${why}`,
+        { scenario: name },
+      );
+      /** The run's fake of `vendor`, or of the account `ref` selects. */
+      const fakeOf = (vendor: string, ref?: ConnectionRef) => {
+        const selected = select(vendor, ref);
+        return selected ? named.get(vendor)!.account({ vendor, $connection: selected.id }) : fakes.get(vendor)!;
+      };
+      const seeded = await applyGivens(scenario, {
+        drivers,
+        fakes,
+        fakeOf,
+        ops: state.ops,
+        call: (i, opId, ref) => ({
+          idempotencyKey: `${run.id}:seed:${i}`,
+          runId: run.id,
+          opId,
+          attempt: 1,
+          secrets,
+          connection: select(state.ops.get(opId)!.vendor, ref),
+        }),
+      });
       copies = drivers;
       return { seeds: seeded };
     },

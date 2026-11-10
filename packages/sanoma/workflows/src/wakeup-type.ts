@@ -7,7 +7,7 @@ import { defineResource } from "./resource.ts";
 // wakeup`, `wakeup-service.ts`: sanoma-ops's, or one of the company's own) that calls the host's
 // `GET /wake` at the time the worker registered before it stopped. The fallback for a host with no
 // clock of its own; every config with a host type has it (`resolveConfig`), so no connector is
-// needed. Its driver is `wakeup-driver.ts`, its fake `fakeSanomaWakeup` in `fake.ts`, and `config.ts`
+// needed. Its driver is `wakeup-driver.ts`, its fake `fakeSanomaWakeup` in `wakeup-fake.ts`, and `config.ts`
 // puts them together as `sanomaWakeup`. The service has no SDK or OpenAPI spec, so
 // the schemas are a cut of its own JSON, by hand.
 

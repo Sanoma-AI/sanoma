@@ -134,9 +134,14 @@
       "default": "./workflows/dist/description.js"
     },
     "./workflows/fake": {
-      "sanoma-source": "./workflows/src/fake.ts",
-      "types": "./workflows/dist/fake.d.ts",
-      "default": "./workflows/dist/fake.js"
+      "sanoma-source": "./workflows/src/fakes.ts",
+      "types": "./workflows/dist/fakes.d.ts",
+      "default": "./workflows/dist/fakes.js"
+    },
+    "./workflows/page": {
+      "sanoma-source": "./workflows/src/page-run.ts",
+      "types": "./workflows/dist/page-run.d.ts",
+      "default": "./workflows/dist/page-run.js"
     },
     "./workflows/plugin": {
       "sanoma-source": "./workflows/src/plugin.ts",
@@ -344,6 +349,7 @@
     "cn": "^0.4.0",
     "cookie-es": "^3.1.1",
     "crc-32": "^1.2.2",
+    "dequal": "^2.0.3",
     "drizzle-orm": "0.45.4",
     "fast-png": "^8.0.0",
     "fflate": "^0.8.3",

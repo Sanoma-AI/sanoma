@@ -14,7 +14,7 @@ import {
   memoryLedger,
   withSetup,
 } from "../src/index.ts";
-import { recorded } from "../src/call.ts";
+import { recorded } from "../src/ctx.ts";
 import { defineFake } from "../src/fake.ts";
 import announce from "./fixtures/announce.ts";
 import fanout, { fakeStats, stats } from "./fixtures/fanout.ts";

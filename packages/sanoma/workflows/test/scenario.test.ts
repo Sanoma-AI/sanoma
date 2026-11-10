@@ -18,7 +18,7 @@ import {
   memoryLedger,
   resolveConfig,
 } from "../src/index.ts";
-import { missingResourceFake, seedResource } from "../src/sandbox.ts";
+import { missingResourceFake, seedResource } from "../src/givens.ts";
 import { type CoreExpectation, detailOf } from "../src/expectations.ts";
 import { check as checkRun, loadScenarios, loadWorld, type Scenario, type Scope } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
