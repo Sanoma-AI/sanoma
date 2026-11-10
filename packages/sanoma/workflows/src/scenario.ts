@@ -1311,10 +1311,66 @@ const scenarioFiles = (root: string): string[] =>
     isDirectory(dir) ? featureFiles(dir).map((file) => `${relative(root, dir).split(sep).join("/")}/${file}`) : [],
   );
 
+/** Where the world is: `scenarios/world.feature` at the root, never an app's. */
+export const WORLD_FILE = `${SCENARIOS_DIR}/world.feature`;
+
+/**
+ * The world (`WORLD_FILE`): one Scenario of Givens alone, which seed the company a demo opens on
+ * (a collection's records, a vendor's objects, calls through a fake). Nothing runs or checks it.
+ */
+export interface World {
+  name: string;
+  given: Given[];
+}
+
 /** What `loadScenarios` returns. */
 export interface LoadedScenarios {
   scenarios: Scenario[];
   errors: { file: string; message: string }[];
+  /** The world, when the root has one that compiles; one that does not has its error in `errors`. */
+  world?: World;
+}
+
+/** What a world is, as its refusals say. */
+const WORLD_IS = "the world is one Scenario of Givens alone, which seed the company a demo opens on";
+
+/**
+ * The world, from its file's pickles: its one scenario's name and Givens. Throws, at its line, for
+ * a Scenario Outline, a second scenario, a step that did not pass, and every step but a Given that
+ * seeds: a When, a Then, a fault, a decision, who is acting.
+ */
+function worldOf(built: Built, report: Report, pickles: Pickle[], specs: Map<string, Spec>): World {
+  const [pickle, second] = pickles as [Pickle, ...Pickle[]];
+  const { query } = report;
+  const scenario = query.findLineageBy(pickle)!.scenario!;
+  if (scenario.examples.length) {
+    throw new Error(`${WORLD_FILE}:${scenario.location.line}: a Scenario Outline, but ${WORLD_IS}`);
+  }
+  if (second) {
+    const { location, name } = query.findLineageBy(second)!.scenario!;
+    throw new Error(`${WORLD_FILE}:${location.line}: a second scenario, "${name}", but ${WORLD_IS}`);
+  }
+  const spec = specs.get(pickle.id)!;
+  const results = stepResults(report);
+  const seeds = new Set(spec.given.map((g) => g.step));
+  for (const [i, step] of pickle.steps.entries()) {
+    const where = whereOf(report, WORLD_FILE, step);
+    const kind = step.type && KINDS[step.type];
+    if (kind === "when" || kind === "then") {
+      throw new Error(`${where}: "${step.text}" is a ${kind === "when" ? "When" : "Then"}, but ${WORLD_IS}`);
+    }
+    const error = stepError(built, results.get(step.id), step, where);
+    if (error) throw new Error(error);
+    const does = spec.steps[i]!.fault
+      ? "injects a fault"
+      : seeds.has(step.text)
+        ? undefined
+        : spec.decisions.some((d) => d.step === step.text)
+          ? "decides an approval"
+          : "says who is acting";
+    if (does) throw new Error(`${where}: "${step.text}" ${does}, but ${WORLD_IS}`);
+  }
+  return { name: spec.name, given: spec.given };
 }
 
 /** A parse error, as a file's error: `file:line: message`. */
@@ -1322,10 +1378,11 @@ const parseErrorOf = ({ uri, line, message }: Report["parseErrors"][number]) =>
   `${uri}${line === undefined ? "" : `:${line}`}: ${message}`;
 
 /**
- * Compiles the feature files `files` (relative to `dir`) into scenarios: Cucumber runs each,
- * and its steps record what they say. A file with an error has none of its scenarios: the
- * first error in it (a step that fails or matches no step or two, a scenario with no `When`,
- * a name used twice, a file Gherkin cannot parse, no scenarios at all) is its error.
+ * Compiles the feature files `files` (relative to `dir`) into scenarios, and `WORLD_FILE` among
+ * them into the world: Cucumber runs each, and its steps record what they say. A file with an
+ * error has none of its scenarios: the first error in it (a step that fails or matches no step or
+ * two, a scenario with no `When`, a name used twice, a file Gherkin cannot parse, no scenarios at
+ * all, the world's refusals) is its error.
  */
 async function compile(scope: Scope, dir: string, files: string[]): Promise<LoadedScenarios> {
   const built = builtFor(scope);
@@ -1349,6 +1406,7 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
     report = undefined;
   }
   const scenarios: Scenario[] = [];
+  let world: World | undefined;
   if (report) {
     const { query } = report;
     const names = namesOf(report);
@@ -1360,6 +1418,10 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
       try {
         const list = pickles.get(file) ?? [];
         if (list.length === 0) throw new Error(`${file}: no scenarios; add one with "Scenario: <name>"`);
+        if (file === WORLD_FILE) {
+          world = worldOf(built, report, list, specs);
+          continue;
+        }
         for (const pickle of list) {
           const line = lineOf(report, pickle);
           const scenario = query.findLineageBy(pickle)!.scenario!;
@@ -1406,7 +1468,7 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
     }
   }
   // Each file's error, in the files' order, and the scenarios of the rest, one name each across files.
-  const loaded: LoadedScenarios = { scenarios: [], errors: [] };
+  const loaded: LoadedScenarios = { scenarios: [], errors: [], ...(world && { world }) };
   const seen = new Map<string, string>();
   for (const file of files) {
     const error = errors.get(file);
@@ -1443,7 +1505,7 @@ const loadedByScope = new WeakMap<
 /**
  * Every scenario in the `.feature` files under `scenarios/` and each app's `apps/<app>/scenarios/`
  * in `scenarios` (a `file:` URL to the root), each named by its path from there, compiled by Cucumber, with an error for each file that does not compile and each name used
- * twice. No directory, or none given, is no scenarios. Rejects when an operation's phrase names
+ * twice, and the world (`WORLD_FILE`), which is no scenario. No directory, or none given, is no scenarios. Rejects when an operation's phrase names
  * a field it lacks. The files are compiled again only once one is added, removed or written
  * (its name, `mtimeMs` or size changes), or the people's data files change: until then each
  * call returns the same object, which callers must not change.
@@ -1473,6 +1535,18 @@ export async function loadScenarios(scope: Scope): Promise<LoadedScenarios> {
     if (loadedByScope.get(scope)?.loaded === loaded) loadedByScope.delete(scope);
   });
   return loaded;
+}
+
+/**
+ * The world (`WORLD_FILE`), compiled with the scenarios (`loadScenarios`): its name and Givens, or
+ * undefined when the root has none. Rejects with its error, at its `file:line`, when it does not
+ * compile or is not a world.
+ */
+export async function loadWorld(scope: Scope): Promise<World | undefined> {
+  const { world, errors } = await loadScenarios(scope);
+  const error = errors.find((e) => e.file === WORLD_FILE);
+  if (error) throw new Error(error.message);
+  return world;
 }
 
 /**

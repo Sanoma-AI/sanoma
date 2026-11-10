@@ -46,6 +46,12 @@ describe("runScenarios", () => {
       ].join("\n"),
     );
     onTestFinished(() => rmSync(join(dir, "rejected.feature")));
+    // The world seeds a demo: it is no scenario, and nothing runs it.
+    writeFileSync(
+      join(dir, "world.feature"),
+      'Feature: World\n  Scenario: A blog\n    Given a post titled "Old news" exists\n',
+    );
+    onTestFinished(() => rmSync(join(dir, "world.feature")));
     const printed = [vi.spyOn(console, "warn"), vi.spyOn(console, "error"), vi.spyOn(console, "log")];
     const log: string[] = [];
     const validate = vi.fn<() => Promise<void>>(async () => {
@@ -80,7 +86,7 @@ describe("runScenarios", () => {
     expect(lines.filter((l) => /error in step|rejected|DriverError|Error:/i.test(l))).toEqual([]);
   });
 
-  it("reports each step that did not hold, with the scenario, and each file that did not load", async () => {
+  it("reports each step that did not hold, with the scenario, and each file that did not load, a broken world among them", async () => {
     const feature = join(dir, "announce.feature");
     const text = readFileSync(feature, "utf8");
     writeFileSync(
@@ -94,6 +100,7 @@ describe("runScenarios", () => {
       join(dir, "broken.feature"),
       "Feature: Broken\n  Scenario: On fire\n    When announce runs\n    Then the blog is on fire\n",
     );
+    writeFileSync(join(dir, "world.feature"), "Feature: World\n  Scenario: A blog\n    When announce runs\n");
     try {
       const { passed, failed } = await runScenarios(config, { databaseUrl });
       expect(passed).toEqual(["Publish retried", "The newsletter fails to send"]);
@@ -103,11 +110,18 @@ describe("runScenarios", () => {
           step: "did not load",
           message: expect.stringMatching(/^scenarios\/broken\.feature:4: no step matches "the blog is on fire"/),
         },
+        {
+          scenario: "scenarios/world.feature",
+          step: "did not load",
+          message:
+            'scenarios/world.feature:3: "announce runs" is a When, but the world is one Scenario of Givens alone, which seed the company a demo opens on',
+        },
         { scenario: "Launch on time", step: "the run fails", message: "the run finished" },
       ]);
     } finally {
       writeFileSync(feature, text);
       rmSync(join(dir, "broken.feature"));
+      rmSync(join(dir, "world.feature"));
     }
   });
 

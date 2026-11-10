@@ -891,6 +891,24 @@ A doc string is a JSON object. A table cell, and a phrase's field, is read as te
 
 Checking a run, every `Then` step runs and judges the run on its own: one that does not hold says why, and the steps after it are still checked.
 
+### The world
+
+`scenarios/world.feature` at the root is the world: the company a demo opens on, written as one scenario of `Given` steps alone. It uses the same steps as any scenario, so it can give a collection its records, a vendor's fake its objects and a fake the calls it should have had (`{op} was called with`).
+
+```gherkin
+Feature: The company a demo opens on
+
+  Scenario: Acme's books
+    Given data.clients "acme" has
+      | name | Acme Corp |
+    And github.repository "website" has
+      | has_wiki | true |
+```
+
+The world is not a scenario: nothing runs or checks it, and the list of scenarios leaves it out. Its file holds exactly one `Scenario`. A `Scenario Outline`, a second scenario, a `When`, a `Then`, a fault, a decision or a step saying who is acting is refused at its line, and `sanoma check` reports that as it reports any feature file that does not load. Only the root has a world: a `world.feature` in an app's `apps/<app>/scenarios/` is an ordinary feature file, whose scenarios each need a `When`.
+
+`loadWorld(scope)`, from `sanoma/workflows/scenario`, resolves to the world's `{ name, given }`, or `undefined` when the root has no `scenarios/world.feature`, and rejects with its error at its `file:line`. `loadScenarios` returns it too, as `world`, with its error among `errors`.
+
 ### Steps a connector ships
 
 A connector's package declares steps with `defineSteps(vendor, ({ given, then }) => …)` (from the main entry) and attaches them with `withSetup(ops, { driver, fake, steps })`; a company passes its own as the config's `steps`. A step is a Cucumber expression (with the built-in parameter types, `{string}`, `{int}`, `{word}` and the rest) and a pure function of its parameters' values: compiling calls it, the app too, whenever a feature file changes.
