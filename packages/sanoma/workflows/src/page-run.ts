@@ -22,7 +22,7 @@ import { applyGivens, refuseUnfaked } from "./givens.ts";
 import type { LedgerBody, LedgerGroup, LedgerRecord } from "./ledger.ts";
 import { type CallContext, type Connector, type DriverFn, indexConnectors, makersOf, type Op } from "./op.ts";
 import { resourceTypesOf } from "./resource.ts";
-import type { Given } from "./scenario.ts";
+import type { World } from "./scenario.ts";
 import { memorySecrets, type Secrets } from "./secret.ts";
 import { ANONYMOUS_PRINCIPAL, apiNameOf, DATA_VENDOR, errorMessage, isEnded, type RunStatus } from "./shared.ts";
 
@@ -43,8 +43,8 @@ export interface PageRuntimeOptions {
   collections?: readonly Collection[];
   /** The connectors the workflows call, as their packages export them: each one's fake (`withSetup`'s `fake`) stands in for its vendor. */
   connectors?: readonly Connector<any, any>[];
-  /** The `Given` steps every run starts from (a world feature's, `loadWorld`), applied to the fakes at the start and on `reset`. */
-  world?: readonly Given[];
+  /** The world every run starts from (`loadWorld`): its `Given` steps applied to the fakes at the start and on `reset`. */
+  world?: World;
   /** Who starts every run and makes every call: `anonymous` unless given. */
   actor?: Principal;
   /** How an approval a run asks for is decided, at once: approved unless this says otherwise. */
@@ -117,7 +117,13 @@ const RunsLimit = z.object({ limit: z.number().int().positive().optional() });
  * implements, and a world its fakes cannot take.
  */
 export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRuntime> {
-  const { workflows, collections = [], connectors = [], world = [], actor = ANONYMOUS_PRINCIPAL } = options;
+  const {
+    workflows,
+    collections = [],
+    connectors = [],
+    world = { name: "world", given: [] },
+    actor = ANONYMOUS_PRINCIPAL,
+  } = options;
   const decide = options.decide ?? (() => "approve");
   const ops = indexConnectors([...connectors, ...(collections.length ? [collectionsConnector(collections)] : [])]);
   const types = resourceTypesOf(connectors);
@@ -134,16 +140,13 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       ),
     );
     const secrets = memorySecrets();
-    await applyGivens(
-      { name: "world", given: [...world] },
-      {
-        drivers,
-        fakes,
-        fakeOf: (vendor) => fakes.get(vendor)!,
-        ops,
-        call: (i, opId) => ({ idempotencyKey: `world:${i}`, runId: "world", opId, attempt: 1, secrets }),
-      },
-    );
+    await applyGivens(world, {
+      drivers,
+      fakes,
+      fakeOf: (vendor) => fakes.get(vendor)!,
+      ops,
+      call: (i, opId) => ({ idempotencyKey: `world:${i}`, runId: "world", opId, attempt: 1, secrets }),
+    });
     return { drivers, secrets };
   };
 

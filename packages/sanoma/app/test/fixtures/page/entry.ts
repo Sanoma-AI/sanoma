@@ -30,11 +30,14 @@ export const page = pageRuntime({
   workflows: [send],
   collections: [invoices],
   connectors: [resend],
-  world: [
-    {
-      step: 'Given data.invoices "INV-1" has',
-      op: "data.invoices.save",
-      input: { record: { number: "INV-1", customer: "ada@example.com" } },
-    },
-  ],
+  world: {
+    name: "An invoice to send",
+    given: [
+      {
+        step: 'Given data.invoices "INV-1" has',
+        op: "data.invoices.save",
+        input: { record: { number: "INV-1", customer: "ada@example.com" } },
+      },
+    ],
+  },
 });

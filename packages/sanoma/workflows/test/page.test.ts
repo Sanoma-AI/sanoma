@@ -4,7 +4,7 @@ import { z } from "zod";
 import { collection } from "../src/collection.ts";
 import { defineWorkflow, errorCode } from "../src/index.ts";
 import { pageRuntime } from "../src/page-run.ts";
-import type { Given } from "../src/scenario.ts";
+import type { World } from "../src/scenario.ts";
 
 const DAY = 86_400_000;
 
@@ -38,13 +38,16 @@ const chase = defineWorkflow({
   },
 });
 
-const world: Given[] = [
-  {
-    step: 'Given data.invoices "INV-1" has',
-    op: "data.invoices.save",
-    input: { record: { number: "INV-1", customer: "ada@example.com", status: "sent" } },
-  },
-];
+const world: World = {
+  name: "An invoice sent",
+  given: [
+    {
+      step: 'Given data.invoices "INV-1" has',
+      op: "data.invoices.save",
+      input: { record: { number: "INV-1", customer: "ada@example.com", status: "sent" } },
+    },
+  ],
+};
 
 const page = (decide?: () => "approve" | "reject") =>
   pageRuntime({
@@ -167,8 +170,10 @@ describe("pageRuntime", () => {
     await expect(
       pageRuntime({
         workflows: [],
-        world: [{ step: "Given a ghost post", op: "ghost.post.create", input: {} }],
+        world: { name: "A ghost post", given: [{ step: "Given a ghost post", op: "ghost.post.create", input: {} }] },
       }),
-    ).rejects.toThrow(/no fake its connectors attach implements it/);
+    ).rejects.toThrow(
+      /Scenario "A ghost post" seeds ghost\.post\.create, but no fake its connectors attach implements it/,
+    );
   });
 });
