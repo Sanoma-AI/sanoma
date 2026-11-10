@@ -1001,7 +1001,7 @@ describe("the page", () => {
     expect(column).toContain(">More agents<");
     expect(column).toContain("Connect your agent above to start.");
     // A new chat's engine, chosen in the composer: our loop to start with (chat-thread.test.tsx opens the menu).
-    expect(column).toMatch(/<button[^>]*aria-label="Engine: Sanoma"[^>]*>Sanoma</);
+    expect(column).toMatch(/<button[^>]*aria-label="Engine: Sanoma"[^>]*><img[^>]*>Sanoma</);
     expect(html).toContain('href="/workflows/announce"');
     expect(html).not.toContain('href="/runs"');
     expect(html).not.toContain('href="/start');
@@ -1597,7 +1597,9 @@ describe("the page", () => {
   it("opens a new chat on the engine the person chose last, from its cookie: no cards for a plan of their own", async () => {
     const chosen = await page("/workflows", app.url, { headers: { cookie: "sanoma_engine=acp-copilot" } });
     const column = chosen.text.match(/<aside id="chat" aria-label="Chat"[^>]*>([\s\S]*?)<\/aside>/)?.[1] ?? "";
-    expect(column).toMatch(/<button[^>]*aria-label="Engine: Copilot \(your plan\)"[^>]*>Copilot \(your plan\)</);
+    expect(column).toMatch(
+      /<button[^>]*aria-label="Engine: Copilot \(your plan\)"[^>]*>(<img[^>]*>){2}Copilot \(your plan\)</,
+    );
     expect(column).not.toContain("Connect your agent");
     expect(column).toContain(">What should change?<");
     expect(column).toMatch(/<button(?![^>]*aria-describedby)[^>]*aria-label="Send"/);
@@ -1606,7 +1608,7 @@ describe("the page", () => {
     for (const cookie of ["sanoma_engine=nonsense", "sanoma_engine=acp-claude-code"]) {
       const unknown = await page("/workflows", app.url, { headers: { cookie } });
       expect(unknown.text, cookie).toContain(">Connect your agent<");
-      expect(unknown.text, cookie).toMatch(/<button[^>]*aria-label="Engine: Sanoma"[^>]*>Sanoma</);
+      expect(unknown.text, cookie).toMatch(/<button[^>]*aria-label="Engine: Sanoma"[^>]*><img[^>]*>Sanoma</);
     }
   });
 

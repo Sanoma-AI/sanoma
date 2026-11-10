@@ -13,7 +13,7 @@ import { ApiError } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import {
   type ChatMessage,
-  ENGINE_NAMES,
+  engineOf,
   heldRunOf,
   noModelText,
   onModelConnector,
@@ -84,8 +84,10 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
     const named = chat?.engine ?? body.engine;
-    if (!Object.hasOwn(ENGINE_NAMES, named)) {
-      throw invalid(`No engine ${named}: the engines are ${Object.keys(ENGINE_NAMES).join(", ")}`);
+    // A chat keeps its engine; a new one opens only on our loop or a plan an installed connector gives its agent.
+    const { agent, plan } = engineOf(body.engine);
+    if (!chat && body.engine !== "loop" && !app.resolved.agents.get(agent)?.[plan]) {
+      throw invalid(`No engine ${body.engine}: no connector of this company gives its agent on that plan`);
     }
     const sent = await personMessage(body.message);
     const message: ChatMessage = body.start

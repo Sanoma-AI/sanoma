@@ -299,8 +299,8 @@ describe("describeConfig", () => {
       { id: "copilot", vendor: "github", title: "Copilot", mark: marks, own: true },
       { id: "claude-code", vendor: "anthropic", title: "Claude Code", mark, own: true, onKey: { model: "anthropic" } },
       { id: "codex", vendor: "openai", title: "Codex", mark: marks, own: true },
-      { id: "opencode", vendor: "opencode", title: "OpenCode", mark: marks, own: true },
-      { id: "pi", vendor: "pi", title: "Pi", mark: marks, own: true, onKey: { model: "anthropic" } },
+      { id: "opencode", vendor: "opencode", title: "OpenCode", mark: marks, own: true, once: true },
+      { id: "pi", vendor: "pi", title: "Pi", mark: marks, own: true, once: true, onKey: { model: "anthropic" } },
     ]);
     // Each agent's vendor is described as any connector's.
     expect(Object.keys(vendors)).toEqual(expect.arrayContaining(agents.map((agent) => agent.vendor)));

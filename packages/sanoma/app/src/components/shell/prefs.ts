@@ -18,8 +18,9 @@ export const chatPref = (value: string | undefined): ChatPref =>
   value === "open" || value === "closed" ? value : undefined;
 
 /**
- * The cookie the engine a person's new chats open on is kept in (a name of `ENGINE_NAMES`, which
- * the chat checks): the one they last chose, in the empty chat's cards or the composer.
+ * The cookie the engine a person's new chats open on is kept in (its name, `engineName`, which the
+ * chat takes only when the company can open a chat on it here, `enginesHere`): the one they last
+ * chose, in the empty chat's cards or the composer.
  */
 export const ENGINE_COOKIE = "sanoma_engine";
 

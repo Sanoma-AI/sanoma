@@ -29,7 +29,7 @@ import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
-import { type ChatMessage, chatTransport, type EngineName, type SignInCard } from "../src/lib/chat.ts";
+import { type ChatMessage, chatTransport, type SignInCard } from "../src/lib/chat.ts";
 import { agentOn, boxName } from "../src/steps/agent/checkout.ts";
 import { appSteps } from "../src/steps/index.ts";
 
@@ -166,7 +166,7 @@ afterAll(async () => {
 const headers = (actor: string) => ({ [ACTOR_HEADER]: actor, origin: new URL(app!.url).origin });
 
 /** Opens (or continues) the chat `id` on `engine` with `text`, as the chat column does: the reply's stream. */
-const opening = (id: string, engine: EngineName, text: string, actor = "ada") =>
+const opening = (id: string, engine: string, text: string, actor = "ada") =>
   chatTransport(new URL("/api/chat", app!.url).href, () => headers(actor)).sendMessages({
     trigger: "submit-message",
     chatId: id,
@@ -177,7 +177,7 @@ const opening = (id: string, engine: EngineName, text: string, actor = "ada") =>
   });
 
 /** The reply to `text` as it ended, each snapshot to `onSnapshot`. */
-async function send(id: string, engine: EngineName, text: string, onSnapshot?: (reply: ChatMessage) => void) {
+async function send(id: string, engine: string, text: string, onSnapshot?: (reply: ChatMessage) => void) {
   const stream = await opening(id, engine, text);
   let reply: ChatMessage | undefined;
   for await (const snapshot of readUIMessageStream<ChatMessage>({ stream })) {

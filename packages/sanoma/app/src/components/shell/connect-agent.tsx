@@ -3,10 +3,20 @@ import { Link } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
-import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
-import { ENGINE_NAMES, type EngineName, MODEL_CONNECTOR, ownEngine } from "../../lib/chat.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "#/components/ui/item.tsx";
+import { DECLARE_BOX } from "../../api.ts";
+import { enginesHere, enginesOf, MODEL_CONNECTOR } from "../../lib/chat.ts";
 import { configQuery } from "../../queries.ts";
-import { ButtonLink } from "../common.tsx";
+import { ButtonLink } from "../kit.tsx";
+import { EngineMark } from "./composer.tsx";
 
 // The empty chat while the person's agent is not connected, and when the menu's Agent… opens it:
 // the ways to connect it, as cards, the person's own Claude plan first.
@@ -16,22 +26,23 @@ const CLAUDE = "claude-code";
 const CODEX = "codex";
 
 /**
- * The cards: Your Claude plan (its sign-in starts at once), Your ChatGPT plan through Codex (on a
- * live instance, where OpenAI's plan sign-in does not reach, an OpenAI API key, which is not
- * offered yet), an API key on the model's connector page (`vendor`'s, else the Anthropic connector
- * to add), and More agents. An agent has its card only when a connector of the company gives it
- * on a person's own plan (`ConfigDescription.agents`): a turn on any other fails. `onChoose` gets
- * the engine chosen: the chat opens on it and keeps it for the person's new chats.
+ * The cards, each with its agent's mark: Your Claude plan (its sign-in starts at once; on a live
+ * instance that declares no box, what to declare instead, `DECLARE_BOX`), Your ChatGPT plan
+ * through Codex (on a live instance, where OpenAI's plan sign-in does not reach, an OpenAI API key,
+ * which is not offered yet), an API key on the model's connector page (`vendor`'s, else the
+ * Anthropic connector to add), and More agents, the rest the chat can open on here
+ * (`enginesHere`). An agent has its card only when a connector of the company gives it on a
+ * person's own plan (`ConfigDescription.agents`): a turn on any other fails. `onChoose` gets the
+ * engine chosen: the chat opens on it and keeps it for the person's new chats.
  */
-export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: (engine: EngineName) => void }) {
-  const { data: live } = useQuery({ ...configQuery(), select: (config) => config.place === "live" });
-  const { data: own = [] } = useQuery({
-    ...configQuery(),
-    // The engines the chat knows, of the agents the company's connectors give on a person's own plan.
-    select: (config) => config.agents.filter((agent) => agent.own && Object.hasOwn(ENGINE_NAMES, ownEngine(agent.id))),
-  });
-  const has = (id: string) => own.some((agent) => agent.id === id);
-  const more = own.filter((agent) => agent.id !== CLAUDE && agent.id !== CODEX);
+export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: (engine: string) => void }) {
+  const { data: config } = useQuery(configQuery());
+  const live = config?.place === "live";
+  const own = config ? enginesOf(config.agents).filter((engine) => engine.plan === "own") : [];
+  const here = new Set(config ? enginesHere(config).map((engine) => engine.name) : []);
+  const claude = own.find((engine) => engine.agent === CLAUDE);
+  const codex = own.find((engine) => engine.agent === CODEX);
+  const more = own.filter((engine) => engine !== claude && engine !== codex && here.has(engine.name));
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
@@ -42,21 +53,33 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
         </p>
       </div>
       <ItemGroup className="gap-2">
-        {has(CLAUDE) && (
+        {claude && (
           <Item variant="outline" className="border-primary bg-card">
+            <ItemMedia>
+              <EngineMark engine={claude} />
+            </ItemMedia>
             <ItemContent>
               <ItemTitle>
                 Your Claude plan <Badge variant="secondary">Recommended</Badge>
               </ItemTitle>
-              <ItemDescription>Pro or Max. Sign in once in your browser; nothing extra to pay.</ItemDescription>
+              <ItemDescription>
+                {here.has(claude.name)
+                  ? "Pro or Max. Sign in once in your browser; nothing extra to pay."
+                  : `${DECLARE_BOX}.`}
+              </ItemDescription>
             </ItemContent>
-            <Button className="w-full" onClick={() => onChoose("acp-claude-code")}>
-              Sign in with Claude
-            </Button>
+            {here.has(claude.name) && (
+              <Button className="w-full" onClick={() => onChoose(claude.name)}>
+                Sign in with Claude
+              </Button>
+            )}
           </Item>
         )}
-        {!has(CODEX) ? null : live ? (
+        {!codex ? null : live ? (
           <Item variant="outline" className="bg-card">
+            <ItemMedia>
+              <EngineMark engine={codex} />
+            </ItemMedia>
             <ItemContent>
               <ItemTitle>An OpenAI API key</ItemTitle>
               <ItemDescription>
@@ -66,12 +89,15 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
           </Item>
         ) : (
           <Item variant="outline" className="bg-card">
+            <ItemMedia>
+              <EngineMark engine={codex} />
+            </ItemMedia>
             <ItemContent>
               <ItemTitle>Your ChatGPT plan</ItemTitle>
               <ItemDescription>Plus or Pro, through Codex</ItemDescription>
             </ItemContent>
             <ItemActions>
-              <Button variant="outline" size="sm" onClick={() => onChoose("acp-codex")}>
+              <Button variant="outline" size="sm" onClick={() => onChoose(codex.name)}>
                 Sign in
               </Button>
             </ItemActions>
@@ -101,7 +127,7 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
         <p className="text-xs text-muted-foreground">
           {more.length > 0 && (
             <>
-              Other agents ({more.map((agent) => agent.title).join(", ")}) are under{" "}
+              Other agents ({more.map((engine) => engine.title).join(", ")}) are under{" "}
               <CollapsibleTrigger className="underline underline-offset-4">More agents</CollapsibleTrigger>.{" "}
             </>
           )}
@@ -109,13 +135,16 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
         </p>
         <CollapsibleContent>
           <ItemGroup className="gap-2">
-            {more.map((agent) => (
-              <Item key={agent.id} variant="outline" size="xs" className="bg-card">
+            {more.map((engine) => (
+              <Item key={engine.name} variant="outline" size="xs" className="bg-card">
+                <ItemMedia>
+                  <EngineMark engine={engine} />
+                </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>{agent.title}</ItemTitle>
+                  <ItemTitle>{engine.title}</ItemTitle>
                 </ItemContent>
                 <ItemActions>
-                  <Button variant="outline" size="sm" onClick={() => onChoose(ownEngine(agent.id) as EngineName)}>
+                  <Button variant="outline" size="sm" onClick={() => onChoose(engine.name)}>
                     Sign in
                   </Button>
                 </ItemActions>

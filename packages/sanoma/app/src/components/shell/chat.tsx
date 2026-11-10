@@ -20,19 +20,18 @@ import { actorHeaders, useActor } from "../../actor.ts";
 import {
   type ChatMessage,
   chatTransport,
-  ENGINE_NAMES,
-  type EngineName,
-  installed,
+  engineOf,
+  enginesHere,
+  enginesOf,
   isBusy,
   MODEL_CONNECTOR,
   onModelConnector,
-  ownPlan,
   written,
 } from "../../lib/chat.ts";
 import { CHATS_KEY, chatModelQuery, chatQuery, chatsQuery, configQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
 import type { Prompt } from "./chat-prompt.ts";
-import { Composer } from "./composer.tsx";
+import { Composer, EngineMark } from "./composer.tsx";
 import { ConnectAgent } from "./connect-agent.tsx";
 import { ConnectorPageLink, Thread } from "./thread.tsx";
 
@@ -42,7 +41,7 @@ import { ConnectorPageLink, Thread } from "./thread.tsx";
 /** The engine a person's new chats open on (none until they choose one), and choosing it. */
 interface EngineChoice {
   value?: string;
-  set(engine: EngineName): void;
+  set(engine: string): void;
 }
 
 /**
@@ -68,6 +67,10 @@ export function ChatColumn({
   const [fresh] = useState(generateId);
   const id = picked ?? chats[0]?.id ?? fresh;
   const chat = chats.find((c) => c.id === id);
+  // Every engine of the company's, to label a chat by, even one it can no longer open on here.
+  const { data: engines = [] } = useQuery({ ...configQuery(), select: (config) => enginesOf(config.agents) });
+  const optionOf = (name: string) => engines.find((e) => e.name === name);
+  const opened = chat && optionOf(chat.engine);
   return (
     <aside
       id="chat"
@@ -88,17 +91,25 @@ export function ChatColumn({
           <DropdownMenuContent align="start" className="min-w-64">
             <DropdownMenuGroup>
               <DropdownMenuLabel>Your chats</DropdownMenuLabel>
-              {chats.map((c) => (
-                <DropdownMenuItem key={c.id} onClick={() => setPicked(c.id)}>
-                  <span className="truncate">{c.title}</span>
-                </DropdownMenuItem>
-              ))}
+              {chats.map((c) => {
+                const on = optionOf(c.engine);
+                return (
+                  <DropdownMenuItem key={c.id} onClick={() => setPicked(c.id)}>
+                    {on && <EngineMark engine={on} />}
+                    <span className="truncate">{c.title}</span>
+                  </DropdownMenuItem>
+                );
+              })}
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
         {chat && (
-          <span className="shrink-0 text-xs text-muted-foreground" title="The engine answering this chat">
-            {ENGINE_NAMES[chat.engine as EngineName] ?? chat.engine}
+          <span
+            className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+            title="The engine answering this chat"
+          >
+            {opened && <EngineMark engine={opened} />}
+            {opened?.label ?? chat.engine}
           </span>
         )}
         <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setPicked(generateId())}>
@@ -191,16 +202,12 @@ function Conversation({
   const page = useCrumbs().at(-1)?.label;
   // The chat's own engine; a new chat opens on the person's choice (`choice`, which choosing here
   // changes) and keeps it after.
-  // The person's choice is one cookie for every company on this computer: one this company cannot run is not taken.
-  const { data: agents = [] } = useQuery({ ...configQuery(), select: (config) => config.agents });
-  const [engine, setEngine] = useState<EngineName>(
-    () =>
-      (openedOn ??
-        (choice.value !== undefined && Object.hasOwn(ENGINE_NAMES, choice.value) && installed(choice.value, agents)
-          ? choice.value
-          : "loop")) as EngineName,
+  // The person's choice is one cookie for every company on this computer: one this company cannot run here is not taken.
+  const { data: options = [] } = useQuery({ ...configQuery(), select: enginesHere });
+  const [engine, setEngine] = useState(
+    () => openedOn ?? (options.some((option) => option.name === choice.value) ? choice.value! : "loop"),
   );
-  const choose = (name: EngineName) => {
+  const choose = (name: string) => {
     setEngine(name);
     choice.set(name);
   };
@@ -214,7 +221,7 @@ function Conversation({
     void sendMessage({ text }, { body: { engine } });
   };
   /** The agent speaks first, on `on`: the message is its cue, which the server writes and the chat never shows. */
-  const speak = (on: EngineName) => {
+  const speak = (on: string) => {
     onSend();
     void sendMessage({ text: "", metadata: { intro: true } }, { body: { engine: on, start: true } });
   };
@@ -249,7 +256,7 @@ function Conversation({
               vendor={model?.vendor}
               onChoose={(name) => {
                 choose(name);
-                if (!ownPlan(name)) return;
+                if (engineOf(name).plan !== "own") return;
                 // Spoken here, so the chat does not speak by itself as well.
                 acted.current = lastId;
                 speak(name);
@@ -266,7 +273,7 @@ function Conversation({
           busy={busy}
           onSend={send}
           draft={opening?.text}
-          engine={fresh && !openedOn ? { value: engine, set: choose } : undefined}
+          engine={fresh && !openedOn ? { value: engine, set: choose, options } : undefined}
           note={
             noModel ? (
               cards ? (
