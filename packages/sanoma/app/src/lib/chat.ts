@@ -8,7 +8,7 @@ import {
   isToolUIPart,
   type UIMessage,
 } from "ai";
-import { type AppConfig, DECLARE_BOX } from "../api.ts";
+import type { AppConfig } from "../api.ts";
 import type { LoopTools } from "../steps/agent/tools.ts";
 
 // The operator agent's chat as the browser and every engine share it: the message type, the
@@ -170,12 +170,6 @@ export const heldRunOf = (output: unknown): string | undefined => {
 
 /** What a turn's error says when the model's connector has no key: its message, then its connector's page. */
 export const noKeyText = (vendor: string, message: string) => `${message} [connector:${vendor}]`;
-
-/**
- * What a coding agent's turn is told on a live instance that declares no sandbox: what to declare,
- * and Agent37's connector page for its key (`noKeyText`).
- */
-export const NO_BOX = noKeyText("agent37", DECLARE_BOX);
 
 /** Why a turn of the loop is refused while it has no model (`chatModel`): with its connector's page (`noKeyText`), when there is one. */
 export const noModelText = (vendor?: string) =>

@@ -56,6 +56,7 @@ export function Composer({
   const [text, setText] = useState(draft ?? "");
   const noteId = useId();
   const chosen = engine?.options.find((option) => option.name === engine.value);
+  const own = engine?.options.filter((option) => option.plan === "own") ?? [];
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -111,10 +112,10 @@ export function Composer({
                   <DropdownMenuGroup>
                     {engine.options.filter((option) => option.plan === "onKey").map(engineOption)}
                   </DropdownMenuGroup>
-                  {engine.options.some((option) => option.plan === "own") && (
+                  {own.length > 0 && (
                     <DropdownMenuGroup>
                       <DropdownMenuLabel>Your own plan</DropdownMenuLabel>
-                      {engine.options.filter((option) => option.plan === "own").map(engineOption)}
+                      {own.map(engineOption)}
                     </DropdownMenuGroup>
                   )}
                 </DropdownMenuRadioGroup>

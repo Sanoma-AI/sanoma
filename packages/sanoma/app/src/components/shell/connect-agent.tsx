@@ -39,11 +39,11 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
   const { data: config } = useQuery(configQuery());
   const live = config?.place === "live";
   const noBox = config !== undefined && boxless(config);
-  const own = config ? enginesOf(config.agents).filter((engine) => engine.plan === "own") : [];
-  const here = new Set(config ? enginesHere(config).map((engine) => engine.name) : []);
-  const claude = own.find((engine) => engine.agent === CLAUDE);
+  // The own plans the chat can open on here; with no box, Claude's still has its card, saying what to declare.
+  const own = config ? enginesHere(config).filter((engine) => engine.plan === "own") : [];
+  const claude = (noBox ? enginesOf(config.agents) : own).find((e) => e.plan === "own" && e.agent === CLAUDE);
   const codex = own.find((engine) => engine.agent === CODEX);
-  const more = own.filter((engine) => engine !== claude && engine !== codex && here.has(engine.name));
+  const more = own.filter((engine) => engine !== claude && engine !== codex);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
@@ -54,7 +54,7 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
         </p>
       </div>
       <ItemGroup className="gap-2">
-        {claude && (here.has(claude.name) || noBox) && (
+        {claude && (
           <Item variant="outline" className="border-primary bg-card">
             <ItemMedia>
               <EngineMark engine={claude} />

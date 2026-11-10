@@ -13,16 +13,15 @@ import { ApiError } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import {
   type ChatMessage,
-  engineOf,
+  enginesHere,
   heldRunOf,
-  NO_BOX,
   noModelText,
   onModelConnector,
   textOf,
   unfinished,
   written,
 } from "../lib/chat.ts";
-import { type ActorContext, parse, requireActor, toApiError } from "./core.ts";
+import { type ActorContext, appConfig, parse, requireActor, toApiError } from "./core.ts";
 import { chatModel } from "./models.ts";
 
 // The operator agent's chat, as the app answers it: a turn is a run of the built-in `chat`, which
@@ -84,8 +83,12 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const { chats } = app.client;
     const chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
-    // A chat keeps its engine, whose turn says what it lacks; a new one opens only on one it can run here.
-    if (!chat) await checkEngine(app, body.engine);
+    // A chat keeps its engine, whose turn says what it lacks; a new one opens only on one the composer offers here.
+    if (!chat) {
+      const here = enginesHere(appConfig(app)).map((engine) => engine.name);
+      if (!here.includes(body.engine))
+        throw invalid(`No engine ${body.engine} here: the engines are ${here.join(", ")}`);
+    }
     const named = chat?.engine ?? body.engine;
     const sent = await personMessage(body.message);
     const message: ChatMessage = body.start
@@ -113,26 +116,6 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const { status, body } = toApiError(err, "a chat turn");
     return Response.json(body, { status });
   }
-}
-
-/**
- * Refuses a new chat on an engine it cannot run here, as the composer offers none such
- * (`enginesHere`): our loop, else a plan an installed connector gives its agent; on a live
- * instance, not while it declares no box (`NO_BOX`), nor an own plan whose sign-in is a command run
- * once on the person's computer.
- */
-async function checkEngine(app: AppContext, name: string) {
-  if (name === "loop") return;
-  const { agent, plan } = engineOf(name);
-  const installed = app.resolved.agents.get(agent);
-  const part = installed?.[plan];
-  if (!installed || !part)
-    throw invalid(`No engine ${name}: no connector of this company gives its agent on that plan`);
-  if (app.place !== "live") return;
-  if ("signIn" in part && "once" in part.signIn) {
-    throw invalid(`${installed.title} signs in on the person's own computer, not on a live instance`);
-  }
-  if ((await app.resolved.sandboxes()).length === 0) throw new ApiError(409, { error: NO_BOX });
 }
 
 /** The person's new message, checked (a 400 for one a chat does not take). The transcript, written by the worker, is not validated again. */

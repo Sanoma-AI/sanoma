@@ -17,7 +17,6 @@ import {
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { cn } from "#/lib/utils.ts";
 import { actorHeaders, useActor } from "../../actor.ts";
-import type { AppConfig } from "../../api.ts";
 import {
   type ChatMessage,
   chatTransport,
@@ -39,9 +38,6 @@ import { ConnectorPageLink, Thread } from "./thread.tsx";
 
 // The chat column, beside the bar on the same surface: the operator agent (POST /api/chat, its
 // stream read by the AI SDK's useChat), your chats, and the composer carrying the page you are on.
-
-/** Every engine of the company's (`enginesOf`), as the chat column reads it from the config. */
-const allEngines = (config: AppConfig) => enginesOf(config.agents);
 
 /** The engine a person's new chats open on (none until they choose one), and choosing it. */
 interface EngineChoice {
@@ -73,7 +69,7 @@ export function ChatColumn({
   const id = picked ?? chats[0]?.id ?? fresh;
   const chat = chats.find((c) => c.id === id);
   // Every engine of the company's, to label a chat by, even one it can no longer open on here.
-  const { data: engines = [] } = useQuery({ ...configQuery(), select: allEngines });
+  const { data: engines = [] } = useQuery({ ...configQuery(), select: (config) => enginesOf(config.agents) });
   const optionOf = (name: string) => engines.find((e) => e.name === name);
   const opened = chat && optionOf(chat.engine);
   return (
