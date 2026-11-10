@@ -3,7 +3,7 @@ import type { Effect } from "sanoma/workflows";
 import { cva, type VariantProps } from "class-variance-authority";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
-import { type ComponentProps, type ReactElement, type ReactNode, useId } from "react";
+import { type ComponentProps, type ReactElement, type ReactNode, useId, useSyncExternalStore } from "react";
 import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button, buttonVariants } from "#/components/ui/button.tsx";
@@ -11,6 +11,7 @@ import { Card, CardTitle } from "#/components/ui/card.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { cn } from "#/lib/utils.ts";
+import { utcText } from "#/lib/time.ts";
 import { type Tone, TONE_FILL } from "#/lib/tone.ts";
 
 // The kit's own pieces, composed from the shadcn components in ./ui: how a page looks, nothing
@@ -272,5 +273,58 @@ export function TipButton({
     <Tip tip={tip} describe={describe}>
       <Button variant={variant} size={size} aria-label={label} {...props} />
     </Tip>
+  );
+}
+
+function ago(ms: number, now: number): string {
+  const s = Math.round((now - ms) / 1000);
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return new Date(ms).toLocaleDateString();
+}
+
+// One clock for every `When` on the page, ticking every 15 s while any is shown.
+let now: number | undefined;
+const watchers = new Set<() => void>();
+let ticker: ReturnType<typeof setInterval> | undefined;
+
+function watchClock(onTick: () => void) {
+  watchers.add(onTick);
+  if (!ticker) {
+    // A clock read while nothing watched it may be old: catch up now.
+    now = Date.now();
+    ticker = setInterval(() => {
+      now = Date.now();
+      for (const watcher of watchers) watcher();
+    }, 15_000);
+  }
+  return () => {
+    watchers.delete(onTick);
+    if (!watchers.size) {
+      clearInterval(ticker);
+      ticker = undefined;
+    }
+  };
+}
+
+const readClock = () => (now ??= Date.now());
+/** The server, and the browser while it hydrates, know no time: they render the UTC time. */
+const noClock = () => undefined;
+
+/**
+ * A time, relative to now in the browser, with the UTC time as its title. The server renders
+ * the UTC time, so the page hydrates the same markup whatever the browser's clock and time zone.
+ */
+export function When({ at }: { at: number }) {
+  const clock = useSyncExternalStore(watchClock, readClock, noClock);
+  const utc = utcText(at, { seconds: true });
+  return (
+    <time dateTime={new Date(at).toISOString()} title={utc}>
+      {clock === undefined ? utc : ago(at, clock)}
+    </time>
   );
 }

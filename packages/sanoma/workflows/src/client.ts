@@ -98,6 +98,7 @@ import {
   chatRunPrefix,
   DATA_VENDOR,
   DRAFT_ID,
+  draftRunOf,
   ENDED_STATUSES,
   errorMessage,
   FOLLOW_WORKFLOW,
@@ -109,10 +110,12 @@ import {
   LIST_LIMIT,
   refusalOf,
   type RunStatus,
+  SAVE_DRAFT_WORKFLOW,
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
 import { RemoteEventSchema } from "./follow-workflow.ts";
+import { SaveDraftInput, type SaveDraftOutput } from "./app-workflows.ts";
 import type { ChatTell, ChatTurnInput } from "./chat-workflow.ts";
 import { sealChatCode } from "./seal.ts";
 import type { RunChecks } from "./scenario.ts";
@@ -233,6 +236,12 @@ export interface ChangeView {
   state: ChangeState;
   /** The run's output, once it has finished. */
   report?: ChangeReport;
+}
+
+/** A save of a draft as the app shows it (`SanomaClient.saves`): its run, its input, and once finished its output. */
+export interface SaveView extends RunSummary {
+  input: SaveDraftInput;
+  output?: SaveDraftOutput;
 }
 
 /** Which changes `SanomaClient.changes` lists: `open` (not ended) or not, and at most `limit` (20), newest first. */
@@ -1002,11 +1011,54 @@ export class SanomaClient {
    */
   async openChange(input: ChangeInput, options: StartOptions): Promise<string> {
     const { id } = parseOrThrow(ChangeInput, input, "Not a change to open");
-    const runs = await this.changeRuns(id);
+    return this.startOnDraft(CHANGE_WORKFLOW, id, input, options);
+  }
+
+  /**
+   * Starts the built-in save of the draft `input.id` (`SaveDraftInput`): its run id is `save:<id>`,
+   * or `save:<id>~<n>` once that run has ended. While a save of the draft has not ended, returns its
+   * id and starts nothing.
+   */
+  async saveDraft(input: SaveDraftInput, options: StartOptions): Promise<string> {
+    const { id } = parseOrThrow(SaveDraftInput, input, "Not a draft to save");
+    return this.startOnDraft(SAVE_DRAFT_WORKFLOW, id, input, options);
+  }
+
+  /** The saves of the draft `id` (`saveDraft`), newest first, each with its input and, once finished, its output. */
+  async saves(id: string): Promise<SaveView[]> {
+    const rows = await this.draftRuns(SAVE_DRAFT_WORKFLOW, id, { load: true });
+    return Promise.all(
+      rows.map(async (row) => ({
+        // A save never asks an approval.
+        ...(await this.summarize(row, [])),
+        input: (row.input as [RunArgs])[0].input as SaveDraftInput,
+        ...(row.status === "SUCCESS" && { output: row.output as SaveDraftOutput }),
+      })),
+    );
+  }
+
+  /** Whether the draft `id` was saved as the commit `sha`: by one of its saves (`saves`), or its change's merge (`change`). */
+  async savedAs(id: string, sha: string): Promise<boolean> {
+    const [change, saves] = await Promise.all([this.change(id), this.saves(id)]);
+    return (
+      change?.state.merged?.sha === sha ||
+      saves.some((save) => save.output && "revision" in save.output && save.output.revision === sha)
+    );
+  }
+
+  /** Starts the built-in `workflow` on the draft `id` as `<prefix>:<id>`, `~<n>` after an ended one; an unended run of it is returned instead. */
+  private async startOnDraft(
+    workflow: keyof typeof DRAFT_RUNS,
+    id: string,
+    input: unknown,
+    options: StartOptions,
+  ): Promise<string> {
+    const runs = await this.draftRuns(workflow, id);
     const open = runs.find((r) => !isEnded(runStatus(r.status, [])));
     if (open) return open.workflowID;
-    const runId = runs.length ? `${changeRunId(id)}~${runs.length + 1}` : changeRunId(id);
-    return this.start(this.config.workflows.get(CHANGE_WORKFLOW)!, input, { ...options, runId });
+    const first = `${DRAFT_RUNS[workflow].prefix}:${id}`;
+    const runId = runs.length ? `${first}~${runs.length + 1}` : first;
+    return this.start(this.config.workflows.get(workflow)!, input, { ...options, runId });
   }
 
   /**
@@ -1053,7 +1105,7 @@ export class SanomaClient {
 
   /** The change of the draft `id`: its latest run's (`openChange`), or undefined when it has none. */
   async change(id: string): Promise<ChangeView | undefined> {
-    const [row] = await this.changeRuns(id, { load: true });
+    const [row] = await this.draftRuns(CHANGE_WORKFLOW, id, { load: true });
     return row && this.changeView(row);
   }
 
@@ -1074,7 +1126,7 @@ export class SanomaClient {
     const given = parseOrThrow(ChangeEventSchema, event, "Not a change event");
     // A close is asked for by whoever asks it, whatever the event names.
     const told: ChangeEvent = given.kind === "close" ? { kind: "close", by: by.id } : given;
-    const [row] = await this.changeRuns(id);
+    const [row] = await this.draftRuns(CHANGE_WORKFLOW, id);
     if (!row) throw new SanomaError("run_not_found", `The draft ${id} has no change`, { id });
     const runId = row.workflowID;
     const approvals = await this.approvals(runId);
@@ -1183,18 +1235,18 @@ export class SanomaClient {
     });
   }
 
-  /** The runs of the draft `id`'s change, newest first: `change:<id>` and `change:<id>~<n>`. */
-  private async changeRuns(id: string, { load = false } = {}) {
-    const base = changeRunId(id);
+  /** The runs of the built-in `workflow` on the draft `id`, newest first: `<prefix>:<id>` and `<prefix>:<id>~<n>`. */
+  private async draftRuns(workflow: keyof typeof DRAFT_RUNS, id: string, { load = false } = {}) {
+    const { prefix, idOf } = DRAFT_RUNS[workflow];
     const rows = await this.dbos.listWorkflows({
-      workflow_id_prefix: base,
-      workflowName: CHANGE_WORKFLOW,
+      workflow_id_prefix: `${prefix}:${id}`,
+      workflowName: workflow,
       applicationName: this.config.appName,
       sortDesc: true,
       loadInput: load,
       loadOutput: load,
     });
-    return rows.filter((r) => isChangeRunOf(id, r.workflowID));
+    return rows.filter((r) => idOf(r.workflowID) === id);
   }
 
   /** A change run's row as the app shows it: its summary, its last `ChangeState` and, once finished, its report. */
@@ -1761,19 +1813,23 @@ export class SanomaClient {
     }
   }
 
-  private async summarize(r: {
-    workflowID: string;
-    workflowName: string;
-    status: string;
-    createdAt: number;
-    updatedAt?: number;
-    authenticatedUser?: string;
-    authenticatedRoles?: string[];
-    error?: unknown;
-    attributes?: Record<string, unknown>;
-    scheduleName?: string;
-  }): Promise<RunSummary> {
-    const approvals = await this.approvals(r.workflowID);
+  /** The run `r` as listed, with its approvals: read from the run unless given. */
+  private async summarize(
+    r: {
+      workflowID: string;
+      workflowName: string;
+      status: string;
+      createdAt: number;
+      updatedAt?: number;
+      authenticatedUser?: string;
+      authenticatedRoles?: string[];
+      error?: unknown;
+      attributes?: Record<string, unknown>;
+      scheduleName?: string;
+    },
+    approvals?: ApprovalState[],
+  ): Promise<RunSummary> {
+    approvals ??= await this.approvals(r.workflowID);
     const groups = r.authenticatedRoles ?? [];
     const onBehalfOf = r.attributes?.onBehalfOf;
     return {
@@ -1848,12 +1904,27 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
     },
   );
 
+/** A built-in run on a draft (`startOnDraft`): its run ids' prefix (`<prefix>:<draft id>`), and the draft a run id is of. */
+const draftRun = (prefix: string) => ({ prefix, idOf: draftRunOf(prefix) });
+
+/** The built-ins run on a draft, by name (`draftRun`). */
+const DRAFT_RUNS = {
+  [CHANGE_WORKFLOW]: draftRun("change"),
+  [SAVE_DRAFT_WORKFLOW]: draftRun("save"),
+} as const;
+
+/** Whether a start of `workflow` is `startOnDraft`'s: under a run id of the draft its input names. */
+function admitsDraftRun(workflow: keyof typeof DRAFT_RUNS) {
+  return ({ id }: { id: string }, _by: Principal, runId: string | undefined) =>
+    runId !== undefined && DRAFT_RUNS[workflow].idOf(runId) === id;
+}
+
 /**
  * The built-ins only one of the client's methods starts, by name: that method (`by`), and whether
  * a start is its own (`admits`), which `start` asks once the policy has (a visitor is denied
- * first), refusing any other: a change under the id `openChange` names; a follow as `host-check`
- * under its event's id; a chat turn under its chat's and message's id, after a turn of the same
- * chat, as the chat's person.
+ * first), refusing any other: a change or a save under the id `openChange` or `saveDraft` names; a
+ * follow as `host-check` under its event's id; a chat turn under its chat's and message's id, after
+ * a turn of the same chat, as the chat's person.
  */
 const OWN_STARTS: Record<
   string,
@@ -1867,7 +1938,8 @@ const OWN_STARTS: Record<
     ): boolean | Promise<boolean>;
   }
 > = {
-  [CHANGE_WORKFLOW]: { by: "openChange", admits: (input: ChangeInput, _by, runId) => isChangeRunOf(input.id, runId) },
+  [CHANGE_WORKFLOW]: { by: "openChange", admits: admitsDraftRun(CHANGE_WORKFLOW) },
+  [SAVE_DRAFT_WORKFLOW]: { by: "saveDraft", admits: admitsDraftRun(SAVE_DRAFT_WORKFLOW) },
   [FOLLOW_WORKFLOW]: {
     by: "follow",
     admits: (event: RemoteEvent, by, runId) => runId === followRunId(event) && by.id === HOST_CHECK_AGENT,
@@ -1893,12 +1965,6 @@ const OWN_STARTS: Record<
  */
 const followRunId = (parsed: RemoteEvent) =>
   `follow:${createHash("sha256").update(JSON.stringify(parsed)).digest("hex")}`;
-
-/** A change's first run's id: `change:<draft id>`. */
-const changeRunId = (id: string) => `change:${id}`;
-
-/** True when `runId` is a run of the draft `id`'s change: `change:<id>` or `change:<id>~<n>`. */
-const isChangeRunOf = (id: string, runId: string | undefined) => runId !== undefined && changeIdOf(runId) === id;
 
 /** Why a change event withdraws the merge's pending approval. */
 const WITHDRAWAL: Record<ChangeEvent["kind"], string> = {

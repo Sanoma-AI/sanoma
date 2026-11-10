@@ -30,6 +30,7 @@ import {
   LOGIN_CODE_WORKFLOW,
   notLoaded,
   type Saved,
+  undoDraftOf,
 } from "sanoma/workflows/shared";
 import { type ConfigDescription, permissionsGrid } from "sanoma/workflows/describe";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
@@ -40,6 +41,8 @@ import {
   type AppConfig,
   CallRequest,
   type ChangeDetail,
+  type SaveDetail,
+  type SaveDraftRequest,
   ChangesQuery,
   type ClearCredentialRequest,
   type CredentialsResponse,
@@ -334,10 +337,12 @@ export async function change({ client, snapshot }: AppContext, id: string): Prom
   const view = await client.change(id);
   if (!view) return null;
   // As the planner finds them: a workflow's file relative to the repository's root, in `touches`.
-  const touched = new Set(view.state.facts?.touches);
-  const files = Object.entries(snapshot.repository?.workflows ?? {});
-  return { ...view, edits: files.filter(([, file]) => touched.has(file)).map(([name]) => name) };
+  return { ...view, edits: workflowsIn(snapshot, view.state.facts?.touches ?? []) };
 }
+
+/** The config's workflows, by name, whose files (relative to the repository's root) are among `files`. */
+const workflowsIn = (snapshot: AppContext["snapshot"], files: readonly string[]) =>
+  Object.entries(snapshot.repository?.workflows ?? {}).flatMap(([name, file]) => (files.includes(file) ? [name] : []));
 
 /** The connector whose remote half is for the repository's remote (`remoteFor`); none without a remote, or without such a connector. */
 export const remoteOf = ({ resolved, snapshot }: Pick<AppContext, "resolved" | "snapshot">) => {
@@ -365,6 +370,44 @@ export async function openChange(
   return {
     runId: await client.openChange({ id, title: chat.title, page: changePage(id, origin) }, { startedBy: actor }),
   };
+}
+
+/**
+ * The saves of the draft `id` (`SanomaClient.saves`), newest first, each with the config's
+ * workflows whose files it saved (`edits`), as the files say now.
+ */
+export async function saves({ client, snapshot }: AppContext, id: string): Promise<SaveDetail[]> {
+  return (await client.saves(id)).map((save) => ({
+    ...save,
+    edits: workflowsIn(snapshot, save.output && "files" in save.output ? save.output.files : []),
+  }));
+}
+
+/**
+ * Saves the draft of `actor`'s chat `id` (`SanomaClient.saveDraft`) at `head`, the commit its card
+ * showed, titled as the chat, its change's page this app's `/changes/<id>` at `origin`. With
+ * `undo`, a commit the chat's draft was saved as (`SanomaClient.savedAs`: by a save, or its
+ * change's merge), that commit is undone instead, from a draft of its own (`undoDraftOf`), titled
+ * "Undo" and the chat's title. The save's run id; a 404 for a chat that is not the actor's, a 409
+ * for a commit the chat did not save.
+ */
+export async function saveDraft(
+  { client }: Pick<AppContext, "client">,
+  actor: Principal,
+  { id, head, undo }: SaveDraftRequest,
+  origin: string,
+): Promise<{ runId: string }> {
+  const chat = await client.chats.get(id);
+  if (chat?.person !== actor.id) throw new ApiError(404, { error: `No chat ${id}` });
+  if (undo !== undefined && !(await client.savedAs(id, undo))) {
+    throw new ApiError(409, { error: `${undo.slice(0, 7)} is not a commit this chat saved` });
+  }
+  const draft = undo === undefined ? id : undoDraftOf(undo);
+  const input =
+    undo === undefined
+      ? { id, title: chat.title, ...(head !== undefined && { head }) }
+      : { id: draft, title: `Undo ${chat.title}`, undo, chat: id };
+  return { runId: await client.saveDraft({ ...input, page: changePage(draft, origin) }, { startedBy: actor }) };
 }
 
 /**
