@@ -230,7 +230,7 @@ export async function renderDraftCard(
     }>,
   ]);
   const queryClient = new QueryClient();
-  queryClient.setQueryData(configQuery().queryKey, { appName: "maple-street-studio" });
+  queryClient.setQueryData(configQuery().queryKey, { appName: "maple-street-studio", name: "Maple Street Studio" });
   queryClient.setQueryData(remoteQuery().queryKey, remote);
   queryClient.setQueryData(savesQuery(draft.draft).queryKey, saves);
   for (const [id, data] of Object.entries(others)) {

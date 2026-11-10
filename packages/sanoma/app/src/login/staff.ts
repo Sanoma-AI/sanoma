@@ -63,7 +63,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
   const people = () => app!.snapshot.people;
   /** How the login's pages look: the kit's stylesheet, and the company they are for. */
   const frame = (): PageFrame =>
-    app ? { ...(app.stylesheet && { stylesheet: app.stylesheet }), company: companyOf(app.resolved.appName) } : {};
+    app ? { ...(app.stylesheet && { stylesheet: app.stylesheet }), company: companyOf(app.resolved.name) } : {};
   /** The declared person `identity` names, as admitted, or undefined. */
   const admitted = (identity: LoginIdentity) => {
     try {
