@@ -313,6 +313,8 @@ export const AgentEntrySchema = z.strictObject({
   title: z.string(),
   mark: MarkSchema.optional(),
   own: z.boolean(),
+  /** Its own plan's sign-in is a command the person runs once on their computer (`AgentSignIn`'s `once`), so it signs in nowhere else. */
+  once: z.literal(true).optional(),
   onKey: z.strictObject({ model: z.string() }).optional(),
 });
 export type AgentEntry = z.infer<typeof AgentEntrySchema>;

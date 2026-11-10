@@ -303,6 +303,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       title,
       ...(mark && { mark: dataUrls(mark) }),
       own: own !== undefined,
+      ...(own && "once" in own.signIn && { once: true as const }),
       ...(onKey && { onKey: { model: onKey.model } }),
     })),
     resourceTypes,
