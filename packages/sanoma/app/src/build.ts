@@ -8,12 +8,14 @@ import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
@@ -159,50 +161,68 @@ export interface PublicFile {
   file: string;
 }
 
+/** A public file's path under its folder, by segment: refused, as a dotfile or dot-folder (`buildKey` leaves them out) or an empty segment, it is none. */
+const servedParts = (under: string) => {
+  const parts = under.split("/");
+  return parts.every((part) => part !== "" && !part.startsWith(".")) ? parts : undefined;
+};
+
 /**
  * A repo's public files: every file under a site's `public/` (`sites/<name>/public/`, an app's
- * `apps/<app>/sites/<name>/public/`), read from disk as it is now. Dotfiles and dot-folders are
- * left out, as `buildKey` leaves them out, and a link is not followed.
+ * `apps/<app>/sites/<name>/public/`; `sitesUnder`), read from disk as it is now, a link not followed.
  */
-export function publicFiles(repo: string): PublicFile[] {
-  const found: PublicFile[] = [];
-  for (const { app, dir } of siteTrees(repo)) {
-    const sites = foldersOf(
-      join(repo, dir),
-      (name) => SITE_NAME.test(name) && existsSync(join(repo, dir, name, "routes")),
-    );
-    for (const name of sites) {
-      const folder = join(repo, dir, name, "public");
-      if (!existsSync(folder)) continue;
-      for (const entry of readdirSync(folder, { recursive: true, withFileTypes: true })) {
+export async function publicFiles(repo: string): Promise<PublicFile[]> {
+  const { sitesUnder } = await import("sanoma/workflows/describe");
+  return sitesUnder(repo)
+    .flatMap(({ name, dir }) => {
+      const folder = join(repo, dir, "public");
+      if (!existsSync(folder)) return [];
+      return readdirSync(folder, { recursive: true, withFileTypes: true }).flatMap((entry) => {
         const file = join(entry.parentPath, entry.name);
-        const parts = relative(folder, file).split(sep);
-        if (!entry.isFile() || parts.some((part) => part.startsWith("."))) continue;
-        const under = parts.join("/");
-        found.push({ path: `/sites/${siteKey(app, name)}/${under}`, under, file });
-      }
-    }
-  }
-  return found.toSorted((a, b) => (a.path < b.path ? -1 : 1));
+        const under = relative(folder, file).split(sep).join("/");
+        return entry.isFile() && servedParts(under) ? [{ path: `/sites/${name}/${under}`, under, file }] : [];
+      });
+    })
+    .toSorted((a, b) => a.path.localeCompare(b.path));
+}
+
+/** The public file at `path` (`/sites/<key>/<under>`, decoded), as `publicFiles` finds it, looked for on disk alone: the dev server's. */
+export async function publicFileAt(repo: string, path: string): Promise<PublicFile | undefined> {
+  const { sitesUnder } = await import("sanoma/workflows/describe");
+  const site = sitesUnder(repo).find(({ name }) => path.startsWith(`/sites/${name}/`));
+  const under = site && path.slice(`/sites/${site.name}/`.length);
+  const parts = under === undefined ? undefined : servedParts(under);
+  if (!site || !parts) return undefined;
+  const file = join(repo, site.dir, "public", ...parts);
+  return lstatSync(file, { throwIfNoEntry: false })?.isFile() ? { path, under: under!, file } : undefined;
 }
 
 /** What a site's own host answers itself, never a public file there: its robots.txt, sitemap, login and the build's files, and nothing under `sites/`. */
 const OWN_PATHS = /^(robots\.txt|sitemap\.xml|(assets|auth|sites)\/.*)$/;
 
+/** The most a public file holds: Cloudflare's limit on one of a Worker's assets, 25 MiB. */
+const MAX_PUBLIC_FILE = 25 * 1024 * 1024;
+
 /**
  * Why each of `files` cannot be served, a line each: a name with no extension (the Worker looks
  * among its assets only for such a path), a path the site's own host answers itself (`OWN_PATHS`),
- * or a page's path, which the page keeps.
+ * a page's path, which the page keeps, another file's path (an app's site's beside a root site's),
+ * or a size over `MAX_PUBLIC_FILE`.
  */
 async function refusedPublicFiles(repo: string, files: readonly PublicFile[]): Promise<string[]> {
   const { sitePagePaths } = await import("sanoma/workflows/describe");
   // Each page's URL: no optional segment, and a character escaped in its file's name (`feed[.]xml`) as it is.
   const pages = new Set(sitePagePaths(repo).map((path) => withoutOptional(path).replaceAll(/\[([^\]]*)\]/g, "$1")));
+  const seen = new Set<string>();
   return files.flatMap(({ path, under, file }) => {
     const name = relative(repo, file).split(sep).join("/");
+    const twice = seen.has(path);
+    seen.add(path);
     if (!/\.[^/]+$/.test(under)) return [`${name}: a public file's name has an extension, such as mount.js`];
     if (OWN_PATHS.test(under)) return [`${name}: /${under} on the site's own host is the app's`];
     if (pages.has(path)) return [`${name}: ${path} is a page's path`];
+    if (twice) return [`${name}: ${path} is another public file's path`];
+    if (statSync(file).size > MAX_PUBLIC_FILE) return [`${name}: a public file is 25 MiB at most`];
     return [];
   });
 }
@@ -219,7 +239,7 @@ function publicPlugin(repo: string): Plugin {
     apply: "build",
     applyToEnvironment: (env) => env.name === "client",
     async buildStart() {
-      files = publicFiles(repo);
+      files = await publicFiles(repo);
       const refused = await refusedPublicFiles(repo, files);
       if (refused.length) throw new Error(`A site's public file cannot be served:\n  ${refused.join("\n  ")}`);
     },

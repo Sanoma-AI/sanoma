@@ -33,6 +33,7 @@ import { admitting } from "./login/admission.ts";
 import { publicFront, servedOnceMade, siteLogin } from "./login/public.ts";
 import { loopbackLogin } from "./loopback.ts";
 import { type AppSnapshot, siteFileBroken } from "./snapshot.ts";
+import { publicPath } from "./site-path.ts";
 import { liveSnapshot } from "./snapshot-build.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
@@ -346,9 +347,13 @@ async function builtResponder(distDir: string): Promise<Responder> {
   const entry = await loadServerEntry(serverEntry);
   return {
     entry,
-    files: async (request) => {
+    files: async (request, site) => {
       const path = filePath(request);
-      const file = path === undefined ? undefined : files.get(path);
+      if (path === undefined) return undefined;
+      // On a public site's host, the build's own files and the site's public ones at its root.
+      const own = site === undefined ? undefined : publicPath(site, path);
+      const file =
+        site === undefined ? files.get(path) : own === undefined ? undefined : (files.get(path) ?? files.get(own));
       return file && fileResponse(request, file);
     },
     ...(stylesheet && { stylesheet }),
@@ -365,25 +370,23 @@ async function devResponder(
   server: ReturnType<typeof createServer>,
   sockets: WeakMap<Request, { req: IncomingMessage; res: ServerResponse }>,
 ): Promise<Responder> {
-  const { appDevServer, publicFiles } = await import("./build.ts");
+  const { appDevServer, publicFileAt } = await import("./build.ts");
   const dev = await appDevServer(repo, server, onFileChange);
-  /** A site's public file at the request's path, looked for on disk as it is now. */
-  const publicFile = async (request: Request): Promise<StaticFile | undefined> => {
-    const path = filePath(request);
-    const found = path?.startsWith("/sites/") ? publicFiles(repo).find((file) => file.path === path) : undefined;
-    return found && { path: found.file, headers: fileHeaders(found.under, (await stat(found.file)).size) };
-  };
   return {
-    files: async (request) => {
-      const own = await publicFile(request);
-      if (own) return fileResponse(request, own);
-      // A request the handler made, for a public site's own file at its host's root: that alone.
-      const socket = sockets.get(request);
-      if (!socket) return undefined;
+    files: async (request, site) => {
+      // A site's public file, looked for on disk as it is now: on a public site's host, its own at its root.
+      const path = filePath(request);
+      const at = path === undefined || site === undefined ? path : publicPath(site, path);
+      const found = at?.startsWith("/sites/") ? await publicFileAt(repo, at) : undefined;
+      if (found) {
+        const headers = fileHeaders(found.path.slice(1), (await stat(found.file)).size);
+        return fileResponse(request, { path: found.file, headers });
+      }
+      const { req, res } = sockets.get(request)!;
       return new Promise((done, fail) => {
         // Vite answers what it serves itself without calling next; the adapter then sends nothing.
-        socket.res.once("close", () => done(new Response(null)));
-        dev.middlewares(socket.req, socket.res, (err) => (err ? fail(err) : done(undefined)));
+        res.once("close", () => done(new Response(null)));
+        dev.middlewares(req, res, (err) => (err ? fail(err) : done(undefined)));
       });
     },
     entry: { fetch: async (request, opts) => (await dev.serverEntry()).fetch(request, opts) },
@@ -457,7 +460,7 @@ async function staticFiles(clientDir: string): Promise<Map<string, StaticFile>> 
  * is revalidated on every use.
  */
 const fileHeaders = (rel: string, size: number): Record<string, string> => ({
-  "content-type": TYPES[extname(rel)] ?? "application/octet-stream",
+  "content-type": TYPES[extname(rel).toLowerCase()] ?? "application/octet-stream",
   "content-length": String(size),
   "cache-control": rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache",
   "x-content-type-options": "nosniff",

@@ -9,6 +9,13 @@ export function sitePath(site: string, path: string): string {
   return path === prefix || path.startsWith(`${prefix}/`) ? path.slice(prefix.length) || "/" : path;
 }
 
+/**
+ * Where a public site's own host finds a file at `path` (decoded): the site's public file at its
+ * root, `/sites/<site>/<path>`; none under `/sites/`, where only the app's host has every site's.
+ */
+export const publicPath = (site: string, path: string): string | undefined =>
+  path.startsWith("/sites/") ? undefined : `/sites/${site}${path}`;
+
 /** A route path without its optional parameters (`{-$locale}`): the page's path when none is given. */
 export const withoutOptional = (path: string): string => path.replace(/\/\{-\$[^}]*\}/g, "");
 

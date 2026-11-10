@@ -296,8 +296,10 @@ describe("buildAppBundle", () => {
     }
     // On the app's host only for a person signed in, as the site's pages are there.
     expect((await secure(`https://${HOSTNAME}/sites/hello/demo/mount.js`)).status).toBe(401);
-    // Nothing under /sites/ on a site's own host.
-    expect((await get("https://intl.example/sites/hello/demo/mount.js")).status).toBe(404);
+    // Nothing under /sites/ on a site's own host, however the path is written, nor another site's at its root.
+    for (const path of ["/sites/hello/demo/mount.js", "/%73ites/hello/demo/mount.js", "/demo/mount.js"]) {
+      expect((await get(`https://intl.example${path}`)).status, path).toBe(404);
+    }
   });
 
   it("renders a page on the Worker, and its robots.txt", async () => {

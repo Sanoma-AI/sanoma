@@ -27,6 +27,7 @@ import { admitting } from "../login/admission.ts";
 import { publicFront, servedOnceMade, siteLogin } from "../login/public.ts";
 import { staffLogin } from "../login/staff.ts";
 import { plain } from "../server/webhooks.ts";
+import { publicPath } from "../site-path.ts";
 import { servedOnWorker } from "../snapshot.ts";
 import { assetAt } from "./assets.ts";
 
@@ -105,7 +106,7 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
       sites,
       domains,
       entry: start,
-      files: (request) => fileFor(request, env),
+      files: (request, site) => fileFor(request, env, site),
     },
     snapshot,
   );
@@ -120,15 +121,23 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
 
 /**
  * A GET's or HEAD's file from the Worker's assets, at a path with an extension: the client build's
- * (`/assets/*` is the assets' own, never the Worker's) or a site's public file. Never the
- * prerendered pages' own path: a prerendered page is the main module's, answered without the app.
- * Undefined when the assets have none.
+ * (`/assets/*` is the assets' own, never the Worker's) or a site's public file; on a public site's
+ * host (`site`), its own public files at its root alone (`publicPath`). Never the prerendered
+ * pages' own path: a prerendered page is the main module's, answered without the app. Undefined
+ * when the assets have none.
  */
-async function fileFor(request: Request, env: AppBundleEnv): Promise<Response | undefined> {
+async function fileFor(request: Request, env: AppBundleEnv, site: string | undefined): Promise<Response | undefined> {
   if (request.method !== "GET" && request.method !== "HEAD") return undefined;
   const { pathname } = new URL(request.url);
   if (!/\.[^/]+$/.test(pathname) || pathname.startsWith(`${PRERENDERED}/`)) return undefined;
-  return assetAt(request, env, pathname);
+  if (site === undefined) return assetAt(request, env, pathname);
+  let path: string | undefined;
+  try {
+    path = publicPath(site, decodeURIComponent(pathname));
+  } catch {
+    return undefined;
+  }
+  return path === undefined ? undefined : assetAt(request, env, path);
 }
 
 /** `response`, its body passed on as it streams, then `close` called once it is sent (or failed). */

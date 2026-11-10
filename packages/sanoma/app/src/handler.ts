@@ -58,11 +58,11 @@ export interface AppHandlerOptions {
   entry: ServerEntry;
   /**
    * What the host answers itself, after the login let the request through and before Start: a
-   * built file, a site's public file among them at `/sites/<key>/<path>`. Undefined for a request
-   * it has nothing for. On a public site's host it is asked a second time, by a request of the
-   * handler's own at `/sites/<site>/<path>`, for the site's public file at the host's root.
+   * built file, a site's public file among them at `/sites/<key>/<path>`. On a public site's host,
+   * `site`, its own public files at the root (`publicPath`) and no other site's. Undefined for a
+   * request it has nothing for.
    */
-  files?: (request: Request) => Promise<Response | undefined>;
+  files?: (request: Request, site?: string) => Promise<Response | undefined>;
   /** The built kit's stylesheet's path (`AppContext.stylesheet`). */
   stylesheet?: string;
 }
@@ -183,22 +183,8 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
    * snapshot as it is now: a file never waits for the snapshot to be checked.
    */
   const served = async (request: Request, asked: (app: AppContext) => RequestContext, site?: string) =>
-    (await fileFor(request, site)) ?? (await options.entry.fetch(request, { context: asked(await contextOf()) }));
-
-  /**
-   * The host's file for the request. On a public site's host (`site`), the build's files, then the
-   * site's public files at its root (`/<path>` is `/sites/<site>/<path>`), and nothing under
-   * `/sites/`, where the app's host has every site's.
-   */
-  async function fileFor(request: Request, site: string | undefined): Promise<Response | undefined> {
-    if (site === undefined) return options.files?.(request);
-    const url = new URL(request.url);
-    if (url.pathname.startsWith("/sites/")) return undefined;
-    const found = await options.files?.(request);
-    if (found || (request.method !== "GET" && request.method !== "HEAD")) return found;
-    url.pathname = `/sites/${site}${url.pathname}`;
-    return options.files?.(new Request(url, { method: request.method, headers: request.headers }));
-  }
+    (await options.files?.(request, site)) ??
+    (await options.entry.fetch(request, { context: asked(await contextOf()) }));
 
   return {
     context,
