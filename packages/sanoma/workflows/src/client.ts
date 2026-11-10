@@ -279,9 +279,11 @@ export interface ConnectionReview extends ConnectionSetup {
 /** What `SanomaClient.connect` is given besides the config. */
 export interface ClientOptions {
   /**
-   * Called, never awaited, right before each change a worker must run: a run's start (drift,
-   * apply and a held call are starts) and an approval's decision or withdrawal; never for a read. A process that
-   * runs a worker that stops when idle starts it again with it (`Supervisor.resume`). Must not throw.
+   * Called, never awaited, right after each change a worker must run commits: a run's start
+   * (drift, apply and a held call are starts) and an approval's decision or withdrawal; never for
+   * a read. A process that runs a worker that stops when idle asks for one with it
+   * (`Supervisor.wake`, or its host's wake): after the commit, so the worker that answers sees the
+   * change. Must not throw.
    */
   onWrite?: () => void;
   /**
@@ -406,7 +408,6 @@ export class SanomaClient {
       onBehalfOf: startedBy.onBehalfOf,
       builtInCode: this.config.builtInCodes[workflow.name],
     };
-    this.options.onWrite?.();
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
       .enqueue(
@@ -433,6 +434,8 @@ export class SanomaClient {
         }
         throw err;
       });
+    // Once it committed: a worker that looks after the ask sees it.
+    this.options.onWrite?.();
     // After the enqueue, not before: of two starts racing with one new id, the first's run stands.
     if (runId !== undefined) await this.mustMatch(runId, args);
     return handle.workflowID;
@@ -918,8 +921,8 @@ export class SanomaClient {
     message: (ApprovalMessage | ApprovalWithdrawal) & { id: string },
     timeoutSeconds = 30,
   ): Promise<ApprovalState> {
-    this.options.onWrite?.();
     await this.dbos.send(runId, message, topicOf(target.id), messageKeyOf(target.id, message.id));
+    this.options.onWrite?.();
     // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise. A
     // running worker answers within moments, so poll often at first, then once a second.
     const event = decisionEventOf(target.id);
@@ -1101,8 +1104,8 @@ export class SanomaClient {
       if (held) throw notApprover(runId, held, refusal);
       throw new SanomaError("not_approver", refusal, { runId, reason: refusal });
     }
-    this.options.onWrite?.();
     await this.dbos.send(runId, told, CHANGE_TOPIC, options.key);
+    this.options.onWrite?.();
     if (held && refusal === undefined) {
       await this.withdraw(runId, held.id, WITHDRAWAL[told.kind], { by, timeoutSeconds: 5 }).catch((err: unknown) => {
         // Decided or ended meanwhile: the run reads the event when it next waits, if it does.

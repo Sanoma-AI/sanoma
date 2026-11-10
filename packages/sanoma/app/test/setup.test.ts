@@ -647,8 +647,8 @@ export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", 
     }
   });
 
-  it("says a host that stops when quiet does, and that nothing starts it again while no Wakeup names it", async () => {
-    const host = fakeHost(() => Promise.reject(new Error("not started here")), { lifetime: "stops-when-quiet" });
+  it("says a host that stops when idle does, and that nothing starts it again while no Wakeup names it", async () => {
+    const host = fakeHost(() => Promise.reject(new Error("not started here")), { lifetime: "stops-on-exit" });
     /** The Host card's text with infra.ts declaring the repository, the host and then `more`. */
     const hostCard = async (more = "") => {
       const live = mkdtempSync(join(tmpdir(), "sanoma-hosting-"));
@@ -675,7 +675,7 @@ ${more}`,
       }
     };
     const card = await hostCard();
-    expect(card).toMatch(/>Lifetime<.*?>Stops when quiet</s);
+    expect(card).toMatch(/>Lifetime<.*?>Stops when idle</s);
     expect(card).not.toContain("started by the Wakeup");
     expect(card).toContain(`${noWakeup("testhost.app")}.`);
     expect(card).not.toMatch(/scale to zero|cold start|alarm/i);
@@ -688,7 +688,7 @@ export const wakeup = sanoma.wakeup({ host: other });
     expect(other).not.toContain("started by the Wakeup");
     expect(other).toContain(`${noWakeup("testhost.app")}.`);
     const woken = await hostCard("export const wakeup = sanoma.wakeup({ host });\n");
-    expect(woken).toMatch(/>Lifetime<.*?>Stops when quiet; what is due while it sleeps is started by the Wakeup</s);
+    expect(woken).toMatch(/>Lifetime<.*?>Stops when idle; what is due while it is stopped is started by the Wakeup</s);
     expect(woken).not.toContain("No connected wakeup");
   });
 });

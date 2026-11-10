@@ -429,7 +429,7 @@ export const INFRA = "resources/sanoma/infra.ts";
 export const DECLARE_BOX = `Coding agents work in a box of their own on a live instance, and this company declares none: declare one in ${INFRA} (\`export const box = agent37.instance({})\`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY`;
 
 /**
- * Why a host of type `hostType` that stops when quiet has no Wakeup, `wakes` being the connected
+ * Why a host of type `hostType` that stops when idle has no Wakeup, `wakes` being the connected
  * wakeups and the host types each wakes, when known: going live's refusal to declare one, and
  * Hosting's notice on a host declared without one.
  */

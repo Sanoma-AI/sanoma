@@ -30,7 +30,7 @@ const hostSchema = z.object({
   hostname: z.string().nullish(),
 });
 const spec: HostSpec = {
-  capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
+  capabilities: { lifetime: "stops-on-exit", publicUrl: true, buildsFromGit: false, staticEgress: false },
   derives: true,
   inputs: {
     name: "name",

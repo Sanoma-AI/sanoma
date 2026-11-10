@@ -18,8 +18,10 @@ import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
-import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
+import { type ChatMessage, chatTransport, isIntro } from "../src/lib/chat.ts";
+import { INTRO } from "../src/server/chat.ts";
 import { allowedPaths, here, realIn } from "../src/steps/agent/checkout.ts";
+import { suggestedAsks } from "../src/steps/agent/transcript.ts";
 import { ENGINES } from "../src/steps/agent/turn.ts";
 import { appSteps } from "../src/steps/index.ts";
 
@@ -55,6 +57,11 @@ const SCRIPT: Record<string, Step[]> = {
   "Look up Beta": [{ tool: "lookup", input: { op: "crm.customer.find", input: { name: "Beta" } } }, { text: "Beta." }],
   "Never mind": [{ text: "Fine." }],
   continue: [{ text: "Acme Ltd is a customer since 2019." }],
+  [INTRO]: [
+    {
+      text: "Hi ada, I make the changes to chat-test. It has two workflows.\n\n**Suggested asks:**\n- Add a laptop step to offboarding\n- **Who can approve a refund?**\n\nAsk me anything.",
+    },
+  ],
   [takeAppPrompt("file:///srv/crm")]: [
     { tool: "take_app", input: { url: "file:///srv/crm" } },
     { text: "That source is not a public repository." },
@@ -216,16 +223,24 @@ const userMessage = (text: string): ChatMessage => ({
 });
 
 /**
- * Sends `text` to the chat `id` after `history`, as useChat does: each snapshot of the reply to
- * `onSnapshot`, and the reply as it ended. A stream cut short ends the reply where it was.
+ * Sends `text` (or a message as it is) to the chat `id` after `history`, as useChat does, with
+ * `body`'s fields: each snapshot of the reply to `onSnapshot`, and the reply as it ended. A stream
+ * cut short ends the reply where it was.
  */
-async function send(id: string, history: ChatMessage[], text: string, onSnapshot?: (reply: ChatMessage) => void) {
+async function send(
+  id: string,
+  history: ChatMessage[],
+  text: string | ChatMessage,
+  onSnapshot?: (reply: ChatMessage) => void,
+  body?: object,
+) {
   const stream = await transport().sendMessages({
     trigger: "submit-message",
     chatId: id,
     messageId: undefined,
-    messages: [...history, userMessage(text)],
+    messages: [...history, typeof text === "string" ? userMessage(text) : text],
     abortSignal: undefined,
+    body,
   });
   let reply: ChatMessage | undefined;
   try {
@@ -238,6 +253,12 @@ async function send(id: string, history: ChatMessage[], text: string, onSnapshot
   }
   return reply;
 }
+
+/** The agent's cue to speak first, as the chat column sends it (`isIntro`). */
+const cue = (): ChatMessage => ({ ...userMessage(""), metadata: { intro: true } });
+
+/** The agent speaks first in the chat `id`, as the chat column asks it: the reply as it ended. */
+const speak = (id: string) => send(id, [], cue(), undefined, { engine: "loop", start: true });
 
 /** A request to the route of the app at `url`, as fetch sends it, from its own origin unless `headers` say otherwise. */
 const post = (body: unknown, headers: Record<string, string> = {}, url = app!.url) =>
@@ -449,6 +470,43 @@ describe("the chat", () => {
     expect(git("log", "--format=%s", `draft/${other}`)).toBe("First");
   }, 300_000);
 
+  it("lets the agent speak first: its cue kept but never the person's, the company at a glance in its prompt, its asks as a card", async () => {
+    const other = `intro-${RUN}`;
+    const reply = await speak(other);
+    expect(reply!.parts.filter((part) => part.type === "text").map((part) => part.text)).toEqual([
+      "Hi ada, I make the changes to chat-test. It has two workflows.\n\nAsk me anything.",
+    ]);
+    expect(reply!.parts.at(-1)).toEqual({
+      type: "data-suggestions",
+      id: "suggestions",
+      data: { asks: ["Add a laptop step to offboarding", "Who can approve a refund?"] },
+    });
+    expect(systems.at(-1)).toMatch(
+      /The company at a glance: its workflows: none; its connectors: crm, mock; its people: ada, lead; its groups: none\./,
+    );
+    expect(systems.at(-1)).toContain('end your reply with a line that says only "Suggested asks:"');
+    expect(systems.at(-1)).toContain("Otherwise suggest none.");
+
+    const { chats } = testApp.client;
+    expect(await chats.get(other)).toMatchObject({ person: "ada", engine: "loop", title: "Getting started" });
+    await waitFor(async () => (await chats.load(other)).length === 2);
+    const [intro, stored] = (await chats.load(other)) as ChatMessage[];
+    // The cue, as the server wrote it: what the model was asked, never the browser's text.
+    expect(intro).toMatchObject({ role: "user", parts: [{ type: "text", text: INTRO }] });
+    expect(isIntro(intro!)).toBe(true);
+    expect(stored!.parts.filter((part) => part.type === "text").map((part) => part.text)).toEqual([
+      "Hi ada, I make the changes to chat-test. It has two workflows.\n\nAsk me anything.",
+    ]);
+
+    // Once the person has written, the agent does not speak first again.
+    await send(other, (await chats.load(other)) as ChatMessage[], "Never mind");
+    const again = await post({ id: other, message: cue(), start: true }, { [ACTOR_HEADER]: "ada" });
+    expect(again.status).toBe(400);
+    expect(await again.json()).toMatchObject({
+      error: "The agent speaks first only in a chat you have not written in",
+    });
+  }, 300_000);
+
   it("refuses another person's chat, a message that is not one or that the chat has, and a request that is not same-origin", async () => {
     const someone = await post({ id, message: userMessage("Hi") }, { [ACTOR_HEADER]: "lead" });
     expect(someone.status).toBe(404);
@@ -469,6 +527,13 @@ describe("the chat", () => {
     expect(await testApp.client.chats.load(id)).toEqual(stored);
     const nobody = await post({ id: `other-${RUN}`, message: userMessage("Hi") });
     expect(nobody.status).toBe(400);
+    // A new chat on an engine no connector of the company gives: refused before it opens.
+    for (const engine of ["nonsense", "acp-claude-code", "acp-loop"]) {
+      const none = await post({ id: `none-${RUN}`, engine, message: userMessage("Hi") }, { [ACTOR_HEADER]: "ada" });
+      expect(none.status, engine).toBe(400);
+      expect(await none.json(), engine).toMatchObject({ error: expect.stringMatching(/^No engine /) });
+    }
+    expect(await testApp.client.chats.get(`none-${RUN}`)).toBeUndefined();
     const elsewhere = await post(
       { id, message: userMessage("Hi") },
       { [ACTOR_HEADER]: "ada", origin: "https://evil.test" },
@@ -510,12 +575,12 @@ describe("the composer and a model", () => {
       await client?.close();
     });
 
-    it("says to connect a model, linking to the connector page, with Send off; and refuses a turn before the chat opens", async () => {
+    it("shows the ways to connect the agent, its key on the connector page, with Send off; and refuses a turn, or the agent speaking first, before the chat opens", async () => {
       const column = await chatColumn(bare!.url);
-      expect(column).toMatch(
-        /<div id="[^"]+"><p[^>]*>Connect a model to start: <a[^>]*href="\/connectors\/anthropic"[^>]*>set its key on the Anthropic connector page<\/a>\.<\/p>/,
-      );
-      const note = /<div id="([^"]+)"><p[^>]*>Connect a model/.exec(column)![1]!;
+      expect(column).toContain(">Connect your agent<");
+      expect(column).toMatch(/<a[^>]*href="\/connectors\/anthropic"[^>]*>Add key<\/a>/);
+      expect(column).toMatch(/<div id="[^"]+"[^>]*><p[^>]*>Connect your agent above to start\.<\/p>/);
+      const note = /<div id="([^"]+)"[^>]*><p[^>]*>Connect your agent above/.exec(column)![1]!;
       expect(column).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*aria-label="Send" aria-describedby="${note}"`));
 
       const chatId = `bare-${RUN}`;
@@ -524,6 +589,8 @@ describe("the composer and a model", () => {
       expect(await res.json()).toEqual({
         error: "Connect a model to start: anthropic is not configured [connector:anthropic]",
       });
+      const intro = await post({ id: chatId, message: cue(), start: true }, { [ACTOR_HEADER]: "ada" }, bare!.url);
+      expect(intro.status).toBe(409);
       expect(await client!.chats.get(chatId)).toBeUndefined();
     });
 
@@ -532,6 +599,7 @@ describe("the composer and a model", () => {
       await client!.setCredential("ANTHROPIC_API_KEY", "sk-ant-not-a-key", { by: "ada" });
       const column = await chatColumn(bare!.url);
       expect(column).not.toContain("Connect a model");
+      expect(column).not.toContain("Connect your agent");
       expect(column).toMatch(/<button(?![^>]*aria-describedby)[^>]*aria-label="Send"/);
     });
 
@@ -549,6 +617,63 @@ describe("the composer and a model", () => {
         .catch(() => undefined);
       expect(await client!.chats.load(chatId)).toEqual([message]);
       expect(await client!.turn(chatId)).toMatchObject({ runId: `chat:${chatId}:${message.id}`, status: "queued" });
+    });
+  });
+});
+
+/** The text and the asks of a reply streamed as `deltas`, through `suggestedAsks`. */
+async function through(deltas: string[]) {
+  const chunks = suggestedAsks(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue({ type: "start" });
+        controller.enqueue({ type: "text-start", id: "t" });
+        for (const delta of deltas) controller.enqueue({ type: "text-delta", id: "t", delta });
+        controller.enqueue({ type: "text-end", id: "t" });
+        controller.enqueue({ type: "finish" });
+        controller.close();
+      },
+    }),
+  );
+  const texts: string[] = [];
+  let asks: string[] | undefined;
+  for await (const chunk of chunks) {
+    if (chunk.type === "text-delta") texts.push(chunk.delta);
+    if (chunk.type === "data-suggestions") asks = (chunk.data as { asks: string[] }).asks;
+  }
+  return { text: texts.join(""), asks };
+}
+
+describe("suggestedAsks", () => {
+  it("never shows the asks' line or what follows it, however it streams, and keeps the text before it as it comes", async () => {
+    const text =
+      'Done. Next:\n\nSuggested asks:\n- Remind clients the day before\n1. Let Sam approve refunds\n* "Add a teammate"';
+    for (const size of [1, 3, 7, text.length]) {
+      const deltas = text.match(new RegExp(`[\\s\\S]{1,${size}}`, "g"))!;
+      expect(await through(deltas), `${size}`).toEqual({
+        text: "Done. Next:",
+        asks: ["Remind clients the day before", "Let Sam approve refunds", "Add a teammate"],
+      });
+    }
+  });
+
+  it("lets a line that only starts like the asks' through, and suggests nothing without them", async () => {
+    expect(await through(["Su", "re, I can.\n", "Sug", "ar is sweet."])).toEqual({
+      text: "Sure, I can.\nSugar is sweet.",
+      asks: undefined,
+    });
+    expect(await through(["One ", "two  \n\n"])).toEqual({ text: "One two", asks: undefined });
+    // Mid-line, however the deltas fall, it is the text's own words.
+    expect(await through(["Here are the", " suggested asks: below."])).toEqual({
+      text: "Here are the suggested asks: below.",
+      asks: undefined,
+    });
+  });
+
+  it("shows what the reply says after its asks once the text ends", async () => {
+    expect(await through(["Done.\n\nSuggested asks:\n- A\n\n- B\n\nRestart the worker", " to pick it up."])).toEqual({
+      text: "Done.\n\nRestart the worker to pick it up.",
+      asks: ["A", "B"],
     });
   });
 });

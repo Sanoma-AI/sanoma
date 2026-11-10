@@ -132,7 +132,7 @@ const container = defineResource({
   find: ({ name }) => name,
   writable: true,
   host: {
-    capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
+    capabilities: { lifetime: "stops-on-exit", publicUrl: true, buildsFromGit: false, staticEgress: false },
     derives: true,
     inputs: { source: "source", ref: "ref", image: "image", database: "database", secrets: "secrets" },
     revision: "revision",
@@ -177,7 +177,7 @@ const docker = defineConnector(
   { container: hostOf("docker", "container", "long-lived", false) },
   { package: "@acme/docker" },
 );
-const fly = defineConnector("fly", { app: hostOf("fly", "app", "stops-when-quiet", true) }, { package: "@acme/fly" });
+const fly = defineConnector("fly", { app: hostOf("fly", "app", "stops-on-exit", true) }, { package: "@acme/fly" });
 
 /** A deploy key's public half, as `renderInfra` takes it. */
 const DEPLOY_KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0deploykey";
@@ -500,7 +500,7 @@ describe("going live by contract", () => {
       find: ({ name }) => name,
       writable: true,
       host: {
-        capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
+        capabilities: { lifetime: "stops-on-exit", publicUrl: true, buildsFromGit: false, staticEgress: false },
         bindsBootstrap: true,
         inputs: { source: "source", ref: "ref", port: "port" },
         revision: "revision",

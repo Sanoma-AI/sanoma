@@ -1,12 +1,10 @@
 import { useChat } from "@ai-sdk/react";
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
-import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { generateId } from "ai";
-import { type FormEvent, type ReactNode, useId, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import {
   DropdownMenu,
@@ -16,46 +14,64 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "#/components/ui/empty.tsx";
-import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { Textarea } from "#/components/ui/textarea.tsx";
 import { cn } from "#/lib/utils.ts";
 import { actorHeaders, useActor } from "../../actor.ts";
 import {
   type ChatMessage,
   chatTransport,
-  ENGINE_NAMES,
-  type EngineName,
-  errorParts,
+  engineOf,
+  enginesHere,
+  enginesOf,
+  isBusy,
   MODEL_CONNECTOR,
   onModelConnector,
-  ownPlan,
-  textOf,
-  unfinished,
+  written,
 } from "../../lib/chat.ts";
 import { CHATS_KEY, chatModelQuery, chatQuery, chatsQuery, configQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
-import { Reply } from "./chat-parts.tsx";
 import type { Prompt } from "./chat-prompt.ts";
+import { Composer } from "./composer.tsx";
+import { ConnectAgent } from "./connect-agent.tsx";
+import { EngineMark } from "./engine-mark.tsx";
+import { ConnectorPageLink, Thread } from "./thread.tsx";
 
 // The chat column, beside the bar on the same surface: the operator agent (POST /api/chat, its
 // stream read by the AI SDK's useChat), your chats, and the composer carrying the page you are on.
+
+/** The engine a person's new chats open on (none until they choose one), and choosing it. */
+interface EngineChoice {
+  value?: string;
+  set(engine: string): void;
+}
 
 /**
  * The chat column (`#chat`, which the bar's Chat controls): your latest chat (or the one you
  * pick, or a new one, or the new one a page's `prompt` opens with its text in the composer), and
  * at its foot the composer. In the page's flow from `lg` up; between `md` and `lg`, over the page
- * beside the bar (not while `besidePageOnly`, until Chat opens it there); not on a phone.
+ * beside the bar (not while `besidePageOnly`, until Chat opens it there); not on a phone. A new
+ * chat opens on `engine`, the person's choice.
  */
-export function ChatColumn({ besidePageOnly = false, prompt }: { besidePageOnly?: boolean; prompt?: Prompt }) {
+export function ChatColumn({
+  besidePageOnly = false,
+  prompt,
+  engine,
+}: {
+  besidePageOnly?: boolean;
+  prompt?: Prompt;
+  engine: EngineChoice;
+}) {
   const { actor } = useActor();
-  const { data: chats = [] } = useQuery({ ...chatsQuery(), enabled: !!actor });
+  const { data: chats = [], isSuccess } = useQuery({ ...chatsQuery(), enabled: !!actor });
   // A new chat's id is the browser's: the first message opens the chat by it.
   const [picked, setPicked] = useState(prompt?.id);
   const [fresh] = useState(generateId);
   const id = picked ?? chats[0]?.id ?? fresh;
   const chat = chats.find((c) => c.id === id);
+  // Every engine of the company's, to label a chat by, even one it can no longer open on here.
+  const { data: engines = [] } = useQuery({ ...configQuery(), select: (config) => enginesOf(config.agents) });
+  const optionOf = (name: string) => engines.find((e) => e.name === name);
+  const opened = chat && optionOf(chat.engine);
   return (
     <aside
       id="chat"
@@ -76,17 +92,25 @@ export function ChatColumn({ besidePageOnly = false, prompt }: { besidePageOnly?
           <DropdownMenuContent align="start" className="min-w-64">
             <DropdownMenuGroup>
               <DropdownMenuLabel>Your chats</DropdownMenuLabel>
-              {chats.map((c) => (
-                <DropdownMenuItem key={c.id} onClick={() => setPicked(c.id)}>
-                  <span className="truncate">{c.title}</span>
-                </DropdownMenuItem>
-              ))}
+              {chats.map((c) => {
+                const on = optionOf(c.engine);
+                return (
+                  <DropdownMenuItem key={c.id} onClick={() => setPicked(c.id)}>
+                    {on && <EngineMark engine={on} />}
+                    <span className="truncate">{c.title}</span>
+                  </DropdownMenuItem>
+                );
+              })}
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
         {chat && (
-          <span className="shrink-0 text-xs text-muted-foreground" title="The engine answering this chat">
-            {ENGINE_NAMES[chat.engine as EngineName] ?? chat.engine}
+          <span
+            className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+            title="The engine answering this chat"
+          >
+            {opened && <EngineMark engine={opened} />}
+            {opened?.label ?? chat.engine}
           </span>
         )}
         <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setPicked(generateId())}>
@@ -99,22 +123,32 @@ export function ChatColumn({ besidePageOnly = false, prompt }: { besidePageOnly?
         key={id}
         id={id}
         known={chat !== undefined}
-        draft={id === prompt?.id ? prompt.text : undefined}
+        opening={id === prompt?.id ? prompt : undefined}
+        first={isSuccess && !chats.length}
+        engine={engine}
         onSend={() => setPicked(id)}
       />
     </aside>
   );
 }
 
+/** What a conversation is opened with besides its chat: the prompt that opened it, whether it is the person's first, and the engine a new one opens on. */
+interface Opened {
+  opening?: Prompt;
+  first?: boolean;
+  engine: EngineChoice;
+  onSend: () => void;
+}
+
 /**
  * A chat: its transcript as stored when it is one you have had (as it was when opened, so the
- * first message of a new one does not read it back), then the conversation over it; a new one's
- * composer holds `draft`.
+ * first message of a new one does not read it back), then the conversation over it; a new one
+ * opens with the prompt that opened it (`opening`).
  */
-function ChatPane({ id, known, draft, onSend }: { id: string; known: boolean; draft?: string; onSend: () => void }) {
+function ChatPane({ id, known, ...opened }: { id: string; known: boolean } & Opened) {
   const [stored] = useState(known);
   const { data, error } = useQuery({ ...chatQuery(id), enabled: stored });
-  if (!stored) return <Conversation id={id} initial={[]} draft={draft} onSend={onSend} />;
+  if (!stored) return <Conversation id={id} initial={[]} {...opened} />;
   if (error) return <p className="p-4 text-destructive">Could not read the chat: {error.message}</p>;
   if (data === undefined) {
     return (
@@ -123,42 +157,61 @@ function ChatPane({ id, known, draft, onSend }: { id: string; known: boolean; dr
       </div>
     );
   }
-  return <Conversation id={id} initial={data?.messages ?? []} openedOn={data?.chat.engine} onSend={onSend} />;
+  return (
+    <Conversation
+      id={id}
+      initial={data?.messages ?? []}
+      openedOn={data?.chat.engine}
+      engine={opened.engine}
+      onSend={opened.onSend}
+    />
+  );
 }
 
 /**
- * The conversation: its messages, a turn's error, Continue after a turn that stopped short, and
- * the composer (holding `draft`), which says "Connect a model" (and Continue is not offered) while
- * the chat's engine (its own, `openedOn`, else the one chosen for a new chat) needs the model
- * connector and it has no key.
+ * The conversation on `useChat`: its `Thread`, and the composer (holding the opening prompt's
+ * text), which says "Connect a model" (and Continue is not offered) while the chat's engine (its
+ * own, `openedOn`, else the one chosen for a new chat) needs the model connector and it has no
+ * key. A new chat's thread starts with the agents to connect while so (or when Agent… opened it);
+ * and the agent speaks first in the person's first chat once its engine is connected, when a card
+ * chose a plan of their own, and once the sign-in it asked for in a chat they have not written in
+ * is done.
  */
 function Conversation({
   id,
   initial,
-  draft,
+  opening,
+  first = false,
   openedOn,
+  engine: choice,
   onSend,
-}: {
-  id: string;
-  initial: ChatMessage[];
-  draft?: string;
-  openedOn?: string;
-  onSend: () => void;
-}) {
+}: { id: string; initial: ChatMessage[]; openedOn?: string } & Opened) {
   const queryClient = useQueryClient();
   const transport = useMemo(() => chatTransport("/api/chat", actorHeaders), []);
   const { messages, sendMessage, status, error } = useChat<ChatMessage>({
     id,
     messages: initial,
     transport,
+    // A reply's Markdown is parsed again per update: at most 20 a second, however fast it streams.
+    throttle: 50,
     // Its title in the list (the open transcript is useChat's own, read again when next opened).
     onFinish: () => void queryClient.invalidateQueries({ queryKey: CHATS_KEY, exact: true }),
     // A refused turn may be one the model's status here was too old to stop: read it again.
     onError: () => void queryClient.invalidateQueries({ queryKey: chatModelQuery().queryKey }),
   });
-  const busy = status === "submitted" || status === "streaming";
-  // The chat's own engine; a new chat opens on the one chosen in the composer and keeps it after.
-  const [engine, setEngine] = useState<EngineName>(() => (openedOn as EngineName | undefined) ?? "loop");
+  const busy = isBusy(status);
+  const page = useCrumbs().at(-1)?.label;
+  // The chat's own engine; a new chat opens on the person's choice (`choice`, which choosing here
+  // changes) and keeps it after.
+  // The person's choice is one cookie for every company on this computer: one this company cannot run here is not taken.
+  const { data: options = [] } = useQuery({ ...configQuery(), select: enginesHere });
+  const [chosen, setChosen] = useState<string>();
+  const engine =
+    openedOn ?? chosen ?? (options.some((option) => option.name === choice.value) ? choice.value! : "loop");
+  const choose = (name: string) => {
+    setChosen(name);
+    choice.set(name);
+  };
   const fresh = messages.length === 0;
   const { data: model } = useQuery(chatModelQuery());
   const noModel = model?.ready === false && onModelConnector(engine);
@@ -168,97 +221,74 @@ function Conversation({
     // and keeps an open chat's own.
     void sendMessage({ text }, { body: { engine } });
   };
+  /** The agent speaks first, on `on`: the message is its cue, which the server writes and the chat never shows. */
+  const speak = (on: string) => {
+    onSend();
+    void sendMessage({ text: "", metadata: { intro: true } }, { body: { engine: on, start: true } });
+  };
+  const cards = fresh && !busy && !openedOn && (noModel || opening?.choose === true);
+  const last = messages.at(-1);
+  const lastId = last?.id ?? "";
+  const signedIn =
+    !written(messages) && last?.parts.some((part) => part.type === "data-signIn" && part.data.state === "done");
+  // The agent speaks by itself once each time the last message changes: in the person's first
+  // chat while it is in view (not one a page opened with a prompt), and after a sign-in it asked for.
+  const greet = first && fresh && !openedOn && !opening && model !== undefined && !cards;
+  const cue = !busy && !error && (greet || signedIn);
+  const acted = useRef<string>(undefined);
+  const act = useEffectEvent(() => {
+    if (greet && !document.getElementById("chat")?.checkVisibility()) return;
+    acted.current = lastId;
+    speak(engine);
+  });
+  useEffect(() => {
+    if (cue && acted.current !== lastId) act();
+  }, [cue, lastId]);
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4" aria-live="polite">
-        {messages.length === 0 && <EmptyChat />}
-        {messages.map((message, i) =>
-          message.role === "user" ? (
-            <div key={message.id} className="ml-8 self-end rounded-xl bg-card px-3 py-2 ring-1 ring-border">
-              <p className="whitespace-pre-wrap">{textOf(message, "\n")}</p>
-            </div>
-          ) : (
-            <Reply key={message.id} message={message} live={busy && i === messages.length - 1} chat={id} />
-          ),
-        )}
-        {status === "submitted" && <Spinner aria-label="Waiting for the agent" />}
-        {error && <TurnError message={error.message} />}
-        {!busy && !error && !noModel && stoppedShort(messages) && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <span>The last turn stopped before it finished.</span>
-            <Button variant="secondary" size="sm" onClick={() => send("continue")}>
-              Continue
-            </Button>
-          </div>
-        )}
-      </div>
+      <Thread
+        chat={id}
+        messages={messages}
+        status={status}
+        error={error}
+        start={
+          cards ? (
+            <ConnectAgent
+              vendor={model?.vendor}
+              onChoose={(name) => {
+                choose(name);
+                if (engineOf(name).plan !== "own") return;
+                // Spoken here, so the chat does not speak by itself as well.
+                acted.current = lastId;
+                speak(name);
+              }}
+            />
+          ) : undefined
+        }
+        onSend={send}
+        canContinue={!noModel}
+      />
       <div className="p-3">
         <Composer
+          page={page}
           busy={busy}
           onSend={send}
-          draft={draft}
-          engine={fresh && !openedOn ? { value: engine, set: setEngine } : undefined}
-          note={noModel ? <ConnectModel vendor={model?.vendor} /> : undefined}
+          draft={opening?.text}
+          engine={fresh && !openedOn ? { value: engine, set: choose, options } : undefined}
+          note={
+            noModel ? (
+              cards ? (
+                <p className="text-muted-foreground">Connect your agent above to start.</p>
+              ) : (
+                <ConnectModel vendor={model?.vendor} />
+              )
+            ) : undefined
+          }
         />
       </div>
     </>
   );
 }
-
-/** A turn that stopped before it finished (a restart, say): no reply to the last message, or a step or text still under way. */
-function stoppedShort(messages: ChatMessage[]): boolean {
-  const last = messages.at(-1);
-  if (!last) return false;
-  return last.role === "user" || last.parts.some(unfinished);
-}
-
-/** A turn's error as text: the server's own message when it sent one, and the connector page where a missing key is set. */
-function TurnError({ message }: { message: string }) {
-  let said = message;
-  try {
-    said = (JSON.parse(message) as { error?: string }).error ?? message;
-  } catch {
-    // Not the app's JSON error: the text as it came.
-  }
-  const { text, vendor } = errorParts(said);
-  return (
-    <p className="text-destructive">
-      {text}
-      {vendor && (
-        <>
-          {" "}
-          <ConnectorPageLink vendor={vendor}>Set it on its connector page</ConnectorPageLink>.
-        </>
-      )}
-    </p>
-  );
-}
-
-/** Focuses a text box with its caret after its text: where a prompt's words go on. */
-const focusAtEnd = (box: HTMLTextAreaElement | null) => {
-  if (!box) return;
-  box.focus();
-  box.setSelectionRange(box.value.length, box.value.length);
-};
-
-/** The engines, the composer's choices: ours on the company's key, then a person's own (`ownPlan`). */
-const NAMES = Object.keys(ENGINE_NAMES) as EngineName[];
-const OURS = NAMES.filter((name) => !ownPlan(name));
-const OWN = NAMES.filter(ownPlan);
-
-/** An engine as the composer's choice. */
-const engineOption = (name: EngineName) => (
-  <NativeSelectOption key={name} value={name}>
-    {ENGINE_NAMES[name]}
-  </NativeSelectOption>
-);
-
-/** A link to a connector's page, where its credentials are set. */
-const ConnectorPageLink = ({ vendor, children }: { vendor: string; children: ReactNode }) => (
-  <Link to="/connectors/$vendor" params={{ vendor }} className="underline underline-offset-4">
-    {children}
-  </Link>
-);
 
 /** The composer's note while the chat has no model: where to set its connector's key, or to add one (its sheet on the Connectors page). */
 function ConnectModel({ vendor }: { vendor?: string }) {
@@ -275,101 +305,5 @@ function ConnectModel({ vendor }: { vendor?: string }) {
       )}
       .
     </p>
-  );
-}
-
-function EmptyChat() {
-  return (
-    <Empty className="p-6">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <SparkleIcon aria-hidden="true" />
-        </EmptyMedia>
-        <EmptyTitle className="font-display text-2xl font-normal">What should change?</EmptyTitle>
-        <EmptyDescription>
-          Ask the agent: it drafts the change on a branch of its own and checks it. You merge it.
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  );
-}
-
-/**
- * The composer: the page as a chip, the message (starting as `draft`, focused at its end, when a
- * page opened the chat with it), the engine a new chat opens on (`engine`, only then: a person's
- * own agents in a group of their own), Send (Enter; Shift+Enter for a new line), and while there
- * is a `note` (where to connect a model), the note, Send off.
- */
-function Composer({
-  busy,
-  onSend,
-  draft,
-  engine,
-  note,
-}: {
-  busy: boolean;
-  onSend: (text: string) => void;
-  draft?: string;
-  engine?: { value: EngineName; set: (engine: EngineName) => void };
-  note?: ReactNode;
-}) {
-  const page = useCrumbs().at(-1)?.label;
-  const [text, setText] = useState(draft ?? "");
-  const noteId = useId();
-
-  const submit = (e?: FormEvent) => {
-    e?.preventDefault();
-    if (busy || note || !text.trim()) return;
-    onSend(text.trim());
-    setText("");
-  };
-  return (
-    <form
-      onSubmit={submit}
-      className="flex flex-col gap-2 rounded-xl bg-card p-3 text-card-foreground ring-1 ring-border"
-    >
-      {page && (
-        <span className="inline-flex h-6 w-fit max-w-full items-center rounded-md px-2 text-xs font-medium ring-1 ring-border">
-          <span className="truncate">{page}</span>
-        </span>
-      )}
-      <Textarea
-        rows={2}
-        ref={draft ? focusAtEnd : undefined}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
-        }}
-        aria-label="Message the agent"
-        placeholder="Ask anything…"
-        className="min-h-0 resize-none rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
-      />
-      {note && <div id={noteId}>{note}</div>}
-      <div className="flex items-center justify-end gap-2">
-        {engine && (
-          <NativeSelect
-            size="sm"
-            className="mr-auto"
-            aria-label="Engine"
-            value={engine.value}
-            onChange={(e) => engine.set(e.target.value as EngineName)}
-          >
-            {OURS.map(engineOption)}
-            <NativeSelectOptGroup label="Your own plan">{OWN.map(engineOption)}</NativeSelectOptGroup>
-          </NativeSelect>
-        )}
-        <Button
-          type="submit"
-          size="icon-sm"
-          variant="secondary"
-          disabled={busy || !!note || !text.trim()}
-          aria-label="Send"
-          aria-describedby={note ? noteId : undefined}
-        >
-          {busy ? <Spinner /> : <ArrowUpIcon aria-hidden="true" />}
-        </Button>
-      </div>
-    </form>
   );
 }

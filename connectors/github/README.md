@@ -51,7 +51,11 @@ A branch protection rule names its repository by the declared repository itself 
 
 The fields are the provider's attributes, by their names, and `owner` (required) on a repository and a team membership. A list block of at most one item (`pages`, `security_and_analysis`, `template`) is one object. Only declared fields are compared for drift; sets (`topics`, and five lists in a branch protection rule) are compared in any order.
 
-The logo is GitHub's mark from [Octicons](https://primer.style/octicons/) (`mark-github`, MIT), there only to identify the service an operation calls.
+The logo is GitHub's mark from [Octicons](https://primer.style/octicons/) (`mark-github`, MIT), there only to identify the service an operation calls; Copilot's is from [LobeHub's icon set](https://github.com/lobehub/lobe-icons) (MIT, [`MARKS-LICENSE`](MARKS-LICENSE)).
+
+## Copilot
+
+The connector also gives the app's chat Copilot, a coding agent (`withSetup({ agent })`), on a person's own plan only, as the engine `acp-copilot`: GitHub's Copilot CLI (`@github/copilot`, pinned) over the Agent Client Protocol (`copilot --acp`), installed on first use in the person's box and signed in with the person's GitHub account by the device code the chat's card shows.
 
 ## Remote half
 

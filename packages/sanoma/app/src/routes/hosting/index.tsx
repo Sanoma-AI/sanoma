@@ -28,6 +28,7 @@ import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
+import { boxless } from "#/lib/chat.ts";
 import { DRIFT_TONE } from "#/lib/tone.ts";
 import { type AppConfig, DECLARE_BOX, errorBodyOf, INFRA, noWakeup } from "../../api.ts";
 import {
@@ -262,9 +263,7 @@ function Hosting({
       <CrumbHeader action={action} />
       {children}
       {slots.goingLive && <GoLive />}
-      {config.place === "live" && !slots.filled.some((slot) => slot.capability === "sandbox") && (
-        <Notice>{DECLARE_BOX}.</Notice>
-      )}
+      {boxless(config) && <Notice>{DECLARE_BOX}.</Notice>}
       {slots.filled.length > 0 && (
         <div className="grid gap-(--gap-region) md:grid-cols-2 2xl:grid-cols-4">
           {slots.filled.map(({ title, capability, resource }) => (
@@ -347,7 +346,7 @@ const plainValue = (value: unknown) =>
 /**
  * A slot's resource: its name (to its declaration), type, a few of its declared fields, its
  * binding, the latest check's verdict and the fields that differ; the host's with where the last
- * apply that made it says it answers, and its `lifetime`: always on, or stops when quiet, with
+ * apply that made it says it answers, and its `lifetime`: always on, or stops when idle, with
  * what starts it again, the Wakeup (`woken`: one naming this host is declared), or a notice that none does.
  */
 function SlotCard({
@@ -423,14 +422,12 @@ function SlotCard({
               {lifetime === "long-lived"
                 ? "Always on"
                 : woken
-                  ? "Stops when quiet; what is due while it sleeps is started by the Wakeup"
-                  : "Stops when quiet"}
+                  ? "Stops when idle; what is due while it is stopped is started by the Wakeup"
+                  : "Stops when idle"}
             </Fact>
           )}
         </Facts>
-        {lifetime === "stops-when-quiet" && !woken && (
-          <Notice>{noWakeup(`${resource.vendor}.${resource.type}`)}.</Notice>
-        )}
+        {lifetime === "stops-on-exit" && !woken && <Notice>{noWakeup(`${resource.vendor}.${resource.type}`)}.</Notice>}
         {result?.error !== undefined ? (
           <p className="text-destructive">{result.error}</p>
         ) : (

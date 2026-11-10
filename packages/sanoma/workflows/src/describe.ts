@@ -297,6 +297,15 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     workflows,
     ops,
     vendors,
+    agents: [...resolved.agents.values()].map(({ id, vendor, title, mark, own, onKey }) => ({
+      id,
+      vendor,
+      title,
+      ...(mark && { mark: dataUrls(mark) }),
+      own: own !== undefined,
+      ...(own && "once" in own.signIn && { once: true as const }),
+      ...(onKey && { onKey: { model: onKey.model } }),
+    })),
     resourceTypes,
     collections,
     // An app's people are refused (`readPeople`), so the grid and the People page never show them.
@@ -486,6 +495,12 @@ function memoised<A, R>(fn: (arg: A) => R): (arg: A) => R {
 /** A logo's SVG markup as a `data:` URL, for an `<img>`. */
 export const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;
 
+/** A logo or a mark, light and dark, as `data:` URLs. */
+const dataUrls = ({ svg, dark }: { svg: string; dark?: string }) => ({
+  src: svgDataUrl(svg),
+  ...(dark && { dark: svgDataUrl(dark) }),
+});
+
 const vendorEntry = (
   id: string,
   info: VendorInfo | undefined,
@@ -493,9 +508,7 @@ const vendorEntry = (
   env: readonly CredentialStatus[] | undefined,
 ): VendorEntry => ({
   title: info?.title ?? id,
-  ...(info?.logo && {
-    logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
-  }),
+  ...(info?.logo && { logo: dataUrls(info.logo) }),
   ...(info?.package && { package: info.package }),
   ...(info?.homepage && { homepage: info.homepage }),
   fake,

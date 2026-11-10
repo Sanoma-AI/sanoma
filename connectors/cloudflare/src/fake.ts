@@ -40,6 +40,8 @@ export interface FakeContainer {
   stop(): Promise<void>;
   /** Each `/wake` it answered, in order, when it records them. */
   wakes?: readonly FakeWake[];
+  /** Settles once the runtime ended on its own (its process exited 0): the container ends with it. */
+  exited?: Promise<void>;
 }
 
 /** Starts the company's runtime, as the container would: the image (the one its pinned copy was copied from), the revision its label names, and the Worker's text bindings as its environment. */
@@ -115,6 +117,8 @@ const INSTANCE_TYPES = ["lite", "standard-1", "standard-2", "standard-3", "stand
 /** How long the fake waits before it rings an alarm again that threw, and how often: Cloudflare retries six times. */
 const RETRY_MS = 250;
 const RETRIES = 6;
+/** The longest inactivity timeout Cloudflare takes, six hours: a longer one rejects. */
+const MAX_INACTIVITY_MS = 6 * 60 * 60 * 1000;
 /** setTimeout's longest delay: a longer one fires at once. */
 const MAX_DELAY_MS = 2 ** 31 - 1;
 /** Headers `fetch` refuses to send, or that no longer hold once it decoded a body. */
@@ -255,13 +259,9 @@ function fakeObject(
     | undefined;
   let alarm: { at: number; timer?: NodeJS.Timeout } | undefined;
   let ringing: Promise<void> | undefined;
-  let inactivityMs: number | undefined;
-  let quiet: NodeJS.Timeout | undefined;
-  let open = 0;
   let instance: Instance | undefined;
 
   const destroy = async () => {
-    clearTimeout(quiet);
     const was = running;
     running = undefined;
     await was?.runtime.then(
@@ -283,26 +283,13 @@ function fakeObject(
     }
     return bundleAnswer(200, bundle(revision));
   };
-  /** Runs `work` as a request to the object: the container's inactivity counts from the last one's end. */
-  const active = async <T>(work: () => Promise<T>): Promise<T> => {
-    open++;
-    clearTimeout(quiet);
-    try {
-      return await work();
-    } finally {
-      open--;
-      if (open === 0 && running && inactivityMs !== undefined) {
-        quiet = setTimeout(() => void destroy(), inactivityMs).unref();
-      }
-    }
-  };
   /** Rings the alarm `armed`, while it is the one set, again after a throw, six times at most. */
   const ring = async (armed: NonNullable<typeof alarm>) => {
     for (let tries = 0; alarm === armed; tries++) {
       // Cloudflare clears the alarm as it runs it: one set in `alarm()` is a new one.
       alarm = undefined;
       try {
-        await active(() => instance!.alarm());
+        await instance!.alarm();
         return;
       } catch (err) {
         console.warn(`cloudflare fake: an alarm threw: ${errorMessage(err)}`);
@@ -358,14 +345,23 @@ function fakeObject(
           built: new Set<string>(),
         };
         running = mine;
-        // A runtime that does not start leaves no container, as a failed start does.
-        runtime.catch(() => {
-          if (running === mine) running = undefined;
-        });
+        // A runtime that does not start leaves no container, as a failed start does; one that
+        // exits ends its container (before `monitor` settles, which waits on the same end).
+        runtime.then(
+          (made) =>
+            void made.exited?.then(() => {
+              if (running === mine) running = undefined;
+            }),
+          () => {
+            if (running === mine) running = undefined;
+          },
+        );
       },
       inspect: async () => (running ? { image: running.image, labels: { ...running.labels } } : null),
-      // A runtime that does not start is a container that ended; one that runs never does here.
-      monitor: () => (running ? running.runtime.then(() => new Promise<void>(() => {})) : Promise.resolve()),
+      // A runtime that does not start is a container that ended (rejected), one that exits one that
+      // exited 0 (resolved); one that never exits never settles.
+      monitor: () =>
+        running ? running.runtime.then((made) => made.exited ?? new Promise<void>(() => {})) : Promise.resolve(),
       // The worker's own stop: it drains and exits, and the container with it.
       signal(signal) {
         if (signal !== 15) throw new TypeError(`the fake sends SIGTERM (15) alone, not ${signal}`);
@@ -403,8 +399,10 @@ function fakeObject(
           return new Response(answer.body, { status: answer.status, statusText: answer.statusText, headers: back });
         },
       }),
+      // Checked as Cloudflare checks it; no timer: the fake never stops a quiet container.
       async setInactivityTimeout(ms) {
-        inactivityMs = ms;
+        if (ms <= 0) throw new TypeError(`an inactivity timeout of ${ms} ms`);
+        if (ms > MAX_INACTIVITY_MS) throw new RangeError(`an inactivity timeout over six hours: ${ms} ms`);
       },
     },
     storage: {
@@ -428,9 +426,9 @@ function fakeObject(
     restart(made: Instance) {
       instance = made;
     },
-    fetch: (request: Request) => active(() => instance!.fetch(request)),
+    fetch: (request: Request) => instance!.fetch(request),
     startNow: () => instance!.startNow(),
-    /** Stops its container, as Cloudflare does once the object is quiet; its storage and alarm stay. */
+    /** Stops its container, as Cloudflare may on its own (a crash, a host's restart); its storage and alarm stay. */
     stop: destroy,
     /** Rings its alarm now, whatever its time; resolves once it rang. */
     async fire() {
@@ -478,7 +476,8 @@ interface FakeVersion {
  * uploaded contents; and its object over a `ctx` in this
  * process: its container runs `start`'s runtime (the image and the revision label it was started
  * at, the Worker's text bindings as its environment), its port's `/__sanoma/app-bundle` answers
- * `bundle`'s as the runtime's route does, SIGTERM stops the runtime, its storage is in memory, and
+ * `bundle`'s as the runtime's route does, SIGTERM stops the runtime, a runtime that exits on its
+ * own (`exited`) ends it, its inactivity timeout is checked but never stops it, its storage is in memory, and
  * its alarm rings on a timer, again after a throw. An upload answers once `propagation` more
  * requests went to the version before (none: at once), and then restarts the object over the new
  * bindings and images, its container, storage and alarm kept: the object finds the labels changed
@@ -488,7 +487,7 @@ interface FakeVersion {
  * and `prepareImage` answers ready for an image pinned in the account's registry. An assets upload
  * session asks for the hashes `state.assets` lacks, in one bucket, and an upload that redeems its
  * completion jwt keeps each path's hash on the Worker (`state.scripts[…].assets`). `stop(name)`
- * stops a company's container as ten quiet minutes would, `fire()` rings every alarm now,
+ * stops a company's container as Cloudflare may on its own, `running(name)` says whether it runs, `fire()` rings every alarm now,
  * `wakes()` lists the `/wake`s the containers answered, `close()` (and `reset()`) stops everything.
  */
 export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
@@ -974,10 +973,12 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   };
   const { reset } = fake;
   return Object.assign(fake, {
-    /** Stops the container of the company `name` (default: every one), as ten quiet minutes would: the next request starts it. */
+    /** Stops the container of the company `name` (default: every one), as Cloudflare may on its own: the next start or wake starts it. */
     async stop(name?: string) {
       for (const object of named(name)) await object.stop();
     },
+    /** Whether the container of the company `name` (default: any) runs. */
+    running: (name?: string) => named(name).some((object) => object.ctx.container.running),
     /** Rings every armed alarm now, whatever its time; resolves once each rang. */
     async fire() {
       await Promise.all(named().map((object) => object.fire()));

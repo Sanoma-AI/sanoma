@@ -183,7 +183,7 @@ const sourceKey = (state: Record<string, unknown>) => {
 /**
  * `cloud.host({ name, hostname?, database? })`: the company's host at Sanoma Cloud, a
  * Worker and container in Sanoma's Cloudflare account at `<slug>.sanoma.work`, which meets the
- * `Host` contract: it stops when quiet and starts on the next request, its URL is public, and it
+ * `Host` contract: it ends with its process once its worker is idle and starts on the next wake, its URL is public, and it
  * wakes itself through its own Worker's alarm. It binds its own bootstrap (the database URL, keys
  * and tokens are the Cloud's to mint and place), so it takes no `secrets`. Apply gives it the
  * repository the app runs from (`source`, an override) and that repository's default branch
@@ -203,7 +203,7 @@ export const host = defineResource({
   normalize: (state, desired) => compareDeclared(hostFields, sourceKey(state), sourceKey(desired)),
   writable: true,
   host: {
-    capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
+    capabilities: { lifetime: "stops-on-exit", publicUrl: true, buildsFromGit: false, staticEgress: false },
     bindsBootstrap: true,
     derives: true,
     // `domains` is the type's own, not the contract's: its `app` is the company's address, no public site.

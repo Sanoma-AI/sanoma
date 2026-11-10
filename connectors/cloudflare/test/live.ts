@@ -1,7 +1,7 @@
 // By hand, against a real Cloudflare account: the Host and Wakeup kits against `cloudflare.container`
 // and `cloudflare.alarm`, and the measured cold wake. Never in CI or the gate: it makes a Worker,
-// a container application and their bills, takes about an hour (each stop is Cloudflare's own ten
-// quiet minutes), and deletes both at the end. README, "Running it live", says what it needs:
+// a container application and their bills, takes a while (each stop waits for the idle worker to
+// exit, about a minute after its last run), and deletes both at the end. README, "Running it live", says what it needs:
 //
 //   pnpm build
 //   SANOMA_LIVE=1 CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... \
@@ -22,7 +22,7 @@ import { mintInstanceToken } from "sanoma/workflows/wakeup-service";
 import { alarm, container } from "../src/connector.ts";
 import { cloudflareDriver } from "../src/driver.ts";
 import { cloudflare } from "../src/index.ts";
-import { HEALTH_PATH, INACTIVITY_MS } from "../worker/instance.js";
+import { HEALTH_PATH } from "../worker/instance.js";
 
 const NEEDS = [
   "CLOUDFLARE_API_TOKEN",
@@ -85,10 +85,13 @@ const hostSecrets = {
 
 const minutes = (ms: number) => `${(ms / 60_000).toFixed(1)} min`;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-/** Stops the container as Cloudflare does: nothing asks the Worker for its ten quiet minutes, and a minute more. */
-async function quiet() {
-  console.log(`waiting ${minutes(INACTIVITY_MS + 60_000)} for Cloudflare to stop the quiet container`);
-  await sleep(INACTIVITY_MS + 60_000);
+/** Whether the container runs, as the object's health tells anyone. */
+const running = async () => ((await (await fetch(`${url}${HEALTH_PATH}`)).json()) as { running: boolean }).running;
+/** Waits until the container ended: its worker exits once idle, about a minute after its last run. */
+async function stopped() {
+  const begun = Date.now();
+  while (await running()) await sleep(5_000);
+  console.log(`the container ended ${minutes(Date.now() - begun)} after the wait began`);
 }
 
 // The operator: a data file that declares the host, applied by a worker in this process with the
@@ -153,7 +156,8 @@ try {
       return state;
     },
     stop: async () => void (await op("container.delete", { id: NAME })),
-    suspend: quiet,
+    suspend: stopped,
+    running,
     client: company,
     secrets: Object.values(secrets),
     async commit() {
@@ -187,7 +191,7 @@ try {
       "wakeup",
       await checkWakeup({
         type: alarm,
-        host: { url, stop: quiet, wakes: () => wakes },
+        host: { url, stop: stopped, wakes: () => wakes },
         client: company,
         register: async (registration) => void (await op("alarm.register", registration)),
         timeoutMs: 15 * 60_000,
@@ -197,7 +201,7 @@ try {
     clearInterval(poll);
   }
 
-  await quiet();
+  await stopped();
   const begun = Date.now();
   const res = await fetch(`${url}${HEALTH_PATH}?start=1`, { headers: { authorization: `Bearer ${token}` } });
   console.log(`cold wake: ${HEALTH_PATH} answered ${res.status} after ${((Date.now() - begun) / 1000).toFixed(1)} s`);
