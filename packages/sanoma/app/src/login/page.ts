@@ -1,4 +1,4 @@
-import { initialsOf } from "../lib/names.ts";
+import type { Company } from "../lib/names.ts";
 
 // What a login answers before the app's own pages: a small page of its own, or JSON for the page's
 // server functions and any change. The page has the app's look without its shell: it links the
@@ -9,26 +9,6 @@ export const wantsJson = (request: Request) =>
   new URL(request.url).pathname.startsWith("/_serverFn/") || (request.method !== "GET" && request.method !== "HEAD");
 
 export const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-
-/** A company as a page names it: its app's name humanised, and two initials for its mark. */
-export interface Company {
-  name: string;
-  initials: string;
-}
-
-/**
- * The company an app's name (`package.json`'s, `resolved.appName`) is, for people to read: its
- * scope dropped, `-` and `_` as spaces, each word capitalised (`sanoma-ops` is "Sanoma Ops", "SO").
- */
-export function companyOf(appName: string): Company {
-  const words = appName
-    .replace(/^@[^/]*\//, "")
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((word) => word[0]!.toUpperCase() + word.slice(1));
-  const name = words.join(" ") || "Sanoma";
-  return { name, initials: initialsOf(name) };
-}
 
 /** What a small page shows around its card: the kit's stylesheet, the company and a line under the card. */
 export interface PageFrame {

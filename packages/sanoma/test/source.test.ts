@@ -247,6 +247,7 @@ describe("localGitSource's drafts", () => {
     expect(committed?.revision).toBe(await source.head(draft.branch));
     expect(git("log", "-1", "--format=%an|%s", draft.branch)).toBe("agent via Sanoma|Add a laptop step");
     expect(await source.diff!("laptop-step")).toEqual({
+      head: committed!.revision,
       files: ["README.md", "workflows/offboard.ts"],
       summary: expect.stringMatching(
         /README\.md +\| 2 \+\+\n.*workflows\/offboard\.ts +\| 1 \+\n 2 files changed, 3 insertions\(\+\)$/s,
@@ -436,6 +437,144 @@ describe("localGitSource's drafts", () => {
       expect(pushed).toBe(await source.head(draft.branch));
     } finally {
       rmSync(remote, { recursive: true, force: true });
+    }
+  });
+
+  it("saves a draft at its head as one commit on main, merged with what main gained since, closes it, and undoes it in another draft", async () => {
+    const source = localGitSource(dir);
+    const draft = await source.draft!("welcome");
+    mkdirSync(join(draft.root, "workflows"));
+    writeFileSync(join(draft.root, "workflows", "welcome.ts"), "export const welcome = 1;\n");
+    await draft.commit({ paths: ["workflows/welcome.ts"], message: "Add welcome", author: "agent" });
+    writeFileSync(join(draft.root, "workflows", "welcome.ts"), "export const welcome = 2;\n");
+    await draft.commit({ paths: ["workflows/welcome.ts"], message: "Edit welcome", author: "agent" });
+    const { head } = await source.diff!("welcome");
+    expect(head).toBe(await source.head(draft.branch));
+    // Main moved on meanwhile, in another file.
+    writeFileSync(join(dir, "other.ts"), "export const other = 1;\n");
+    git("add", "other.ts");
+    git("commit", "--quiet", "-m", "Other");
+    const before = await source.head();
+    expect(await source.saved!("save:welcome")).toBeUndefined();
+
+    const save = { title: "Welcome a new client", author: "dana", run: "save:welcome" };
+    const { revision } = await source.merge!("welcome", { head, ...save });
+    expect(revision).toBe(await source.head());
+    expect(git("rev-parse", "HEAD~1")).toBe(before);
+    expect(git("log", "-1", "--format=%an|%s|%D")).toBe("dana via Sanoma|Welcome a new client|HEAD -> main");
+    expect(git("log", "-1", "--format=%(trailers:key=Sanoma-Save,valueonly)").trim()).toBe("save:welcome");
+    expect(git("show", "--name-only", "--format=", "HEAD")).toBe("workflows/welcome.ts");
+    expect(readFileSync(join(dir, "workflows", "welcome.ts"), "utf8")).toBe("export const welcome = 2;\n");
+    expect(existsSync(join(dir, "other.ts"))).toBe(true);
+    expect(status()).toBe("");
+    // Closed in the same write: its checkout and its branch gone.
+    expect(await source.drafts!()).not.toContain("welcome");
+    expect(git("branch", "--list", "draft/welcome")).toBe("");
+    // Found again by its run alone, and no other run's.
+    expect(await source.saved!("save:welcome")).toEqual({ revision, files: ["workflows/welcome.ts"] });
+    expect(await source.saved!("save:welcome~2")).toBeUndefined();
+    expect(await source.saved!("save:welcom")).toBeUndefined();
+
+    const undone = await source.revert!("undo-welcome", { sha: revision, author: "dana" });
+    expect(undone.revision).toBe(await source.head("draft/undo-welcome"));
+    expect(git("log", "-1", "--format=%an|%s", "draft/undo-welcome")).toBe(
+      'dana via Sanoma|Revert "Welcome a new client"',
+    );
+    expect((await source.diff!("undo-welcome")).files).toEqual(["workflows/welcome.ts"]);
+    const undo = { title: "Undo Welcome a new client", author: "dana", run: "save:undo-welcome" };
+    await source.merge!("undo-welcome", { head: undone.revision, ...undo });
+    expect(existsSync(join(dir, "workflows", "welcome.ts"))).toBe(false);
+    expect(status()).toBe("");
+    await expect(source.revert!("x", { sha: "HEAD~1", author: "dana" })).rejects.toThrow("Not a commit's id");
+    await expect(source.revert!("x", { sha: "f".repeat(40), author: "dana" })).rejects.toThrow(
+      "fffffff is not in this repository yet",
+    );
+  });
+
+  it("saves only the head it is given: a commit that landed since is neither merged nor deleted", async () => {
+    const source = localGitSource(dir);
+    const draft = await source.draft!("moving");
+    writeFileSync(join(draft.root, "a.ts"), "export const a = 1;\n");
+    const checked = (await draft.commit({ paths: ["a.ts"], message: "A", author: "agent" }))!.revision;
+    // The agent's next commit, asked for before the save: it lands first, in the one git write at a time.
+    writeFileSync(join(draft.root, "b.ts"), "export const b = 1;\n");
+    const later = draft.commit({ paths: ["b.ts"], message: "B", author: "agent" });
+    const before = await source.head();
+    await expect(
+      source.merge!("moving", { head: checked, title: "Moving", author: "dana", run: "save:moving" }),
+    ).rejects.toThrow(`The draft moving has moved on from ${checked.slice(0, 7)}: save it from its latest card`);
+    const { revision: b } = (await later)!;
+    expect(await source.head()).toBe(before);
+    expect(await source.head("draft/moving")).toBe(b);
+    expect(await source.drafts!()).toContain("moving");
+    expect(await source.saved!("save:moving")).toBeUndefined();
+  });
+
+  it("refuses to save a draft that conflicts with main, or over uncommitted changes, leaving the checkout as it was", async () => {
+    const source = localGitSource(dir);
+    const draft = await source.draft!("readme");
+    writeFileSync(join(draft.root, "README.md"), "# acme, by the draft\n");
+    const { revision: head } = (await draft.commit({
+      paths: ["README.md"],
+      message: "Draft's readme",
+      author: "agent",
+    }))!;
+    const save = { head, title: "Readme", author: "dana", run: "save:readme" };
+    writeFileSync(join(dir, "README.md"), "# acme, on main\n");
+    await expect(source.merge!("readme", save)).rejects.toThrow("The live checkout has uncommitted changes");
+    git("commit", "--quiet", "-am", "Main's readme");
+    const before = await source.head();
+    await expect(source.merge!("readme", save)).rejects.toThrow(
+      "The draft readme and what was saved since it began both change README.md",
+    );
+    expect(await source.head()).toBe(before);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toBe("# acme, on main\n");
+    expect(status()).toBe("");
+    expect(await source.drafts!()).toContain("readme");
+    // Undoing a commit a later one edits the same lines of: refused, the draft as it was.
+    const first = git("rev-list", "--max-parents=0", "HEAD");
+    await expect(source.revert!("undo-first", { sha: first, author: "dana" })).rejects.toThrow(/cannot be undone here/);
+    expect(git("-C", join(dir, ".sanoma", "drafts", "undo-first"), "status", "--porcelain")).toBe("");
+  });
+
+  it("undoes a merge as what it brought into main", async () => {
+    const source = localGitSource(dir);
+    git("switch", "--quiet", "-c", "side");
+    writeFileSync(join(dir, "side.ts"), "export const side = 1;\n");
+    git("add", "side.ts");
+    git("commit", "--quiet", "-m", "Side");
+    git("switch", "--quiet", "main");
+    writeFileSync(join(dir, "main.ts"), "export const main = 1;\n");
+    git("add", "main.ts");
+    git("commit", "--quiet", "-m", "Main");
+    git("merge", "--quiet", "--no-ff", "-m", "Merge side", "side");
+    const { revision } = await source.revert!("undo-merge", { sha: git("rev-parse", "HEAD"), author: "dana" });
+    expect(git("show", "--name-only", "--format=", revision)).toBe("side.ts");
+    expect(existsSync(join(dir, ".sanoma", "drafts", "undo-merge", "main.ts"))).toBe(true);
+  });
+
+  it("pushes the checked-out branch to origin as git signs in, and says why when origin refuses it", async () => {
+    const source = localGitSource(dir);
+    const remote = `${dir}-origin.git`;
+    execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", remote]);
+    const clone = `${dir}-clone`;
+    try {
+      git("remote", "add", "origin", remote);
+      writeFileSync(join(dir, "a.ts"), "export const a = 1;\n");
+      const { revision } = (await source.commit({ paths: ["a.ts"], message: "A", author: "dana" }))!;
+      await source.pushOrigin!();
+      const there = (...args: string[]) => execFileSync("git", args, { cwd: remote, encoding: "utf8" }).trim();
+      expect(there("rev-parse", "main")).toBe(revision);
+      // Origin gains a commit this checkout lacks: refused, as git refuses what is not a fast-forward.
+      execFileSync("git", ["clone", "--quiet", remote, clone]);
+      execFileSync("git", ["commit", "--quiet", "--allow-empty", "-m", "Elsewhere"], { cwd: clone });
+      execFileSync("git", ["push", "--quiet", "origin", "main"], { cwd: clone });
+      writeFileSync(join(dir, "b.ts"), "export const b = 1;\n");
+      await source.commit({ paths: ["b.ts"], message: "B", author: "dana" });
+      await expect(source.pushOrigin!()).rejects.toThrow(/^git push to origin failed: .*rejected/);
+      expect(there("rev-parse", "main")).not.toBe(await source.head());
+    } finally {
+      for (const at of [remote, clone]) rmSync(at, { recursive: true, force: true });
     }
   });
 });

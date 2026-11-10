@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Compute, OAuth2Client } from "google-auth-library";
-import { and, eq, gt, lte, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
 import type { Db } from "./db.ts";
 import { identityCredentials, identityDeployments } from "./db/identity.ts";
 import { enrollmentBroker } from "./identity-broker.ts";
@@ -42,7 +42,10 @@ export interface IdentityEnrollments {
   active(hash: string): Promise<IdentityEnrollment | undefined>;
 }
 
-/** Install in the broker's own database using provisioning authority, never a company database. */
+/**
+ * Install in the broker's own database using provisioning authority, never a company database. A
+ * credential without `valid_until` has no expiry: it holds until it is retired or revoked.
+ */
 export const CLOUD_IDENTITY_SQL = `
 CREATE SCHEMA IF NOT EXISTS sanoma_identity;
 REVOKE ALL ON SCHEMA sanoma_identity FROM PUBLIC;
@@ -54,7 +57,7 @@ CREATE TABLE IF NOT EXISTS sanoma_identity.credentials (
   hash text PRIMARY KEY CHECK (hash ~ '^[0-9a-f]{64}$'),
   deployment text NOT NULL REFERENCES sanoma_identity.deployments(id),
   generation bigint NOT NULL CHECK (generation > 0),
-  valid_from timestamptz NOT NULL DEFAULT now(), valid_until timestamptz NOT NULL,
+  valid_from timestamptz NOT NULL DEFAULT now(), valid_until timestamptz,
   revoked boolean NOT NULL DEFAULT false,
   UNIQUE (deployment, generation), CHECK (valid_until > valid_from),
   CHECK (isfinite(valid_from) AND isfinite(valid_until))
@@ -84,7 +87,7 @@ export function postgresIdentityEnrollments(database: () => Promise<Db>): Identi
             eq(identityCredentials.revoked, false),
             eq(identityDeployments.enabled, true),
             lte(identityCredentials.validFrom, sql`clock_timestamp()`),
-            gt(identityCredentials.validUntil, sql`clock_timestamp()`),
+            or(isNull(identityCredentials.validUntil), gt(identityCredentials.validUntil, sql`clock_timestamp()`)),
           ),
         );
       return row;

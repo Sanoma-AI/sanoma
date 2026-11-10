@@ -22,10 +22,12 @@ import {
   GO_LIVE_HOST_WORKFLOW,
   GO_LIVE_WORKFLOW,
   PATCH_WORKFLOW,
+  SAVE_DRAFT_WORKFLOW,
+  undoDraftOf,
   visitorPrincipal,
 } from "../src/shared.ts";
 import { companyFakes } from "./fixtures/company/fakes.ts";
-import { ALICE, failure, rootWith } from "./harness.ts";
+import { ALICE, failure, freshDatabase, rootWith } from "./harness.ts";
 
 // The app's own actions on the repository as built-in workflows (`app-workflows.ts`): registered
 // in every config, never a visitor's to start, run by a worker with the app's steps (each in a
@@ -109,11 +111,16 @@ describe("on a worker given the app's steps", () => {
       await record(step);
       return { file: "resources/sanoma/infra.ts", text: "export default [];\n", apply: { only: [] } };
     },
+    saveDraft: async (step, input) => {
+      await record(step);
+      if (input.title === "Refused") throw new SanomaError("invalid_input", "No draft of yours is d1");
+      return { revision: "1111111111111111", files: ["workflows/welcome.ts"], running: true };
+    },
     chat: async () => {
       throw new Error("No chat turns here");
     },
   };
-  const app = useTestApp(config(), { databaseUrl: testDatabaseUrl("app_workflows"), source, app: steps });
+  const app = useTestApp(config(), { databaseUrl: freshDatabase("app_workflows"), source, app: steps });
 
   it("runs each in a step given the worker's client, repository, lock and config, and the run's actor and id, its writes one at a time", async () => {
     const inputs = [
@@ -154,6 +161,45 @@ describe("on a worker given the app's steps", () => {
       "Apply the repository, its deploy key and the database first",
     );
     expect((await app.client.run(pushed))?.error).toBe("Apply the repository, its deploy key and the database first");
+  });
+
+  it("saves a draft only by saveDraft, as save:<id>, then ~<n> once one ended, listing them newest first with their outputs", async () => {
+    const err = await failure(
+      app.client.start(SAVE_DRAFT_WORKFLOW, { id: "d1", title: "Welcome" }, { startedBy: "alice" }),
+    );
+    expect(err).toMatchObject({ code: "invalid_input", message: expect.stringContaining("saveDraft") });
+    const refused = await app.client.saveDraft({ id: "d1", title: "Refused" }, { startedBy: "alice" });
+    expect(refused).toBe("save:d1");
+    await expect(app.client.result(refused)).rejects.toThrow("No draft of yours is d1");
+    const saved = await app.client.saveDraft(
+      { id: "d1", title: "Welcome", head: "2".repeat(40) },
+      { startedBy: "alice" },
+    );
+    expect(saved).toBe("save:d1~2");
+    await app.client.result(saved);
+    expect(given[saved]).toMatchObject({ by: { id: "alice" }, runId: saved });
+    const saves = await app.client.saves("d1");
+    expect(saves.map((s) => [s.runId, s.status, s.input.title, s.output])).toEqual([
+      [
+        "save:d1~2",
+        "finished",
+        "Welcome",
+        { revision: "1111111111111111", files: ["workflows/welcome.ts"], running: true },
+      ],
+      ["save:d1", "failed", "Refused", undefined],
+    ]);
+    expect(await app.client.saves("d")).toEqual([]);
+    // An undo names the chat whose save it undoes, from the undo's own draft.
+    const sha = "3".repeat(40);
+    for (const input of [
+      { id: undoDraftOf(sha), title: "Undo", undo: sha },
+      { id: "d1", title: "Undo", undo: sha, chat: "d1" },
+      { id: "d1", title: "Welcome", chat: "d1" },
+    ]) {
+      expect(await failure(app.client.saveDraft(input, { startedBy: "alice" }))).toMatchObject({
+        code: "invalid_input",
+      });
+    }
   });
 
   it("starts the apply after a write as the run's child, as its actor, and answers its id without waiting for it", async () => {
