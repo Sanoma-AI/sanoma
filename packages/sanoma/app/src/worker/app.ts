@@ -27,7 +27,7 @@ import { admitting } from "../login/admission.ts";
 import { publicFront, servedOnceMade, siteLogin } from "../login/public.ts";
 import { staffLogin } from "../login/staff.ts";
 import { plain } from "../server/webhooks.ts";
-import { publicPath } from "../site-path.ts";
+import { filePath, hasExtension, publicPath } from "../site-path.ts";
 import { servedOnWorker } from "../snapshot.ts";
 import { assetAt } from "./assets.ts";
 
@@ -127,17 +127,10 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
  * when the assets have none.
  */
 async function fileFor(request: Request, env: AppBundleEnv, site: string | undefined): Promise<Response | undefined> {
-  if (request.method !== "GET" && request.method !== "HEAD") return undefined;
-  const { pathname } = new URL(request.url);
-  if (!/\.[^/]+$/.test(pathname) || pathname.startsWith(`${PRERENDERED}/`)) return undefined;
-  if (site === undefined) return assetAt(request, env, pathname);
-  let path: string | undefined;
-  try {
-    path = publicPath(site, decodeURIComponent(pathname));
-  } catch {
-    return undefined;
-  }
-  return path === undefined ? undefined : assetAt(request, env, path);
+  const path = filePath(request);
+  if (path === undefined || !hasExtension(path) || path.startsWith(`${PRERENDERED}/`)) return undefined;
+  const at = site === undefined ? path : publicPath(site, path);
+  return at === undefined ? undefined : assetAt(request, env, at);
 }
 
 /** `response`, its body passed on as it streams, then `close` called once it is sent (or failed). */

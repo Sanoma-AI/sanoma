@@ -786,6 +786,7 @@ describe("a company's app with its sites", () => {
     expect((await at("/sites/hello/demo/mount.js", "hello.localhost")).status).toBe(404);
     expect((await at("/sites/hello/demo/mount.js", "intl.localhost")).status).toBe(404);
     expect((await at("/%73ites/hello/demo/mount.js", "intl.localhost")).status).toBe(404);
+    expect((await at("/..%2Fhello/demo/mount.js", "intl.localhost")).status).toBe(404);
     expect((await at("/demo/mount.js", "intl.localhost")).status).toBe(404);
     // Tailwind looked for classes everywhere in the repo but there.
     const css = readdirSync(join(result.distDir, "client", "assets")).filter((file) => file.endsWith(".css"));

@@ -26,7 +26,7 @@ import { APP_NAME, problemLine, serverEntries, SITE_NAME, siteKey } from "sanoma
 import type { InlineConfig, Logger, Plugin, PluginOption, ViteDevServer } from "vite";
 import { CONTENT_TYPES, type ContentProblem, contentTypes, readContent, STYLESHEET_FILE } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
-import { withoutOptional } from "./site-path.ts";
+import { hasExtension, pageUrl } from "./site-path.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 
@@ -155,7 +155,7 @@ export function sitesOf(repo: string): { sites: string[]; refused: string[] } {
 }
 
 /** A site's file served untouched: `<site>/public/<under>`, at `path`, `/sites/<key>/<under>`. */
-export interface PublicFile {
+interface PublicFile {
   path: string;
   under: string;
   file: string;
@@ -171,7 +171,7 @@ const servedParts = (under: string) => {
  * A repo's public files: every file under a site's `public/` (`sites/<name>/public/`, an app's
  * `apps/<app>/sites/<name>/public/`; `sitesUnder`), read from disk as it is now, a link not followed.
  */
-export async function publicFiles(repo: string): Promise<PublicFile[]> {
+async function publicFiles(repo: string): Promise<PublicFile[]> {
   const { sitesUnder } = await import("sanoma/workflows/describe");
   return sitesUnder(repo)
     .flatMap(({ name, dir }) => {
@@ -186,16 +186,19 @@ export async function publicFiles(repo: string): Promise<PublicFile[]> {
     .toSorted((a, b) => a.path.localeCompare(b.path));
 }
 
-/** The public file at `path` (`/sites/<key>/<under>`, decoded), as `publicFiles` finds it, looked for on disk alone: the dev server's. */
-export async function publicFileAt(repo: string, path: string): Promise<PublicFile | undefined> {
+/** The public file at `path` (`/sites/<key>/<under>`, decoded) and its size, looked for on disk as it is now: the dev server's. */
+export async function publicFileAt(repo: string, path: string): Promise<{ file: string; size: number } | undefined> {
   const { sitesUnder } = await import("sanoma/workflows/describe");
   const site = sitesUnder(repo).find(({ name }) => path.startsWith(`/sites/${name}/`));
-  const under = site && path.slice(`/sites/${site.name}/`.length);
-  const parts = under === undefined ? undefined : servedParts(under);
+  const parts = site && servedParts(path.slice(`/sites/${site.name}/`.length));
   if (!site || !parts) return undefined;
   const file = join(repo, site.dir, "public", ...parts);
-  return lstatSync(file, { throwIfNoEntry: false })?.isFile() ? { path, under: under!, file } : undefined;
+  const stat = lstatSync(file, { throwIfNoEntry: false });
+  return stat?.isFile() ? { file, size: stat.size } : undefined;
 }
+
+/** The sites' public folders, from the repo: built already, so no tool looks into them for its own sources. */
+const PUBLIC_DIRS = ["sites/*/public", "apps/*/sites/*/public"];
 
 /** What a site's own host answers itself, never a public file there: its robots.txt, sitemap, login and the build's files, and nothing under `sites/`. */
 const OWN_PATHS = /^(robots\.txt|sitemap\.xml|(assets|auth|sites)\/.*)$/;
@@ -210,15 +213,15 @@ const MAX_PUBLIC_FILE = 25 * 1024 * 1024;
  * or a size over `MAX_PUBLIC_FILE`.
  */
 async function refusedPublicFiles(repo: string, files: readonly PublicFile[]): Promise<string[]> {
+  if (!files.length) return [];
   const { sitePagePaths } = await import("sanoma/workflows/describe");
-  // Each page's URL: no optional segment, and a character escaped in its file's name (`feed[.]xml`) as it is.
-  const pages = new Set(sitePagePaths(repo).map((path) => withoutOptional(path).replaceAll(/\[([^\]]*)\]/g, "$1")));
+  const pages = new Set(sitePagePaths(repo).map(pageUrl));
   const seen = new Set<string>();
   return files.flatMap(({ path, under, file }) => {
     const name = relative(repo, file).split(sep).join("/");
     const twice = seen.has(path);
     seen.add(path);
-    if (!/\.[^/]+$/.test(under)) return [`${name}: a public file's name has an extension, such as mount.js`];
+    if (!hasExtension(under)) return [`${name}: a public file's name has an extension, such as mount.js`];
     if (OWN_PATHS.test(under)) return [`${name}: /${under} on the site's own host is the app's`];
     if (pages.has(path)) return [`${name}: ${path} is a page's path`];
     if (twice) return [`${name}: ${path} is another public file's path`];
@@ -257,7 +260,7 @@ function publicPlugin(repo: string): Plugin {
  * site's folder (`source("./")`).
  */
 function publicUnscanned(repo: string): Plugin {
-  const not = ["sites/*/public", "apps/*/sites/*/public"].map((dir) => `@source not ${specifier(join(repo, dir))};`);
+  const not = PUBLIC_DIRS.map((dir) => `@source not ${specifier(join(repo, dir))};`);
   return {
     name: "sanoma:public-unscanned",
     enforce: "pre",
@@ -339,7 +342,7 @@ function siteTsconfig(root: string) {
       join(src, "env.d.ts"),
     ],
     // A site's public files are served as they are: never type-checked.
-    exclude: ["../../sites/*/public", "../../apps/*/sites/*/public"],
+    exclude: PUBLIC_DIRS.map((dir) => `../../${dir}`),
   };
 }
 
@@ -800,8 +803,7 @@ export async function appDevServer(
         `${src}/routes/**/*.tsx`,
         "sites/**/*.tsx",
         "apps/*/sites/**/*.tsx",
-        "!sites/*/public/**",
-        "!apps/*/sites/*/public/**",
+        ...PUBLIC_DIRS.map((dir) => `!${dir}/**`),
       ],
     },
   });

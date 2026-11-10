@@ -33,7 +33,7 @@ import { admitting } from "./login/admission.ts";
 import { publicFront, servedOnceMade, siteLogin } from "./login/public.ts";
 import { loopbackLogin } from "./loopback.ts";
 import { type AppSnapshot, siteFileBroken } from "./snapshot.ts";
-import { publicPath } from "./site-path.ts";
+import { filePath, publicPath } from "./site-path.ts";
 import { liveSnapshot } from "./snapshot-build.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
@@ -351,9 +351,8 @@ async function builtResponder(distDir: string): Promise<Responder> {
       const path = filePath(request);
       if (path === undefined) return undefined;
       // On a public site's host, the build's own files and the site's public ones at its root.
-      const own = site === undefined ? undefined : publicPath(site, path);
-      const file =
-        site === undefined ? files.get(path) : own === undefined ? undefined : (files.get(path) ?? files.get(own));
+      const own = site === undefined ? path : publicPath(site, path);
+      const file = own === undefined ? undefined : (files.get(path) ?? files.get(own));
       return file && fileResponse(request, file);
     },
     ...(stylesheet && { stylesheet }),
@@ -378,10 +377,7 @@ async function devResponder(
       const path = filePath(request);
       const at = path === undefined || site === undefined ? path : publicPath(site, path);
       const found = at?.startsWith("/sites/") ? await publicFileAt(repo, at) : undefined;
-      if (found) {
-        const headers = fileHeaders(found.path.slice(1), (await stat(found.file)).size);
-        return fileResponse(request, { path: found.file, headers });
-      }
+      if (found) return fileResponse(request, { path: found.file, headers: fileHeaders(at!.slice(1), found.size) });
       const { req, res } = sockets.get(request)!;
       return new Promise((done, fail) => {
         // Vite answers what it serves itself without calling next; the adapter then sends nothing.
@@ -465,17 +461,6 @@ const fileHeaders = (rel: string, size: number): Record<string, string> => ({
   "cache-control": rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache",
   "x-content-type-options": "nosniff",
 });
-
-/** The path a request asks a file at, decoded: a GET's or a HEAD's, never a server function's. */
-function filePath(request: Request): string | undefined {
-  const { pathname } = new URL(request.url);
-  if ((request.method !== "GET" && request.method !== "HEAD") || pathname.startsWith("/_serverFn/")) return undefined;
-  try {
-    return decodeURIComponent(pathname);
-  } catch {
-    return undefined;
-  }
-}
 
 /** `file` as the answer to `request`: its bytes, streamed, but for a HEAD. */
 const fileResponse = (request: Request, file: StaticFile) =>
