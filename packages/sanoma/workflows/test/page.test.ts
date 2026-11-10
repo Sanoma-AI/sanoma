@@ -155,12 +155,23 @@ describe("pageRuntime", () => {
     await expect(transport({ name: "chaseInvoice.result", input: { runId } })).rejects.toThrow(/No run/);
   });
 
-  it("refuses a vendor's send called directly, a name it does not run, and a workflow whose operation has no fake", async () => {
+  it("refuses a vendor's send called directly, a name it does not run, a start it cannot make, and a workflow whose operation has no fake", async () => {
     const { transport } = await page();
     await expect(
       transport({ name: "resend.emails.send", input: { to: "a@b.c", from: "a@b.c", subject: "s", text: "t" } }),
     ).rejects.toThrow(/cannot be called directly/);
     await expect(transport({ name: "nothing" })).rejects.toThrow(/no operation or workflow/);
+    // A start checks its input before there is a run, and an id names one run.
+    await expect(transport({ name: "chaseInvoice", input: {} })).rejects.toThrow(
+      /does not match chase-invoice's schema/,
+    );
+    await transport({ name: "chaseInvoice", input: { number: "INV-1" }, id: "once" });
+    await expect(transport({ name: "chaseInvoice", input: { number: "INV-2" }, id: "once" })).rejects.toThrow(
+      /was started as another run/,
+    );
+    await expect(transport({ name: "chaseInvoice", input: { number: "INV-1" }, id: "page:1" })).rejects.toThrow(
+      /An id is letters/,
+    );
     await expect(pageRuntime({ workflows: [chase], collections: [invoices] })).rejects.toThrow(
       /uses resend\.emails\.send, but no fake/,
     );

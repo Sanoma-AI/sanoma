@@ -1,3 +1,4 @@
+import { dequal } from "dequal";
 import { z } from "zod";
 import type { RunSummary } from "./client.ts";
 import { type Collection, collectionsConnector, collectionsFake } from "./collection.ts";
@@ -65,6 +66,8 @@ const PAGE_APP = "page";
 interface PageRun {
   id: string;
   workflow: string;
+  /** What it was started with, as given. */
+  input: unknown;
   actor: Principal;
   status: RunStatus;
   createdAt: number;
@@ -240,6 +243,11 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       );
       run.status = "waiting";
       const decision = await decide(state);
+      if (decision !== "approve" && decision !== "reject") {
+        throw new SanomaError("invalid_input", `decide answered ${String(decision)}, not "approve" or "reject"`, {
+          approval: state.id,
+        });
+      }
       run.status = "running";
       // The approver decides: the person named, or for a group, the group's name.
       const by = typeof state.approver === "string" ? state.approver : state.approver.group;
@@ -259,7 +267,13 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
     },
     async all(list, at) {
       // Nested, or two at once: either way the members' records would not read as one fan-out.
-      if (run.group) throw new SanomaError("invalid_input", "a ctx.all is already running: await it before the next");
+      if (run.group) {
+        throw new SanomaError(
+          "invalid_input",
+          "a ctx.all is already running: await it before the next, and call none inside one",
+          { group: run.group.id },
+        );
+      }
       const members = parseOrThrow(AllMembers, list, "ctx.all");
       const id = `all:${run.seq}`;
       const outputs: unknown[] = [];
@@ -277,16 +291,24 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
 
   /** Starts a run of the workflow, or answers the run the id already names. */
   const start = (wf: WorkflowDefinition<any, any>, input: unknown, id = `page:${++started}`): string => {
-    // A generated id has a colon, which a request's never has (`CallRequest`): the two never meet.
+    // Checked before there is a run, as a worker's start checks it.
+    const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
     const seen = runs.get(id);
-    if (seen && seen.workflow !== wf.name) {
-      throw new SanomaError("invalid_input", `Run ${id} is a run of ${seen.workflow}, not ${wf.name}`, { runId: id });
+    if (seen && (seen.workflow !== wf.name || !dequal(seen.input, input))) {
+      throw new SanomaError(
+        "invalid_input",
+        `Run ${id} was started as another run: of ${seen.workflow}, with its own input`,
+        {
+          runId: id,
+        },
+      );
     }
     if (seen) return id;
     const now = Date.now();
     const run: PageRun = {
       id,
       workflow: wf.name,
+      input,
       actor,
       status: "running",
       createdAt: now,
@@ -301,7 +323,6 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
     write(run, { type: "run.started", input });
     run.done = (async () => {
       try {
-        const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
         const output = await wf.run(ctxOf(wf, run, runner), parsed);
         write(run, { type: "run.finished", output });
         run.status = "finished";
@@ -344,6 +365,10 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
 
   return {
     async transport({ name, input, id }) {
+      // As the app's `CallRequest` takes it: never a run id of the page's own (`page:<n>`).
+      if (id !== undefined && !/^[\w-]{1,200}$/.test(id)) {
+        throw new SanomaError("invalid_input", "An id is letters, digits, _ and -", { id });
+      }
       const op = ops.get(name);
       if (op) {
         if (!isDirect(op, types)) {
