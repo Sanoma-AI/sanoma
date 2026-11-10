@@ -26,9 +26,20 @@ export const isEventLine = (line: string) => recordOf(line) !== undefined;
 export const isDatabaseEvent = (line: string) => recordOf(line)?.event === "database";
 
 /**
+ * The stage a line of `sanoma init` begins, `{"sanoma":1,"event":"stage","stage":…,"status":"start"}`:
+ * `template`, `people`, `git`, `install` or `database`. Undefined for any other line.
+ */
+export function startedStage(line: string): string | undefined {
+  const record = recordOf(line);
+  return record?.event === "stage" && record.status === "start" && typeof record.stage === "string"
+    ? record.stage
+    : undefined;
+}
+
+/**
  * The event a line carries that the shell acts on: `{"sanoma":1,"event":"ready","url":…,"sites":{…}}`
  * or `{"sanoma":1,"event":"error","message":…}`. Undefined for any other line, another event
- * (`database`, `isDatabaseEvent`) or one with fields that do not hold.
+ * (`database`, `isDatabaseEvent`; `stage`, `startedStage`) or one with fields that do not hold.
  */
 export function eventOf(
   line: string,

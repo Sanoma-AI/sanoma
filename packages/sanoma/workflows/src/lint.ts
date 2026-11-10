@@ -3,6 +3,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
 import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
 import { APPS_DIR, COLLECTIONS_FILE, inside, nearestDir, RELATIVE } from "./paths.ts";
+import { LOCAL_ENTRIES } from "./shared.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
 
@@ -21,15 +22,20 @@ const THROUGH_CTX = "a workflow must call vendors through ctx, so the policy see
  */
 const AUTHOR_PACKAGES: readonly string[] = ["sanoma/workflows", "sanoma"];
 
-/** The packages a workflow may import from at all: the author packages, connectors and zod. */
-const ALLOWED_PACKAGE = new RegExp(`^(${[...AUTHOR_PACKAGES, "@sanoma-ai/connector-[a-z0-9-]+", "zod"].join("|")})$`);
+/**
+ * The packages a workflow may import from at all: the author packages, `sanoma`'s entries that
+ * compute locally (`LOCAL_ENTRIES`, any of their names), connectors and zod.
+ */
+const ALLOWED_PACKAGE = new RegExp(
+  `^(${[...AUTHOR_PACKAGES, ...LOCAL_ENTRIES, "@sanoma-ai/connector-[a-z0-9-]+", "zod"].join("|")})$`,
+);
 
 /** Packages refused by name, with the reason. */
 const REFUSED_PACKAGES: [RegExp, string][] = [
   [/^sanoma\/testing(\/|$)/, `fakes and test helpers belong in tests; ${THROUGH_CTX}`],
   [/^sanoma\/app(\/|$)/, "the app starts runs and decides approvals, so a workflow could approve itself"],
   [/^@sanoma-ai\/connector-[^/]+\/(fake|driver|remote|vault)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
-  // Its other subpaths (`sanoma/workflows`, an author package, is allowed first).
+  // Its other subpaths (`sanoma/workflows`, an author package, and `LOCAL_ENTRIES` are allowed first).
   [/^sanoma\//, "`sanoma` has no entry points for a workflow: import its names from `sanoma` itself"],
 ];
 
@@ -59,8 +65,8 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
 
 /**
  * Checks a workflow file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
- * type from `sanoma/workflows` or `sanoma`, `@sanoma-ai/connector-<vendor>`, `zod`, and relative files. With
- * `filename`, a relative import must stay inside the file's nearest `workflows/` directory, or its
+ * type from `sanoma/workflows` or `sanoma`, `LOCAL_ENTRIES`, `@sanoma-ai/connector-<vendor>`,
+ * `zod`, and relative files. With `filename`, a relative import must stay inside the file's nearest `workflows/` directory, or its
  * own directory when it has none; the one file outside it a workflow may import is the company's
  * `resources/data.ts`, its collections (by real path). No
  * `instanceof` against the runtime's error classes: read `errorCode(err)`.
@@ -201,7 +207,7 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
   }
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
   for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
-  return "import only from `sanoma` (or `sanoma/workflows`), a `@sanoma-ai/connector-*` package, zod, or a file beside this one";
+  return `import only from \`sanoma\` (or \`sanoma/workflows\`), ${LOCAL_ENTRIES.map((name) => `\`${name}\``).join(", ")}, a \`@sanoma-ai/connector-*\` package, zod, or a file beside this one`;
 }
 
 /**

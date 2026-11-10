@@ -1,3 +1,5 @@
+// `sanoma/invoices`: an invoice's shape and its arithmetic, zod only, for a workflow, a site and a
+// test alike. The PDF is `sanoma/invoices/pdf`.
 export {
   addressSchema,
   currencySchema,
@@ -13,12 +15,3 @@ export {
 export type { Currency, Invoice, InvoiceInput, InvoiceLine } from "./schema.ts";
 export { calculateInvoice, formatMoney, InvoiceValidationError } from "./calculate.ts";
 export type { CalculatedInvoice, CalculatedLine, InvoiceIssue, InvoiceTotals } from "./calculate.ts";
-export {
-  cleaningInvoice,
-  cleaningSchema,
-  cleaningServices,
-  petSittingInvoice,
-  petSittingSchema,
-  petServices,
-} from "./industries.ts";
-export type { CleaningInput, PetSittingInput } from "./industries.ts";

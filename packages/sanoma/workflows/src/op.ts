@@ -40,8 +40,10 @@ export interface OpSpec<I extends z.ZodType = z.ZodType, O extends z.ZodType = z
    */
   phrases?: { given?: string; expect?: string };
   /**
-   * Top-level fields of its input and output that are the driver's own data, not the vendor's
-   * (a resource type's `handle`): the ledger records each as `"<name>"`, never its value.
+   * Fields of its input and output that are the driver's own data, not the vendor's (a resource
+   * type's `handle`), or bytes no reader of the ledger needs (`attachments.content`, an email's
+   * files): the ledger records each as `"<name>"`, never its value. A dotted path goes into a
+   * field, and into each item of a list it holds.
    */
   opaque?: readonly string[];
   /** Logical destinations this operation may create with Secrets.ensure, derived from its authorized input. */

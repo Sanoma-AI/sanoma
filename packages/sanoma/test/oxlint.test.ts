@@ -22,6 +22,12 @@ import { main } from "sanoma/app/build";
 export const all = [defineWorkflow, z, defineConfig, main, Date.now()] as [unknown, unknown, Ctx<[]>, unknown, number];
 `,
   );
+  // `sanoma`'s entries that compute locally, which a workflow and a site alike may import.
+  const invoices = `import { calculateInvoice } from "sanoma/invoices";
+import { renderInvoice } from "sanoma/invoices/pdf";
+export const all = [calculateInvoice, renderInvoice];
+`;
+  writeFileSync(join(dir, "workflows/invoice.ts"), invoices);
   // A data file is loaded, not linted: a computed value is fine.
   mkdirSync(join(dir, "resources"));
   writeFileSync(
@@ -60,6 +66,7 @@ export const pg = require("pg");
 export type Types = [Ctx<[]>, typeof Hello];
 `,
   );
+  writeFileSync(join(dir, "sites/x/routes/invoice.tsx"), invoices);
   writeFileSync(join(dir, "sites/x/routes/a.server.ts"), "export const a = 1;\n");
   writeFileSync(
     join(dir, "sites/x/routes/fn.ts"),
@@ -112,7 +119,7 @@ describe("the shipped oxlint.json", () => {
     expect(names("sanoma")).toContain("z");
   });
 
-  it("refuses what a workflow may not import from sanoma and the clock, and nothing in a data file", () => {
+  it("refuses what a workflow may not import from sanoma and the clock, and nothing in a data file or of sanoma/invoices", () => {
     const imports = "eslint(no-restricted-imports)";
     expect(found.filter((f) => !f.file.startsWith("sites/"))).toEqual([
       {
@@ -138,7 +145,7 @@ describe("the shipped oxlint.json", () => {
     ]);
   });
 
-  it("refuses a site's server code, one problem each, and passes what a site may import and the build's listing", () => {
+  it("refuses a site's server code, one problem each, and passes what a site may import (sanoma/invoices too) and the build's listing", () => {
     const imports = "eslint(no-restricted-imports)";
     const site = "sanoma(site-file)";
     const globals = "eslint(no-restricted-globals)";

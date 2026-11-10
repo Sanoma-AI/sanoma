@@ -31,7 +31,7 @@ npm run check       # tsc, the lint, the policies, what the worker would refuse,
 npm run env         # rewrites .env.example from the connectors' variables
 ```
 
-The app's chat answers on the company's Anthropic key (`@sanoma-ai/connector-anthropic`, the chat's model). Paste it on the Anthropic connector page (Connectors, then Anthropic) once the app is up; until it is there, the chat says to connect a model and links to that page.
+The app's chat answers on the company's Anthropic key (`@sanoma-ai/connector-anthropic`, the chat's model). Paste it on the Anthropic connector page (Connectors, then Anthropic) once the app is up; until it is there, the chat says to connect a model and links to that page. A person can instead run the chat on their own coding agent's plan: each agent comes from its vendor's connector (Claude Code from Anthropic's, Copilot from GitHub's, Codex from OpenAI's, OpenCode and Pi from their own), and the chat offers the ones installed here.
 
 Until it goes live the company runs on this computer alone. `resources/sanoma/infra.ts` declares where it goes live: a database and a host on Sanoma Cloud, at `<name>.sanoma.work`; nothing is made until then. Live, the host runs `main`, and a change merged there deploys it. Sign-in codes go out through Resend: `login.sender` names the operation and `login.from` the sender address in `sanoma.config.ts`. The Cloud host supplies Sanoma's Resend key for codes; elsewhere, supply your own `RESEND_API_KEY` and change `login.from` to an address on your verified domain, or sign in on this computer by `id`, which needs no sender.
 

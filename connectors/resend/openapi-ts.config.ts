@@ -5,8 +5,20 @@ export default {
   input: "https://raw.githubusercontent.com/resend/resend-openapi/8916b099d7f52b8552a2e1ef38a7f16fcd17864c/resend.yaml",
   output: { path: "src/generated", module: { extension: ".ts" }, postProcess: ["oxfmt"] },
   parser: {
-    // The driver handles no webhooks, and the filters below drop the schemas they point to.
-    patch: { input: (spec: { webhooks?: unknown }) => void delete spec.webhooks },
+    patch: {
+      input: (spec: {
+        webhooks?: unknown;
+        components: { schemas: { Attachment: { properties: Record<string, unknown> } } };
+      }) => {
+        // The driver handles no webhooks, and the filters below drop the schemas they point to.
+        delete spec.webhooks;
+        // The spec says binary, but the JSON body carries an attachment's bytes as base64 text.
+        spec.components.schemas.Attachment.properties.content = {
+          type: "string",
+          description: "Content of an attached file, base64-encoded.",
+        };
+      },
+    },
     filters: {
       operations: {
         include: [

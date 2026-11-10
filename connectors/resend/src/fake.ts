@@ -19,6 +19,8 @@ export interface FakeResendEmail {
   subject: string;
   html?: string;
   text?: string;
+  /** The files attached, their bytes base64-encoded as sent. */
+  attachments?: { filename: string; content: string }[];
 }
 
 export interface FakeResendState extends Record<string, unknown> {

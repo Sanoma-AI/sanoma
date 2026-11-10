@@ -1,5 +1,16 @@
 import { describe, expect, test } from "vitest";
-import { type CompanyState, companyPage, folderNameOf, INSTALLING, QUIET_MS, STARTING, stepsOf } from "../src/pages.ts";
+import {
+  ADDING_YOU,
+  type CompanyState,
+  companyPage,
+  FROM_TEMPLATE,
+  folderNameOf,
+  INSTALLING,
+  OPENING,
+  QUIET_MS,
+  STARTING,
+  stepsOf,
+} from "../src/pages.ts";
 import { failureOf } from "../src/session.ts";
 
 const state = (over: Partial<CompanyState> = {}): CompanyState => ({
@@ -32,19 +43,38 @@ describe("a start's steps", () => {
     expect(statuses({ progress: [INSTALLING, STARTING] })).toEqual(["done", "now"]);
   });
 
-  test("a new company has two: setting up, until its database event, and starting", () => {
-    const steps = stepsOf(state({ kind: "new", progress: ["Starting a new company with sanoma from npm"] }));
-    expect(steps.map((step) => step.label)).toEqual(["Setting up the company", "Starting it"]);
-    expect(steps.map((step) => step.status)).toEqual(["now", "next"]);
-    expect(statuses({ kind: "new", progress: ["Starting a new company with sanoma from npm", STARTING] })).toEqual([
+  test("a new company has five, ticked by init's stages, then the app opening", () => {
+    const NEW = "Starting a new company with sanoma from npm";
+    const steps = stepsOf(state({ kind: "new", progress: [NEW] }));
+    expect(steps.map((step) => step.label)).toEqual([
+      "Making the company from the starter",
+      "Adding you as its admin",
+      "Installing what it needs",
+      "Starting its database on this computer",
+      "Opening it",
+    ]);
+    expect(steps.map((step) => step.status)).toEqual(["now", "next", "next", "next", "next"]);
+    expect(statuses({ kind: "new", progress: [NEW, FROM_TEMPLATE, ADDING_YOU] })).toEqual([
       "done",
       "now",
+      "next",
+      "next",
+      "next",
     ]);
+    expect(
+      statuses({ kind: "new", progress: [NEW, FROM_TEMPLATE, ADDING_YOU, INSTALLING, STARTING, OPENING] }),
+    ).toEqual(["done", "done", "done", "done", "now"]);
   });
 
-  test("a new company tried again, in a folder that got that far, reports as an open does", () => {
-    expect(statuses({ kind: "new", progress: [INSTALLING] })).toEqual(["now", "next"]);
-    expect(statuses({ kind: "new", progress: [INSTALLING, STARTING] })).toEqual(["done", "now"]);
+  test("a new company tried again, in a folder that got that far, picks up at the install", () => {
+    expect(statuses({ kind: "new", progress: [INSTALLING] })).toEqual(["done", "done", "now", "next", "next"]);
+    expect(statuses({ kind: "new", progress: [INSTALLING, STARTING] })).toEqual([
+      "done",
+      "done",
+      "done",
+      "now",
+      "next",
+    ]);
   });
 
   test("a copy from GitHub has one more in front, done when the copy is there already", () => {
@@ -168,6 +198,17 @@ describe("why a session ended", () => {
       pill: "Did not start",
     });
     expect(failureOf(exit({ code: 2 }), opened).message).toContain("the details below say what");
+  });
+
+  test("a new company's init that refuses the form's answers says why in its own words", () => {
+    const refused = exit({ code: 2, error: "--email: not an email address" });
+    expect(failureOf(refused, { kind: "new", phase: "starting", progress: [] })).toEqual({
+      message: "--email: not an email address",
+      pill: "Not set up",
+    });
+    expect(failureOf(exit({ code: 2 }), { kind: "new", phase: "starting", progress: [] }).message).toContain(
+      "the details below say what",
+    );
   });
 
   test("with only an exit code, a new company that never answered says it was setting up", () => {

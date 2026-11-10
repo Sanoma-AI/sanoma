@@ -37,7 +37,8 @@ const COMPATIBILITY_FLAGS = ["nodejs_compat"];
  * What the runtime imports that the Worker never runs, and the build leaves out, each aliased to
  * `worker/missing.js`, whose every use throws: DBOS's optional dependencies, required lazily only
  * with tracing or OTLP logs on (measured on workerd for #428: DBOSClient bundles without exactly
- * these, and enqueues), and the runtime's source tools, which parse and format the company's files.
+ * these, and enqueues), the runtime's source tools, which parse and format the company's files, and
+ * an optional peer a workflow's file imports.
  */
 const OPTIONAL: readonly string[] = [
   "@opentelemetry/api",
@@ -51,6 +52,9 @@ const OPTIONAL: readonly string[] = [
   "winston-transport",
   "oxc-parser",
   "oxfmt",
+  // `sanoma/invoices/pdf`'s renderer, an optional peer a company installs only to make PDFs: a
+  // workflow's file that imports it is in the bundle for its declarations, and renders on the worker.
+  "@react-pdf/renderer",
 ];
 
 /**

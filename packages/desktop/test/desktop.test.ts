@@ -9,6 +9,7 @@ import {
   afterFailure,
   type Company,
   companyName,
+  liveOf,
   partitionOf,
   portFor,
   readCompanies,
@@ -398,12 +399,74 @@ describe("companies.json", () => {
     expect(toReopen(updated(list, "/a", { open: false }), () => true)).toEqual(["/gone"]);
   });
 
-  test("marks the running companies in Recent", () => {
+  test("marks the running companies in Recent, and the live ones", () => {
     const list = [at("/a", 3100, "2"), at("/b", 3101, "1")];
-    expect(recentOf(list, new Set(["/b"])).map((c) => [c.path, c.running])).toEqual([
-      ["/a", false],
-      ["/b", true],
+    const recent = recentOf(list, new Set(["/b"]), (path) =>
+      path === "/a" ? { hostname: "acme.sanoma.work" } : undefined,
+    );
+    expect(recent.map((c) => [c.path, c.running, c.live])).toEqual([
+      ["/a", false, { hostname: "acme.sanoma.work" }],
+      ["/b", true, undefined],
     ]);
+  });
+
+  test("a company is live once its lockfile binds the host its data file declares, at the hostname it names", () => {
+    const repo = temp();
+    const lock = join(repo, "resources", "sanoma.lock.json");
+    const infra = join(repo, "resources", "sanoma", "infra.ts");
+    mkdirSync(join(repo, "resources", "sanoma"), { recursive: true });
+    // No lockfile, one that is not JSON, and one that binds other things: local.
+    expect(liveOf(repo)).toBeUndefined();
+    writeFileSync(lock, "{");
+    expect(liveOf(repo)).toBeUndefined();
+    writeFileSync(lock, JSON.stringify({ "resources/sanoma/infra.ts#store": { type: "cloud.database", id: "acme" } }));
+    expect(liveOf(repo)).toBeUndefined();
+    writeFileSync(
+      lock,
+      JSON.stringify({
+        "resources/sanoma/infra.ts#host": { type: "cloud.host", id: "acme" },
+        "resources/sanoma/infra.ts#host.sourceKey": { type: "github.repository_deploy_key", id: "acme/ops:1" },
+      }),
+    );
+    // Bound: live, with no address while the data file names none.
+    expect(liveOf(repo)).toEqual({});
+    writeFileSync(
+      infra,
+      `import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";
+
+export const store = cloud.database({ name: "acme" });
+export const host = cloud.host({ name: "acme", database: store });
+export default [store, host];
+`,
+    );
+    expect(liveOf(repo)).toEqual({});
+    writeFileSync(
+      infra,
+      `export const store = cloud.database({ name: "acme" });
+export const host = cloud.host({
+  name: "acme",
+  database: store,
+  hostname: "acme.sanoma.work",
+});
+`,
+    );
+    expect(liveOf(repo)).toEqual({ hostname: "acme.sanoma.work" });
+    // A comment or a call in the declaration before it; never another declaration's.
+    writeFileSync(
+      infra,
+      `export const host = cloudflare.host({
+  // What it serves (\`sites/*/site.ts\`), from build("x").
+  source: build("x"),
+  hostname: "internal.sanoma.work",
+});
+`,
+    );
+    expect(liveOf(repo)).toEqual({ hostname: "internal.sanoma.work" });
+    writeFileSync(
+      infra,
+      `export const host = cloud.host({ name: "acme" });\nexport const site = page({ hostname: "x.example" });\n`,
+    );
+    expect(liveOf(repo)).toEqual({});
   });
 
   test("forgets a failed start whose folder holds no company, such as a failed clone, and keeps any other", () => {
@@ -420,6 +483,42 @@ describe("companies.json", () => {
     const repo = temp();
     expect(companyName(repo)).toMatch(/^sanoma-desktop-/);
     writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "acme" }));
+    expect(companyName(repo)).toBe("acme");
+    // The name its config gives it, a top-level key, before the package's.
+    const config = join(repo, "sanoma.config.ts");
+    writeFileSync(
+      config,
+      `const ops = defineConnection(neon, {
+  name: "infrastructure",
+});
+
+export default defineConfig({
+  connectors: [defineConnection(neon, {
+    name: "nested",
+  })],
+  name: "Maple Street \\"Studio\\"",
+});
+`,
+    );
+    expect(companyName(repo)).toBe('Maple Street "Studio"');
+    writeFileSync(config, `export default defineConfig({ name: "Café Ünïcode", connectors: [] });\n`);
+    expect(companyName(repo)).toBe("Café Ünïcode");
+    writeFileSync(
+      config,
+      `export default defineConfig({\n  connectors: [defineConnection(neon, { name: "x" })],\n});\n`,
+    );
+    expect(companyName(repo)).toBe("acme");
+    writeFileSync(
+      config,
+      `export default defineConfig({\n\tconnectors: [defineConnection(neon, {\n\t\tname: "x",\n\t})],\n});\n`,
+    );
+    expect(companyName(repo)).toBe("acme");
+    writeFileSync(config, `export default defineConfig({\n\tconnectors: [],\n\tname: "Tabbed",\n});\n`);
+    expect(companyName(repo)).toBe("Tabbed");
+    writeFileSync(
+      config,
+      `export default defineConfig({\n  connectors: [],\n});\n\nconst x = defineConnection(neon, {\n  name: "cloud",\n});\n`,
+    );
     expect(companyName(repo)).toBe("acme");
     expect(partitionOf("/x/acme")).toMatch(/^persist:company-[0-9a-f]{40}$/);
     expect(partitionOf("/x/acme")).not.toBe(partitionOf("/y/acme"));

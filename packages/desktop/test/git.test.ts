@@ -17,6 +17,7 @@ import {
   isCloneUrl,
   newCompanyTarget,
   repoNameOf,
+  stepOf,
 } from "../src/create.ts";
 import {
   AUTH_MESSAGE,
@@ -31,7 +32,7 @@ import {
   type Run,
   setIdentity,
 } from "../src/git.ts";
-import { STARTING } from "../src/pages.ts";
+import { ADDING_YOU, FROM_TEMPLATE, INSTALLING, OPENING, STARTING } from "../src/pages.ts";
 import type { SessionOptions } from "../src/session.ts";
 import { shims } from "../src/shims.ts";
 import { fastForward, LOCAL_CHANGES, ownChanges, prepareUpdate } from "../src/update-company.ts";
@@ -236,53 +237,93 @@ describe("a new company", () => {
     expect(hasFiles(dir)).toBe(true);
   });
 
-  test("runs the launcher's init with pnpm dlx through the shims, and serves the company it started", async () => {
-    const repo = temp();
-    const bin = join(temp(), "bin");
-    const calls = join(temp(), "calls");
-    const lines: string[] = [];
-    const progress: string[] = [];
-    const port = await freePort();
-    const session = createSession({
-      repo,
-      port,
-      node: process.execPath,
-      pnpm: fixture("dlx.mjs"),
-      bin,
-      env: { ...process.env, FAKE_MODE: "event", FAKE_PNPM_LOG: calls },
-      pollMs: 50,
-      onLine: (_stream, line) => lines.push(line),
-      onProgress: (step) => progress.push(step),
-    });
+  test("reads init's stages as its steps, and the database answering as the app opening", () => {
+    expect(stepOf(stage("template", "start"))).toBe(FROM_TEMPLATE);
+    expect(stepOf(stage("people", "start"))).toBe(ADDING_YOU);
+    expect(stepOf(stage("install", "start"))).toBe(INSTALLING);
+    expect(stepOf(stage("database", "start"))).toBe(STARTING);
+    expect(stepOf(eventLine({ event: "database", how: "created" }))).toBe(OPENING);
+    // Part of a step, a stage it does not know, a stage whose fields do not hold, or no event.
+    for (const other of [
+      stage("git", "start"),
+      stage("people", "done"),
+      stage("database", "done"),
+      stage("later", "start"),
+      stage("template", "begun"),
+      eventLine({ event: "stage", status: "start" }),
+      eventLine({ event: "ready", url: "http://localhost:3100" }),
+      "starting a Sanoma company",
+    ]) {
+      expect(stepOf(other), other).toBeUndefined();
+    }
+  });
+
+  test("runs the launcher's init with the form's answers through the shims, its stages its steps, and serves the company it started", async () => {
+    const { repo, bin, port, lines, progress, session, calls } = await newCompany("init");
     await expect(session.ready).resolves.toBe(`http://localhost:${port}`);
-    expect(readFileSync(calls, "utf8")).toBe(
-      "--config.minimumReleaseAgeExclude=sanoma --config.minimumReleaseAgeExclude=@sanoma-ai/* dlx sanoma\n",
-    );
+    expect(calls()).toEqual([INIT]);
     expect(existsSync(join(repo, "sanoma.config.ts"))).toBe(true);
     expect(Object.keys(shims("node", "pnpm")).every((name) => existsSync(join(bin, name)))).toBe(true);
     expect(lines).toContain(`env ${port} 1 ${bin}`);
-    // The launcher's database event: the company is set up, and starting.
-    expect(progress).toEqual(["Starting a new company with sanoma from npm", STARTING]);
+    expect(progress).toEqual([NEW, FROM_TEMPLATE, ADDING_YOU, INSTALLING, STARTING, OPENING]);
     await session.stop();
     await expect(session.ended).resolves.toMatchObject({ code: 143 });
+  });
+
+  test("an init that refuses the form's answers ends there, its answers never dropped for git's", async () => {
+    const { session, calls } = await newCompany("refuses");
+    await expect(session.ended).resolves.toMatchObject({ code: 2, error: "--email: not an email address" });
+    expect(calls()).toEqual([INIT]);
   });
 
   test("opens a folder that holds files as any other, as Start again after an init that got that far does", async () => {
     const repo = temp();
     writeFileSync(join(repo, "package.json"), "{}");
     const progress: string[] = [];
-    const session = createSession(options(repo, await freePort(), { FAKE_PNPM_EXIT: "1" }, progress));
+    const session = createSession(FOUNDED)(options(repo, await freePort(), { FAKE_PNPM_EXIT: "1" }, progress));
     await expect(session.ended).resolves.toMatchObject({ error: expect.stringContaining("pnpm install failed") });
     expect(progress).toEqual(["Installing packages"]);
   });
 
   test("makes the folder again when Start again finds it gone", async () => {
     const repo = join(temp(), "gone");
-    const session = createSession(options(repo, await freePort(), { FAKE_PNPM_EXIT: "1" }));
+    const session = createSession(FOUNDED)(options(repo, await freePort(), { FAKE_PNPM_EXIT: "1" }));
     await session.ended;
     expect(existsSync(repo)).toBe(true);
   });
 });
+
+/** A line of the launcher's events. */
+const eventLine = (fields: object) => JSON.stringify({ sanoma: 1, ...fields });
+const stage = (name: string, status: string) => eventLine({ event: "stage", stage: name, status });
+
+/** A new company's session in an empty folder, on the fake `pnpm dlx` (`FAKE_SANOMA` says which sanoma). */
+async function newCompany(sanoma: string) {
+  const repo = temp();
+  const bin = join(temp(), "bin");
+  const calls = join(temp(), "calls");
+  const lines: string[] = [];
+  const progress: string[] = [];
+  const port = await freePort();
+  const session = createSession({ name: "Maple Street Studio", you: "Dana Reyes", email: "dana@example.com" })({
+    repo,
+    port,
+    node: process.execPath,
+    pnpm: fixture("dlx.mjs"),
+    bin,
+    env: { ...process.env, FAKE_MODE: "event", FAKE_PNPM_LOG: calls, FAKE_SANOMA: sanoma },
+    pollMs: 50,
+    onLine: (_stream, line) => lines.push(line),
+    onProgress: (step) => progress.push(step),
+  });
+  return { repo, bin, port, lines, progress, session, calls: () => readFileSync(calls, "utf8").trim().split("\n") };
+}
+const DLX = "--config.minimumReleaseAgeExclude=sanoma --config.minimumReleaseAgeExclude=@sanoma-ai/* dlx sanoma";
+const INIT = `${DLX} init --name=Maple Street Studio --you=Dana Reyes --email=dana@example.com`;
+const NEW = "Starting a new company with sanoma from npm";
+
+/** A new company's answers, for a session that never runs its init. */
+const FOUNDED = { name: "Acme", you: "Ada Lovelace", email: "ada@example.com" };
 
 /** A session's options for `repo`, on the fake pnpm and Node, with `extra` in its environment. */
 function options(repo: string, port: number, extra: NodeJS.ProcessEnv, progress: string[] = []): SessionOptions {

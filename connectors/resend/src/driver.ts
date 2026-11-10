@@ -212,10 +212,10 @@ export function resendDriver(options: ResendDriverOptions = {}) {
       emails: {
         // The call's idempotency key makes a retry within 24 hours return the first email's id
         // and send nothing; Resend refuses the key with another input (409, final).
-        send: async ({ to, from, subject, html, text }, call) => {
+        send: async ({ to, from, subject, html, text, attachments }, call) => {
           const reply = await emailsSend({
             client: client("emails.send", call),
-            body: { to, from: senderOf("emails.send", from), subject, html, text },
+            body: { to, from: senderOf("emails.send", from), subject, html, text, attachments },
           });
           return { id: replied("emails.send", reply).id };
         },

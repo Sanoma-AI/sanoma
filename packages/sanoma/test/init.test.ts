@@ -177,6 +177,9 @@ describe("pinDependencies", () => {
     expect(pinDependencies({ ...template.dependencies, "left-alone": "^1" }, { version: "1.2.3" })).toEqual({
       "@sanoma-ai/connector-anthropic": "1.2.3",
       "@sanoma-ai/connector-github": "1.2.3",
+      "@sanoma-ai/connector-openai": "1.2.3",
+      "@sanoma-ai/connector-opencode": "1.2.3",
+      "@sanoma-ai/connector-pi": "1.2.3",
       "@sanoma-ai/connector-resend": "1.2.3",
       "@sanoma-ai/connector-sanoma-cloud": "1.2.3",
       "left-alone": "^1",

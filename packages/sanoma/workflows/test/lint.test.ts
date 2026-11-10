@@ -45,6 +45,8 @@ describe("lintWorkflow", () => {
       import { defineWorkflow } from "sanoma/workflows";
       import { ghost } from "@sanoma-ai/connector-ghost";
       import { z } from "zod";
+      import { calculateInvoice } from "sanoma/invoices";
+      import { renderInvoice } from "sanoma/invoices/pdf";
       import { other } from "./other.ts";
       const m = await import("./lazy.ts");
     `);

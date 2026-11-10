@@ -17,6 +17,7 @@
   "references": [
     { "path": "workflows/tsconfig.build.json" },
     { "path": "better-auth/tsconfig.build.json" },
+    { "path": "invoices/tsconfig.build.json" },
     { "path": "bridge/tsconfig.build.json" },
     { "path": "dev/tsconfig.build.json" }
   ],

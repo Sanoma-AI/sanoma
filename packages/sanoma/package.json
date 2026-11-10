@@ -59,6 +59,8 @@
     "better-auth/drizzle",
     "!better-auth/drizzle/*.config.ts",
     "better-auth/README.md",
+    "invoices/dist",
+    "invoices/README.md",
     "!**/*.tsbuildinfo",
     "!**/AGENTS.md",
     "template/AGENTS.md"
@@ -104,6 +106,16 @@
       "sanoma-source": "./workflows/src/claims.ts",
       "types": "./workflows/dist/claims.d.ts",
       "default": "./workflows/dist/claims.js"
+    },
+    "./invoices": {
+      "sanoma-source": "./invoices/src/index.ts",
+      "types": "./invoices/dist/index.d.ts",
+      "default": "./invoices/dist/index.js"
+    },
+    "./invoices/pdf": {
+      "sanoma-source": "./invoices/src/pdf.ts",
+      "types": "./invoices/dist/pdf.d.ts",
+      "default": "./invoices/dist/pdf.js"
     },
     "./tsconfig.json": "./tsconfig.base.json",
     "./workflows": {
@@ -277,7 +289,7 @@
   },
   "scripts": {
     "build": "tsc -b workflows/tsconfig.build.json better-auth/tsconfig.build.json && cd app && vite build && tsc -p tsconfig.build.json && cd .. && tsc -b tsconfig.build.json testing/tsconfig.build.json && esbuild workflows/src/sandbox-runner.ts --bundle --platform=node --target=node22 --format=cjs --minify --external:bufferutil --external:utf-8-validate --outfile=workflows/dist/sandbox-runner.cjs --log-level=warning && node scripts/oxlint.ts",
-    "clean": "rm -rf dist workflows/dist better-auth/dist bridge/dist testing/dist app/dist dev/dist",
+    "clean": "rm -rf dist workflows/dist better-auth/dist invoices/dist bridge/dist testing/dist app/dist dev/dist",
     "prepack": "pnpm run clean && pnpm run build",
     "watch": "tsc -b -w --preserveWatchOutput tsconfig.build.json & cd app && (tsc -w --preserveWatchOutput -p tsconfig.build.json & vite build --watch)",
     "typecheck:ui": "tsc -p app/tsconfig.json",
@@ -339,6 +351,8 @@
     "crc-32": "^1.2.2",
     "dequal": "^2.0.3",
     "drizzle-orm": "0.45.4",
+    "fast-png": "^8.0.0",
+    "fflate": "^0.8.3",
     "google-auth-library": "^11.3.2",
     "lucide-react": "1.55.0",
     "magic-string": "^0.30.21",
@@ -367,6 +381,7 @@
     "zod-schema-faker": "^2.1.2"
   },
   "devDependencies": {
+    "@react-pdf/renderer": "^4.9.0",
     "@shadcn/helpers": "^0.3.0",
     "@testing-library/react": "^16.3.3",
     "@types/pg": "^8.23.1",
@@ -375,13 +390,18 @@
     "esbuild": "0.28.2",
     "jsdom": "^30.1.3",
     "msw": "^3.0.3",
+    "pdfjs-dist": "^6.4.299",
     "ws": "8.22.0"
   },
   "peerDependencies": {
+    "@react-pdf/renderer": "^4",
     "msw": "^3",
     "vitest": "^5"
   },
   "peerDependenciesMeta": {
+    "@react-pdf/renderer": {
+      "optional": true
+    },
     "msw": {
       "optional": true
     },

@@ -17,7 +17,7 @@ import { parseOrThrow } from "./errors.ts";
 import type { LedgerBody, LedgerGroup, LedgerRecord } from "./ledger.ts";
 import { isOp, type Op } from "./op.ts";
 import type { CallNode } from "./outline.ts";
-import { DEFAULT_SLEEP_NAME, entryOpsOf, isBatch, LOGIN_CODE_WORKFLOW, shown } from "./shared.ts";
+import { DEFAULT_SLEEP_NAME, entryOpsOf, isBatch, isRecord, LOGIN_CODE_WORKFLOW, shown } from "./shared.ts";
 
 // A run's `ctx`, built the same way wherever the run is: on DBOS in a worker (`buildCtx` in
 // `call.ts`), and in memory in a page (`page-run.ts`). This module builds the members and names
@@ -178,10 +178,15 @@ const LOGIN_CODE_BODY = ["text", "html"];
  */
 export function recorded(op: Op, value: unknown, workflow?: string): unknown {
   const hidden = [...(op.opaque ?? []), ...(workflow === LOGIN_CODE_WORKFLOW ? LOGIN_CODE_BODY : [])];
-  if (!hidden.length || typeof value !== "object" || value === null || Array.isArray(value)) return value;
-  const out: Record<string, unknown> = { ...value };
-  for (const name of hidden) if (out[name] !== undefined) out[name] = `<${name}>`;
-  return out;
+  return hidden.reduce((out, path) => hide(out, path.split(".")), value);
+}
+
+/** `value` with the field at `path` as `"<name>"`, in each item of a list it meets on the way. */
+function hide(value: unknown, path: string[]): unknown {
+  if (Array.isArray(value)) return value.map((item) => hide(item, path));
+  const [name, ...rest] = path;
+  if (!isRecord(value) || value[name!] === undefined) return value;
+  return { ...value, [name!]: rest.length ? hide(value[name!], rest) : `<${name}>` };
 }
 
 /** The resource instance the call acts on, from the operation's `target`, when it declares one. */
