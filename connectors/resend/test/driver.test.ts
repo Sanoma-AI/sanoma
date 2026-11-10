@@ -3,6 +3,7 @@ import { type CallContext, memorySecrets } from "sanoma/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { resendDriver } from "../src/driver.ts";
+import { resendOps } from "../src/connector.ts";
 import { fakeResend } from "../src/fake.ts";
 import { audience, from, replayOptions } from "./replay.ts";
 
@@ -106,6 +107,19 @@ describe("resendDriver", () => {
     }
   });
 
+  it("has the fake keep the files an email attached, which the ledger records by name only", async () => {
+    const fake = fakeResend();
+    const attachments = [{ filename: "invoice-INV-001.pdf", content: "JVBERi0xLjQK" }];
+    const { id } = (await fake.driver.ops["emails.send"]!(
+      { to, from, subject: "s", text: "Hi", attachments },
+      call,
+    )) as {
+      id: string;
+    };
+    expect(fake.state.emails[id]?.attachments).toEqual(attachments);
+    expect(resendOps.emails.send.opaque).toEqual(["attachments"]);
+  });
+
   it("fails a 422 for good, with Resend's status and error name", async () => {
     // Read before the test can re-record it: live, Resend's reply must still match it.
     const [invalid] = fixture("create-invalid-from") as [Exchange & { body: { name: string } }];
@@ -134,6 +148,13 @@ describe("resendDriver", () => {
       play("send-an-email");
       await email({ to: [to, to], from, subject: "s", text: "Hello" }, 6);
       expect(sent[0]!.body).toEqual({ to: [to, to], from, subject: "s", text: "Hello" });
+    });
+
+    it("sends the files attached, their bytes as base64 text", async () => {
+      play("send-an-email");
+      const attachments = [{ filename: "invoice-INV-001.pdf", content: "JVBERi0xLjQK" }];
+      await email({ to, from, subject: "Invoice", text: "Attached", attachments }, 9);
+      expect(sent[0]!.body).toEqual({ to, from, subject: "Invoice", text: "Attached", attachments });
     });
 
     it("refuses an email with no sender, or an empty one, without calling Resend", async () => {

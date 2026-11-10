@@ -15,7 +15,6 @@ One workspace package per vendor, each built on `sanoma/workflows`. A connector 
 | [`gcp/`](gcp/AGENTS.md)                   | `@sanoma-ai/connector-gcp`: KMS, IAM, audit config and Cloud Run provisioning as one declared identity, its bearer stored on the connection, isolated provider sessions |
 | [`ghost/`](ghost/AGENTS.md)               | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake                                                                                     |
 | [`github/`](github/AGENTS.md)             | `@sanoma-ai/connector-github`: GitHub resources (OpenTofu provider), operations through its App, pull requests, and Copilot (an agent part)                             |
-| [`invoices/`](invoices/AGENTS.md)         | `@sanoma-ai/connector-invoices` (private): local invoice PDF generation for standard, pet-sitting and cleaning inputs                                                   |
 | [`neon/`](neon/AGENTS.md)                 | `@sanoma-ai/connector-neon`: Neon projects (the company's database, which pauses and branches), branches and computes                                                   |
 | [`openai/`](openai/AGENTS.md)             | `@sanoma-ai/connector-openai`: Codex (an agent part) on a person's own plan; no operations or models yet                                                                |
 | [`opencode/`](opencode/AGENTS.md)         | `@sanoma-ai/connector-opencode`: OpenCode (an agent part) on a person's own plan                                                                                        |
@@ -25,7 +24,7 @@ One workspace package per vendor, each built on `sanoma/workflows`. A connector 
 | [`stripe/`](stripe/AGENTS.md)             | `@sanoma-ai/connector-stripe`: Stripe resources read through its OpenTofu provider                                                                                      |
 | [`supabase/`](supabase/AGENTS.md)         | `@sanoma-ai/connector-supabase`: Supabase projects (OpenTofu provider), pooler and health                                                                               |
 
-Local computation connectors may use the same operation contract without representing an external vendor. [`invoices/`](invoices/AGENTS.md) runs its portable generator in both live and fake execution, needs no credentials or HTTP replay, and still uses normal policy and checkpoint boundaries.
+A connector is a third party's API. Local computation is never a connector: it is a folder of the `sanoma` package, imported as a plain function (an invoice's arithmetic and PDF are [`sanoma/invoices`](../packages/sanoma/invoices/README.md)).
 
 ## Integration sources
 

@@ -58,9 +58,9 @@ export type SendEmailRequest = {
 
 export type Attachment = {
   /**
-   * Content of an attached file.
+   * Content of an attached file, base64-encoded.
    */
-  content?: Blob | File;
+  content?: string;
   /**
    * Name of attached file.
    */

@@ -142,7 +142,7 @@ export const resendOps = defineConnector(
     emails: {
       send: {
         effect: "send",
-        description: "Send one email to an address, or to a list of up to 50. Cannot be undone.",
+        description: "Send one email to an address, or to a list of up to 50, with files attached. Cannot be undone.",
         input: z
           .object({
             to: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(50)]),
@@ -150,11 +150,22 @@ export const resendOps = defineConnector(
             subject: z.string().min(1),
             html: z.string().optional(),
             text: z.string().optional(),
+            attachments: z
+              .array(
+                z.object({
+                  filename: z.string().min(1).describe("The file's name, such as `invoice-001.pdf`"),
+                  content: z.base64().min(1).describe("The file's bytes, base64-encoded"),
+                }),
+              )
+              .optional()
+              .describe("Files to attach; Resend takes up to 40 MB per email, encoded"),
           })
           .refine((email) => Boolean(email.html || email.text), {
             message: "an email needs `html`, `text` or both, not empty",
           }),
         output: z.object({ id: z.string() }),
+        // The files' bytes stay out of the ledger, which records `"<attachments>"`.
+        opaque: ["attachments"],
       },
     },
   },

@@ -653,6 +653,12 @@ export const errorMessage = (err: unknown) => (err instanceof Error ? err.messag
 /** A mistake in how the bin was called or in what it found: its message is printed alone, and the exit code is 2. */
 export class UsageError extends Error {}
 
+/**
+ * The entries of `sanoma` that compute locally, a workflow's and a site's alike: plain functions
+ * over the values given, with no clock, vendor, runtime or credentials (an invoice's arithmetic and its PDF).
+ */
+export const LOCAL_ENTRIES: readonly string[] = ["sanoma/invoices", "sanoma/invoices/pdf"];
+
 /** The entries of `sanoma` a browser bundle may load: plain values and React, no server, runtime or credentials. */
 export const CLIENT_ENTRIES: ReadonlySet<string> = new Set([
   "sanoma/site",
@@ -661,6 +667,7 @@ export const CLIENT_ENTRIES: ReadonlySet<string> = new Set([
   "sanoma/claims",
   "sanoma/workflows/shared",
   "sanoma/workflows/description",
+  ...LOCAL_ENTRIES,
 ]);
 
 /** The specifiers of `sanoma`'s `exports` (its `package.json`'s) that are server code: every one but `CLIENT_ENTRIES`. */

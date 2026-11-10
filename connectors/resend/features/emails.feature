@@ -18,3 +18,12 @@ Feature: Resend emails
       { "to": ["ada@example.com", "grace@example.com"], "from": "Acme <hello@acme.example>", "subject": "Following up", "text": "Hello" }
       """
     Then a Resend email to "grace@example.com" is sent
+
+  @fake-only
+  Scenario: Send an email with a file attached
+    When resend.emails.send is called with
+      """
+      { "to": "ada@example.com", "from": "Acme <billing@acme.example>", "subject": "Invoice INV-001", "text": "Your invoice is attached.", "attachments": [{ "filename": "invoice-INV-001.pdf", "content": "JVBERi0xLjQK" }] }
+      """
+    Then a Resend email with "invoice-INV-001.pdf" attached is sent
+    And a Resend email to "ada@example.com" is sent

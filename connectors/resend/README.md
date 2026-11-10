@@ -8,11 +8,11 @@
 npm install @sanoma-ai/connector-resend
 ```
 
-| Operation                 | Effect  | What it does                                                              |
-| ------------------------- | ------- | ------------------------------------------------------------------------- |
-| `resend.broadcast.create` | `write` | Create a broadcast to an audience. Nothing is sent.                       |
-| `resend.broadcast.send`   | `send`  | Send a broadcast to every contact in its audience. Cannot be undone.      |
-| `resend.emails.send`      | `send`  | Send one email to an address, or to a list of up to 50. Cannot be undone. |
+| Operation                 | Effect  | What it does                                                                                   |
+| ------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `resend.broadcast.create` | `write` | Create a broadcast to an audience. Nothing is sent.                                            |
+| `resend.broadcast.send`   | `send`  | Send a broadcast to every contact in its audience. Cannot be undone.                           |
+| `resend.emails.send`      | `send`  | Send one email to an address, or to a list of up to 50, with files attached. Cannot be undone. |
 
 ```ts
 import { resend } from "@sanoma-ai/connector-resend";
@@ -33,7 +33,7 @@ defineWorkflow({
 });
 ```
 
-`emails.send` takes `to` (an address, or a list of 1 to 50), `from` (required, see below), `subject`, and `html`, `text` or both (Resend makes the text from the HTML when there is none), and returns the email's `{ id }`:
+`emails.send` takes `to` (an address, or a list of 1 to 50), `from` (required, see below), `subject`, `html`, `text` or both (Resend makes the text from the HTML when there is none), and optional `attachments`, each `{ filename, content }` with the file's bytes base64-encoded (Resend takes up to 40 MB an email, encoded), and returns the email's `{ id }`. The ledger records `attachments` as `"<attachments>"`, never the files:
 
 ```ts
 defineWorkflow({
@@ -45,6 +45,7 @@ defineWorkflow({
       from: "Acme <hello@acme.example>",
       subject: "Following up",
       text: `Hi ${input.name},…`,
+      attachments: [{ filename: "invoice-001.pdf", content: input.pdfBase64 }],
     }),
 });
 ```
@@ -146,19 +147,20 @@ It checks what the reference leaves open: whether Resend names a subdomain's rec
 
 The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#steps-a-connector-ships) (`resendSteps`, attached with `withSetup`), which a company's scenario can use beside the generic steps and other connectors' ones:
 
-| Keyword | Step                                    | What it does                                                                                                       |
-| ------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Given   | `a Resend broadcast {string}`           | Seeds a draft broadcast with that subject through `resend.broadcast.create`, named `broadcast` (`$broadcast.id`)   |
-| Given   | `a Resend domain {string}`              | Seeds a sending domain of that name through `resend.domain.create`, asked to verify, named `domain` (`$domain.id`) |
-| Given   | `Resend fails to send once`             | The next `resend.broadcast.send` fails (`failNext`)                                                                |
-| Then    | `the Resend broadcast {string} is sent` | The broadcast with that subject, seeded or created by the run, was sent                                            |
-| Then    | `a Resend email to {string} is sent`    | The run sent an email to that address, alone or in its list                                                        |
+| Keyword | Step                                            | What it does                                                                                                       |
+| ------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Given   | `a Resend broadcast {string}`                   | Seeds a draft broadcast with that subject through `resend.broadcast.create`, named `broadcast` (`$broadcast.id`)   |
+| Given   | `a Resend domain {string}`                      | Seeds a sending domain of that name through `resend.domain.create`, asked to verify, named `domain` (`$domain.id`) |
+| Given   | `Resend fails to send once`                     | The next `resend.broadcast.send` fails (`failNext`)                                                                |
+| Then    | `the Resend broadcast {string} is sent`         | The broadcast with that subject, seeded or created by the run, was sent                                            |
+| Then    | `a Resend email to {string} is sent`            | The run sent an email to that address, alone or in its list                                                        |
+| Then    | `a Resend email with {string} attached is sent` | The run sent an email with a file of that name attached                                                            |
 
 `features/broadcast.feature` creates and sends a broadcast, `features/emails.feature` sends an email, and `features/domain.feature` creates, reads, imports, plans and deletes a sending domain, with these steps and the generic ones for an operation's own test, on the fake and on Resend's replies (`create-and-send.json`, `send-an-email.json`, and the domain's, written from the reference): `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/testing/README.md#a-connectors-own-features). A scenario tagged `@fake-only` has no recording. The package ships `features/`.
 
 ## Testing
 
-`@sanoma-ai/connector-resend/fake` is an in-memory Resend that emails nobody, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.broadcasts`, `state.emails` (the emails sent, by id), `state.domains` (the sending domains, by id, as Resend gives them) and `calls`.
+`@sanoma-ai/connector-resend/fake` is an in-memory Resend that emails nobody, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.broadcasts`, `state.emails` (the emails sent, by id, with their attachments), `state.domains` (the sending domains, by id, as Resend gives them) and `calls`.
 
 ```ts
 import { withSetup } from "sanoma/workflows";
