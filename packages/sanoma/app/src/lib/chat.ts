@@ -1,6 +1,13 @@
 import type { CheckResult } from "sanoma/workflows";
 import type { ConfigDescription } from "sanoma/workflows/describe";
-import { DefaultChatTransport, type InferUITools, isTextUIPart, isToolUIPart, type UIMessage } from "ai";
+import {
+  type ChatStatus,
+  DefaultChatTransport,
+  type InferUITools,
+  isTextUIPart,
+  isToolUIPart,
+  type UIMessage,
+} from "ai";
 import type { LoopTools } from "../steps/agent/tools.ts";
 
 // The operator agent's chat as the browser and every engine share it: the message type, the
@@ -149,6 +156,13 @@ export const textOf = (message: UIMessage, separator = "\n\n") =>
     .filter(isTextUIPart)
     .map((part) => part.text)
     .join(separator);
+
+/** Whether a turn is under way. */
+export const isBusy = (status: ChatStatus) => status === "submitted" || status === "streaming";
+
+/** What a reply suggests the person ask next: its last `data-suggestions` part's asks, else none. */
+export const suggestionsOf = (message: ChatMessage): string[] =>
+  message.parts.findLast((part) => part.type === "data-suggestions")?.data.asks ?? [];
 
 /**
  * A part a turn left under way: text still streaming, a tool call without its result, or a held

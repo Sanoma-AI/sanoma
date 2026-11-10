@@ -572,8 +572,8 @@ describe("the composer and a model", () => {
       const column = await chatColumn(bare!.url);
       expect(column).toContain(">Connect your agent<");
       expect(column).toMatch(/<a[^>]*href="\/connectors\/anthropic"[^>]*>Add key<\/a>/);
-      expect(column).toMatch(/<div id="[^"]+"><p[^>]*>Connect your agent above to start\.<\/p>/);
-      const note = /<div id="([^"]+)"><p[^>]*>Connect your agent above/.exec(column)![1]!;
+      expect(column).toMatch(/<div id="[^"]+"[^>]*><p[^>]*>Connect your agent above to start\.<\/p>/);
+      const note = /<div id="([^"]+)"[^>]*><p[^>]*>Connect your agent above/.exec(column)![1]!;
       expect(column).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*aria-label="Send" aria-describedby="${note}"`));
 
       const chatId = `bare-${RUN}`;
