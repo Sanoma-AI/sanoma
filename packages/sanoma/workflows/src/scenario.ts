@@ -1023,8 +1023,14 @@ function seedNames(report: Report, pickle: Pickle): string {
   return name;
 }
 
-/** A World for compiling: each step records what it says into its scenario's spec, in `specs`. */
-function compileWorld(built: Built, specs: Map<string, Spec>) {
+/** What a step of a scenario was, by its pickle step's id: its rule's kind, or `fault` for a `Given` that injects one. */
+type StepKinds = Map<string, Rule["kind"] | "fault">;
+
+/**
+ * A World for compiling: each step records what it says into its scenario's spec, in `specs`,
+ * and what it was in `kinds`.
+ */
+function compileWorld(built: Built, specs: Map<string, Spec>, kinds: StepKinds) {
   return (report: Report): SanomaWorld => {
     let spec: Spec;
     return {
@@ -1077,6 +1083,7 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
           }
         }
         spec.steps.push(step);
+        kinds.set(pickle.id, step.fault ? "fault" : rule.kind);
       },
     };
   };
@@ -1331,15 +1338,29 @@ export interface LoadedScenarios {
   world?: World;
 }
 
+/** What a step of each kind a world refuses does, as its refusal says. */
+const WORLD_REFUSES: Partial<Record<Rule["kind"] | "fault", string>> = {
+  fault: "injects a fault",
+  any: "decides an approval",
+  actor: "says who is acting",
+};
+
 /** What a world is, as its refusals say. */
 const WORLD_IS = "the world is one Scenario of Givens alone, which seed the company a demo opens on";
 
 /**
  * The world, from its file's pickles: its one scenario's name and Givens. Throws, at its line, for
  * a Scenario Outline, a second scenario, a step that did not pass, and every step but a Given that
- * seeds: a When, a Then, a fault, a decision, who is acting.
+ * seeds: a When or a Then (by its keyword), a fault, a decision, who is acting (by its rule's kind).
  */
-function worldOf(built: Built, report: Report, pickles: Pickle[], specs: Map<string, Spec>): World {
+function worldOf(
+  built: Built,
+  report: Report,
+  results: Map<string, StepResult>,
+  pickles: Pickle[],
+  specs: Map<string, Spec>,
+  kinds: StepKinds,
+): World {
   const [pickle, second] = pickles as [Pickle, ...Pickle[]];
   const { query } = report;
   const scenario = query.findLineageBy(pickle)!.scenario!;
@@ -1350,10 +1371,7 @@ function worldOf(built: Built, report: Report, pickles: Pickle[], specs: Map<str
     const { location, name } = query.findLineageBy(second)!.scenario!;
     throw new Error(`${WORLD_FILE}:${location.line}: a second scenario, "${name}", but ${WORLD_IS}`);
   }
-  const spec = specs.get(pickle.id)!;
-  const results = stepResults(report);
-  const seeds = new Set(spec.given.map((g) => g.step));
-  for (const [i, step] of pickle.steps.entries()) {
+  for (const step of pickle.steps) {
     const where = whereOf(report, WORLD_FILE, step);
     const kind = step.type && KINDS[step.type];
     if (kind === "when" || kind === "then") {
@@ -1361,16 +1379,11 @@ function worldOf(built: Built, report: Report, pickles: Pickle[], specs: Map<str
     }
     const error = stepError(built, results.get(step.id), step, where);
     if (error) throw new Error(error);
-    const does = spec.steps[i]!.fault
-      ? "injects a fault"
-      : seeds.has(step.text)
-        ? undefined
-        : spec.decisions.some((d) => d.step === step.text)
-          ? "decides an approval"
-          : "says who is acting";
+    const does = WORLD_REFUSES[kinds.get(step.id) ?? "given"];
     if (does) throw new Error(`${where}: "${step.text}" ${does}, but ${WORLD_IS}`);
   }
-  return { name: spec.name, given: spec.given };
+  const { name, given } = specs.get(pickle.id)!;
+  return { name, given };
 }
 
 /** A parse error, as a file's error: `file:line: message`. */
@@ -1388,11 +1401,12 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
   const built = builtFor(scope);
   const errors = new Map<string, string>();
   const specs = new Map<string, Spec>();
+  const kinds: StepKinds = new Map();
   let report: Report | undefined;
   let left = files;
   // A file Gherkin cannot parse stops the whole run: it is left out, and the rest run again.
   while (left.length) {
-    report = await runFeatures(built.library, compileWorld(built, specs), { cwd: dir, files: left, isBug });
+    report = await runFeatures(built.library, compileWorld(built, specs, kinds), { cwd: dir, files: left, isBug });
     if (report.parseErrors.length === 0) break;
     for (const error of report.parseErrors) {
       if (!errors.has(error.uri)) errors.set(error.uri, parseErrorOf(error));
@@ -1419,7 +1433,7 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
         const list = pickles.get(file) ?? [];
         if (list.length === 0) throw new Error(`${file}: no scenarios; add one with "Scenario: <name>"`);
         if (file === WORLD_FILE) {
-          world = worldOf(built, report, list, specs);
+          world = worldOf(built, report, results, list, specs, kinds);
           continue;
         }
         for (const pickle of list) {
@@ -1540,7 +1554,7 @@ export async function loadScenarios(scope: Scope): Promise<LoadedScenarios> {
 /**
  * The world (`WORLD_FILE`), compiled with the scenarios (`loadScenarios`): its name and Givens, or
  * undefined when the root has none. Rejects with its error, at its `file:line`, when it does not
- * compile or is not a world.
+ * compile or is not a world. Cached as `loadScenarios` is: callers must not change it.
  */
 export async function loadWorld(scope: Scope): Promise<World | undefined> {
   const { world, errors } = await loadScenarios(scope);

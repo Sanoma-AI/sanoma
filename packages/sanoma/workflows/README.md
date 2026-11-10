@@ -893,7 +893,7 @@ Checking a run, every `Then` step runs and judges the run on its own: one that d
 
 ### The world
 
-`scenarios/world.feature` at the root is the world: the company a demo opens on, written as one scenario of `Given` steps alone. It uses the same steps as any scenario, so it can give a collection its records, a vendor's fake its objects and a fake the calls it should have had (`{op} was called with`).
+`scenarios/world.feature` at the root is the world: the company a demo opens on, written as one scenario of `Given` steps alone. It uses the same steps as any scenario, so it can describe a collection's records, the objects a vendor's fake holds and the calls a fake has had (`{op} was called with`). Sanoma reads and checks it; nothing applies it yet.
 
 ```gherkin
 Feature: The company a demo opens on
