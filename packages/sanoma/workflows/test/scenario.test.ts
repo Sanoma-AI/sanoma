@@ -733,6 +733,12 @@ describe("the world", () => {
         'Feature: W\n  Scenario Outline: Clients\n    Given data.clients "<id>" has\n      | name | <id> |\n\n    Examples:\n      | id   |\n      | acme |\n',
       ),
     ).toBe(`scenarios/world.feature:2: a Scenario Outline, ${IS}`);
+    // An Outline with no Examples is still one.
+    expect(
+      await refused(
+        'Feature: W\n  Scenario Outline: Clients\n    Given data.clients "acme" has\n      | name | Acme |\n',
+      ),
+    ).toBe(`scenarios/world.feature:2: a Scenario Outline, ${IS}`);
     expect(
       await refused(`${WORLD}\n  Scenario: More\n    Given data.clients "globex" has\n      | name | Globex |\n`),
     ).toBe(`scenarios/world.feature:10: a second scenario, "More", ${IS}`);

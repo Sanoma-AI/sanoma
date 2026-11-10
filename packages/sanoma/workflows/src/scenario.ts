@@ -1058,7 +1058,10 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
             spec.given.push(...items.map((item) => ({ step: text, ...item }) as Given));
             const [first] = items;
             if (first && "op" in first) step.op = first.op;
-            if (items.some((i) => "fault" in i)) step.fault = true;
+            if (items.some((i) => "fault" in i)) {
+              step.fault = true;
+              refuse("injects a fault");
+            }
             break;
           }
           case "then": {
@@ -1085,7 +1088,6 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
             Object.assign(spec, item);
           }
         }
-        if (step.fault) refuse(WORLD_REFUSES.get("fault"));
         spec.steps.push(step);
       },
     };
@@ -1349,11 +1351,10 @@ export interface LoadedScenarios {
   world?: World;
 }
 
-/** What a step of each kind the world refuses does, as its refusal says: every step but a `Given` that seeds. */
-const WORLD_REFUSES = new Map<Rule["kind"] | "fault", string>([
+/** What a step of each kind the world refuses does, as its refusal says: every kind but a `Given` (whose fault it refuses too). */
+const WORLD_REFUSES = new Map<Rule["kind"], string>([
   ["when", "runs a workflow"],
   ["then", "checks a run"],
-  ["fault", "injects a fault"],
   ["any", "decides an approval"],
   ["actor", "says who is acting"],
 ]);
@@ -1376,7 +1377,7 @@ function worldOf(
   const [pickle, second] = pickles as [Pickle, ...Pickle[]];
   const { query } = report;
   const scenario = query.findLineageBy(pickle)!.scenario!;
-  if (scenario.examples.length) {
+  if (scenario.examples.length || /Outline|Template/.test(scenario.keyword)) {
     throw new Error(`${WORLD_FILE}:${scenario.location.line}: a Scenario Outline, but ${WORLD_IS}`);
   }
   if (second) {
