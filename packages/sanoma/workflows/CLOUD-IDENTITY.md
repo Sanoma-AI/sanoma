@@ -27,7 +27,7 @@ The broker's attached identity must have no company database access, direct KMS 
 
 ## Enrollment database and role separation
 
-Install `CLOUD_IDENTITY_SQL` with an administrator in a **broker-owned database**, never a company database. It creates `sanoma_identity.deployments` (deployment → company/environment/service account and enabled state) and `sanoma_identity.credentials` (SHA-256 hash, deployment, positive generation, validity interval and revoked state). It revokes public schema/table access. It does not create logins or grant broker/provisioner privileges.
+Install `CLOUD_IDENTITY_SQL` with an administrator in a **broker-owned database**, never a company database. It creates `sanoma_identity.deployments` (deployment → company/environment/service account and enabled state) and `sanoma_identity.credentials` (SHA-256 hash, deployment, positive generation, validity start, an optional end and revoked state). A credential without an end has no expiry: runtime enrollment sets none, and an administrator enrolling a provisioning bearer by hand sets one. It revokes public schema/table access. It does not create logins or grant broker/provisioner privileges.
 
 Example roles, to adapt and install with administrative authority:
 
@@ -51,7 +51,7 @@ The broker login must have no writer-role membership, inherited write grants or 
 
 ### Provisioning operations
 
-The trusted control-plane config supplies `identityProvisioning` with a `secret()` reference to its enrollment-writer URL and the maximum credential validity. Company runtimes and the serving broker do not receive this writer. Install `CLOUD_IDENTITY_SQL` separately with administrative authority, then configure the control plane:
+The trusted control-plane config supplies `identityProvisioning` with a `secret()` reference to its enrollment-writer URL. Company runtimes and the serving broker do not receive this writer. Install `CLOUD_IDENTITY_SQL` separately with administrative authority, then configure the control plane:
 
 ```ts
 import { defineConfig } from "sanoma";
@@ -59,10 +59,7 @@ import { secret } from "sanoma/resources";
 
 export default defineConfig({
   connectors: [], // Add the control plane's configured vendor connectors.
-  identityProvisioning: {
-    databaseUrl: secret("IDENTITY_WRITER_URL"),
-    maxValidityMs: 24 * 60 * 60 * 1000,
-  },
+  identityProvisioning: { databaseUrl: secret("IDENTITY_WRITER_URL") },
 });
 ```
 
@@ -70,7 +67,7 @@ Enter the URL under that name on the app's Hosting page (Connect), where the enr
 
 Before writes, the managed pool checks that its login has schema USAGE and SELECT, INSERT and UPDATE on both enrollment tables. It refuses schema CREATE, table DELETE, TRUNCATE, REFERENCES or TRIGGER, and superuser, create-role, create-database or bypass-RLS authority. Use a dedicated restricted login rather than a database owner; effective inherited permissions also matter.
 
-The one-day limit is illustrative; choose a validity and renewal policy for the deployment. `maxValidityMs` is required and enforced against the enrollment database clock. This configuration does not install schemas, create roles, provision IAM, deliver credentials or schedule renewal.
+A company's runtime bearer has no expiry. A deploy replaces it: the new generation rides the deploy, and the old one is retired once the rollout's overlap ends. Closing the company, or a leak, revokes it at the broker, which refuses it from the next exchange on. The trade-off: a bearer leaked once (a log line, a backup) stays usable until the next deploy or a revocation. This configuration does not install schemas, create roles, provision IAM or deliver credentials.
 
 Trusted composition that already owns a writer pool may instead supply the low-level `IdentityProvisioning` adapter:
 
@@ -79,9 +76,7 @@ import { postgresIdentityProvisioning } from "sanoma/workflows/cloud-identity";
 import { databaseOn } from "sanoma/workflows/db";
 
 const enrollmentWriter = databaseOn(enrollmentWriterPool);
-const identityProvisioning = postgresIdentityProvisioning(async () => enrollmentWriter, {
-  maxValidityMs: 24 * 60 * 60 * 1000,
-});
+const identityProvisioning = postgresIdentityProvisioning(async () => enrollmentWriter);
 // Supply this adapter as defineConfig's identityProvisioning value.
 // Its caller owns pool shutdown, TLS and permission validation.
 ```
@@ -90,19 +85,19 @@ An explicitly supplied adapter stays caller-owned; Sanoma does not close it or a
 
 Workflows declare the built-in `sanoma.identity.enroll`, `.retire` and `.revoke` operations in `uses`. They pass through the existing policy and ledger path; direct calls are refused. All three identify the same fixed mapping: `deployment`, `company`, `environment` and `serviceAccount`. The workflow and policy must authorize the actor against that company and environment before granting access.
 
-| Operation | Additional input                    | Result and behavior                                                                                                                                                                         |
-| --------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enroll`  | `generation`, `validUntil`, `store` | Ensures a random bootstrap credential in the selected secret store, enrolls its SHA-256 hash and returns `{ deployment, generation, store }`. No bearer or hash enters the workflow result. |
-| `retire`  | `generation`, `validUntil`          | Shortens a generation's validity without extending it; a deadline at or before the database's current time revokes it. Returns `{}`.                                                        |
-| `revoke`  | None                                | Disables renewal for every generation of the deployment. This is terminal for that deployment ID. Returns `{}`.                                                                             |
+| Operation | Additional input           | Result and behavior                                                                                                                                                                                        |
+| --------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enroll`  | `generation`, `store`      | Ensures a random bootstrap credential in the selected secret store, enrolls its SHA-256 hash with no expiry and returns `{ deployment, generation, store }`. No bearer or hash enters the workflow result. |
+| `retire`  | `generation`, `validUntil` | Ends a generation at `validUntil`, never later than an end it already has; a deadline at or before the database's current time retires it at once. Returns `{}`.                                           |
+| `revoke`  | None                       | Stops every generation of the deployment from obtaining tokens. This is terminal for that deployment ID. Returns `{}`.                                                                                     |
 
 Use a distinct secret name for each deployment and generation, such as `ACME_PRODUCTION_BOOTSTRAP_G1`. A higher generation must use a new credential; reusing an enrolled hash is refused. Neither rotation nor retry may change the deployment's company, environment or service account.
 
-Enrollment writes take a deployment-row lock, so concurrent enrollment, retirement and revocation serialize. A retry with the same mapping, generation, hash and still-valid deadline succeeds. A changed or retired deadline, revoked credential, disabled deployment, reused hash or lower unused generation is refused. If the database response is lost after commit, retry with the original inputs and secret name; the stored credential is retained. Do not delete or replace that secret while the outcome is uncertain. A failed enrollment can leave an inactive secret; reconcile the enrollment before removing it.
+Enrollment writes take a deployment-row lock, so concurrent enrollment, retirement and revocation serialize. A retry with the same mapping, generation and hash succeeds until that generation is retired. A retired or revoked generation, disabled deployment, reused hash or lower unused generation is refused. If the database response is lost after commit, retry with the original inputs and secret name; the stored credential is retained. Do not delete or replace that secret while the outcome is uncertain. A failed enrollment can leave an inactive secret; reconcile the enrollment before removing it.
 
-Rotation consists of enrolling a higher generation under a new secret name, securely delivering it, verifying renewal with it, then retiring the old generation with a bounded overlap deadline. These operations do not perform delivery or readiness verification. Revocation stops further issuance, but already issued Google tokens can remain usable until their expiry.
+Rotation happens on a deploy: enroll a higher generation under a new secret name, deliver it with the deploy, verify the new runtime obtains tokens with it, then retire the old generation, with a deadline that bounds the rollout's overlap or at once. These operations do not perform delivery or readiness verification. Revocation stops further issuance, but already issued Google tokens can remain usable until their expiry.
 
-Database failures are sanitized and classified as unavailable; invalid inputs and conflicting enrollment state are not retryable. There is no HTTP enrollment endpoint. Sandbox runs use separate in-memory enrollment authority and never touch the live enrollment database; they do not validate the deployment-specific maximum validity.
+Database failures are sanitized and classified as unavailable; invalid inputs and conflicting enrollment state are not retryable. There is no HTTP enrollment endpoint. Sandbox runs use separate in-memory enrollment authority and never touch the live enrollment database.
 
 Restore enrollment backups carefully so revoked credentials do not become active again. Bootstrap values remain in the selected secret store and the deployment's protected delivery channel; the enrollment database stores only their hashes.
 
@@ -169,7 +164,7 @@ This proof uses test infrastructure and compiled source, not published-package c
 
 ## Residual authority and rollout gates
 
-Possession of the deployment bearer proves possession, not host attestation. A stolen bearer can renew that deployment's tokens while its enrollment remains active. Revoking enrollment stops subsequent renewal checks; **already issued tokens can remain usable until expiry**. IAM changes have their own propagation behavior, and neither revocation nor expiry recalls plaintext already obtained.
+Possession of the deployment bearer proves possession, not host attestation. A stolen bearer can obtain that deployment's tokens until its generation is retired or the deployment revoked. Revoking enrollment stops subsequent renewal checks; **already issued tokens can remain usable until expiry**. IAM changes have their own propagation behavior, and neither revocation nor expiry recalls plaintext already obtained.
 
 A compromised broker can impersonate every service account its attached identity may mint for. Per-company keys do not remove that fleet-level issuer risk. A compromised enrollment writer can change mappings within the broker's permitted targets. Keep both outside company-authored code and public company Workers; give each company runtime only its own bearer, database authority and key access.
 
@@ -177,7 +172,7 @@ Before rollout:
 
 - Provision the Cloud Run service, attached issuer account, broker database roles, durable audit sink and per-company/environment keys and service accounts. Enable billing and required APIs. The temporary verification deployment below does not provision a production service.
 - Make the TLS endpoint reachable without first demanding a Google invocation token; the application bearer authenticates it. This requires an explicit [Cloud Run invocation configuration](https://docs.cloud.google.com/run/docs/authenticating/public), plus appropriate request limits and quota monitoring. Do not add this endpoint to a company Worker that holds fleet authority.
-- Deliver each bootstrap credential only to its intended deployment. For Cloudflare, explicitly pass its protected Worker binding to that company's container. Prove cold start, resume, refresh through token expiry, bounded credential rotation, revoked/expired generations and broker/audit outages.
+- Deliver each bootstrap credential only to its intended deployment. For Cloudflare, explicitly pass its protected Worker binding to that company's container. Prove cold start, resume, refresh through token expiry, rotation on deploy, retired/revoked generations and broker/audit outages.
 - Prove company A's bearer cannot select B via body/query, A's token cannot use B's key, A's database login cannot read B's rows, and preview cannot access production. Synthetic handler tests are insufficient evidence for Google IAM or database isolation.
 - Verify issuance and KMS audit attribution, credential/header redaction, service quotas, backup recovery and retained key versions. Record the actual deployment evidence before declaring D1 or managed Cloud ready.
 

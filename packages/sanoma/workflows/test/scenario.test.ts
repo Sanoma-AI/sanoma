@@ -7,6 +7,7 @@ import { ghost } from "@sanoma-ai/connector-ghost";
 import { resend } from "@sanoma-ai/connector-resend";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { collection } from "../src/collection.ts";
 import { defineFake, type Fake } from "../src/fake.ts";
 import {
   defineConnector,
@@ -19,7 +20,7 @@ import {
 } from "../src/index.ts";
 import { missingResourceFake, seedResource } from "../src/givens.ts";
 import { type CoreExpectation, detailOf } from "../src/expectations.ts";
-import { check as checkRun, loadScenarios, type Scenario, type Scope } from "../src/scenario.ts";
+import { check as checkRun, loadScenarios, loadWorld, type Scenario, type Scope } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
 import { companyConfig } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
@@ -639,6 +640,126 @@ describe("loadScenarios", () => {
       errors: [],
     });
     expect(await loadScenarios(scope)).toEqual({ scenarios: [], errors: [] });
+  });
+});
+
+describe("the world", () => {
+  // The company fixture's GitHub resources, and a collection of clients.
+  const clients = collection({ name: "clients", key: "id", fields: { id: "text", name: "text" } });
+  const company = resolveConfig({ ...companyConfig([inspect]), collections: [clients], ledger: memoryLedger() });
+  const WORLD = `Feature: The company a demo opens on
+
+  Scenario: Acme's books
+    Given data.clients "acme" has
+      | name | Acme Corp |
+    And github.repository "website" has
+      | has_wiki | true |
+    And github.repository "docs" is gone
+`;
+  /** What loading the world with this text rejects with. */
+  const refused = async (text: string) => {
+    const { scope: within } = scenariosDir({ "scenarios/world.feature": text }, company);
+    return loadWorld(within).then(
+      () => "loaded",
+      (err: unknown) => (err as Error).message,
+    );
+  };
+  const IS = "but the world is one Scenario of Givens alone, which seed the company a demo opens on";
+
+  it("loads its name and Givens, a collection's records and a vendor's objects, and is no scenario", async () => {
+    const { scope: within } = scenariosDir(
+      {
+        "scenarios/world.feature": WORLD,
+        "scenarios/inspect.feature": "Feature: I\n  Scenario: Look\n    When inspect runs\n",
+      },
+      company,
+    );
+    expect(await loadWorld(within)).toEqual({
+      name: "Acme's books",
+      given: [
+        {
+          step: 'data.clients "acme" has',
+          op: "data.clients.save",
+          input: { record: { id: "acme", name: "Acme Corp" } },
+        },
+        {
+          step: 'github.repository "website" has',
+          resource: "github.repository",
+          vendor: "github",
+          type: "repository",
+          name: "website",
+          fields: { has_wiki: true },
+        },
+        {
+          step: 'github.repository "docs" is gone',
+          resource: "github.repository",
+          vendor: "github",
+          type: "repository",
+          name: "docs",
+          gone: true,
+        },
+      ],
+    });
+    const { scenarios, errors } = await loadScenarios(within);
+    expect(scenarios.map((s) => s.name)).toEqual(["Look"]);
+    expect(errors).toEqual([]);
+  });
+
+  it("refuses a When, a Then, a fault, a decision and who is acting, at its line", async () => {
+    expect(await refused(WORLD + "    When inspect runs\n")).toBe(
+      `scenarios/world.feature:9: "inspect runs" runs a workflow, ${IS}`,
+    );
+    expect(await refused(WORLD + "    Then the run succeeds\n")).toBe(
+      `scenarios/world.feature:9: "the run succeeds" checks a run, ${IS}`,
+    );
+    expect(await refused(WORLD + "    And github.repository.import fails once\n")).toBe(
+      `scenarios/world.feature:9: "github.repository.import fails once" injects a fault, ${IS}`,
+    );
+    expect(await refused(WORLD + '    And "Read a product" is approved by finance\n')).toBe(
+      `scenarios/world.feature:9: ""Read a product" is approved by finance" decides an approval, ${IS}`,
+    );
+    expect(await refused(WORLD + "    And anonymous is acting\n")).toBe(
+      `scenarios/world.feature:9: "anonymous is acting" says who is acting, ${IS}`,
+    );
+    // A Given that matches no step is refused as any scenario's is.
+    expect(await refused(WORLD + "    And the sky is blue\n")).toMatch(
+      /^scenarios\/world\.feature:9: no step matches "the sky is blue"/,
+    );
+  });
+
+  it("refuses a Scenario Outline and a second scenario", async () => {
+    expect(
+      await refused(
+        'Feature: W\n  Scenario Outline: Clients\n    Given data.clients "<id>" has\n      | name | <id> |\n\n    Examples:\n      | id   |\n      | acme |\n',
+      ),
+    ).toBe(`scenarios/world.feature:2: a Scenario Outline, ${IS}`);
+    // An Outline with no Examples is still one.
+    expect(
+      await refused(
+        'Feature: W\n  Scenario Outline: Clients\n    Given data.clients "acme" has\n      | name | Acme |\n',
+      ),
+    ).toBe(`scenarios/world.feature:2: a Scenario Outline, ${IS}`);
+    expect(
+      await refused(`${WORLD}\n  Scenario: More\n    Given data.clients "globex" has\n      | name | Globex |\n`),
+    ).toBe(`scenarios/world.feature:10: a second scenario, "More", ${IS}`);
+  });
+
+  it("is undefined without the file, and only the root's: an app's world.feature is a scenario that lacks a When", async () => {
+    const { scope: without } = scenariosDir(
+      {
+        "scenarios/inspect.feature": "Feature: I\n  Scenario: Look\n    When inspect runs\n",
+        "apps/crm/scenarios/world.feature": WORLD,
+      },
+      company,
+    );
+    expect(await loadWorld(without)).toBeUndefined();
+    expect((await loadScenarios(without)).errors).toEqual([
+      {
+        file: "apps/crm/scenarios/world.feature",
+        message: expect.stringContaining(`scenario "Acme's books" has no When`),
+      },
+    ]);
+    expect(await loadWorld(company)).toBeUndefined();
   });
 });
 
