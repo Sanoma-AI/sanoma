@@ -84,11 +84,11 @@ jobs:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
-      # What the template depends on, and what that depends on; in dependency order, as each prepack builds against the last.
+      # What the template depends on (its package.json's dependencies, sanoma among them), and what that depends on; in
+      # dependency order, as each prepack builds against the last.
       - run: >-
           pnpm -r --workspace-concurrency=1
-          --filter "sanoma..." --filter "@sanoma-ai/connector-anthropic..." --filter "@sanoma-ai/connector-github..."
-          --filter "@sanoma-ai/connector-resend..." --filter "@sanoma-ai/connector-sanoma-cloud..."
+          $(jq -r '.dependencies | keys[] | "--filter=\(.)..."' packages/sanoma/template/package.json)
           --filter "!@sanoma-ai/postgres-*" --filter "!@sanoma-ai/bridge-*"
           exec pnpm pack --pack-destination "$RUNNER_TEMP/packages"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

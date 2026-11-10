@@ -19,7 +19,7 @@ apps/<app>/          an app: app.ts (defineApp, its source repository) and its o
 .env                 this machine's settings and secrets, never committed (SANOMA_SIGNING_KEY signs app state; SANOMA_SECRETS_KEY encrypts stored credentials)
 ```
 
-The company's name, as the app shows it, is `name` in `sanoma.config.ts`, else `package.json`'s `name`. `.env.example` (written by `sanoma env`) and `.oxlintrc.json` (written by `sanoma check` when missing) are generated, and so are `sites/__virtual.ts` and `sites/tsconfig.json` once there is a site: commit them, never edit them. `.sanoma/` holds what `sanoma` builds (ignored), `.sanoma/api.ts` among it: the typed `api` for sites, and `.sanoma/schema.cedarschema`, the schema the policies are checked against, both generated from the config by `sanoma check` and at start, never edited.
+The company's name, as the app shows it, is `name` in `sanoma.config.ts`, else `package.json`'s `name` made readable (`maple-street` is "Maple Street"). `.env.example` (written by `sanoma env`) and `.oxlintrc.json` (written by `sanoma check` when missing) are generated, and so are `sites/__virtual.ts` and `sites/tsconfig.json` once there is a site: commit them, never edit them. `.sanoma/` holds what `sanoma` builds (ignored), `.sanoma/api.ts` among it: the typed `api` for sites, and `.sanoma/schema.cedarschema`, the schema the policies are checked against, both generated from the config by `sanoma check` and at start, never edited.
 
 ## Run
 

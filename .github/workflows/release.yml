@@ -152,7 +152,11 @@ jobs:
           version=$(jq -r .version packages/sanoma/package.json)
           pm=$(jq -r .packageManager package.json)
           cd .company-template
-          git ls-files -z | grep -zvE '^(README\.md|LICENSE|\.mise\.toml|\.github/.*)$' | xargs -0 -r git rm -q --
+          if [ "$(jq -r '.dependencies.sanoma // empty' package.json 2>/dev/null)" = "$version" ]; then
+            echo "::notice title=Company template unchanged::Sanoma-AI/company-template already has sanoma $version's template."
+            exit 0
+          fi
+          git ls-files -z | { grep -zvE '^(README\.md|LICENSE|\.mise\.toml|\.github/.*)$' || true; } | xargs -0 -r git rm -q --
           cp -R ../packages/sanoma/template/. .
           # npm drops a package's .gitignore, so the template carries it as gitignore (as `sanoma init` renames it).
           mv gitignore .gitignore

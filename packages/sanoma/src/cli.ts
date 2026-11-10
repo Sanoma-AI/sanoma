@@ -8,7 +8,7 @@ import type { SanomaConfig } from "sanoma/workflows";
 import { errorMessage, UsageError } from "sanoma/workflows/shared";
 import { type Loaded, type LoadedConfig, loadConfig } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
-import { emit, eventsOn } from "./events.ts";
+import { emit, eventsOn, stage } from "./events.ts";
 import type { EnsuredPostgres } from "./postgres.ts";
 import type { Listening } from "./listen.ts";
 
@@ -16,6 +16,8 @@ import type { Listening } from "./listen.ts";
 // command imports what it runs, so `--help`, `env`, `ledger export` and the dev-mode parent load
 // neither the worker nor the app (the parent loads the app's Node-only build module to see whether
 // there are sites).
+
+const INIT_USAGE = "sanoma init [--name <name>] [--you <name>] [--email <email>]";
 
 const USAGE = `usage: sanoma [command]
 
@@ -25,7 +27,7 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
                                       and the repo's sites/, when it has any, from a dev server that shows each
                                       edit as it is saved. In an empty directory, first starts a company there: the
                                       template, .env, an install and a git repository
-  sanoma init [--name <name>] [--you <name>] [--email <email>]
+  ${INIT_USAGE}
                                       starts a company in this empty directory, then runs it as sanoma does: --name
                                       the company's name (else the directory's), --you and --email who starts it
                                       (else git's user.name and user.email)
@@ -57,10 +59,10 @@ For a parent process: SANOMA_EVENTS=1 adds a JSON line on stdout per event, {"sa
 app's "url" (where it listens, on the port SANOMA_APP_PORT names) and its "sites" each time it listens, "error" with the
 "message" when it cannot start or stop, "database" with "how" ("answered", "started" or "created"), "url" and
 "place" once the company's own Postgres answers, and "stage" with "stage" and "status" ("start" or "done") for each
-stage of starting a company: "template", "people", "git", "install", then "database" (on every run); the end of stdin
-then stops it as SIGTERM does. sanoma never prompts, reads stdin only then, and opens no browser; SIGTERM stops
-everything it started, the app, the worker, then the Postgres it started unless another client is connected; exit 2 is
-a mistake in the call or the config, 1 a failure.
+stage of starting a company: "template", "people", "git", "install", then "database" (around the company's own
+Postgres, on every run); the end of stdin then stops it as SIGTERM does. sanoma never prompts, reads stdin only then,
+and opens no browser; SIGTERM stops everything it started, the app, the worker, then the Postgres it started unless
+another client is connected; exit 2 is a mistake in the call or the config, 1 a failure.
 `;
 
 /** Exit codes: 2 for how the bin was called or what it found, 1 for failed checks and failures while running. */
@@ -93,13 +95,11 @@ export async function main(argv: string[]): Promise<number> {
   }
   const [command, ...rest] = positionals;
   if (command !== "init" && (values.name ?? values.you ?? values.email) !== undefined) {
-    throw new UsageError(
-      "--name, --you and --email are sanoma init's: sanoma init [--name <name>] [--you <name>] [--email <email>]",
-    );
+    throw new UsageError(`--name, --you and --email are sanoma init's: ${INIT_USAGE}`);
   }
   switch (command) {
     case undefined: {
-      if (!existsSync(join(process.cwd(), "sanoma.config.ts")) && (await initCompany(values))) {
+      if (!existsSync(join(process.cwd(), "sanoma.config.ts")) && (await initCompany())) {
         return serveStarted(process.cwd());
       }
       const { devRepo, linkedPackages } = await import("./dev.ts");
@@ -108,7 +108,7 @@ export async function main(argv: string[]): Promise<number> {
       return repo === undefined ? serveCommand(true) : dev(repo, linked);
     }
     case "init":
-      if (rest.length) throw new UsageError(`usage: sanoma init [--name <name>] [--you <name>] [--email <email>]`);
+      if (rest.length) throw new UsageError(`usage: ${INIT_USAGE}`);
       if (!(await initCompany(values))) {
         throw new UsageError(
           `sanoma init starts a company in an empty directory: ${process.cwd()} holds files already`,
@@ -195,7 +195,7 @@ const parse = (argv: string[]) =>
  * as `sanoma init`'s flags say: whether it did. A flag left empty is one not given; an `--email`
  * that is no address is refused before anything is written.
  */
-async function initCompany(values: ReturnType<typeof parse>["values"]): Promise<boolean> {
+async function initCompany(values: ReturnType<typeof parse>["values"] = {}): Promise<boolean> {
   const [name, you, email] = [values.name, values.you, values.email].map((value) => value?.trim() || undefined);
   const { isEmail, startCompany, whoIsStarting } = await import("./init.ts");
   if (email && !isEmail(email)) throw new UsageError(`--email: "${email}" is not an email address`);
@@ -244,7 +244,7 @@ const namedDatabaseUrl = (config: LoadedConfig["config"]) =>
 /**
  * Makes the database `named` answer, or with none the company's own in `root` (`ensurePostgres`),
  * and names it in this process's `SANOMA_DATABASE_URL`, which the runtime reads and every child
- * inherits; never in `.env`. The company's own is a `database` event, inside the `database` stage's
+ * inherits; never in `.env`. The company's own is a `database` event, inside the `database` stage
  * (the last of starting a company, and on every run), unless `announce` is false.
  */
 async function withPostgres(
@@ -254,14 +254,16 @@ async function withPostgres(
   { announce = true, adopt = false } = {},
 ): Promise<EnsuredPostgres> {
   const { ensurePostgres } = await import("./postgres.ts");
-  const own = named === undefined && announce;
-  if (own) emit({ event: "stage", stage: "database", status: "start" });
-  const postgres = await ensurePostgres(named, { root, log, start, adopt });
+  const ensure = () => ensurePostgres(named, { root, log, start, adopt });
+  const postgres =
+    named === undefined && announce
+      ? await stage("database", async () => {
+          const own = await ensure();
+          emit({ event: "database", how: own.how, url: own.databaseUrl, place: "this-computer" });
+          return own;
+        })
+      : await ensure();
   process.env.SANOMA_DATABASE_URL = postgres.databaseUrl;
-  if (own) {
-    emit({ event: "database", how: postgres.how, url: postgres.databaseUrl, place: "this-computer" });
-    emit({ event: "stage", stage: "database", status: "done" });
-  }
   return postgres;
 }
 

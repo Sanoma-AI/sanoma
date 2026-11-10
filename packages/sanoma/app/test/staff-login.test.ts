@@ -97,7 +97,7 @@ describe("staffLogin", () => {
     await provider.open!({
       resolved: {
         appName: "acme-plumbing",
-        name: "acme-plumbing",
+        name: "Acme Plumbing",
         root,
         ...(sender && { login: { sender: {}, from: "Acme <login@acme.test>" } }),
       },
@@ -326,7 +326,7 @@ describe("staffLogin", () => {
     try {
       const provider = staffLogin(async () => fakeHalf(["code", "invite"]));
       await provider.open!({
-        resolved: { appName: "acme-plumbing", name: "acme-plumbing", root: broken },
+        resolved: { appName: "acme-plumbing", name: "Acme Plumbing", root: broken },
         client,
         snapshot: { people: readPeople(broken) },
       } as unknown as AppContext);

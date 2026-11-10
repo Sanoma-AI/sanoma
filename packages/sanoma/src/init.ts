@@ -14,8 +14,9 @@ import { basename, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { AGENTS, RUNTIME_AGENTS, VISITORS } from "sanoma/workflows";
-import { isVisitor } from "sanoma/workflows/shared";
-import { emit, type Stage } from "./events.ts";
+import { isVisitor, slugged } from "sanoma/workflows/shared";
+import { z } from "zod";
+import { stage } from "./events.ts";
 import { writeDeploymentKeys } from "./key.ts";
 
 const run = promisify(execFile);
@@ -47,25 +48,11 @@ export interface StartOptions {
   log?: (line: string) => void;
 }
 
-/** Runs `work` as one stage of starting a company, between its `stage` events. */
-async function stage(name: Stage, work: () => unknown): Promise<void> {
-  emit({ event: "stage", stage: name, status: "start" });
-  await work();
-  emit({ event: "stage", stage: name, status: "done" });
-}
-
 /**
- * `sanoma init`, and `sanoma` where there is no `sanoma.config.ts`: in an empty directory (dotfiles
- * aside) it starts a company there and says so; anywhere else it does nothing and says it did not.
- * Starting copies the template, names the package after the directory, writes the company's `name`
- * in `sanoma.config.ts` when one is given and its slug (`slugOf` the name, else the directory's) in
- * `resources/sanoma/infra.ts`, writes `.env` (a new signing and encryption key, keeping what it
- * already holds; no database URL, so `sanoma` runs the company's own Postgres), declares whoever
- * starts it as the first person in `resources/people.ts` (so the app admits them), commits what it
- * wrote as the first commit of a git repository, as the machine's git user, then installs with the
- * package manager that ran this (`npm_config_user_agent`, else pnpm) and adds the lockfile to that
- * commit: the stages `template`, `people`, `git` and `install`, each a `stage` event. Throws before
- * writing anything when git is missing or has no user to commit as.
+ * `sanoma init`, and `sanoma` where there is no `sanoma.config.ts`: starts a company in `cwd` when
+ * it is empty (dotfiles aside), from the template, as the first commit of a git repository, its
+ * dependencies installed, each stage a `stage` event; whether it did. Throws before writing
+ * anything when git is missing or has no user to commit as.
  */
 export async function startCompany(
   cwd: string,
@@ -80,11 +67,14 @@ export async function startCompany(
     );
   });
   log(`starting a Sanoma company in ${cwd}`);
+  // Asked now, while the template is copied: `gh` may take its time.
+  const who = creator();
+  who.catch(() => {});
   const packageManager = packageManagerOf(process.env.npm_config_user_agent);
   await stage("template", () => copyTemplate(cwd, name, packageManager));
   await stage("people", async () => {
-    const people = join(cwd, "resources", "people.ts");
-    writeFileSync(people, declareFounder(readFileSync(people, "utf8"), await creator()));
+    const founder = await who;
+    editIn(cwd, "resources/people.ts", (text) => declareFounder(text, founder));
   });
 
   // Committed before the install, so a failed install leaves a repository to rerun it in; the
@@ -131,14 +121,16 @@ function copyTemplate(cwd: string, name: string | undefined, packageManager: str
   if (INSTALLED) pkg.dependencies = pinDependencies(pkg.dependencies, own);
   writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
 
-  const edit = (file: string, change: (text: string) => string) =>
-    writeFileSync(join(cwd, file), change(readFileSync(join(cwd, file), "utf8")));
-  if (name) edit("sanoma.config.ts", (text) => declareName(text, name));
-  edit(INFRA, (text) => declareSlug(text, slugOf(name || basename(cwd))));
+  if (name) editIn(cwd, "sanoma.config.ts", (text) => declareName(text, name));
+  editIn(cwd, INFRA, (text) => declareSlug(text, slugOf(name, basename(cwd))));
 
   writeDeploymentKeys(join(cwd, ".env"));
   if (packageManager !== "pnpm") rmSync(join(cwd, "pnpm-workspace.yaml"));
 }
+
+/** Writes `file` in `cwd` again as `change` makes its text. */
+const editIn = (cwd: string, file: string, change: (text: string) => string) =>
+  writeFileSync(join(cwd, file), change(readFileSync(join(cwd, file), "utf8")));
 
 /**
  * Whether this launcher is an installed release (its real path under `node_modules`), not a checkout's,
@@ -196,26 +188,23 @@ export function declareName(text: string, name: string): string {
   return text.replace(CONFIG_OPENING, (opening) => `${opening}  name: ${JSON.stringify(name)},\n`);
 }
 
-/** The template's slug in `resources/sanoma/infra.ts`: the Cloud names and its address. */
-const TEMPLATE_SLUG = /"company(\.sanoma\.work)?"/g;
+/** The template's slug in `resources/sanoma/infra.ts`, which its Cloud names and address are made of. */
+const TEMPLATE_SLUG = /^const slug = "company";$/m;
 
-/** The infra file with the company's slug for the template's, in the names and the address. */
+/** The infra file with the company's slug for the template's. */
 export function declareSlug(text: string, slug: string): string {
-  if (text.search(TEMPLATE_SLUG) < 0) throw new Error(`the template's ${INFRA} names no "company"`);
-  return text.replaceAll(TEMPLATE_SLUG, (_, address: string | undefined) => JSON.stringify(slug + (address ?? "")));
+  if (!TEMPLATE_SLUG.test(text)) throw new Error(`the template's ${INFRA} has no \`const slug = "company";\``);
+  return text.replace(TEMPLATE_SLUG, () => `const slug = ${JSON.stringify(slug)};`);
 }
 
 /**
- * A company's name as its Sanoma Cloud slug, its address `<slug>.sanoma.work`: lower case letters,
- * digits and single dashes, a dash at neither end, 3 to 40 of them, as the Cloud takes it; a shorter
- * one gains `-company`, and none at all is `company`.
+ * A company's Sanoma Cloud slug, its address `<slug>.sanoma.work`: its name's (`slugged`), else its
+ * directory's when the name gives none; lower case letters, digits and single dashes, a dash at
+ * neither end, 3 to 40 of them, as the Cloud takes it; a shorter one gains `-company`, and none at
+ * all is `company`.
  */
-export function slugOf(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .slice(0, 40)
-    .replaceAll(/^-+|-+$/g, "");
+export function slugOf(name: string | undefined, dir: string): string {
+  const [slug = ""] = [name ?? "", dir].map((text) => slugged(text).slice(0, 40).replace(/-+$/, "")).filter(Boolean);
   return slug.length >= 3 ? slug : [slug, "company"].filter(Boolean).join("-");
 }
 
@@ -256,8 +245,8 @@ function machineUser(): string {
   }
 }
 
-/** Whether `text` reads as an email address: what a host's staff login can send a code to. */
-export const isEmail = (text: string) => /^[^\s@]+@[^\s@]+$/.test(text);
+/** Whether `text` is an email address as the people file takes one: what a host's staff login can send a code to. */
+export const isEmail = (text: string) => z.email().safeParse(text).success;
 
 /**
  * Who is starting the company: their GitHub login, as `gh` is signed in, which the GitHub sign-in

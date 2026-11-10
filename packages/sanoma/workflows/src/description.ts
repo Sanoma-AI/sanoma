@@ -409,7 +409,7 @@ export const ConfigDescriptionSchema = z.strictObject({
     )
     .optional(),
   appName: z.string(),
-  /** The company's name as people read it: the config's `name`, else `appName`. */
+  /** The company's name as people read it: the config's `name`, else `appName` made readable. */
   name: z.string(),
   /** The application version runs started now are stamped with. */
   version: z.string(),

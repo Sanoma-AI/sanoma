@@ -264,11 +264,16 @@ describe("resolveConfig's conventions", () => {
     expect(resolveConfig(config({ file: join(named, "sanoma.config.ts") })).appName).toBe("@acme/ops");
   });
 
-  it("names the company for people by the config's name, the runs still by the app's", () => {
-    const named = tree("display", { "package.json": JSON.stringify({ name: "maple" }) });
-    const resolved = resolveConfig(config({ root: named, name: " Maple Street Studio " }));
-    expect(resolved).toMatchObject({ appName: "maple", name: "Maple Street Studio", queueName: "sanoma:maple" });
-    expect(resolveConfig(config({ root: named })).name).toBe("maple");
+  it("names the company for people by the config's name, else the app's made readable, the runs still by the app's", () => {
+    const named = tree("display", { "package.json": JSON.stringify({ name: "@acme/maple_street-studio" }) });
+    const resolved = resolveConfig(config({ root: named, name: " Smith-Jones Plumbing " }));
+    expect(resolved).toMatchObject({
+      appName: "@acme/maple_street-studio",
+      name: "Smith-Jones Plumbing",
+      queueName: "sanoma:@acme/maple_street-studio",
+    });
+    expect(resolveConfig(config({ root: named })).name).toBe("Maple Street Studio");
+    expect(resolveConfig(config()).name).toBe("Sanoma");
   });
 
   it("names the app sanoma when the root's package.json names none, never taking a name from above", () => {

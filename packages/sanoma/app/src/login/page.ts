@@ -10,23 +10,14 @@ export const wantsJson = (request: Request) =>
 
 export const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-/** A company as a page names it: its app's name humanised, and two initials for its mark. */
+/** A company as a page names it: its name, and two initials for its mark. */
 export interface Company {
   name: string;
   initials: string;
 }
 
-/**
- * The company a name (the config's, else `package.json`'s: `resolved.name`) is, for people to read: its
- * scope dropped, `-` and `_` as spaces, each word capitalised (`sanoma-ops` is "Sanoma Ops", "SO").
- */
-export function companyOf(appName: string): Company {
-  const words = appName
-    .replace(/^@[^/]*\//, "")
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((word) => word[0]!.toUpperCase() + word.slice(1));
-  const name = words.join(" ") || "Sanoma";
+/** The company named `name` (`resolved.name`, already for people to read), with its initials. */
+export function companyOf(name: string): Company {
   return { name, initials: initialsOf(name) };
 }
 

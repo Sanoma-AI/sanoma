@@ -17,6 +17,7 @@ import {
 import type { DataValue } from "sanoma/workflows/describe";
 import { secret } from "sanoma/resources";
 import { WAKEUP_TOKEN } from "sanoma/workflows/wakeup-service";
+import { slugged } from "sanoma/workflows/shared";
 import {
   ApiError,
   INFRA,
@@ -299,12 +300,7 @@ export async function goLiveChoices(app: AppContext, actor?: Principal): Promise
     host: host ? { type: idOf(host), title: host.title, publicUrl: host.host!.capabilities.publicUrl } : null,
     missing: missingTypes(app),
     connect: toConnect(chosen),
-    name:
-      app.snapshot.description.name
-        .toLowerCase()
-        .replaceAll(/[^a-z0-9]+/g, "-")
-        .replaceAll(/^-+|-+$/g, "")
-        .slice(0, 63) || "company",
+    name: slugged(app.snapshot.description.name).slice(0, 63).replace(/-+$/, "") || "company",
     errors,
   };
 }

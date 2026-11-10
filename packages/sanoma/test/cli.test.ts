@@ -27,10 +27,10 @@ describe("sanoma serve", () => {
     try {
       const stdout = await waitFor(
         () => output().stdout,
-        (out) => /sanoma-fixture at http:\/\/127\.0\.0\.1:\d+/.test(out),
+        (out) => /Sanoma Fixture at http:\/\/127\.0\.0\.1:\d+/.test(out),
         30_000,
       );
-      expect(stdout).toContain("sanoma-fixture running hello");
+      expect(stdout).toContain("Sanoma Fixture running hello");
       const { stderr } = output();
       // The worker's one line, naming the vendor; nothing per variable, and no pg deprecation
       // (DBOS's per-connection SET, see DBOS_DATABASE_OPTIONS).
@@ -153,7 +153,7 @@ describe("SANOMA_EVENTS=1, for a parent process", () => {
       10_000,
     );
     // Right after the line a person reads.
-    expect(stdout.split("\n").slice(-3)).toEqual([`sanoma-fixture at ${url}; ctrl-c to stop`, ready, ""]);
+    expect(stdout.split("\n").slice(-3)).toEqual([`Sanoma Fixture at ${url}; ctrl-c to stop`, ready, ""]);
     child.stdin!.end();
     const done = await finished;
     expect(done.code, done.stderr).toBe(0);

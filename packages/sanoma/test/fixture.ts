@@ -48,10 +48,18 @@ export function ensureSanomaBuilt(): void {
   );
 }
 
+const CONNECTOR = "@sanoma-ai/connector-";
+
+/** The connectors the company template depends on, each by its directory under `connectors/`. */
+export const templateConnectors = Object.keys(
+  (JSON.parse(readFileSync(join(sanoma, "template/package.json"), "utf8")) as { dependencies: Record<string, string> })
+    .dependencies,
+).flatMap((dependency) => (dependency.startsWith(CONNECTOR) ? [dependency.slice(CONNECTOR.length)] : []));
+
 /** `sanoma` and the connectors a fixture copy installs, the template's among them, built (`ensureSanomaBuilt`). */
 export function ensureBuilt(): void {
   ensureSanomaBuilt();
-  for (const name of ["ghost", "anthropic", "docker", "github", "resend", "sanoma-cloud"]) {
+  for (const name of ["ghost", "docker", ...templateConnectors]) {
     ensure(join(repo, "connectors", name), ["dist/index.js"], ["pnpm", "run", "build"]);
   }
 }
@@ -127,7 +135,7 @@ export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", 
 
 /** This checkout's `connectors/<name>` installed in the copy at `dir` as `@sanoma-ai/connector-<name>`. */
 export const linkConnector = (dir: string, name: string) =>
-  link(join(repo, "connectors", name), join(dir, "node_modules", `@sanoma-ai/connector-${name}`));
+  link(join(repo, "connectors", name), join(dir, "node_modules", `${CONNECTOR}${name}`));
 
 /** A symlink at `at` to `target`'s real path, its directory made first. */
 function link(target: string, at: string): void {

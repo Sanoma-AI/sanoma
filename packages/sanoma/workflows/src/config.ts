@@ -115,8 +115,9 @@ import { checkDatabaseOps } from "./database.ts";
 export interface SanomaConfig {
   /**
    * The company's name, as people read it ("Maple Street Studio"): the app, the agent and a
-   * sign-in code's mail name the company by it. Default: the `appName`. Only shown, so it may
-   * change any time; the runs are scoped by `appName`.
+   * sign-in code's mail name the company by it. Default: the `appName` made readable
+   * (`sanoma-ops` is "Sanoma Ops"). Only shown, so it may change any time; the runs are scoped by
+   * `appName`.
    */
   name?: string;
   /**
@@ -210,7 +211,7 @@ export interface ResolvedConfig {
    * `<root>/package.json` when it names one, else "sanoma".
    */
   appName: string;
-  /** The company's name as people read it: the config's `name`, else `appName`. */
+  /** The company's name as people read it: the config's `name`, else `appName` made readable (`readableName`). */
   name: string;
   databaseUrl: string;
   /** The DBOS application version: `<appName>@<DBOS__APPVERSION, or a hash of the workflows>`. */
@@ -253,9 +254,10 @@ export interface ResolvedConfig {
   /** The coding agents the connectors attach (`ConnectorSetup.agent`), by the agent's id, in `connectors` order: the chat's engines. */
   agents: ReadonlyMap<string, InstalledAgent>;
   /**
-   * The resources the data files under `root` declare whose type is a host (`<file>#<export>`),
-   * read at each call: what a change's deploy and a push to `main` apply. None when no connector
-   * declares a host type.
+   * The resources the data files under `root` declare whose type is a host (`<file>#<export>`) and
+   * the lockfile binds, read at each call: what a change's deploy and a push to `main` apply. A host
+   * not bound yet is left to going live, whose apply makes it. None when no connector declares a
+   * host type.
    */
   hosts(): Promise<string[]>;
   /**
@@ -429,7 +431,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const ledger = ledgerOf(config);
   const root = rootOf(config);
   const appName = appNameAt(root);
-  const name = config.name?.trim() || appName;
+  const name = config.name?.trim() || readableName(appName);
   const scenarios = scenariosAt(root);
   // With the built-in `sanoma.wakeup` when they declare a host type.
   const running = withBuiltIns(config.connectors);
@@ -537,13 +539,16 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   }
   // Built-in, in every config: the life of a change, which deploys to the declared hosts after its merge.
   // The declared hosts (and sandboxes), as the files say them: nothing derived, nothing minted.
-  const declaredOf = (contract: "host" | "sandbox") => async () => {
+  const declaredOf = async (contract: "host" | "sandbox") => {
     const { loadDataFiles } = await import("./resources.ts");
-    return loadDataFiles(root, connectors, declarable).resources.filter(
-      (r) => types.get(`${r.vendor}.${r.type}`)?.[contract],
-    );
+    const { resources, bindings } = loadDataFiles(root, connectors, declarable);
+    return { resources: resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.[contract]), bindings };
   };
-  const hosts = async () => (await declaredOf("host")()).map((r) => r.id);
+  // Only those the lockfile binds: nothing is made until the company goes live, whose apply makes them.
+  const hosts = async () => {
+    const { resources, bindings } = await declaredOf("host");
+    return resources.filter((r) => r.id in bindings).map((r) => r.id);
+  };
   names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
   // Built-in, in every config: what a git host's webhook says happened, which the worker with the checkout follows.
   names.set(FOLLOW_WORKFLOW, followWorkflow(followSteps({ remotes, hosts })));
@@ -602,7 +607,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     remotes,
     agents: agentsOf(config.connectors),
     hosts,
-    sandboxes: declaredOf("sandbox"),
+    sandboxes: async () => (await declaredOf("sandbox")).resources,
     declaredObjects,
     ...(scenarios && { scenarios }),
     types,
@@ -799,6 +804,15 @@ export function readRootSnapshot(config: SanomaConfig, resolved: ResolvedConfig 
     people: readPeople(root),
   };
 }
+
+/** An app name for people to read: its scope dropped, `-` and `_` as spaces, each word capitalised (`sanoma-ops` is "Sanoma Ops"). */
+const readableName = (appName: string): string =>
+  appName
+    .replace(/^@[^/]*\//, "")
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((word) => word[0]!.toUpperCase() + word.slice(1))
+    .join(" ") || "Sanoma";
 
 /**
  * The `name` of `<root>/package.json`, kept whole (`@acme/ops`), when that file exists and names

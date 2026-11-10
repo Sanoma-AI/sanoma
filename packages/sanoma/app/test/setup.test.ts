@@ -182,7 +182,7 @@ describe("creating the GitHub App", () => {
     const { action, manifest } = form(html);
     expect(`${action.origin}${action.pathname}`).toBe("https://github.com/settings/apps/new");
     const state = action.searchParams.get("state")!;
-    expect(manifest).toEqual(githubManifest(app.url, `Sanoma ${ctx.snapshot.description.appName}`));
+    expect(manifest).toEqual(githubManifest(app.url, `Sanoma ${ctx.snapshot.description.name}`));
     expect(manifest).toMatchObject({
       redirect_url: `${app.url}/setup/github/callback`,
       callback_urls: [`${app.url}/auth/better-auth/callback/github`],

@@ -168,7 +168,11 @@ describe("follow a push to main", () => {
     { workflows: [], connectors: [host.connector, remote.connector], ledger: memoryLedger(), root },
     { databaseUrl: freshDatabase("follow-main"), source: source.source },
   );
-  beforeAll(() => git.commit());
+  // Gone live: its apply binds the host, which a push to main then deploys.
+  beforeAll(async () => {
+    await git.commit();
+    await app.client.applyReport(await app.client.apply({ only: ["resources/infra.ts#app"] }, { startedBy: "alice" }));
+  });
   afterAll(async () => {
     await host.close();
     git.remove();
@@ -188,7 +192,7 @@ describe("follow a push to main", () => {
     const event: RemoteEvent = { kind: "pushed", repo, branch: "main", head };
     expect(await followed(app.client, event)).toEqual({ followed: "main", deploy: `deploy:${head}` });
     expect(await followed(app.client, event)).toEqual({ followed: "main", deploy: `deploy:${head}` });
-    const runs = await app.client.runs({ workflow: "apply" });
+    const runs = (await app.client.runs({ workflow: "apply" })).filter((r) => r.runId.startsWith("deploy:"));
     expect(runs).toEqual([
       expect.objectContaining({ runId: `deploy:${head}`, startedBy: expect.objectContaining({ id: "host-check" }) }),
     ]);

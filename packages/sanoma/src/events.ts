@@ -8,7 +8,7 @@ import type { CheckResult } from "sanoma/workflows";
 /**
  * The stages of starting a company, in order: `sanoma init` (and `sanoma` in an empty directory)
  * copies the template, declares its founder, makes the git repository, installs, then makes its
- * database answer as every `sanoma` run does.
+ * own Postgres answer, as every run on the company's own Postgres does.
  */
 export type Stage = "template" | "people" | "git" | "install" | "database";
 
@@ -31,4 +31,12 @@ export const eventsOn = () => process.env.SANOMA_EVENTS === "1";
 /** Writes `event` as one line on stdout when `SANOMA_EVENTS=1`; nothing otherwise. */
 export function emit(event: SanomaEvent): void {
   if (eventsOn()) process.stdout.write(`${JSON.stringify({ sanoma: 1, ...event })}\n`);
+}
+
+/** Runs `work` as the stage `name`, between its `stage` events; one that throws has no `done`. */
+export async function stage<T>(name: Stage, work: () => T | Promise<T>): Promise<T> {
+  emit({ event: "stage", stage: name, status: "start" });
+  const done = await work();
+  emit({ event: "stage", stage: name, status: "done" });
+  return done;
 }

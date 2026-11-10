@@ -21,6 +21,7 @@ import { afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from "
 import {
   declareFounder,
   declareName,
+  declareSlug,
   FIRST_COMMIT,
   packageManagerOf,
   packageName,
@@ -31,7 +32,7 @@ import {
   templatePeopleIds,
   whoIsStarting,
 } from "../src/init.ts";
-import { copyFixture, ensureBuilt, linkConnector, runCli } from "./fixture.ts";
+import { copyFixture, ensureBuilt, linkConnector, runCli, templateConnectors } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
 /** The template's manifest, as a company starts from it. */
@@ -53,6 +54,10 @@ const fresh = (name = "Acme Ops") => {
 };
 /** Who starts the company in these tests: never `gh`, which may be signed in on this machine. */
 const creator = async () => ({ id: "ada", name: "Ada Ortiz", github: "ada-ortiz" });
+/** The `stage` events of starting a company, in order, as `SANOMA_EVENTS=1` writes them. */
+const STAGES = ["template", "people", "git", "install"].flatMap((stage) =>
+  ["start", "done"].map((status) => ({ sanoma: 1, event: "stage", stage, status })),
+);
 /** An install that writes pnpm's lockfile alone. */
 const writeLockfile = async (cwd: string) => writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
 afterEach(() => {
@@ -102,10 +107,7 @@ describe("startCompany", () => {
     );
     expect(templatePeopleIds()).toEqual(["founder", "admin"]);
     // Sanoma Cloud declared, by the directory's name for want of the company's.
-    expect(read("resources/sanoma/infra.ts")).toContain(
-      'export const host = cloud.host({ name: "acme-ops", database: store, hostname: "acme-ops.sanoma.work" });',
-    );
-    expect(read("resources/sanoma/infra.ts")).toContain('export const store = cloud.database({ name: "acme-ops" });');
+    expect(read("resources/sanoma/infra.ts")).toContain('\nconst slug = "acme-ops";\n');
 
     expect(git("log", "--format=%s|%an")).toBe(`${FIRST_COMMIT}|Test User`);
     expect(git("branch", "--show-current")).toBe("main");
@@ -154,15 +156,9 @@ describe("startCompany", () => {
     await startCompany(fresh("maple"), { name: "Maple Street Studio", creator, install: writeLockfile });
     vi.mocked(process.stdout.write).mockRestore();
 
-    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual(
-      ["template", "people", "git", "install"].flatMap((stage) =>
-        ["start", "done"].map((status) => ({ sanoma: 1, event: "stage", stage, status })),
-      ),
-    );
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual(STAGES);
     expect(read("sanoma.config.ts")).toContain('export default defineConfig({\n  name: "Maple Street Studio",\n');
-    expect(read("resources/sanoma/infra.ts")).toContain(
-      'cloud.host({ name: "maple-street-studio", database: store, hostname: "maple-street-studio.sanoma.work" })',
-    );
+    expect(read("resources/sanoma/infra.ts")).toContain('\nconst slug = "maple-street-studio";\n');
     // The package stays named after the directory.
     expect(JSON.parse(read("package.json")).name).toBe("maple");
     expect(git("status", "--porcelain")).toBe("");
@@ -195,7 +191,7 @@ describe("pinDependencies", () => {
   });
 });
 
-describe("declareName and slugOf", () => {
+describe("declareName, declareSlug and slugOf", () => {
   it("writes the company's name first in the config, as given", () => {
     expect(declareName("export default defineConfig({\n  connectors: [],\n});\n", 'Ann\'s "Co" $&')).toBe(
       'export default defineConfig({\n  name: "Ann\'s \\"Co\\" $&",\n  connectors: [],\n});\n',
@@ -203,14 +199,25 @@ describe("declareName and slugOf", () => {
     expect(() => declareName("export default {};\n", "Acme")).toThrow("has no `export default defineConfig({`");
   });
 
-  it("makes a slug the Cloud takes of any name", () => {
-    expect(slugOf("Maple Street Studio")).toBe("maple-street-studio");
-    expect(slugOf("  Café & Co.  ")).toBe("caf-co");
-    expect(slugOf("AB")).toBe("ab-company");
-    expect(slugOf("!!!")).toBe("company");
-    const long = slugOf(`${"a".repeat(39)} b`);
+  it("writes the company's slug for the template's, and refuses a file without it", () => {
+    const text =
+      'const slug = "company";\nexport const host = cloud.host({ name: slug, hostname: `${slug}.sanoma.work` });\n';
+    expect(declareSlug(text, "maple-$&")).toBe(text.replace('"company"', () => '"maple-$&"'));
+    expect(() => declareSlug("export {};\n", "maple")).toThrow('has no `const slug = "company";`');
+  });
+
+  it("makes a slug the Cloud takes of any name, else of the directory's", () => {
+    expect(slugOf("Maple Street Studio", "maple")).toBe("maple-street-studio");
+    expect(slugOf("  Café & Co.  ", "dir")).toBe("cafe-co");
+    expect(slugOf("Crème Brûlée Co", "dir")).toBe("creme-brulee-co");
+    expect(slugOf("AB", "dir")).toBe("ab-company");
+    expect(slugOf(undefined, "Acme Ops")).toBe("acme-ops");
+    // A name in another script gives no slug: the directory's stands.
+    expect(slugOf("Пекарня", "bakery")).toBe("bakery");
+    expect(slugOf("東京", "東京")).toBe("company");
+    const long = slugOf(`${"a".repeat(39)} b`, "dir");
     expect(long).toBe("a".repeat(39));
-    expect(slugOf("x".repeat(60))).toHaveLength(40);
+    expect(slugOf("x".repeat(60), "dir")).toHaveLength(40);
   });
 });
 
@@ -343,15 +350,12 @@ describe("sanoma in an empty directory", () => {
     );
 
     expect(done.code, done.stderr).toBe(0);
-    const stages = ["template", "people", "git", "install"].flatMap((stage) =>
-      ["start", "done"].map((status) => JSON.stringify({ sanoma: 1, event: "stage", stage, status })),
-    );
-    expect(done.stdout).toBe(`${[...stages, "served []"].join("\n")}\n`);
+    expect(done.stdout).toBe(`${[...STAGES.map((stage) => JSON.stringify(stage)), "served []"].join("\n")}\n`);
     expect(read("sanoma.config.ts")).toContain('  name: "Maple Street Studio",\n');
     expect(read("resources/people.ts")).toMatch(
       /^export const founder = sanoma\.person\(\{ id: "[^"]+", .*name: "Dana Reyes", email: "dana@maple\.test" \}\);$/m,
     );
-    expect(read("resources/sanoma/infra.ts")).toContain('hostname: "maple-street-studio.sanoma.work"');
+    expect(read("resources/sanoma/infra.ts")).toContain('\nconst slug = "maple-street-studio";\n');
   });
 
   it("sanoma init refuses a directory with files in it, and an email that is no address before writing anything", async () => {
@@ -413,7 +417,7 @@ describe("the template", () => {
     await startCompany(started, { creator, install: async () => {} });
     dir = copyFixture(started);
     // The template's connectors: the chat's model, the sign-in code's sender, the repository's and Sanoma Cloud's.
-    for (const name of ["anthropic", "resend", "github", "sanoma-cloud"]) linkConnector(dir, name);
+    for (const name of templateConnectors) linkConnector(dir, name);
     rmSync(started, { recursive: true, force: true });
     // A workflow that sends, which the template's policy holds for admin unless someone in admin asked.
     writeFileSync(join(dir, "workflows/welcome.ts"), WELCOME);
