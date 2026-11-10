@@ -386,33 +386,28 @@ export async function saves({ client, snapshot }: AppContext, id: string): Promi
 /**
  * Saves the draft of `actor`'s chat `id` (`SanomaClient.saveDraft`) at `head`, the commit its card
  * showed, titled as the chat, its change's page this app's `/changes/<id>` at `origin`. With
- * `undo`, a commit the chat's draft was saved as (its save's, or with a remote its change's
- * merge), that commit is undone instead, from a draft of its own (`undoDraftOf`), titled "Undo"
- * and the chat's title. The save's run id; a 404 for a chat that is not the actor's, a 409 for a
- * commit the chat did not save.
+ * `undo`, a commit the chat's draft was saved as (`SanomaClient.savedAs`: by a save, or its
+ * change's merge), that commit is undone instead, from a draft of its own (`undoDraftOf`), titled
+ * "Undo" and the chat's title. The save's run id; a 404 for a chat that is not the actor's, a 409
+ * for a commit the chat did not save.
  */
 export async function saveDraft(
-  app: Pick<AppContext, "client" | "resolved" | "snapshot">,
+  { client }: Pick<AppContext, "client">,
   actor: Principal,
   { id, head, undo }: SaveDraftRequest,
   origin: string,
 ): Promise<{ runId: string }> {
-  const { client } = app;
   const chat = await client.chats.get(id);
   if (chat?.person !== actor.id) throw new ApiError(404, { error: `No chat ${id}` });
-  if (undo === undefined) {
-    const input = { id, title: chat.title, ...(head !== undefined && { head }), page: changePage(id, origin) };
-    return { runId: await client.saveDraft(input, { startedBy: actor }) };
+  if (undo !== undefined && !(await client.savedAs(id, undo))) {
+    throw new ApiError(409, { error: `${undo.slice(0, 7)} is not a commit this chat saved` });
   }
-  const saved = remoteOf(app)
-    ? (await client.change(id))?.state.merged?.sha === undo
-    : (await client.saves(id)).some(
-        (save) => save.output && "revision" in save.output && save.output.revision === undo,
-      );
-  if (!saved) throw new ApiError(409, { error: `${undo.slice(0, 7)} is not a commit this chat saved` });
-  const draft = undoDraftOf(undo);
-  const input = { id: draft, title: `Undo ${chat.title}`, undo, page: changePage(draft, origin) };
-  return { runId: await client.saveDraft(input, { startedBy: actor }) };
+  const draft = undo === undefined ? id : undoDraftOf(undo);
+  const input =
+    undo === undefined
+      ? { id, title: chat.title, ...(head !== undefined && { head }) }
+      : { id: draft, title: `Undo ${chat.title}`, undo, chat: id };
+  return { runId: await client.saveDraft({ ...input, page: changePage(draft, origin) }, { startedBy: actor }) };
 }
 
 /**

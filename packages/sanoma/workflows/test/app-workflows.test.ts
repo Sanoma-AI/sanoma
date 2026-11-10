@@ -23,6 +23,7 @@ import {
   GO_LIVE_WORKFLOW,
   PATCH_WORKFLOW,
   SAVE_DRAFT_WORKFLOW,
+  undoDraftOf,
   visitorPrincipal,
 } from "../src/shared.ts";
 import { companyFakes } from "./fixtures/company/fakes.ts";
@@ -188,6 +189,17 @@ describe("on a worker given the app's steps", () => {
       ["save:d1", "failed", "Refused", undefined],
     ]);
     expect(await app.client.saves("d")).toEqual([]);
+    // An undo names the chat whose save it undoes, from the undo's own draft.
+    const sha = "3".repeat(40);
+    for (const input of [
+      { id: undoDraftOf(sha), title: "Undo", undo: sha },
+      { id: "d1", title: "Undo", undo: sha, chat: "d1" },
+      { id: "d1", title: "Welcome", chat: "d1" },
+    ]) {
+      expect(await failure(app.client.saveDraft(input, { startedBy: "alice" }))).toMatchObject({
+        code: "invalid_input",
+      });
+    }
   });
 
   it("starts the apply after a write as the run's child, as its actor, and answers its id without waiting for it", async () => {

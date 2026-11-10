@@ -281,15 +281,18 @@ const RELOAD_MS = 1_000;
 export async function serve(config: SanomaConfig, serveOptions: ServeOptions): Promise<Served> {
   // Read and built before the worker starts, so a mistake in the variables or a site starts nothing.
   const options = await appStart(config, serveOptions);
-  /** What the app runs with now: `options`, then a reload's. */
-  let current = options;
+  /** The files the app and the worker run, and what the app started with: the first, then a reload's. */
+  let running = { config, options };
   const { log } = serveOptions;
   // An app on this machine alone is not the instance the host runs: its worker never stops
   // itself (its wakeup would wake that instance).
   const here = isLoopback(options.host ?? "127.0.0.1");
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reloading = Promise.resolve();
+  // Set once `stop` begins: a reload asked after it starts nothing.
+  let closed = false;
   const reload = () => {
+    if (closed) return;
     clearTimeout(timer);
     timer = setTimeout(() => {
       reloading = reloading
@@ -320,26 +323,30 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
     throw err;
   }
   const restart = async () => {
-    const { config: next } = await loadConfig(dirname(config.file!), { fresh: true });
-    const resolved = resolveConfig(next);
+    if (closed) return;
+    const { config: files } = await loadConfig(dirname(running.config.file!), { fresh: true });
+    const resolved = resolveConfig(files);
     if (resolved.policyProblems.length)
       throw new Error(`the policies do not hold: ${resolved.policyProblems.join("; ")}`);
-    const port = Number(new URL(app.url).port);
-    const nextOptions = await appStart(next, { ...serveOptions, port, resolved });
+    // The port it was given, or with any free port (0) the one it took; a URL names no port that is its scheme's.
+    const port = serveOptions.port || Number(new URL(app.url).port);
+    const next = { config: files, options: await appStart(files, { ...serveOptions, port, resolved }) };
+    if (closed) return;
+    const startOn = async (on: typeof running) => {
+      supervised = await supervise(on.config);
+      app = await start(on.config, on.options);
+    };
     await app.stop();
     await supervised.stop();
     try {
-      supervised = await supervise(next);
-      app = await start(next, nextOptions);
+      await startOn(next);
     } catch (err) {
       // Started again on the files as they were, which ran a moment ago.
       await supervised.stop().catch(() => {});
-      supervised = await supervise(config);
-      app = await start(config, { ...current, port });
+      await startOn({ ...running, options: { ...running.options, port } });
       throw err;
     }
-    config = next;
-    current = nextOptions;
+    running = next;
     log(`${resolved.appName} started again on the saved files`);
   };
   return {
@@ -350,6 +357,7 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
       return app.sites;
     },
     async stop() {
+      closed = true;
       clearTimeout(timer);
       await reloading;
       try {

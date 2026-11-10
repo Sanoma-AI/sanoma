@@ -42,18 +42,31 @@ export interface Source {
   /** Closes the draft `id`: its checkout removed and its branch deleted, whatever it held; nothing when it is gone. */
   closeDraft?(id: string): Promise<void>;
   /**
-   * Saves the draft `id` into the checked-out branch: what it changes, merged with what that branch
-   * gained since, as one commit titled `title` by `author` (a squash; the draft stays open). Refused
-   * while the checkout has uncommitted changes to any file git tracks, when the draft changes nothing there,
-   * or when the two edit the same lines. The commit.
+   * Saves the draft `id` at its commit `head` into the checked-out branch: what it changes, merged
+   * with what that branch gained since, as one commit titled `title` by `author` (a squash) that
+   * names the save `run` (`saved` finds it by it), then closes the draft as `closeDraft` does, all
+   * as one git write; a draft that will not close stays open, the commit made. Refused once the
+   * draft's branch is not at `head`, while the checkout has uncommitted changes to any file git
+   * tracks, when the draft changes nothing there, or when the two edit the same lines. The commit.
    */
-  merge?(id: string, change: { title: string; author: string }): Promise<{ revision: string }>;
+  merge?(
+    id: string,
+    change: { head: string; title: string; author: string; run: string },
+  ): Promise<{ revision: string }>;
+  /** The commit `merge` made for the save `run` on the checked-out branch, and the files it changed; undefined when there is none. */
+  saved?(run: string): Promise<{ revision: string; files: string[] } | undefined>;
   /**
-   * Commits the undoing of `sha` (a commit of the checked-out branch) on the draft `id`, by
-   * `author`, opening the draft first as `draft` does; refused when a later commit edits the same
-   * lines. The draft's commit after.
+   * Commits the undoing of `sha` (a commit of the checked-out branch; of a merge, what it brought
+   * in) on the draft `id`, by `author`, opening the draft first as `draft` does; refused when this
+   * repository does not have `sha`, or a later commit edits the same lines. The draft's commit after.
    */
   revert?(id: string, change: { sha: string; author: string }): Promise<{ revision: string }>;
+  /**
+   * Pushes the checked-out branch to `origin`, signed in as git on this machine is (its credential
+   * helpers, its keys), never prompting; an error saying why, without the remote's credentials,
+   * when `origin` refuses it (it has commits this branch lacks) or cannot be reached.
+   */
+  pushOrigin?(): Promise<void>;
   /**
    * The draft `id`'s branch as a git bundle (`git bundle create`), for a clone elsewhere (an agent
    * box's) to fetch: its commits since `since`, a commit that clone has, or the whole branch when

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { type ApprovalMessage, topicOf, withdrawApprovals } from "./approvals.ts";
+import { type ApprovalMessage, nextApprovalId, topicOf, withdrawApprovals } from "./approvals.ts";
 import { decide } from "./call.ts";
 import {
   ADMIN,
@@ -33,7 +33,7 @@ import {
   CHANGE_TOPIC,
   DRIFT_WORKFLOW,
   errorMessage,
-  refusalOf,
+  mayDecide,
 } from "./shared.ts";
 import type { CheckResult, RemoteHalf } from "./source.ts";
 
@@ -246,14 +246,14 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
       const may = await DBOS.runStep(
         async () => {
           const { people, problems } = readPeople(run.state.root);
-          return !problems.length && refusalOf({ approver }, run.actor, run, people) === undefined;
+          return !problems.length && mayDecide({ approver }, run.actor, run, people);
         },
         { name: "change:saved" },
       );
       if (!may) return;
       // Publish is the run's next approval: its decision waits on its topic until it is asked.
       const decision: ApprovalMessage = { decision: "approve", by: run.actor, note: "Saved" };
-      await DBOS.send(run.id, decision, topicOf(`approval-${run.approvals.length + 1}`));
+      await DBOS.send(run.id, decision, topicOf(nextApprovalId(run)));
     },
 
     async deploy() {

@@ -37,7 +37,7 @@ export interface ChangeSteps {
   retire(reason: string): Promise<void>;
   /**
    * For a change opened by Save, in a round at the head saved (`ChangeInput.save`): approves the
-   * Publish about to be asked of `approver` as the run's actor, when they may decide it (`refusalOf`, the run's own actor
+   * Publish about to be asked of `approver` as the run's actor, when they may decide it (`mayDecide`, the run's own actor
    * allowed only while nobody else could). Nothing when they may not: Publish waits as asked.
    */
   publishOnSave(approver: Approver): Promise<void>;

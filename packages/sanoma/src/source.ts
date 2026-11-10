@@ -86,6 +86,12 @@ const withoutToken = (what: string, token: string) => (err: { stderr?: string; m
   throw new Error(`${what} failed: ${why}`);
 };
 
+/** The trailer a saved draft's commit names its save's run in (`Source.merge`, `Source.saved`). */
+const SAVE_TRAILER = "Sanoma-Save";
+
+/** How long a push to `origin` may take. */
+const PUSH_TIMEOUT_MS = 60_000;
+
 /** The environment a commit by `author` is made in: named `<author> via Sanoma`, the email the machine's. */
 const authoredBy = (author: string) => ({ GIT_AUTHOR_NAME: `${author} via Sanoma` });
 
@@ -252,9 +258,11 @@ async function keepOurs(cwd: string, paths: string[]): Promise<void> {
  * A draft takes an app (`git merge --allow-unrelated-histories` of its source) and updates one
  * (a merge of its source's default branch); `behind` fetches an app's source into the checkout.
  * A draft's branch travels to an agent box's clone and back as a git bundle (`bundle`, `unbundle`).
- * A draft is saved (`merge`) as one commit on the checked-out branch, its tree made by
- * `git merge-tree` so a conflict never reaches the live checkout, which then fast-forwards; a
- * saved commit is undone (`revert`) by a `git revert` committed in a draft, saved the same way.
+ * A draft is saved (`merge`) at the commit given as one commit on the checked-out branch, its
+ * tree made by `git merge-tree` so a conflict never reaches the live checkout, which then
+ * fast-forwards, its save's run in a trailer (`Sanoma-Save`, which `saved` reads), the draft
+ * closed in the same git write; a saved commit is undone (`revert`) by a `git revert` committed in
+ * a draft, saved the same way; `pushOrigin` pushes the checked-out branch with git's own sign-in.
  */
 export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: string } = {}): Source {
   const git = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(root, args, env);
@@ -277,6 +285,22 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         const id = branch === undefined ? undefined : draftOf(branch);
         return id && path === join(at, id) ? [[id, !fields.some((f) => f.startsWith("prunable"))] as const] : [];
       }),
+    );
+  };
+  /**
+   * Closes the draft `id`, under `serial`: its checkout removed and its branch deleted, the branch
+   * only while it is still at `tip` when one is given.
+   */
+  const close = async (id: string, tip?: string) => {
+    const [branch, at] = [branchOf(id), draftAt(id)];
+    // Its link first: Git for Windows takes a junction for a folder, and would empty the company's own node_modules.
+    const modules = join(at, "node_modules");
+    if (lstatSync(modules, { throwIfNoEntry: false })?.isSymbolicLink()) unlinkSync(modules);
+    // Forced: whatever it holds uncommitted goes with it, and one whose directory is gone too.
+    if ((await listed()).has(id)) await git(["worktree", "remove", "--force", at]);
+    if (!(await branched(branch))) return;
+    await git(
+      tip === undefined ? ["branch", "--quiet", "-D", branch] : ["update-ref", "-d", `refs/heads/${branch}`, tip],
     );
   };
 
@@ -384,17 +408,9 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       };
     },
     closeDraft: async (id) => {
-      const [branch, at] = [branchOf(id), draftAt(id)];
       // Not under a check still running in it.
-      await checkingAt.get(at);
-      return serial(async () => {
-        // Its link first: Git for Windows takes a junction for a folder, and would empty the company's own node_modules.
-        const modules = join(at, "node_modules");
-        if (lstatSync(modules, { throwIfNoEntry: false })?.isSymbolicLink()) unlinkSync(modules);
-        // Forced: whatever it holds uncommitted goes with it, and one whose directory is gone too.
-        if ((await listed()).has(id)) await git(["worktree", "remove", "--force", at]);
-        if (await branched(branch)) await git(["branch", "--quiet", "-D", branch]);
-      });
+      await checkingAt.get(draftAt(id));
+      return serial(() => close(id));
     },
     async bundle(id, { since } = {}) {
       const ref = `refs/heads/${branchOf(id)}`;
@@ -458,14 +474,17 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       ]);
       return { files: pathsOf(names), summary, head: tip };
     },
-    async merge(id, { title, author }) {
+    async merge(id, { head: tip, title, author, run: save }) {
       // Not under a check still running in it.
       await checkingAt.get(draftAt(id));
       return serial(async () => {
+        // Read once the agent's commits can no longer land: what is merged and closed is `tip`, or nothing.
+        if ((await head(`refs/heads/${branchOf(id)}`)) !== tip) {
+          throw new Error(`The draft ${id} has moved on from ${tip.slice(0, 7)}: save it from its latest card`);
+        }
         if (await git(["status", "--porcelain", "--untracked-files=no"])) {
           throw new Error("The live checkout has uncommitted changes: commit or discard them first");
         }
-        const tip = await head(`refs/heads/${branchOf(id)}`);
         // Merged as git would, without touching the checkout: the tree, or the files both sides edit.
         const tree = await git(["merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", tip]).catch(
           (err: { code?: unknown; stdout?: string }) => {
@@ -477,23 +496,60 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         if (tree === (await git(["rev-parse", "HEAD^{tree}"]))) {
           throw new Error(`The draft ${id} changes nothing here`);
         }
-        const commit = await git(["commit-tree", tree, "-p", "HEAD", "-m", title], authoredBy(author));
+        const message = ["-m", title, "-m", `${SAVE_TRAILER}: ${save}`];
+        const commit = await git(["commit-tree", tree, "-p", "HEAD", ...message], authoredBy(author));
         await git(["merge", "--quiet", "--ff-only", commit]);
+        // Saved either way: a draft that would not close is saved again from where it is, or closed with its chat.
+        await close(id, tip).catch((err: unknown) =>
+          console.warn(
+            `sanoma: saved ${commit.slice(0, 7)}, but could not close the draft ${id}: ${errorMessage(err)}`,
+          ),
+        );
         return { revision: commit };
       });
     },
+    async saved(save) {
+      const line = `^${SAVE_TRAILER}: ${save.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`;
+      const revision = await git(["log", "--first-parent", "-n", "1", "--format=%H", "-E", `--grep=${line}`, "HEAD"]);
+      if (!revision) return undefined;
+      const files = await git(["diff-tree", "--no-commit-id", "--no-renames", "--name-only", "-r", "-z", revision]);
+      return { revision, files: pathsOf(files) };
+    },
     async revert(id, { sha, author }) {
       if (!COMMIT_ID.test(sha)) throw new Error(`Not a commit's id: ${JSON.stringify(sha)}`);
+      // A commit merged on the host is here once the checkout followed main.
+      const parents = await git(["rev-list", "--parents", "-n", "1", sha]).catch(() => {
+        throw new Error(`${sha.slice(0, 7)} is not in this repository yet: undo it once main has it`);
+      });
       const { root: at } = await source.draft!(id);
       await checkingAt.get(at);
       return serial(async () => {
-        await gitIn(at, ["revert", "--no-edit", sha], authoredBy(author)).catch(
+        // A merge is undone as what it brought into its first parent.
+        const mainline = parents.split(" ").length > 2 ? ["-m", "1"] : [];
+        await gitIn(at, ["revert", "--no-edit", ...mainline, sha], authoredBy(author)).catch(
           async (err: { stderr?: string; message: string }) => {
             await gitIn(at, ["revert", "--abort"]).catch(() => undefined);
             throw new Error(`${sha.slice(0, 7)} cannot be undone here: ${err.stderr?.trim() || err.message}`);
           },
         );
         return { revision: await head("HEAD", at) };
+      });
+    },
+    async pushOrigin() {
+      // To the branch of the same name; a fast-forward only, as git pushes by default.
+      await run("git", ["push", "--quiet", "origin", "HEAD"], {
+        cwd: root,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        timeout: PUSH_TIMEOUT_MS,
+      }).catch((err: { stderr?: string; message: string; killed?: boolean }) => {
+        if (err.killed) throw new Error(`git push to origin took more than ${PUSH_TIMEOUT_MS / 1000} seconds`);
+        const why = (err.stderr?.trim() || err.message)
+          .split("\n")
+          .filter((line) => !line.startsWith("hint:"))
+          .join(" ")
+          // A URL's credentials, should git print one.
+          .replace(/\/\/[^/@\s]*@/g, "//");
+        throw new Error(`git push to origin failed: ${why}`);
       });
     },
   };

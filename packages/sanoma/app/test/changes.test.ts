@@ -284,6 +284,7 @@ describe("the draft card", () => {
         approvals: [{ status: "approved", decidedBy: "ada", decidedAt: 1_000 }],
         state: { phase: "merged", merged: { sha: SHA } },
       },
+      others: { [undoDraftOf(SHA)]: [] },
     });
     expect(merged).toContain("Saved by ada, ");
     expect(merged).toMatch(/<a [^>]*href="\/workflows\/refund"[^>]*>Open the workflow<\/a>/);
@@ -317,7 +318,11 @@ describe("the draft card", () => {
     expect(failed).toContain("Could not save it: The draft has changed since: save it from its latest card");
     expect(failed).toContain("Save to Maple Street Studio");
     const output = { revision: SHA, files: ["workflows/refund.ts"], running: true };
-    const saved = await renderDraftCard(draft, { remote: false, saves: [save("finished", { output })] });
+    const saved = await renderDraftCard(draft, {
+      remote: false,
+      saves: [save("finished", { output })],
+      others: { [undoDraftOf(SHA)]: [] },
+    });
     expect(saved).toContain("Saved by dana, ");
     expect(saved).toContain("It&#x27;s part of Maple Street Studio.");
     expect(saved).toMatch(/<a [^>]*href="\/workflows\/refund"[^>]*>Open the workflow<\/a>/);
@@ -335,6 +340,13 @@ describe("the draft card", () => {
       saves: [save("finished", { output: { ...output, running: false } })],
     });
     expect(waits).toContain("and runs once Sanoma starts again.");
+    expect(waits).not.toContain("on this computer only");
+    // Saved here, but an origin that reviews nothing refused the push of main.
+    const unpushed = await renderDraftCard(draft, {
+      remote: false,
+      saves: [save("finished", { output: { ...output, notPushed: "git push to origin failed: ! [rejected]" } })],
+    });
+    expect(unpushed).toContain("It&#x27;s saved on this computer only: git push to origin failed: ! [rejected]");
     // Undone: who undid it.
     const undone = await renderDraftCard(draft, {
       remote: false,

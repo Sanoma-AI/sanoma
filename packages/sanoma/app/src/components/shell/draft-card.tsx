@@ -72,30 +72,45 @@ export function DraftCardView({ draft }: { draft: DraftCard }) {
 }
 
 /**
- * Where the draft goes from here. Save to the company (`useSaveDraft`): without a remote it is
- * merged into the company and runs at once; with one, its change is opened as saved, and the
- * policy says whether Publish still waits. With a remote, Review opens the change for review
- * instead. Both disabled, saying why, until something is committed and the checks since the last
- * edit pass. Once saved: who saved it and when, Open the workflow, and Undo.
+ * How the draft `id` was saved, once its saves (`savesQuery`) and, with a remote that reviews
+ * changes, its change are `read`: the change, and of its save (the one of the commit `head`, or
+ * with none given the latest) what it was saved as (`savedOf`), whether it is under way (`doing`)
+ * and why it failed (`failed`); and Save's mutation (`useSaveDraft`).
+ */
+function useSaveOf(id: string, remote: boolean, head?: string) {
+  const saves = useQuery(savesQuery(id));
+  const change = useQuery({ ...changeQuery(id), enabled: remote });
+  const save = useSaveDraft();
+  const latest = saves.data?.find((s) => head === undefined || s.input.head === head);
+  return {
+    error: saves.error ?? change.error,
+    read: saves.data !== undefined && (!remote || change.data !== undefined),
+    change: change.data ?? undefined,
+    saved: savedOf(latest, change.data ?? undefined),
+    doing: latest !== undefined && !isEnded(latest.status),
+    failed: latest?.status === "failed" ? (latest.error ?? "") : undefined,
+    save,
+  };
+}
+
+/**
+ * Where the draft goes from here. Save to the company (`useSaveDraft`): without a remote that
+ * reviews changes it is merged into the company and runs at once; with one, its change is opened
+ * as saved, and the policy says whether Publish still waits. With such a remote, Review opens the
+ * change for review instead. Both disabled, saying why, until something is committed and the
+ * checks since the last edit pass. Once saved: who saved it and when, Open the workflow, and Undo.
  */
 function Save({ draft, id }: { draft: DraftCard; id: string }) {
   const { data: remote } = useSuspenseQuery(remoteQuery());
   const { data: config } = useSuspenseQuery(configQuery());
-  const saves = useQuery(savesQuery(id));
-  const change = useQuery({ ...changeQuery(id), enabled: remote });
-  const save = useSaveDraft();
-  const review = useOpenChange();
-  const error = saves.error ?? change.error;
-  if (error) return <>Could not read how it was saved: {error.message}</>;
-  // Still reading them; the change is null when the draft has none.
-  if (saves.data === undefined || (remote && change.data === undefined)) return null;
-  const company = companyOf(config.appName).name;
   // This card's save: the one of the commit it shows, or (a card from before cards carried it) the latest.
-  const latest = saves.data.find((s) => draft.head === undefined || s.input.head === draft.head);
-  const saved = savedOf(latest, change.data ?? undefined);
-  if (saved) return <Saved chat={id} saved={saved} company={company} />;
-  if (latest && !isEnded(latest.status)) return <>Saving…</>;
-  const open = change.data;
+  const { error, read, change: open, saved, doing, failed, save } = useSaveOf(id, remote, draft.head);
+  const review = useOpenChange();
+  if (error) return <>Could not read how it was saved: {error.message}</>;
+  if (!read) return null;
+  const company = companyOf(config.appName).name;
+  if (saved) return <Saved chat={id} saved={saved} company={company} remote={remote} />;
+  if (doing) return <>Saving…</>;
   const why =
     draft.files.length === 0
       ? "Nothing is committed on the draft yet."
@@ -122,7 +137,7 @@ function Save({ draft, id }: { draft: DraftCard; id: string }) {
   };
   return (
     <div className="flex flex-col gap-2">
-      {latest?.status === "failed" && <p className="text-destructive">Could not save it: {latest.error}</p>}
+      {failed !== undefined && <p className="text-destructive">Could not save it: {failed}</p>}
       <div className="flex flex-wrap items-center gap-2">
         {open && <ChangeLink id={id} change={open} />}
         {(!open || isEnded(open.status)) && (
@@ -147,21 +162,24 @@ interface SavedAs {
   edits: string[];
   /** Whether the worker started again on it: false when this instance does not reload, and it waits for a restart. */
   running: boolean;
+  /** Why `origin` did not take it, when the repository has one that does not review changes. */
+  notPushed?: string;
 }
 
 /**
- * What `save` (without a remote) or `change` (with one, once published) saved the draft as;
- * undefined while it is not saved.
+ * What `save` (without a remote that reviews changes) or `change` (with one, once published)
+ * saved the draft as; undefined while it is not saved.
  */
 function savedOf(save: SaveDetail | undefined, change: ChangeDetail | undefined): SavedAs | undefined {
   if (save?.output && "revision" in save.output) {
-    const { revision, running } = save.output;
+    const { revision, running, notPushed } = save.output;
     return {
       by: save.startedBy?.id ?? "someone",
       at: save.updatedAt ?? save.createdAt,
       sha: revision,
       edits: save.edits,
       running,
+      ...(notPushed !== undefined && { notPushed }),
     };
   }
   const sha = change?.state.merged?.sha;
@@ -176,8 +194,11 @@ function savedOf(save: SaveDetail | undefined, change: ChangeDetail | undefined)
   };
 }
 
-/** The chat `chat`'s saved draft: who saved it and when, Open the workflow it saved, and Undo. */
-function Saved({ chat, saved, company }: { chat: string; saved: SavedAs; company: string }) {
+/**
+ * The chat `chat`'s saved draft: who saved it and when, Open the workflow it saved, and Undo (its
+ * change opened when the `remote` reviews changes).
+ */
+function Saved({ chat, saved, company, remote }: { chat: string; saved: SavedAs; company: string; remote: boolean }) {
   const [workflow] = saved.edits;
   return (
     <div className="flex flex-col gap-2">
@@ -188,6 +209,9 @@ function Saved({ chat, saved, company }: { chat: string; saved: SavedAs; company
         Saved by {saved.by}, <When at={saved.at} />. It's part of {company}
         {saved.running ? "." : ", and runs once Sanoma starts again."}
       </p>
+      {saved.notPushed !== undefined && (
+        <p className="text-destructive">It's saved on this computer only: {saved.notPushed}</p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {workflow !== undefined && (
           <ButtonLink variant="outline" size="xs">
@@ -195,7 +219,7 @@ function Saved({ chat, saved, company }: { chat: string; saved: SavedAs; company
             <a href={`/workflows/${encodeURIComponent(workflow)}`}>Open the workflow</a>
           </ButtonLink>
         )}
-        <Undo chat={chat} sha={saved.sha} />
+        <Undo chat={chat} sha={saved.sha} remote={remote} />
       </div>
     </div>
   );
@@ -203,17 +227,15 @@ function Saved({ chat, saved, company }: { chat: string; saved: SavedAs; company
 
 /**
  * Undo of what the chat `chat` saved as `sha`: a draft of its own reverting it (`undoDraftOf`),
- * saved the same way; then where that undo is: under way, failed, done, or with a remote, its change.
+ * saved the same way; then where that undo is: under way, failed, done, or with a `remote` that
+ * reviews changes, its change.
  */
-function Undo({ chat, sha }: { chat: string; sha: string }) {
+function Undo({ chat, sha, remote }: { chat: string; sha: string; remote: boolean }) {
   const id = undoDraftOf(sha);
-  const { data: remote } = useSuspenseQuery(remoteQuery());
-  const { data: saves } = useQuery(savesQuery(id));
-  const { data: change } = useQuery({ ...changeQuery(id), enabled: remote });
-  const save = useSaveDraft();
-  const [latest] = saves ?? [];
+  const { error, read, change, saved: undone, doing, failed, save } = useSaveOf(id, remote);
+  if (error) return <>Could not read how it was undone: {error.message}</>;
+  if (!read) return null;
   if (change) return <ChangeLink id={id} change={change} />;
-  const undone = savedOf(latest, undefined);
   if (undone) {
     return (
       <span>
@@ -221,18 +243,13 @@ function Undo({ chat, sha }: { chat: string; sha: string }) {
       </span>
     );
   }
-  if (latest && !isEnded(latest.status)) return <>Undoing…</>;
+  if (doing) return <>Undoing…</>;
   return (
     <>
-      <Button
-        size="xs"
-        variant="ghost"
-        disabled={saves === undefined || save.isPending}
-        onClick={() => save.mutate({ id: chat, undo: sha })}
-      >
+      <Button size="xs" variant="ghost" disabled={save.isPending} onClick={() => save.mutate({ id: chat, undo: sha })}>
         Undo
       </Button>
-      {latest?.status === "failed" && <span className="text-destructive">Could not undo it: {latest.error}</span>}
+      {failed !== undefined && <span className="text-destructive">Could not undo it: {failed}</span>}
     </>
   );
 }

@@ -47,6 +47,7 @@ import {
   preview,
   readStartRun,
   recordHistory,
+  remoteOf,
   runDetail,
   saveDraft,
   saves,
@@ -129,10 +130,11 @@ export const getChange = createServerFn(READ)
   .validator(validate(z.object({ id: z.string().min(1) })))
   .handler(({ data, context }) => change(context.app, data.id));
 
-/** Whether the repository has a remote, where its changes are reviewed: the bar's Changes. */
-export const getRemote = createServerFn(READ).handler(
-  ({ context }) => context.app.snapshot.repository?.remote !== undefined,
-);
+/**
+ * Whether the repository's remote is one a connector reviews changes on (`remoteOf`), as Save and
+ * a form's Save decide: the bar's Changes, a draft's Review, a column change waiting for admin.
+ */
+export const getRemote = createServerFn(READ).handler(({ context }) => remoteOf(context.app) !== undefined);
 
 /** Sends the person's chat's draft for review: its change opened, its run's id. */
 export const openChangeFn = createServerFn(CHANGE)

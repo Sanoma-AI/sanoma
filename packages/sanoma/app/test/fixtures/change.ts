@@ -204,7 +204,7 @@ export async function pageOf(app: App, path: string, as = "ada"): Promise<{ stat
  * A chat's draft card as the server renders it, in a router and over a query cache holding the
  * company (Maple Street Studio), whether the repository has a remote, the draft's saves (none
  * when left out) and its change (null when it has none; unread when left out), and any other
- * draft's saves (`others`, by id), its HTML with React's text separators removed.
+ * draft's saves (`others`, by id; none has a change), its HTML with React's text separators removed.
  */
 export async function renderDraftCard(
   draft: DraftCard,
@@ -233,7 +233,10 @@ export async function renderDraftCard(
   queryClient.setQueryData(configQuery().queryKey, { appName: "maple-street-studio" });
   queryClient.setQueryData(remoteQuery().queryKey, remote);
   queryClient.setQueryData(savesQuery(draft.draft).queryKey, saves);
-  for (const [id, data] of Object.entries(others)) queryClient.setQueryData(savesQuery(id).queryKey, data);
+  for (const [id, data] of Object.entries(others)) {
+    queryClient.setQueryData(savesQuery(id).queryKey, data);
+    queryClient.setQueryData(changeQuery(id).queryKey, null);
+  }
   if (change !== undefined) queryClient.setQueryData(changeQuery(draft.draft).queryKey, change);
   const router = createRouter({
     routeTree: createRootRoute({

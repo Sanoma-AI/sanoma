@@ -107,6 +107,7 @@ function freshLoad(root: string): string {
       },
     });
   }
+  // Every load's modules stay in memory until the process ends: Node never unloads an ES module.
   const load = String(freshRoots.size + 1);
   freshRoots.set(load, root);
   return `?${FRESH}=${load}`;

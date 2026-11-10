@@ -116,6 +116,7 @@ interface CompanyApi {
     title: string;
     head?: string;
     undo?: string;
+    chat?: string;
     page?: string;
   }, unknown>;
   /** acme: the operations a person may call directly. */

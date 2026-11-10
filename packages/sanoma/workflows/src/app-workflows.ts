@@ -100,8 +100,9 @@ export type ConnectExistingInput = z.infer<typeof ConnectExistingInput>;
 /**
  * A chat's draft saved (`SanomaClient.saveDraft`): the draft `id`, the title its commit or change
  * takes, the draft's commit the person saw (`head`: refused once the draft has moved on), and the
- * change's page, which its pull request's status links. With `undo`, a saved commit undone
- * instead: reverted in its own draft (`undoDraftOf`, which `id` must be), then saved the same way.
+ * change's page, which its pull request's status links. With `undo`, a commit the person's
+ * `chat` saved undone instead: reverted in its own draft (`undoDraftOf`, which `id` must be), then
+ * saved the same way.
  */
 export const SaveDraftInput = z
   .object({
@@ -109,21 +110,29 @@ export const SaveDraftInput = z
     title: z.string().min(1),
     head: z.string().regex(COMMIT_ID).optional(),
     undo: z.string().regex(COMMIT_ID).optional(),
+    chat: z.string().regex(DRAFT_ID).optional(),
     page: z.string().url().optional(),
   })
   .refine(({ id, undo }) => undo === undefined || id === undoDraftOf(undo), {
     message: "An undo is saved from its own draft",
     path: ["id"],
+  })
+  .refine(({ undo, chat }) => (undo === undefined) === (chat === undefined), {
+    message: "An undo names the chat that saved the commit, and only an undo does",
+    path: ["chat"],
   });
 export type SaveDraftInput = z.infer<typeof SaveDraftInput>;
 
 /**
- * What a save lands as: the change opened (its run id), when the repository has a remote; else the
- * commit on `main`, the files it changed (relative to the root), and whether the instance runs it
- * now (`running`: its worker started again on it; false where nothing can, until the instance
- * starts again).
+ * What a save lands as: the change opened (its run id), when the repository's remote is one a
+ * connector reviews changes on; else the commit on `main`, the files it changed (relative to the
+ * root), whether the instance runs it now (`running`: its worker started again on it; false where
+ * nothing can, until the instance starts again), and, when the repository has an `origin` that did
+ * not take `main`, why (`notPushed`): the save stands here.
  */
-export type SaveDraftOutput = { change: string } | { revision: string; files: string[]; running: boolean };
+export type SaveDraftOutput =
+  | { change: string }
+  | { revision: string; files: string[]; running: boolean; notPushed?: string };
 
 /** A data file written, relative to the root, and its commit, when the worker has a repository. */
 export interface Written {

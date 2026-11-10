@@ -689,8 +689,9 @@ export const hostEnforcementQuery = () =>
   queryOptions({ queryKey: ["host-enforcement"], queryFn: () => getHostEnforcement(), staleTime: 5 * 60_000 });
 
 /**
- * Whether the repository has a remote: the bar's Changes. Read once per page load: it rarely
- * changes (going live adds one), and the root loader waits for it on every navigation.
+ * Whether the repository's remote is one changes are reviewed on (`getRemote`): the bar's Changes,
+ * a draft's Review. Read once per page load: it rarely changes (going live adds one), and the root
+ * loader waits for it on every navigation.
  */
 export const remoteQuery = () =>
   queryOptions({ queryKey: ["remote"], queryFn: () => getRemote(), staleTime: Number.POSITIVE_INFINITY });

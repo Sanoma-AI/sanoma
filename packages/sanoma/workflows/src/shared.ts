@@ -301,7 +301,7 @@ export const CHANGE_WORKFLOW = "change";
 export const DRAFT_ID = /^[\w-]{1,64}$/;
 
 /** The draft a run id of `prefix` is of: `<prefix>:<id>` (its first run) or `<prefix>:<id>~<n>` (a later one); undefined for any other. */
-const draftRunOf = (prefix: string) => {
+export const draftRunOf = (prefix: string) => {
   const run = new RegExp(`^${prefix}:(${DRAFT_ID.source.slice(1, -1)})(?:~\\d+)?$`);
   return (runId: string): string | undefined => run.exec(runId)?.[1];
 };
@@ -314,9 +314,6 @@ export const changeIdOf = draftRunOf("change");
  * merged into `main` and run at once; with one, its change opened, which the policy decides.
  */
 export const SAVE_DRAFT_WORKFLOW = "save-draft";
-
-/** The draft a save's run is of: `save:<id>` or `save:<id>~<n>`; undefined for any other run id. */
-export const saveIdOf = draftRunOf("save");
 
 /** A commit's full id, as git names it (SHA-1, or SHA-256). */
 export const COMMIT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;

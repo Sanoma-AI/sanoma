@@ -109,6 +109,7 @@ import {
   chatRunPrefix,
   DATA_VENDOR,
   DRAFT_ID,
+  draftRunOf,
   ENDED_STATUSES,
   errorMessage,
   FOLLOW_WORKFLOW,
@@ -121,7 +122,6 @@ import {
   refusalOf,
   type RunStatus,
   SAVE_DRAFT_WORKFLOW,
-  saveIdOf,
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
@@ -1044,10 +1044,20 @@ export class SanomaClient {
     const rows = await this.draftRuns(SAVE_DRAFT_WORKFLOW, id, { load: true });
     return Promise.all(
       rows.map(async (row) => ({
-        ...(await this.summarize(row)),
+        // A save never asks an approval.
+        ...(await this.summarize(row, [])),
         input: (row.input as [RunArgs])[0].input as SaveDraftInput,
         ...(row.status === "SUCCESS" && { output: row.output as SaveDraftOutput }),
       })),
+    );
+  }
+
+  /** Whether the draft `id` was saved as the commit `sha`: by one of its saves (`saves`), or its change's merge (`change`). */
+  async savedAs(id: string, sha: string): Promise<boolean> {
+    const [change, saves] = await Promise.all([this.change(id), this.saves(id)]);
+    return (
+      change?.state.merged?.sha === sha ||
+      saves.some((save) => save.output && "revision" in save.output && save.output.revision === sha)
     );
   }
 
@@ -1818,19 +1828,23 @@ export class SanomaClient {
     }
   }
 
-  private async summarize(r: {
-    workflowID: string;
-    workflowName: string;
-    status: string;
-    createdAt: number;
-    updatedAt?: number;
-    authenticatedUser?: string;
-    authenticatedRoles?: string[];
-    error?: unknown;
-    attributes?: Record<string, unknown>;
-    scheduleName?: string;
-  }): Promise<RunSummary> {
-    const approvals = await this.approvals(r.workflowID);
+  /** The run `r` as listed, with its approvals: read from the run unless given. */
+  private async summarize(
+    r: {
+      workflowID: string;
+      workflowName: string;
+      status: string;
+      createdAt: number;
+      updatedAt?: number;
+      authenticatedUser?: string;
+      authenticatedRoles?: string[];
+      error?: unknown;
+      attributes?: Record<string, unknown>;
+      scheduleName?: string;
+    },
+    approvals?: ApprovalState[],
+  ): Promise<RunSummary> {
+    approvals ??= await this.approvals(r.workflowID);
     const groups = r.authenticatedRoles ?? [];
     const onBehalfOf = r.attributes?.onBehalfOf;
     return {
@@ -1905,12 +1919,27 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
     },
   );
 
+/** A built-in run on a draft (`startOnDraft`): its run ids' prefix (`<prefix>:<draft id>`), and the draft a run id is of. */
+const draftRun = (prefix: string) => ({ prefix, idOf: draftRunOf(prefix) });
+
+/** The built-ins run on a draft, by name (`draftRun`). */
+const DRAFT_RUNS = {
+  [CHANGE_WORKFLOW]: draftRun("change"),
+  [SAVE_DRAFT_WORKFLOW]: draftRun("save"),
+} as const;
+
+/** Whether a start of `workflow` is `startOnDraft`'s: under a run id of the draft its input names. */
+function admitsDraftRun(workflow: keyof typeof DRAFT_RUNS) {
+  return ({ id }: { id: string }, _by: Principal, runId: string | undefined) =>
+    runId !== undefined && DRAFT_RUNS[workflow].idOf(runId) === id;
+}
+
 /**
  * The built-ins only one of the client's methods starts, by name: that method (`by`), and whether
  * a start is its own (`admits`), which `start` asks once the policy has (a visitor is denied
- * first), refusing any other: a change under the id `openChange` names; a follow as `host-check`
- * under its event's id; a chat turn under its chat's and message's id, after a turn of the same
- * chat, as the chat's person.
+ * first), refusing any other: a change or a save under the id `openChange` or `saveDraft` names; a
+ * follow as `host-check` under its event's id; a chat turn under its chat's and message's id, after
+ * a turn of the same chat, as the chat's person.
  */
 const OWN_STARTS: Record<
   string,
@@ -1924,14 +1953,8 @@ const OWN_STARTS: Record<
     ): boolean | Promise<boolean>;
   }
 > = {
-  [CHANGE_WORKFLOW]: {
-    by: "openChange",
-    admits: (input: ChangeInput, _by, runId) => runId !== undefined && changeIdOf(runId) === input.id,
-  },
-  [SAVE_DRAFT_WORKFLOW]: {
-    by: "saveDraft",
-    admits: (input: SaveDraftInput, _by, runId) => runId !== undefined && saveIdOf(runId) === input.id,
-  },
+  [CHANGE_WORKFLOW]: { by: "openChange", admits: admitsDraftRun(CHANGE_WORKFLOW) },
+  [SAVE_DRAFT_WORKFLOW]: { by: "saveDraft", admits: admitsDraftRun(SAVE_DRAFT_WORKFLOW) },
   [FOLLOW_WORKFLOW]: {
     by: "follow",
     admits: (event: RemoteEvent, by, runId) => runId === followRunId(event) && by.id === HOST_CHECK_AGENT,
@@ -1957,12 +1980,6 @@ const OWN_STARTS: Record<
  */
 const followRunId = (parsed: RemoteEvent) =>
   `follow:${createHash("sha256").update(JSON.stringify(parsed)).digest("hex")}`;
-
-/** The built-ins run on a draft, by name: their run ids' prefix (`<prefix>:<draft id>`), and the draft a run id is of. */
-const DRAFT_RUNS = {
-  [CHANGE_WORKFLOW]: { prefix: "change", idOf: changeIdOf },
-  [SAVE_DRAFT_WORKFLOW]: { prefix: "save", idOf: saveIdOf },
-} as const;
 
 /** Why a change event withdraws the merge's pending approval. */
 const WITHDRAWAL: Record<ChangeEvent["kind"], string> = {

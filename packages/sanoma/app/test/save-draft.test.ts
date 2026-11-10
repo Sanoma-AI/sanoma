@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { startTestWorker } from "sanoma/testing";
 import { errorCode, memoryLedger, resolveConfig, SanomaClient, type SanomaConfig, type Worker } from "sanoma/workflows";
-import { undoDraftOf } from "sanoma/workflows/shared";
+import { SAVE_DRAFT_WORKFLOW, undoDraftOf } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { localGitSource } from "../../src/source.ts";
 import { gitIdentity } from "../../test/git.ts";
@@ -15,10 +15,10 @@ import { appSnapshot } from "../src/snapshot-build.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { PEOPLE } from "./fixtures/change.ts";
 
-// Saving a chat's draft on a repository with no remote, end to end: the app's `saveDraft` starts
-// the built-in, whose step (`steps/writes.ts`) merges the draft into a real checkout
-// (`localGitSource`), closes it, and asks the worker to reload; Undo saves a draft reverting it.
-// Needs Postgres (`pnpm db:up`).
+// Saving a chat's draft on a repository with no remote a connector reviews changes on, end to end:
+// the app's `saveDraft` starts the built-in, whose step (`steps/writes.ts`) merges the draft into a
+// real checkout (`localGitSource`), closes it, pushes main to an origin when there is one, and asks
+// the worker to reload; Undo saves a draft reverting it. Needs Postgres (`pnpm db:up`).
 
 const databaseUrl = freshDatabase("save_draft");
 const ORIGIN = "http://127.0.0.1:3000";
@@ -28,6 +28,7 @@ let dir = "";
 let gitConfig = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 let source: ReturnType<typeof localGitSource>;
+let config: SanomaConfig;
 let worker: Worker | undefined;
 let client: SanomaClient;
 let app: Pick<AppContext, "client" | "resolved" | "snapshot">;
@@ -42,7 +43,7 @@ beforeAll(async () => {
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
-  const config: SanomaConfig = { workflows: [], connectors: [], root: dir, ledger: memoryLedger(), databaseUrl };
+  config = { workflows: [], connectors: [], root: dir, ledger: memoryLedger(), databaseUrl };
   source = localGitSource(dir, { databaseUrl });
   worker = await startTestWorker(config, { databaseUrl, source, app: appSteps, reload: () => void reloads++ });
   client = await SanomaClient.connect(config);
@@ -71,8 +72,17 @@ async function drafted(id: string, title: string, files: Record<string, string>,
 /** The save run `runId`'s output, once it ends. */
 const outcome = async (runId: string) => client.result(runId).catch((err: unknown) => err);
 
+/** Starts the undo of `sha` by the chat `chat` as `startedBy` directly, past the app's own check; `n` (`~2`) runs it again. */
+const undo = (sha: string, chat: string, startedBy: string, n = "") =>
+  client.start(
+    SAVE_DRAFT_WORKFLOW,
+    { id: undoDraftOf(sha), title: "Undo", undo: sha, chat },
+    { startedBy, runId: `save:${undoDraftOf(sha)}${n}` },
+  );
+
 describe("saving a chat's draft without a remote", () => {
   let revision = "";
+  let welcomed = "";
 
   it("merges it into main as one commit titled as the chat, closes the draft, and reloads the worker", async () => {
     const head = await drafted("welcome", "Welcome a new client", { "workflows/welcome.ts": WELCOME });
@@ -87,6 +97,26 @@ describe("saving a chat's draft without a remote", () => {
     expect(reloads).toBe(1);
     const [listed] = await saves(app as AppContext, "welcome");
     expect(listed).toMatchObject({ runId, status: "finished", startedBy: { id: "alice" }, input: { head }, edits: [] });
+    welcomed = head;
+  });
+
+  it("answers a step run again after its merge (a worker cut short) with that commit, opening no draft", async () => {
+    let asked = 0;
+    const step = {
+      client,
+      source,
+      serially: <T>(write: () => Promise<T>) => write(),
+      config,
+      resolved: app.resolved,
+      by: { id: "alice" },
+      runId: "save:welcome",
+      reload: () => void asked++,
+    };
+    const again = await appSteps.saveDraft(step, { id: "welcome", title: "Welcome a new client", head: welcomed });
+    expect(again).toEqual({ revision, files: ["workflows/welcome.ts"], running: true });
+    expect(asked).toBe(1);
+    expect(await source.drafts!()).not.toContain("welcome");
+    expect(git("rev-parse", "main")).toBe(revision);
   });
 
   it("refuses another person's chat, a draft moved on since its card, and a change to the people by anyone but admin", async () => {
@@ -130,5 +160,45 @@ describe("saving a chat's draft without a remote", () => {
     const { runId } = await saveDraft(app, { id: "alice" }, { id: "greet", undo: greeted }, ORIGIN);
     expect(await outcome(runId)).toMatchObject({ message: expect.stringContaining("cannot be undone here") });
     expect(await source.drafts!()).not.toContain(undoDraftOf(greeted));
+  });
+
+  it("undoes, however the run is started, only a commit a chat of the starter's saved", async () => {
+    const before = git("rev-parse", "main");
+    const first = git("rev-list", "--max-parents=0", "main");
+    expect(await outcome(await undo(first, "welcome", "alice"))).toMatchObject({
+      message: `${first.slice(0, 7)} is not a commit your chat welcome saved`,
+    });
+    expect(await outcome(await undo(revision, "welcome", "ada", "~9"))).toMatchObject({
+      message: "No draft of yours is welcome",
+    });
+    expect(git("rev-parse", "main")).toBe(before);
+    expect(await source.drafts!()).not.toContain(undoDraftOf(first));
+  });
+
+  it("pushes main to an origin no connector serves, and says when origin did not take it, the save standing", async () => {
+    const remote = `${dir}-origin.git`;
+    execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", remote]);
+    git("remote", "add", "origin", remote);
+    try {
+      const head = await drafted("pushed", "Pushed", { "notes/pushed.md": "pushed\n" });
+      const { runId } = await saveDraft(app, { id: "alice" }, { id: "pushed", head }, ORIGIN);
+      const pushed = (await client.result(runId)) as { revision: string };
+      expect(pushed).toEqual({ revision: git("rev-parse", "main"), files: ["notes/pushed.md"], running: true });
+      expect(execFileSync("git", ["rev-parse", "main"], { cwd: remote, encoding: "utf8" }).trim()).toBe(
+        pushed.revision,
+      );
+      git("remote", "set-url", "origin", `${dir}-nowhere.git`);
+      const next = await drafted("unpushed", "Unpushed", { "notes/unpushed.md": "unpushed\n" });
+      const { runId: refused } = await saveDraft(app, { id: "alice" }, { id: "unpushed", head: next }, ORIGIN);
+      expect(await client.result(refused)).toEqual({
+        revision: git("rev-parse", "main"),
+        files: ["notes/unpushed.md"],
+        running: true,
+        notPushed: expect.stringMatching(/^git push to origin failed: /),
+      });
+    } finally {
+      git("remote", "remove", "origin");
+      rmSync(remote, { recursive: true, force: true });
+    }
   });
 });
