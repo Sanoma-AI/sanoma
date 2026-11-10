@@ -38,7 +38,15 @@ import {
   updated,
   writeCompanies,
 } from "./companies.ts";
-import { addressProblem, cloneSession, cloneTarget, createSession, defaultParent, newCompanyTarget } from "./create.ts";
+import {
+  addressProblem,
+  cloneSession,
+  cloneTarget,
+  createSession,
+  defaultParent,
+  type NewCompany,
+  newCompanyTarget,
+} from "./create.ts";
 import {
   GIT_FOR_WINDOWS_URL,
   gitEnv,
@@ -87,17 +95,16 @@ export interface StartState {
   warnings: string[];
   /** One line the start screen shows: why what was asked did not happen (`problem`), or what did. */
   notice?: { text: string; problem: boolean };
-  /** A form the start screen shows: a new company's name and place, a repository's address to clone, or who commits. */
+  /** A form the start screen shows: a new company's name, its founder and place, a repository's address to clone, or who commits. */
   ask?:
     | NewCompanyForm
     | { kind: "clone"; url?: string; problem?: string }
     | ({ kind: "identity"; problem?: string } & Identity);
 }
 
-/** The new company form: its name so far, the folder it goes under and that as a person reads it. */
-interface NewCompanyForm {
+/** The new company form: what is typed so far (`NewCompany`), the folder it goes under and that as a person reads it. */
+interface NewCompanyForm extends NewCompany {
   kind: "new";
-  name: string;
   parent: string;
   place: string;
   warning?: string;
@@ -175,9 +182,9 @@ let notice: StartState["notice"];
 const archWarning = () => archWarnings(app.runningUnderARM64Translation);
 
 /** Whether the company runs or is starting now. */
-const isLive = (path: string) => running.has(path) || opening.has(path);
+const runsNow = (path: string) => running.has(path) || opening.has(path);
 /** The companies running or starting now, by real path. */
-const live = () => new Set([...running.keys(), ...opening.keys()]);
+const runningNow = () => new Set([...running.keys(), ...opening.keys()]);
 
 let startTimer: NodeJS.Timeout | undefined;
 /** Sends the start screen what it shows (soon, once for a burst of changes). */
@@ -190,7 +197,10 @@ function sendStart() {
 }
 
 const startState = (): StartState => ({
-  recent: recentOf(readCompanies(companiesFile()), live()).map((c) => ({ ...c, place: withTilde(c.path, homedir()) })),
+  recent: recentOf(readCompanies(companiesFile()), runningNow()).map((c) => ({
+    ...c,
+    place: withTilde(c.path, homedir()),
+  })),
   warnings: archWarning(),
   notice,
   ask,
@@ -519,6 +529,8 @@ interface Begin {
   how: (options: SessionOptions) => Session;
   /** The form that started it has said what `syncedFolderWarning` says. */
   warned?: boolean;
+  /** The name typed for a new company, until its `sanoma.config.ts` gives it one (`companyName`). */
+  name?: string;
 }
 const OPEN: Begin = { kind: "open", how: startSession };
 
@@ -538,7 +550,7 @@ async function begin(path: string, beginAs?: Begin) {
   // Stopped a moment ago (Company → Stop takes it out of the window at once): its session is ending.
   const ending = running.get(path);
   if (ending?.stopping) await ending.session.ended;
-  if (isLive(path) || quitting) return;
+  if (runsNow(path) || quitting) return;
   if (beginAs) beginnings.set(path, beginAs);
   const added = !inWindow.has(path);
   const views = viewsFor(path);
@@ -593,8 +605,8 @@ function reopensAfterEnd(path: string): boolean {
   return kept.some((c) => c.path === path && c.open);
 }
 
-/** The company's port (`portFor`), remembered in companies.json with the company, marked open. */
-async function claimPort(path: string) {
+/** The company's port (`portFor`), remembered in companies.json with the company, marked open, under `name` when given. */
+async function claimPort(path: string, name = companyName(path)) {
   const { port, moved } = await portFor(readCompanies(companiesFile()), path);
   // Read again: another company may have been saved meanwhile.
   const companies = readCompanies(companiesFile());
@@ -602,7 +614,7 @@ async function claimPort(path: string) {
   const company: Company = {
     ...before,
     path,
-    name: companyName(path),
+    name,
     port,
     // Opened now, unless it was open already (a launch reopening it, Restart, Start again, Get
     // Updates): the companies reopen in the order they were opened (`toReopen`, oldest first).
@@ -614,8 +626,8 @@ async function claimPort(path: string) {
   return { company, moved };
 }
 
-async function start(path: string, views: CompanyViews, { how, warned }: Begin) {
-  const claimed = claiming.then(() => claimPort(path));
+async function start(path: string, views: CompanyViews, { how, warned, name }: Begin) {
+  const claimed = claiming.then(() => claimPort(path, name));
   claiming = claimed.catch(() => {});
   const { company, moved } = await claimed;
   const { port } = company;
@@ -811,13 +823,39 @@ function askFor(form: NonNullable<StartState["ask"]>): Promise<unknown> {
 const isIdentity = (value: unknown): value is Identity =>
   typeof (value as Identity)?.name === "string" && typeof (value as Identity)?.email === "string";
 
-const isNewCompanyAnswer = (value: unknown): value is { name: string; parent: string } =>
-  typeof (value as NewCompanyForm)?.name === "string" && typeof (value as NewCompanyForm)?.parent === "string";
+const isNewCompanyAnswer = (value: unknown): value is NewCompany & { parent: string } =>
+  ["name", "you", "email", "parent"].every((key) => typeof (value as Record<string, unknown>)?.[key] === "string");
+
+/**
+ * Who git commits as on this computer, to fill the new company form: no one while macOS lacks the
+ * command line tools, whose stub git would offer their installer before the form shows.
+ */
+const knownIdentity = async (): Promise<Identity> =>
+  (await needsCommandLineTools()) ? { name: "", email: "" } : identityOf(homedir(), gitEnv(process.env));
+
+/**
+ * Sets what git's identity lacks (`user.name`, `user.email`) globally from `typed`, as a new
+ * company's first commit, and the app's later ones, need both; what git has stays. Why it could
+ * not, in one line.
+ */
+async function saveIdentity(typed: Identity): Promise<string | undefined> {
+  const env = gitEnv(process.env);
+  const known = await identityOf(homedir(), env);
+  if (known.name && known.email) return undefined;
+  return setIdentityProblem({ name: known.name || typed.name, email: known.email || typed.email }, env);
+}
+
+/** Sets git's global `user.name` and `user.email` to `who`; why it could not, in one line. */
+const setIdentityProblem = (who: Identity, env: NodeJS.ProcessEnv): Promise<string | undefined> =>
+  setIdentity(who, env).then(
+    () => undefined,
+    (err: unknown) => `git could not save your name and email: ${messageOf(err)}`,
+  );
 
 /**
  * Whether git has someone to commit as from `cwd`: `user.name` and `user.email`, asked for once on
- * the start screen when either is missing and set globally (the form says so), as a new company's
- * first commit, and the app's later ones, need them.
+ * the start screen when either is missing and set globally (the form says so), as a copied
+ * company's commits, the app's, need them. A new company's form asks for them itself.
  */
 async function identityReady(cwd: string): Promise<boolean> {
   const env = gitEnv(process.env);
@@ -828,12 +866,7 @@ async function identityReady(cwd: string): Promise<boolean> {
     const value = await askFor({ kind: "identity", ...typed, problem });
     if (!isIdentity(value)) return false;
     typed = value;
-    problem =
-      identityProblem(value) ??
-      (await setIdentity(value, env).then(
-        () => undefined,
-        (err: unknown) => `git could not save it: ${messageOf(err)}`,
-      ));
+    problem = identityProblem(value) ?? (await setIdentityProblem(value, env));
     if (!problem) return true;
   }
 }
@@ -880,12 +913,12 @@ async function untilThere(
   return true;
 }
 
-/** The new company form for a company called `name` under `parent`, where a synced folder warns before anything starts. */
-const newCompanyForm = (name: string, parent: string, problem?: string): NewCompanyForm => {
+/** The new company form for `typed` under `parent`, where a synced folder warns before anything starts. */
+const newCompanyForm = (typed: NewCompany, parent: string, problem?: string): NewCompanyForm => {
   const warning = syncedFolderWarning(parent, homedir());
   return {
     kind: "new",
-    name,
+    ...typed,
     parent,
     place: `${withTilde(parent, homedir())}${sep}`,
     ...(warning && { warning }),
@@ -903,29 +936,37 @@ async function changePlace() {
     properties: ["openDirectory", "createDirectory"],
   });
   if (canceled || !filePaths[0] || ask?.kind !== "new") return;
-  ask = newCompanyForm(ask.name, filePaths[0]);
+  ask = newCompanyForm({ name: ask.name, you: ask.you, email: ask.email }, filePaths[0]);
   sendStart();
 }
 
 /**
- * File → New Company…: its name and where it goes (the start screen asks), then the shell makes
- * its folder and runs the launcher's init there. Nothing is made until every question has its answer.
+ * File → New Company…: its name, who starts it (filled from git's identity) and where it goes (the
+ * start screen asks, once), then the shell makes its folder and runs the launcher's init there with
+ * those answers. Nothing is made until every question has its answer.
  */
 async function newCompany(): Promise<void> {
   notice = undefined;
-  let name = "";
+  const { name: you, email } = await knownIdentity();
+  let typed: NewCompany = { name: "", you, email };
   let parent = parentFolder();
   let problem: string | undefined;
   for (;;) {
-    const value = await askFor(newCompanyForm(name, parent, problem));
+    const value = await askFor(newCompanyForm(typed, parent, problem));
     if (!isNewCompanyAnswer(value)) return;
-    ({ name, parent } = value);
-    const target = newCompanyTarget(name, parent);
+    typed = { name: value.name, you: value.you, email: value.email };
+    parent = value.parent;
+    const target = newCompanyTarget(typed.name, parent);
     if ("problem" in target) {
       problem = target.problem;
       continue;
     }
-    if (!(await gitReady()) || !(await identityReady(homedir()))) return;
+    const founder = { name: typed.you, email: typed.email };
+    problem = identityProblem(founder);
+    if (problem) continue;
+    if (!(await gitReady())) return;
+    problem = await saveIdentity(founder);
+    if (problem) continue;
     try {
       mkdirSync(target.dir, { recursive: true });
     } catch (err) {
@@ -937,7 +978,8 @@ async function newCompany(): Promise<void> {
     const dir = realPathOf(target.dir);
     // Asked for again while it starts, its folder still empty: it is there already.
     if (inWindow.has(dir)) return show(dir);
-    return begin(dir, { kind: "new", how: createSession, warned });
+    const answers = { name: typed.name.trim(), you: typed.you.trim(), email: typed.email.trim() };
+    return begin(dir, { kind: "new", how: createSession(answers), warned, name: answers.name });
   }
 }
 

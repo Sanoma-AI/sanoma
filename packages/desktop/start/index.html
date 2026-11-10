@@ -53,11 +53,19 @@
         <p class="muted small">Closing the window leaves your companies running; Quit stops them.</p>
       </div>
 
-      <form class="stack" id="new-form" hidden>
+      <form class="stack" id="new-form" novalidate hidden>
         <div class="card fields">
           <div class="field">
             <label for="new-name">What is it called?</label>
             <input id="new-name" type="text" spellcheck="false" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="new-you">Your name</label>
+            <input id="new-you" type="text" autocomplete="name" />
+          </div>
+          <div class="field">
+            <label for="new-email">Your email</label>
+            <input id="new-email" type="email" autocomplete="email" />
           </div>
           <div class="field">
             <span class="label">Where it goes</span>
@@ -68,7 +76,10 @@
           </div>
           <div class="banner" id="new-warning" role="status" hidden></div>
           <p class="problem" id="new-problem" role="alert" hidden></p>
-          <p class="muted small">Setting up takes about a minute, the first time.</p>
+          <p class="muted small">
+            You are its first person and its admin, and your changes are signed with your name and email. Setting up
+            takes about a minute, the first time.
+          </p>
         </div>
         <div class="actions">
           <button class="primary" type="submit">Start the company</button>
@@ -93,7 +104,7 @@
         </div>
       </form>
 
-      <form class="stack" id="identity-form" hidden>
+      <form class="stack" id="identity-form" novalidate hidden>
         <div class="card fields">
           <div class="field">
             <label for="identity-name">Name</label>
