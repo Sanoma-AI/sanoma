@@ -134,20 +134,35 @@ jobs:
       contents: read
     # Actions pinned to commits, as in the publish job: this job pushes to another repository's main.
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Without the token the job mirrors nothing: the repository changes only once someone sets it.
+      - name: Whether the template's token is set
+        id: token
+        env:
+          TOKEN: ${{ secrets.COMPANY_TEMPLATE_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "set=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Company template not mirrored::No COMPANY_TEMPLATE_TOKEN secret is set, so Sanoma-AI/company-template keeps its files."
+          fi
+      - if: steps.token.outputs.set == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - if: steps.token.outputs.set == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Sanoma-AI/company-template
           ref: main
           token: ${{ secrets.COMPANY_TEMPLATE_TOKEN }}
           path: .company-template
       # Node and pnpm for the lockfile. No cache, as in the publish job.
-      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - if: steps.token.outputs.set == 'true'
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           cache: false
-      - name: Mirror the template
+      - if: steps.token.outputs.set == 'true'
+        name: Mirror the template
         run: |
           version=$(jq -r .version packages/sanoma/package.json)
           pm=$(jq -r .packageManager package.json)

@@ -188,13 +188,13 @@ export function declareName(text: string, name: string): string {
   return text.replace(CONFIG_OPENING, (opening) => `${opening}  name: ${JSON.stringify(name)},\n`);
 }
 
-/** The template's slug in `resources/sanoma/infra.ts`, which its Cloud names and address are made of. */
-const TEMPLATE_SLUG = /^const slug = "company";$/m;
+/** The template's slug in `resources/sanoma/infra.ts`: the Cloud names and its address, literals the app's forms can edit. */
+const TEMPLATE_SLUG = /"company(\.sanoma\.work)?"/g;
 
-/** The infra file with the company's slug for the template's. */
+/** The infra file with the company's slug for the template's, in the names and the address. */
 export function declareSlug(text: string, slug: string): string {
-  if (!TEMPLATE_SLUG.test(text)) throw new Error(`the template's ${INFRA} has no \`const slug = "company";\``);
-  return text.replace(TEMPLATE_SLUG, () => `const slug = ${JSON.stringify(slug)};`);
+  if (text.search(TEMPLATE_SLUG) < 0) throw new Error(`the template's ${INFRA} names no "company"`);
+  return text.replaceAll(TEMPLATE_SLUG, (_, address: string | undefined) => JSON.stringify(slug + (address ?? "")));
 }
 
 /**

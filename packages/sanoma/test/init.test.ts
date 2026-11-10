@@ -107,7 +107,7 @@ describe("startCompany", () => {
     );
     expect(templatePeopleIds()).toEqual(["founder", "admin"]);
     // Sanoma Cloud declared, by the directory's name for want of the company's.
-    expect(read("resources/sanoma/infra.ts")).toContain('\nconst slug = "acme-ops";\n');
+    expect(read("resources/sanoma/infra.ts")).toContain('hostname: "acme-ops.sanoma.work"');
 
     expect(git("log", "--format=%s|%an")).toBe(`${FIRST_COMMIT}|Test User`);
     expect(git("branch", "--show-current")).toBe("main");
@@ -158,7 +158,7 @@ describe("startCompany", () => {
 
     expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual(STAGES);
     expect(read("sanoma.config.ts")).toContain('export default defineConfig({\n  name: "Maple Street Studio",\n');
-    expect(read("resources/sanoma/infra.ts")).toContain('\nconst slug = "maple-street-studio";\n');
+    expect(read("resources/sanoma/infra.ts")).toContain('hostname: "maple-street-studio.sanoma.work"');
     // The package stays named after the directory.
     expect(JSON.parse(read("package.json")).name).toBe("maple");
     expect(git("status", "--porcelain")).toBe("");
@@ -200,10 +200,11 @@ describe("declareName, declareSlug and slugOf", () => {
   });
 
   it("writes the company's slug for the template's, and refuses a file without it", () => {
-    const text =
-      'const slug = "company";\nexport const host = cloud.host({ name: slug, hostname: `${slug}.sanoma.work` });\n';
-    expect(declareSlug(text, "maple-$&")).toBe(text.replace('"company"', () => '"maple-$&"'));
-    expect(() => declareSlug("export {};\n", "maple")).toThrow('has no `const slug = "company";`');
+    const text = 'export const host = cloud.host({ name: "company", hostname: "company.sanoma.work" });\n';
+    expect(declareSlug(text, "maple-$&")).toBe(
+      'export const host = cloud.host({ name: "maple-$&", hostname: "maple-$&.sanoma.work" });\n',
+    );
+    expect(() => declareSlug("export {};\n", "maple")).toThrow('names no "company"');
   });
 
   it("makes a slug the Cloud takes of any name, else of the directory's", () => {
@@ -355,7 +356,7 @@ describe("sanoma in an empty directory", () => {
     expect(read("resources/people.ts")).toMatch(
       /^export const founder = sanoma\.person\(\{ id: "[^"]+", .*name: "Dana Reyes", email: "dana@maple\.test" \}\);$/m,
     );
-    expect(read("resources/sanoma/infra.ts")).toContain('\nconst slug = "maple-street-studio";\n');
+    expect(read("resources/sanoma/infra.ts")).toContain('hostname: "maple-street-studio.sanoma.work"');
   });
 
   it("sanoma init refuses a directory with files in it, and an email that is no address before writing anything", async () => {
