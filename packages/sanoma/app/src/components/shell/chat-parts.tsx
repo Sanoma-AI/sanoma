@@ -22,8 +22,8 @@ import { DraftCardView } from "./draft-card.tsx";
 
 // What the chat draws of the agent's reply, per app.md's Chat: plain text at the reply size, the
 // steps as a quiet checked list, a held lookup as the Inbox's approval card, and the draft as a
-// small card, and a person's own agent's sign-in as its card. Any engine's reply: a tool part of
-// another engine is a step by its title or name.
+// small card, a person's own agent's sign-in as its card, and the last reply's suggested asks as
+// buttons. Any engine's reply: a tool part of another engine is a step by its title or name.
 
 type Part = ChatMessage["parts"][number];
 type ToolPart = Extract<Part, { toolCallId: string }>;
@@ -275,6 +275,27 @@ function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; 
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** A reply's suggested asks (its `data-suggestions` part), each a button that sends it (`onAsk`); nothing when it suggests none. */
+export function Suggested({ message, onAsk }: { message: ChatMessage; onAsk: (ask: string) => void }) {
+  const asks = message.parts.findLast((part) => part.type === "data-suggestions")?.data.asks ?? [];
+  if (!asks.length) return null;
+  return (
+    <ul aria-label="Suggested asks" className="flex flex-col gap-2">
+      {asks.map((ask) => (
+        <li key={ask}>
+          <Button
+            variant="outline"
+            className="h-auto w-full justify-start py-2 text-left whitespace-normal"
+            onClick={() => onAsk(ask)}
+          >
+            {ask}
+          </Button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

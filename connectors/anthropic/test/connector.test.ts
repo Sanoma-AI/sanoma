@@ -20,3 +20,27 @@ it("is a connector with no operations, a driver declaring its key and a model ha
   expect(resolved.driversByVendor.get("anthropic")?.env?.shape).toHaveProperty("ANTHROPIC_API_KEY");
   expect(resolved.models.get("anthropic")).toBe(anthropicModel);
 });
+
+it("gives the chat Claude Code, on a person's own plan and on this connector's key", () => {
+  const { agents } = describeConfig(company);
+  expect(agents).toEqual([
+    {
+      id: "claude-code",
+      vendor: "anthropic",
+      title: "Claude Code",
+      mark: { src: expect.stringMatching(/^data:image\/svg\+xml/) },
+      own: true,
+      onKey: { model: "anthropic" },
+    },
+  ]);
+  const claudeCode = resolveConfig(company).agents.get("claude-code")!;
+  expect(claudeCode.own).toMatchObject({ bin: "claude-agent-acp", signIn: { method: "claude-ai-login" } });
+  expect(claudeCode.onKey).toMatchObject({ model: "anthropic", qualified: false, bridge: true });
+});
+
+it("loads Claude Code's adapter only when a turn on the key asks for it", async () => {
+  const harness = await resolveConfig(company)
+    .agents.get("claude-code")!
+    .onKey!.harness({ ANTHROPIC_API_KEY: "x" }, "/");
+  expect(harness.specificationVersion).toBe("harness-v1");
+});

@@ -1,4 +1,5 @@
-// The shell's preferences kept in cookies (the chat column's, and the density's for density.tsx),
+// The shell's preferences kept in cookies (the chat column's, the engine a new chat opens on, and
+// the density's for density.tsx),
 // so the server renders them from the first paint: the root's loader reads them (`readPrefs` in
 // routes/__root.tsx, which imports this module statically, so it stays this small) and the
 // chrome writes them.
@@ -15,6 +16,12 @@ export type ChatPref = "open" | "closed" | undefined;
 /** The cookie's value as a `ChatPref`: anything else is unset. */
 export const chatPref = (value: string | undefined): ChatPref =>
   value === "open" || value === "closed" ? value : undefined;
+
+/**
+ * The cookie the engine a person's new chats open on is kept in (a name of `ENGINE_NAMES`, which
+ * the chat checks): the one they last chose, in the empty chat's cards or the composer.
+ */
+export const ENGINE_COOKIE = "sanoma_engine";
 
 /** The width from which the chat column sits beside the page rather than over it (Tailwind's `lg`). */
 export const BESIDE_PAGE = "(min-width: 64rem)";

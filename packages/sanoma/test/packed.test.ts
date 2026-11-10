@@ -191,12 +191,11 @@ describe("sanoma from packed tarballs: the dev server", () => {
     expect(result.stdout.trim()).toBe("managed storage configured");
   });
 
-  it("starts the chat saying to connect a model, linking to the Anthropic connector's page, until its key is set", async () => {
+  it("starts the chat on the cards to connect an agent, an API key's on the Anthropic connector's page, until its key is set", async () => {
     const { url } = server!;
     const html = (await (await fetch(`${url}/workflows`)).text()).replaceAll("<!-- -->", "");
-    expect(html, stderr()).toMatch(
-      /Connect a model to start: <a[^>]*href="\/connectors\/anthropic"[^>]*>set its key on the Anthropic connector page<\/a>/,
-    );
+    expect(html, stderr()).toContain("Connect your agent");
+    expect(html).toMatch(/<a[^>]*href="\/connectors\/anthropic"[^>]*>Add key<\/a>/);
     const page = await fetch(`${url}/connectors/anthropic`);
     expect(page.status, stderr()).toBe(200);
     expect(await page.text()).toContain("<code>ANTHROPIC_API_KEY</code>");

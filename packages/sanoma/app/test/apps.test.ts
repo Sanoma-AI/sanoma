@@ -83,7 +83,11 @@ describe("the Apps page", () => {
     expect(html).toContain("<title>Apps · Sanoma</title>");
     expect(barLink(html, "/apps")).toContain('aria-current="page"');
     expect(shown).toMatch(/<h2[^>]*>Yours<\/h2>[\s\S]*<h2[^>]*>Taken<\/h2>[\s\S]*<h2[^>]*>Available<\/h2>/);
-    const [yours, taken] = shown.split(/<h2[^>]*>/).slice(1);
+    // The page's own headings (the chat column before it has its own).
+    const [yours, taken] = shown
+      .slice(shown.indexOf("<main"))
+      .split(/<h2[^>]*>/)
+      .slice(1);
     // shop: the company's own, with what it holds.
     expect(yours).toContain(">shop<");
     expect(yours).toContain("apps/shop");

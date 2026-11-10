@@ -10,7 +10,7 @@ import { actorQuery } from "../queries.ts";
 import { Bar, PhoneBar } from "./shell/bar.tsx";
 import { ChatColumn } from "./shell/chat.tsx";
 import { type ChatPrompt, ChatPromptContext, type Prompt } from "./shell/chat-prompt.ts";
-import { BESIDE_PAGE, CHAT_COOKIE, rememberPref } from "./shell/prefs.ts";
+import { BESIDE_PAGE, CHAT_COOKIE, ENGINE_COOKIE, rememberPref } from "./shell/prefs.ts";
 
 // The app's chrome around every page on the app's host: the bar, the chat column, the page, who
 // you are. The root loads it lazily, so a public site's host never does.
@@ -38,6 +38,13 @@ export default function Root() {
   // taken once, as the chrome mounts (hydration has the server's answer, from the cookie).
   const chatPref = useLoaderData({ from: "__root__", select: (data) => data?.chat });
   const compact = useLoaderData({ from: "__root__", select: (data) => data?.compact ?? false });
+  // The engine a new chat opens on, kept here as well as in its cookie: a chat opened later starts on it.
+  const enginePref = useLoaderData({ from: "__root__", select: (data) => data?.engine });
+  const [engine, setEngine] = useState(enginePref);
+  const chooseEngine = (name: string) => {
+    rememberPref(ENGINE_COOKIE, name);
+    setEngine(name);
+  };
   const [chat, setChat] = useState(chatPref !== "closed");
   // Never set: open beside the page, and folded where it would lie over it, following the
   // window's width until Chat is used (the server cannot know it, so the column hides there by
@@ -59,17 +66,18 @@ export default function Root() {
     setChat(!chat);
     setUnset(false);
   };
-  const chatPrompt = useMemo<ChatPrompt>(
-    () => ({
-      open: (text) => {
-        rememberPref(CHAT_COOKIE, "open");
-        setChat(true);
-        setUnset(false);
-        setPrompt({ id: generateId(), text });
-      },
-    }),
-    [],
-  );
+  const chatPrompt = useMemo<ChatPrompt>(() => {
+    const openOn = (opening: Omit<Prompt, "id">) => {
+      rememberPref(CHAT_COOKIE, "open");
+      setChat(true);
+      setUnset(false);
+      setPrompt({ id: generateId(), ...opening });
+    };
+    return {
+      open: (text) => openOn({ text }),
+      chooseAgent: () => openOn({ text: "", choose: true }),
+    };
+  }, []);
   // A page that asks for it (a workflow's, for its graph) takes the full width.
   const wide = useMatches({ select: (matches) => matches.some((match) => match.staticData.wide) });
   return (
@@ -81,7 +89,14 @@ export default function Root() {
             <div className="flex min-h-svh">
               <Bar chat={{ open: chat, toggle: toggleChat }} className="sticky top-0 hidden h-svh self-start md:flex" />
               {/* A new prompt opens a column of its own, on the prompt's chat. */}
-              {chat && <ChatColumn key={prompt?.id} besidePageOnly={unset} prompt={prompt} />}
+              {chat && (
+                <ChatColumn
+                  key={prompt?.id}
+                  besidePageOnly={unset}
+                  prompt={prompt}
+                  engine={{ value: engine, set: chooseEngine }}
+                />
+              )}
               {/* The page: its frame (title row, tabs, one card) is its children, the region gap apart. */}
               <main data-slot="page" className="flex min-w-0 flex-1 flex-col">
                 <PhoneBar />

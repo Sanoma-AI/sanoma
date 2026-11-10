@@ -9,6 +9,8 @@ import { type CloudApi, cloudOperations, type Company } from "./operations.ts";
 export interface FakeRuntime {
   url: string;
   stop(): Promise<void>;
+  /** Settles once the runtime ended on its own (its process exited): the host ends with it. */
+  exited?: Promise<void>;
 }
 
 /** Starts a company's runtime at a revision, as the Cloud's container would, its bootstrap the Cloud's own. */
@@ -56,18 +58,30 @@ const stubRuntime: StartRuntime = async () => {
 /**
  * A company's address in this process, as `<slug>.sanoma.work` is: a server made at its first
  * host, kept for the fake's life, that starts the runtime on a request while the host is there
- * (one start at a time) and forwards the request to it, and answers 404 while there is none.
+ * (one start at a time, again once the last ended on its own) and forwards the request to it, and
+ * answers 404 while there is none.
  */
 function address(slug: string, start: StartRuntime) {
   let revision: string | undefined;
   let runtime: Promise<FakeRuntime> | undefined;
   let server: Server | undefined;
   let url: string | undefined;
-  const up = () =>
-    (runtime ??= start({ slug, revision: revision! }).catch((err: unknown) => {
-      runtime = undefined;
-      throw err;
-    }));
+  const up = () => {
+    if (runtime) return runtime;
+    const starting: Promise<FakeRuntime> = start({ slug, revision: revision! }).then(
+      (made) => {
+        void made.exited?.then(() => {
+          if (runtime === starting) runtime = undefined;
+        });
+        return made;
+      },
+      (err: unknown) => {
+        runtime = undefined;
+        throw err;
+      },
+    );
+    return (runtime = starting);
+  };
   /** Stops the runtime, the address kept: the next request starts it again. */
   const suspend = async () => {
     const was = runtime;
@@ -126,6 +140,10 @@ function address(slug: string, start: StartRuntime) {
     get url() {
       return url;
     },
+    /** True while a runtime starts or runs behind it. */
+    get running() {
+      return runtime !== undefined;
+    },
   };
 }
 
@@ -134,9 +152,10 @@ function address(slug: string, start: StartRuntime) {
  * each with the parts `cloud-signup` made (a database `fake-db-<n>` in its region, `us-east` by
  * default; a host at its revision), every part healthy. A host runs `start`'s runtime behind an
  * address in this process that outlives it (`<slug>.sanoma.work`'s stand-in), which starts it on
- * a request; a deploy moves it to the new revision; a close removes the part, and the company with
- * its last. `stop(slug)` stops a host's runtime as a quiet spell would, the address kept;
- * `close()` (and `reset()`) stops everything. It refuses
+ * a request, again once it ended on its own (`exited`); a deploy moves it to the new revision; a
+ * close removes the part, and the company with its last. `stop(slug)` stops a host's runtime as
+ * the platform may, the address kept; `running(slug)` says whether one runs; `close()` (and
+ * `reset()`) stops everything. It refuses
  * what sanoma-ops's workflows refuse: a slug that is not one, a region the Cloud has not, a host
  * with no repository, a deploy of a company with no host.
  */
@@ -212,10 +231,13 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
   };
   const { reset } = fake;
   return Object.assign(fake, {
-    /** Stops the runtime of the host `slug` (default: every one), as a quiet spell would: the next request starts it. */
+    /** Stops the runtime of the host `slug` (default: every one), as the Cloud's platform may on its own: the next request starts it. */
     async stop(slug?: string) {
       for (const [at, found] of addresses) if (slug === undefined || at === slug) await found.suspend();
     },
+    /** Whether a runtime runs (or starts) for the host `slug` (default: any). */
+    running: (slug?: string) =>
+      [...addresses].some(([at, found]) => (slug === undefined || at === slug) && found.running),
     /** Stops every runtime and closes every address. */
     close,
     /** Empties the state and stops everything. */

@@ -302,7 +302,7 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
   let supervised = await supervise(config);
   let wakeup: WakeupService | undefined;
   const start = (files: SanomaConfig, started: AppOptions) =>
-    served(files, { ...started, onWrite: () => void supervised.resume() }, [
+    served(files, { ...started, onWrite: () => void supervised.wake() }, [
       wakeRoute({ log, onWake: () => supervised.wake() }),
       ...(wakeup?.routes ?? []),
     ]);

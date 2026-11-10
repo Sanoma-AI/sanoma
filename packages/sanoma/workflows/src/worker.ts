@@ -67,7 +67,18 @@ export interface Worker {
    */
   idle(): Promise<boolean>;
   /** Stops the worker; a second call waits for the first. */
-  stop(): Promise<void>;
+  stop(options?: WorkerStop): Promise<void>;
+}
+
+/** How `Worker.stop` stops. */
+export interface WorkerStop {
+  /**
+   * For a stop that is not the worker's own (a signal from the host): first registers with its
+   * wakeup what the next worker must do, as its own stop would (`StopRule.handOff`), so a run it
+   * cut short or a deadline it held is not left until something else wakes the instance. A
+   * worker that stops itself never registers this way, nor one that registers with no wakeup.
+   */
+  register?: boolean;
 }
 
 /**
@@ -172,7 +183,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const ledger = ownedLedger(resolved);
   const secrets = lazyDb(resolved.databaseUrl, "secrets");
   const storedSecrets = configuredSecrets(resolved.secrets, () => secrets.db());
-  let stopRule: { close(): void } | undefined;
+  let stopRule: ReturnType<typeof stopWhenIdle> | undefined;
   let renewing: { close(): Promise<void> } | undefined;
   let stopping: Promise<void> | undefined;
   const horizonMs = options.idleHorizonMs ?? 60_000;
@@ -252,11 +263,17 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     async idle() {
       return !state.stopped && idle(state.deadlines, resolved, horizonMs);
     },
-    stop() {
+    stop(how = {}) {
       // A stop that failed may be tried again.
       return (stopping ??= (async () => {
-        state.stopped = true;
         stopRule?.close();
+        // Before anything closes: it asks whether the worker is idle, as a check does.
+        if (how.register) {
+          await stopRule
+            ?.handOff()
+            .catch((err: unknown) => warn(`could not register the wakeup before stopping: ${errorMessage(err)}`));
+        }
+        state.stopped = true;
         // Each is closed whatever the one before did; the first failure is what stop throws.
         let failed: { error: unknown } | undefined;
         for (const close of [
@@ -336,7 +353,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
       await applyScheduled(resolved, registered, () => secrets.db());
-      // A schedule's next tick is a deadline: a worker that stops when quiet registers it with its wakeup.
+      // A schedule's next tick is a deadline: a worker that stops when idle registers it with its wakeup.
       state.deadlines.addSource(() => nextScheduledFire(resolved, new Date()));
     }
     // An OAuth grant due for renewal is a deadline, and the renewal agent's call when it comes.

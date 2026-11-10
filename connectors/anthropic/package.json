@@ -1,11 +1,13 @@
 {
   "name": "@sanoma-ai/connector-anthropic",
-  "version": "0.11.21",
-  "description": "Anthropic's Claude models for Sanoma's agent, through the AI SDK, on the company's API key",
+  "version": "0.11.22",
+  "description": "Anthropic's Claude models for Sanoma's agent, through the AI SDK, on the company's API key; and Claude Code, a coding agent for the chat on a person's own plan or the company's key",
   "keywords": [
     "ai-sdk",
     "anthropic",
     "claude",
+    "claude-code",
+    "coding-agent",
     "connector",
     "model",
     "sanoma",
@@ -23,8 +25,10 @@
     "dist",
     "logo.svg",
     "logo-dark.svg",
+    "claude-code.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "MARKS-LICENSE"
   ],
   "type": "module",
   "sideEffects": false,
@@ -51,6 +55,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.88",
+    "@ai-sdk/harness-claude-code": "1.0.162",
     "@ai-sdk/provider": "4.0.34",
     "ai": "7.0.153"
   },
@@ -68,6 +73,11 @@
   "sanoma": {
     "title": "Anthropic",
     "logo": "logo.svg",
-    "logoDark": "logo-dark.svg"
+    "logoDark": "logo-dark.svg",
+    "agent": {
+      "id": "claude-code",
+      "title": "Claude Code",
+      "mark": "claude-code.svg"
+    }
   }
 }

@@ -1,18 +1,28 @@
 # readme-shots
 
-`pnpm readme:shots` retakes the README's pictures in [`.github/assets/`](../../.github/assets/) from the running app: `demo.gif` (1200×800, about 27 s) and six stills at 2x, `workflow.png`, `runs.png`, `inbox.png`, `run.png`, `site.png` and `data.png`. Run it after a change to the app's look, then look at what changed before committing it.
+`pnpm readme:shots` refreshes the six README screenshots, then records the launch-desk intro in [`.github/assets/demo.gif`](../../.github/assets/demo.gif). `pnpm readme:shots --intro` records only the intro. Both use the running app and disposable companies, with no customer data or live service calls.
 
-The [intro video storyboard](STORYBOARD.md) plans the replacement demo: a coworker builds a launch desk with their own AI subscription, a developer reviews its permissions, and a run uses Ghost and Resend after approval. It is a recording plan; the current capture script still records the workflow-only demo described below.
+## The intro
 
-## What one run does
+The [storyboard](STORYBOARD.md) follows a request, a checked Git draft, code and permission review, and a marketing announcement approved before Ghost publishing and Resend email. [`intro.ts`](intro.ts) prepares the company and cleans it up; [`intro-capture.ts`](intro-capture.ts) captures the scenes; [`intro-server.ts`](intro-server.ts) runs the app and worker together.
 
-1. Builds what the preview loads from `dist/` (`workflows`, `connector-ghost`, `testing`, `app`, `sanoma`) when a package's `dist/` is older than its `src/`.
-2. Writes a company repo named `acme` to a temporary directory: `workflows/announce.ts` read from the README's "What a workflow looks like" block, and a config that answers Ghost with its in-memory fake behind the live connector, so the form still shows Live vendors, and a site, `sites/launches`, its page read from the [packages/sanoma/app README](../../packages/sanoma/app/README.md)'s `sites/launches/routes/index.tsx` block (the kit's `PageHeader`, `Region` and `Facts`, and announce's `RunForm` from `sanoma/site`), and a collection, `outbound`, in `resources/data.ts`.
-3. Runs `sanoma serve` there on its own database and a free port, its output in a log file beside that directory. In Chrome, it records the GIF's storyboard (dana starts a run with a launch time about a minute away, marketing-lead approves it in the Inbox, the run sleeps and finishes). It starts two more runs as dana through the runtime's client (`SanomaClient`), as the app does, saves six outbound leads through it as their owners, and once the runs wait on marketing-lead, takes the stills, the chat column folded but in `inbox.png` (`runs.png` is announce's Runs tab with the demo's run open, `site.png` the site's page, `data.png` the outbound grid sorted by stage with a lead open in its form).
-4. Makes the GIF with ffmpeg and, once all seven are made, copies them into `.github/assets/` under temporary names and renames each into place: a failed run leaves the ones there as they were.
-5. Closes Chrome, stops the server, drops the database and removes the temporary directory and the log, also when a step fails or on Ctrl-C (which exits 130). A failure keeps the log and prints its path, with its last 40 lines when the app did not start or a run did not move on.
+The agent is mocked with [`@shadcn/helpers/ai-sdk`](https://ui.shadcn.com/docs/helpers/ai-sdk). [`intro-fixture.ts`](intro-fixture.ts) uses `createChat` to author each predefined tool request. A model adapter feeds those inputs through Sanoma's existing agent loop. The actual tools write and commit the files, run `sanoma check`, and produce the draft card; check results and tool outputs are not mocked. The helper pauses at unresolved tools, so each tool request is authored separately.
 
-It takes one and a half to two minutes, most of it the run's sleep until its launch minute (30 to 90 s away) ([`capture.ts`](capture.ts) has the storyboard; [`shots.ts`](shots.ts) the rest).
+The Claude Code selector is shown as an available agent choice, then switched to the local demo model before sending. This is not a recording of Claude generating the app or of a signed-in subscription. Every frame labels the scripted AI, simulated Git host and simulated service calls. Build waits are condensed.
+
+The change flow pushes to a disposable bare Git repository and uses the test Git host to open and squash-merge the change. Code review includes a separate, labelled rendering of the actual Git diff; the app's Changes page supplies the permission comparison and Publish approval. After publishing, the recorder restarts the app on the merged code and runs the new site. The capture asserts that pending and rejected announcements make no publish/send calls, and an approved announcement makes one of each. Ghost and Resend are backed by their in-memory fakes.
+
+[`motion.ts`](motion.ts) uses Puppeteer’s `Page.record()` to capture continuous Chrome video at 1200 × 900. The request, announcement fields and approval note are typed character by character. The pointer follows actual mouse events, with a brief ring on clicks; the final scene scrolls into the ledger. Recording runs throughout each interaction. Cuts skip builds, the app restart and changes of role, with the build wait labelled as condensed.
+
+The temporary MP4 clips are joined and converted to a 960 × 720, 15 fps looping GIF with ffmpeg. The recorder sizes Chrome's content area as well as its emulated viewport, checks each clip's dimensions, and verifies that the GIF preserves their combined duration. It reserves space below the chat composer for captions and replaces the README GIF only after the full capture and assertions succeed. Duration varies with the interactions; inspect the exported GIF rather than assuming a fixed cut length. No standalone video is published by this command.
+
+Each invocation uses its own temporary company, Git remote, log and database. The database is `SANOMA_TEST_DATABASE_URL` with `_readme_intro_<random suffix>` appended; checks use its `_check` database. Chrome, the server, databases and temporary files are cleaned up on completion, failure or interruption. A failure keeps the server log and, when Chrome is available, a diagnostic screenshot beside the temporary directory.
+
+## The screenshots
+
+The existing [`shots.ts`](shots.ts) and [`capture.ts`](capture.ts) fixture captures `workflow.png`, `runs.png`, `inbox.png`, `run.png`, `site.png` and `data.png` at 2x. It reads the announce workflow from the root README's code block and the site page from the [app README](../../packages/sanoma/app/README.md), starts a disposable company, and runs the scheduled Ghost announcement through its approval. It then seeds two pending approvals and six outbound leads for the stills.
+
+This older fixture uses a fake Ghost service behind the live connector, so its form still displays “Live vendors.” It remains the stable fixture for visual CI; its workflow-only animation no longer overwrites the intro GIF. Stills are copied into `.github/assets` after all six are captured. The stills phase and intro phase publish their assets independently.
 
 ## On a pull request
 
@@ -29,7 +39,7 @@ node scripts/readme-shots/compare.ts /tmp/before /tmp/after /tmp/diff ""
 ## Needs
 
 - Postgres on 5433: `pnpm db:up`.
-- Google Chrome, found where its installer puts it; or `CHROME_PATH` naming a Chrome or Chromium binary. The demo types its launch time as US English lays out a date (month/day/year): Chrome is started with `--lang=en-US`, but on macOS it follows the system's language, and the run stops if the field reads the date otherwise.
-- `ffmpeg` on `PATH`, except with `--out`.
+- Google Chrome, found where its installer puts it; or `CHROME_PATH` naming a Chrome or Chromium binary. The intro requires Chrome’s `Page.startScreenRecording` API (tested with Chrome 156). The demo types its launch time as US English lays out a date (month/day/year): Chrome is started with `--lang=en-US`, but on macOS it follows the system's language, and the run stops if the field reads the date otherwise.
+- `ffmpeg` and `ffprobe` on `PATH`, except with `--out`. The intro uses a local Git repository and needs Git 2.38 or later for the simulated host’s real squash merge.
 
-The database it creates and drops is named as a test's is: `SANOMA_TEST_DATABASE_URL` (default `postgresql://postgres:dbos@localhost:5433/sanoma_test`) with `_readme_shots` appended. Set that per worktree, as for the tests, so two runs at once never share one.
+The stills database is named as a test's is: `SANOMA_TEST_DATABASE_URL` (default `postgresql://postgres:dbos@localhost:5433/sanoma_test`) with `_readme_shots` appended. Set that per worktree, as for the tests, so two runs at once never share one.

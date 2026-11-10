@@ -1,0 +1,72 @@
+{
+  "name": "@sanoma-ai/connector-openai",
+  "version": "0.11.22",
+  "description": "Codex, OpenAI's coding agent, for Sanoma's chat on a person's own ChatGPT plan",
+  "keywords": [
+    "codex",
+    "coding-agent",
+    "connector",
+    "openai",
+    "sanoma",
+    "sanoma-connector"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/openai#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/openai"
+  },
+  "files": [
+    "dist",
+    "logo.svg",
+    "logo-dark.svg",
+    "codex.svg",
+    "codex-dark.svg",
+    "README.md",
+    "LICENSE",
+    "MARKS-LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "devDependencies": {
+    "sanoma": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "sanoma": "workspace:*",
+    "zod": "^4"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "sanoma": {
+    "title": "OpenAI",
+    "logo": "logo.svg",
+    "logoDark": "logo-dark.svg",
+    "agent": {
+      "id": "codex",
+      "title": "Codex",
+      "mark": "codex.svg",
+      "markDark": "codex-dark.svg"
+    }
+  }
+}

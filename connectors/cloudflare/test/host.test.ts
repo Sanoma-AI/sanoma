@@ -15,16 +15,16 @@ import {
 } from "sanoma/workflows";
 import { writeLockfile } from "sanoma/workflows/describe";
 import { secret } from "sanoma/resources";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { cloudflareOps, container } from "../src/connector.ts";
 import { fakeCloudflare, stubAppBundle, stubContainer } from "../src/fake.ts";
 
 // Needs Postgres: `pnpm db:up`. The Host contract's conformance kit against `cloudflare.container`
 // on the fake: its Worker script served in this process (the package's own `serve` over the app
 // bundle the container's worker built, `stubAppBundle`), the package's own object code running the
-// company in this process as its container, which the fake stops as Cloudflare does when it is
-// quiet. Drift is the built-in workflow over a data file that declares the host, bound in the
-// lockfile.
+// company in this process as its container, which ends when the company's process exits once its
+// worker is idle (its environment, the container's, names the Worker's wake route). Drift is the
+// built-in workflow over a data file that declares the host, bound in the lockfile.
 
 const key = "kit-secret-value-that-never-leaks";
 const DATABASE_URL = "postgresql://sanoma:p%40ss@db.acme.example:5432/company";
@@ -63,7 +63,13 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
   // Each upload answers only after three more requests to the version before, as Cloudflare's
   // takes a while to reach every location: the checks' deploys wait for it.
   const fake = fakeCloudflare({
-    start: ({ revision, env }) => inProcessHost(config, databaseUrl)({ port: 0, revision, secrets: env }),
+    start: ({ revision, env }) => {
+      // The worker reads its host's wake route from its process's environment: the container's.
+      vi.stubEnv("SANOMA_HOST_URL", env.SANOMA_HOST_URL);
+      vi.stubEnv("SANOMA_WAKEUP_TOKEN", env.SANOMA_WAKEUP_TOKEN);
+      // It stops itself soon once idle, so the checks of its end take seconds.
+      return inProcessHost(config, databaseUrl, { stopCheckMs: 500 })({ port: 0, revision, secrets: env });
+    },
     propagation: 3,
   });
   config.connectors.push(withSetup(cloudflareOps, { driver: () => fake.driver }));
@@ -87,6 +93,7 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
   afterAll(async () => {
     await client?.close();
     await fake.close();
+    vi.unstubAllEnvs();
     repo.remove();
     rmSync(root, { recursive: true, force: true });
   });
@@ -115,6 +122,7 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
         apply,
         stop: async () => void (await op("delete")({ id: declared.name })),
         suspend: () => fake.stop(declared.name),
+        running: async () => fake.running(declared.name),
         client,
         secrets: [key],
         commit: repo.commit,
@@ -132,6 +140,8 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
         { name: "a sleep survives a restart", ok: true },
         { name: "a queued run drains after a stop and a wake", ok: true },
         { name: "a sleep that ends while stopped continues after a wake", ok: true },
+        { name: "the host stops when its worker is idle", ok: true },
+        { name: "a run queued while the worker is stopping still runs", ok: true },
         { name: "a page of the app answers while the container is stopped", ok: true },
         { name: "a deploy never answers 503 to a visitor", ok: true },
         { name: "a new commit shows as drift that apply clears", ok: true },

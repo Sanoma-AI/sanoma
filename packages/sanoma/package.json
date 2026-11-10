@@ -1,6 +1,6 @@
 {
   "name": "sanoma",
-  "version": "0.11.21",
+  "version": "0.11.22",
   "description": "Sanoma's core in one package: the bin a company repo runs, checks and exports itself with, the durable workflow runtime, the web app and the test helpers",
   "keywords": [
     "approvals",
@@ -283,8 +283,6 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "2.0.2",
     "@ai-sdk/harness": "1.0.158",
-    "@ai-sdk/harness-claude-code": "1.0.162",
-    "@ai-sdk/harness-pi": "1.0.160",
     "@ai-sdk/provider": "4.0.34",
     "@ai-sdk/provider-utils": "5.0.68",
     "@ai-sdk/react": "4.0.157",

@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { DBOS, type DBOSClient, type WorkflowStatus } from "@dbos-inc/dbos-sdk";
+import { DBOS, DBOSClient, type WorkflowStatus } from "@dbos-inc/dbos-sdk";
 import { startTestWorker, testDatabaseUrl } from "sanoma/testing";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -478,7 +478,10 @@ describe("the stop rule with the environment's wakeup", () => {
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
     host = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
-  afterEach(() => {
+  afterEach(async () => {
+    // Stopped before the wakes are cleared: vitest runs afterEach hooks last-registered first, so
+    // the worker's hook would otherwise stop it after, and a late PUT would land in the next test.
+    await app.worker?.stop();
     vi.unstubAllEnvs();
     wakes.length = 0;
     answer = { status: 204 };
@@ -501,6 +504,39 @@ describe("the stop rule with the environment's wakeup", () => {
     // No driver: the connector's register is never called.
     expect(registered).toEqual([]);
     expect(await app.row()).toMatchObject({ at: new Date(at), lastError: null });
+  });
+
+  it("registers now when its host stops it with a run under way, so the next worker takes the run up", async () => {
+    vi.stubEnv("SANOMA_HOST_URL", host);
+    vi.stubEnv("SANOMA_WAKEUP_TOKEN", TOKEN);
+    const worker = await app.start({ ...fast, stopCheckMs: 60_000, onStopped: () => {} });
+    await app.client.start(hold, {}, { startedBy: alice });
+    await waitFor(() => held);
+    const before = Date.now();
+    // A signal's stop, as `sanoma worker` passes it on; the run is let go once the wake is in.
+    const stopping = worker.stop({ register: true });
+    await waitFor(() => wakes.length === 1);
+    gate.resolve();
+    await stopping;
+    const at = (wakes[0]!.body as { at: string }).at;
+    expect(Date.parse(at)).toBeGreaterThanOrEqual(before - 1_000);
+    expect(Date.parse(at)).toBeLessThanOrEqual(Date.now());
+    expect(await app.row()).toMatchObject({ at: new Date(at), lastError: null });
+  });
+
+  it("registers its next deadline when its host stops it idle, and nothing on a stop of its own asking", async () => {
+    vi.stubEnv("SANOMA_HOST_URL", host);
+    vi.stubEnv("SANOMA_WAKEUP_TOKEN", TOKEN);
+    const runId = await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
+    const worker = await app.start({ ...fast, stopCheckMs: 60_000, onStopped: () => {} });
+    await waitFor(() => worker.deadlines.waitOf(runId) !== undefined);
+    await worker.stop({ register: true });
+    const at = new Date((await untilOf(app.client, runId))!).toISOString();
+    expect(wakes).toEqual([{ method: "PUT", url: "/__sanoma/wake", authorization: `Bearer ${TOKEN}`, body: { at } }]);
+    const again = await app.start({ ...fast, stopCheckMs: 60_000, onStopped: () => {} });
+    await waitFor(() => again.deadlines.waitOf(runId) !== undefined);
+    await again.stop();
+    expect(wakes).toHaveLength(1);
   });
 
   it("keeps running when the host refuses the registration, recording its status and error", async () => {
@@ -560,7 +596,7 @@ describe("the supervisor", () => {
     supervisor = undefined;
   });
 
-  it("starts a fresh worker on a wake once it stopped, and nothing more on a wake while it runs", async () => {
+  it("starts a fresh worker on a wake once it stopped, and once more after a wake heard while it ran", async () => {
     const stops: SelfStop[] = [];
     const runId = await app.client.start(nap, { seconds: 2 }, { startedBy: alice });
     supervisor = await superviseWorker(app.config, { ...fast, onStopped: (s) => stops.push(s) });
@@ -571,15 +607,15 @@ describe("the supervisor", () => {
     await delay(Date.parse(stops[0]!.at!) - Date.now());
     await supervisor.wake();
     expect(supervisor.stopped).toBe(false);
-    // A wake while it runs starts nothing more.
+    // A wake while it runs is heard: once it stops, a fresh one looks again.
     await supervisor.wake();
     expect(await app.client.result(runId)).toBe("rested");
-    // Nothing left: it stops again, with no deadline.
-    await waitFor(() => stops.length === 2);
-    expect(stops[1]!.at).toBeNull();
+    // Nothing left: it stops with no deadline, and so does the one after it.
+    await waitFor(() => stops.length === 3);
+    expect(stops.slice(1)).toEqual([{ at: null }, { at: null }]);
     await supervisor.stop();
     expect(supervisor.stopped).toBe(false);
-    await supervisor.resume();
+    await supervisor.wake();
     expect(supervisor.stopped).toBe(false);
   });
 
@@ -598,7 +634,7 @@ describe("the supervisor", () => {
     const client = await SanomaClient.connect(app.config, {
       onWrite: () => {
         writes.push(Date.now());
-        void supervisor!.resume();
+        void supervisor!.wake();
       },
     });
     try {
@@ -613,7 +649,7 @@ describe("the supervisor", () => {
       expect(supervisor.stopped).toBe(false);
       // A write heard while it starts (the one above started it): once it stops itself, it starts
       // again at once, and stops again.
-      await supervisor.resume();
+      await supervisor.wake();
       await waitFor(async () => (await client.approvals(runId)).some((a) => a.status === "pending"));
       await waitFor(() => stops.length === 2);
       await waitFor(() => stops.length === 3);
@@ -625,6 +661,98 @@ describe("the supervisor", () => {
     } finally {
       await client.close();
     }
+  });
+
+  it("starts a fresh worker for a wake while the worker is stopping, after a write its last check missed", async () => {
+    const stops: SelfStop[] = [];
+    const said: boolean[] = [];
+    let runId: Promise<string> | undefined;
+    const shutdown = DBOS.shutdown.bind(DBOS);
+    // The worker passed its last check and is stopping: a run queued now, then its wake, as the
+    // app on a host's Worker starts one (the host's `startNow` sends the `/wake`).
+    vi.spyOn(DBOS, "shutdown").mockImplementation((...args) => {
+      runId ??= app.client.start(nap, { seconds: 0 }, { startedBy: alice }).then(async (id) => {
+        await supervisor!.wake();
+        return id;
+      });
+      return runId.then(() => shutdown(...args));
+    });
+    supervisor = await superviseWorker(app.config, {
+      ...fast,
+      onStopped: (s) => {
+        stops.push(s);
+        said.push(supervisor!.stopped);
+      },
+    });
+    await waitFor(() => stops.length === 1);
+    // Not stopped as it told the stop: a fresh worker was already starting, which runs the run.
+    expect(said[0]).toBe(false);
+    expect(await app.client.result(await runId!)).toBe("rested");
+  });
+
+  it("asks for a worker only once a start and a decision committed", async () => {
+    const order: string[] = [];
+    const { enqueue, send } = DBOSClient.prototype;
+    vi.spyOn(DBOSClient.prototype, "enqueue").mockImplementation(async function (this: DBOSClient, ...args) {
+      const handle = await enqueue.apply(this, args);
+      order.push("enqueued");
+      return handle;
+    });
+    vi.spyOn(DBOSClient.prototype, "send").mockImplementation(async function (this: DBOSClient, ...args) {
+      await send.apply(this, args);
+      order.push("sent");
+    });
+    supervisor = await superviseWorker(app.config, fast);
+    const client = await SanomaClient.connect(app.config, {
+      onWrite: () => {
+        order.push("asked");
+        void supervisor!.wake();
+      },
+    });
+    try {
+      const runId = await client.start(ask, {}, { startedBy: alice });
+      await waitFor(async () => (await client.approvals(runId)).some((a) => a.status === "pending"));
+      await client.decide(runId, { decision: "approve", by: { id: "lead" } });
+      expect(order).toEqual(["enqueued", "asked", "sent", "asked"]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("starts a fresh worker for a write that commits after its last check began, woken before the write", async () => {
+    const stops: SelfStop[] = [];
+    let runId: Promise<string> | undefined;
+    const shutdown = DBOS.shutdown.bind(DBOS);
+    supervisor = await superviseWorker(app.config, { ...fast, onStopped: (s) => stops.push(s) });
+    // The wake first, while the worker runs and before its checks: a host's alarm may ring before
+    // the write it is for commits.
+    await supervisor.wake();
+    // The write after its last check, as it stops, with no wake of its own.
+    vi.spyOn(DBOS, "shutdown").mockImplementation((...args) => {
+      runId ??= app.client.start(nap, { seconds: 0 }, { startedBy: alice });
+      return runId.then(() => shutdown(...args));
+    });
+    await waitFor(() => stops.length === 1);
+    expect(await app.client.result(await runId!)).toBe("rested");
+  });
+
+  it("tells onEnded why when the fresh worker a wake asked for fails to start, and says it stopped", async () => {
+    const ended: ({ error: unknown } | undefined)[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    supervisor = await superviseWorker(app.config, { ...fast, onEnded: (failure) => ended.push(failure) });
+    // Heard while it runs: once it stops, a fresh one is asked for, and fails to start.
+    await supervisor.wake();
+    const launch = vi.spyOn(DBOS, "launch").mockRejectedValueOnce(new Error("the database is gone"));
+    await waitFor(() => ended.length === 1);
+    expect(launch).toHaveBeenCalled();
+    expect(ended[0]?.error).toBeInstanceOf(Error);
+    expect(supervisor.stopped).toBe(true);
+    // The next wake tries again, and once that worker stops with nothing heard, onEnded hears it with no failure.
+    await supervisor.wake();
+    expect(supervisor.stopped).toBe(false);
+    await waitFor(() => ended.length === 2);
+    expect(ended[1]).toBeUndefined();
+    warn.mockRestore();
   });
 
   it("keeps the worker running, idle past its horizon, with selfStop false", async () => {

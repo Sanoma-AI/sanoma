@@ -230,7 +230,7 @@ async function withPostgres(
 
 /**
  * Starts what `start` starts over the loaded config, prints what runs (and where, when it
- * listens), and stops it on SIGINT or SIGTERM, then the Postgres `load` started, then exits 0. The worker names the vendors not
+ * listens), and stops it on SIGINT or SIGTERM, or once what it started has `exited` (done), then the Postgres `load` started, then exits 0. The worker names the vendors not
  * configured yet itself, in one line.
  */
 async function keep(
@@ -238,7 +238,7 @@ async function keep(
   start: (
     config: SanomaConfig,
     resolved: Loaded["resolved"],
-  ) => Promise<{ stop(): Promise<void>; url?: string; sites?: Record<string, string> }>,
+  ) => Promise<{ stop(): Promise<void>; exited?: Promise<void>; url?: string; sites?: Record<string, string> }>,
 ): Promise<never> {
   let started: Awaited<ReturnType<typeof start>>;
   try {
@@ -258,7 +258,12 @@ async function keep(
     emit({ event: "ready", url: started.url, sites: started.sites ?? {} });
   }
   // Postgres last, once the worker and the app have closed their connections.
-  onSignal(() => started.stop().finally(() => postgres?.stop()));
+  const stopOnce = onSignal(() => started.stop().finally(() => postgres?.stop()));
+  // Done on its own (`runWorker`): stopped as a signal stops it, exiting 1 when it failed.
+  void started.exited?.then(
+    () => stopOnce(),
+    (error: unknown) => stopOnce({ error }),
+  );
   return new Promise(() => {});
 }
 
@@ -452,15 +457,18 @@ async function wakeupAccount(label: string): Promise<number> {
  * the parent has its own deadline, and it may be the same stop reaching this process twice (`pnpm dlx
  * sanoma` passes on a signal its process group got too), which must not leave Postgres running.
  * Without the variable stdin is never read. Returns what stops, once, for a caller with a reason of
- * its own to stop.
+ * its own to stop (what it runs is done): as a signal stops, exiting 1 when given the `failure`
+ * that ended it (logged), else 0; a signal while that stop runs exits at once with the same code.
  */
-function onSignal(stop: () => Promise<void>): () => void {
+function onSignal(stop: () => Promise<void>): (failure?: { error: unknown }) => void {
   let stopping = false;
+  // Set by a stop of the caller's own: a signal during it is no reason of its own to stop.
+  let own: { code: number } | undefined;
   const stopOnce = () => {
     if (stopping) return;
     stopping = true;
     stop().then(
-      () => process.exit(0),
+      () => process.exit(own?.code ?? 0),
       (err: unknown) => {
         fail(err);
         // Once stdout has taken the line: a pipe's writes are asynchronous on macOS.
@@ -470,7 +478,7 @@ function onSignal(stop: () => Promise<void>): () => void {
   };
   const handle = () => {
     if (!stopping) stopOnce();
-    else if (!eventsOn()) process.exit(130);
+    else if (!eventsOn()) process.exit(own?.code ?? 130);
   };
   // `on`, not `once`: the second signal must find the handler still there, and a dependency's
   // signal-exit (Pi's, in the app) re-sends a signal it finds no other listener for, which would
@@ -478,7 +486,12 @@ function onSignal(stop: () => Promise<void>): () => void {
   process.on("SIGINT", handle);
   process.on("SIGTERM", handle);
   if (eventsOn()) process.stdin.once("end", stopOnce).once("error", stopOnce).resume();
-  return stopOnce;
+  return (failure) => {
+    if (stopping) return;
+    if (failure) fail(failure.error);
+    own = { code: failure ? 1 : 0 };
+    stopOnce();
+  };
 }
 
 if (import.meta.main) {
