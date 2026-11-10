@@ -954,7 +954,8 @@ async function newCompany(): Promise<void> {
   for (;;) {
     const value = await askFor(newCompanyForm(typed, parent, problem));
     if (!isNewCompanyAnswer(value)) return;
-    ({ parent, ...typed } = value);
+    typed = { name: value.name, you: value.you, email: value.email };
+    parent = value.parent;
     const target = newCompanyTarget(typed.name, parent);
     if ("problem" in target) {
       problem = target.problem;
