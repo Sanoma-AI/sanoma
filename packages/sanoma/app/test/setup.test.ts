@@ -379,9 +379,7 @@ describe("a control plane's enrollment writer", () => {
     const writer = "IDENTITY_WRITER_URL";
     const plane: AppContext = {
       ...ctx,
-      resolved: resolveConfig(
-        defineConfig({ ...config, identityProvisioning: { databaseUrl: secret(writer), maxValidityMs: 86_400_000 } }),
-      ),
+      resolved: resolveConfig(defineConfig({ ...config, identityProvisioning: { databaseUrl: secret(writer) } })),
     };
     expect((await setupStatus(ctx)).enrollmentWriter).toBeUndefined();
     const before = await setupStatus(plane);

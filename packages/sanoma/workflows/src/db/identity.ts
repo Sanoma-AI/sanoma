@@ -19,7 +19,7 @@ export const identityDeployments = identity.table("deployments", {
   enabled: boolean().notNull().default(true),
 });
 
-/** Each deployment credential's hash, never the credential, with its generation and validity. */
+/** Each deployment credential's hash, never the credential, with its generation and validity (no end: no expiry). */
 export const identityCredentials = identity.table(
   "credentials",
   {
@@ -29,7 +29,7 @@ export const identityCredentials = identity.table(
       .references(() => identityDeployments.id),
     generation: bigint({ mode: "number" }).notNull(),
     validFrom: when().notNull().defaultNow(),
-    validUntil: when().notNull(),
+    validUntil: when(),
     revoked: boolean().notNull().default(false),
   },
   (t) => [

@@ -529,7 +529,7 @@ On a Cloudflare host, apply resolves each binding on the machine that applies it
 
 The managed Cloud [runtime identity broker](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/CLOUD-IDENTITY.md) supplies refreshable, deployment-bound Google access tokens; its enrollment, bootstrap and rollout requirements are separate from credential storage and provisioning identity.
 
-In the trusted control plane, configure `identityProvisioning: { databaseUrl: secret("IDENTITY_WRITER_URL"), maxValidityMs }` to use `sanoma.identity.enroll`, `.retire` and `.revoke` under policy. The restricted enrollment-writer URL is entered under that name on the app's Hosting page (Connect) and read from the store when an enrollment operation first uses it, never at config load. Until it is stored, the page lists it as missing and enrollment fails with "the enrollment writer is not set". Each client and worker owns its lazy writer pool; company runtimes and the broker do not receive it. See [provisioning operations](CLOUD-IDENTITY.md#provisioning-operations) for setup, rotation and the caller-owned adapter option.
+In the trusted control plane, configure `identityProvisioning: { databaseUrl: secret("IDENTITY_WRITER_URL") }` to use `sanoma.identity.enroll`, `.retire` and `.revoke` under policy. A company's runtime bearer has no expiry: a deploy replaces it with a new generation and retires the old one, and closing the company or a leak revokes it. The restricted enrollment-writer URL is entered under that name on the app's Hosting page (Connect) and read from the store when an enrollment operation first uses it, never at config load. Until it is stored, the page lists it as missing and enrollment fails with "the enrollment writer is not set". Each client and worker owns its lazy writer pool; company runtimes and the broker do not receive it. See [provisioning operations](CLOUD-IDENTITY.md#provisioning-operations) for setup, rotation and the caller-owned adapter option.
 
 Back up ciphertext, its namespace/path and version metadata, and the matching encryption key separately. A database-only backup cannot recover encrypted values. Preserve the signing key across ordinary restarts; replacing it invalidates sessions and pending signed authorization state. Changing a vendor token updates a stored value and its version; it does not rotate the row-encryption key. Replacing the encryption key without re-encrypting every retained value makes those values unreadable. Automated encryption-key rotation is not included. A move to another store is the [`migrate-store` workflow](#moving-between-stores), and an OAuth grant that needs new consent is reconnected from its card.
 
@@ -890,6 +890,24 @@ A doc string is a JSON object. A table cell, and a phrase's field, is read as te
 `runs with` and `runs` make up omitted workflow input from the schema with [zod-schema-faker](https://github.com/soc221b/zod-schema-faker), seeded from the scenario's name, so one scenario always makes up the same values; it is then parsed by the schema. Use `runs with exactly` to test omitted optional inputs or schema defaults: it parses only the supplied JSON object or table, without generating values. A missing required field is a scenario compilation error. For example, `When cloud-signup runs with exactly` can omit an optional `installation` to exercise the workflow's missing-installation path. A step no rule matches, or more than one, an unknown operation, workflow or field, a value its field does not take, a missing or second `When`, a doc string that is not JSON, and a file Gherkin cannot parse are errors naming the file and line; the first lists every step there is, each operation's phrases under its id and each connector's steps under its vendor. A file with an error has none of its scenarios; the other files still load.
 
 Checking a run, every `Then` step runs and judges the run on its own: one that does not hold says why, and the steps after it are still checked.
+
+### The world
+
+`scenarios/world.feature` at the root is the world: the company a demo opens on, written as one scenario of `Given` steps alone. It uses the same steps as any scenario, so it can describe a collection's records, the objects a vendor's fake holds and the calls a fake has had (`{op} was called with`). Sanoma reads and checks it; nothing applies it yet.
+
+```gherkin
+Feature: The company a demo opens on
+
+  Scenario: Acme's books
+    Given data.clients "acme" has
+      | name | Acme Corp |
+    And github.repository "website" has
+      | has_wiki | true |
+```
+
+The world is not a scenario: nothing runs or checks it, and the list of scenarios leaves it out. Its file holds exactly one `Scenario`. A `Scenario Outline`, a second scenario, a `When`, a `Then`, a fault, a decision or a step saying who is acting is refused at its line, and `sanoma check` reports that as it reports any feature file that does not load. Only the root has a world: a `world.feature` in an app's `apps/<app>/scenarios/` is an ordinary feature file, whose scenarios each need a `When`.
+
+`loadWorld(scope)`, from `sanoma/workflows/scenario`, resolves to the world's `{ name, given }`, or `undefined` when the root has no `scenarios/world.feature`, and rejects with its error at its `file:line`. `loadScenarios` returns it too, as `world`, with its error among `errors`.
 
 ### Steps a connector ships
 
