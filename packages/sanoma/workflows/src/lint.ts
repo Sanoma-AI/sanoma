@@ -27,7 +27,7 @@ const AUTHOR_PACKAGES: readonly string[] = ["sanoma/workflows", "sanoma"];
  * compute locally (`LOCAL_ENTRIES`, any of their names), connectors and zod.
  */
 const ALLOWED_PACKAGE = new RegExp(
-  `^(${[...[...AUTHOR_PACKAGES, ...LOCAL_ENTRIES].map(RegExp.escape), "@sanoma-ai/connector-[a-z0-9-]+", "zod"].join("|")})$`,
+  `^(${[...AUTHOR_PACKAGES, ...LOCAL_ENTRIES, "@sanoma-ai/connector-[a-z0-9-]+", "zod"].join("|")})$`,
 );
 
 /** Packages refused by name, with the reason. */
