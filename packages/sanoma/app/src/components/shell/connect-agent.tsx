@@ -13,10 +13,10 @@ import {
   ItemTitle,
 } from "#/components/ui/item.tsx";
 import { DECLARE_BOX } from "../../api.ts";
-import { enginesHere, enginesOf, MODEL_CONNECTOR } from "../../lib/chat.ts";
+import { boxless, enginesHere, enginesOf, MODEL_CONNECTOR } from "../../lib/chat.ts";
 import { configQuery } from "../../queries.ts";
 import { ButtonLink } from "../kit.tsx";
-import { EngineMark } from "./composer.tsx";
+import { EngineMark } from "./engine-mark.tsx";
 
 // The empty chat while the person's agent is not connected, and when the menu's Agent… opens it:
 // the ways to connect it, as cards, the person's own Claude plan first.
@@ -38,6 +38,7 @@ const CODEX = "codex";
 export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: (engine: string) => void }) {
   const { data: config } = useQuery(configQuery());
   const live = config?.place === "live";
+  const noBox = config !== undefined && boxless(config);
   const own = config ? enginesOf(config.agents).filter((engine) => engine.plan === "own") : [];
   const here = new Set(config ? enginesHere(config).map((engine) => engine.name) : []);
   const claude = own.find((engine) => engine.agent === CLAUDE);
@@ -53,7 +54,7 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
         </p>
       </div>
       <ItemGroup className="gap-2">
-        {claude && (
+        {claude && (here.has(claude.name) || noBox) && (
           <Item variant="outline" className="border-primary bg-card">
             <ItemMedia>
               <EngineMark engine={claude} />
@@ -63,12 +64,10 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
                 Your Claude plan <Badge variant="secondary">Recommended</Badge>
               </ItemTitle>
               <ItemDescription>
-                {here.has(claude.name)
-                  ? "Pro or Max. Sign in once in your browser; nothing extra to pay."
-                  : `${DECLARE_BOX}.`}
+                {noBox ? `${DECLARE_BOX}.` : "Pro or Max. Sign in once in your browser; nothing extra to pay."}
               </ItemDescription>
             </ItemContent>
-            {here.has(claude.name) && (
+            {!noBox && (
               <Button className="w-full" onClick={() => onChoose(claude.name)}>
                 Sign in with Claude
               </Button>

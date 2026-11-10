@@ -17,7 +17,8 @@ import {
 } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { acpEngine } from "../src/steps/agent/acp.ts";
-import { boxSession, homeOf, NO_BOX, personBox } from "../src/steps/agent/box-session.ts";
+import { NO_BOX } from "../src/lib/chat.ts";
+import { boxSession, homeOf, personBox } from "../src/steps/agent/box-session.ts";
 import { boxName } from "../src/steps/agent/checkout.ts";
 import { harnessEngine } from "../src/steps/agent/harness.ts";
 import { freePort, localBackend } from "../src/steps/agent/local-box.ts";

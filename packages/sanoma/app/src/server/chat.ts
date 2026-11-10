@@ -15,6 +15,7 @@ import {
   type ChatMessage,
   engineOf,
   heldRunOf,
+  NO_BOX,
   noModelText,
   onModelConnector,
   textOf,
@@ -83,12 +84,9 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const { chats } = app.client;
     const chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
+    // A chat keeps its engine, whose turn says what it lacks; a new one opens only on one it can run here.
+    if (!chat) await checkEngine(app, body.engine);
     const named = chat?.engine ?? body.engine;
-    // A chat keeps its engine; a new one opens only on our loop or a plan an installed connector gives its agent.
-    const { agent, plan } = engineOf(body.engine);
-    if (!chat && body.engine !== "loop" && !app.resolved.agents.get(agent)?.[plan]) {
-      throw invalid(`No engine ${body.engine}: no connector of this company gives its agent on that plan`);
-    }
     const sent = await personMessage(body.message);
     const message: ChatMessage = body.start
       ? { ...sent, parts: [{ type: "text", text: INTRO }], metadata: { intro: true } }
@@ -115,6 +113,26 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const { status, body } = toApiError(err, "a chat turn");
     return Response.json(body, { status });
   }
+}
+
+/**
+ * Refuses a new chat on an engine it cannot run here, as the composer offers none such
+ * (`enginesHere`): our loop, else a plan an installed connector gives its agent; on a live
+ * instance, not while it declares no box (`NO_BOX`), nor an own plan whose sign-in is a command run
+ * once on the person's computer.
+ */
+async function checkEngine(app: AppContext, name: string) {
+  if (name === "loop") return;
+  const { agent, plan } = engineOf(name);
+  const installed = app.resolved.agents.get(agent);
+  const part = installed?.[plan];
+  if (!installed || !part)
+    throw invalid(`No engine ${name}: no connector of this company gives its agent on that plan`);
+  if (app.place !== "live") return;
+  if ("signIn" in part && "once" in part.signIn) {
+    throw invalid(`${installed.title} signs in on the person's own computer, not on a live instance`);
+  }
+  if ((await app.resolved.sandboxes()).length === 0) throw new ApiError(409, { error: NO_BOX });
 }
 
 /** The person's new message, checked (a 400 for one a chat does not take). The transcript, written by the worker, is not validated again. */

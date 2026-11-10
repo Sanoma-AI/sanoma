@@ -5,8 +5,7 @@ import {
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
 import { type AppStepContext, type Box, type Process, valueAt } from "sanoma/workflows";
-import { DECLARE_BOX } from "../../api.ts";
-import { noKeyText } from "../../lib/chat.ts";
+import { NO_BOX } from "../../lib/chat.ts";
 import { placeOf } from "../../loopback.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { agentHome, boxName, inCheckout, type RealPaths, realIn, under, within } from "./checkout.ts";
@@ -38,12 +37,6 @@ export interface BoxSessionOptions {
 
 /** The directory under a box's home that is a person's own agents' HOME (`acp.ts`): their installs, shims and sign-ins. */
 export const OWN_AGENTS_DIR = ".acp";
-
-/**
- * What a coding agent's turn is told on a live instance that declares no sandbox: what to declare,
- * and Agent37's connector page for its key (`noKeyText`).
- */
-export const NO_BOX = noKeyText("agent37", DECLARE_BOX);
 
 /**
  * The box of the person `step` is run by, for the company (`boxName`), chosen: where every coding

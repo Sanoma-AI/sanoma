@@ -17,6 +17,7 @@ import {
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { cn } from "#/lib/utils.ts";
 import { actorHeaders, useActor } from "../../actor.ts";
+import type { AppConfig } from "../../api.ts";
 import {
   type ChatMessage,
   chatTransport,
@@ -31,12 +32,16 @@ import {
 import { CHATS_KEY, chatModelQuery, chatQuery, chatsQuery, configQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
 import type { Prompt } from "./chat-prompt.ts";
-import { Composer, EngineMark } from "./composer.tsx";
+import { Composer } from "./composer.tsx";
 import { ConnectAgent } from "./connect-agent.tsx";
+import { EngineMark } from "./engine-mark.tsx";
 import { ConnectorPageLink, Thread } from "./thread.tsx";
 
 // The chat column, beside the bar on the same surface: the operator agent (POST /api/chat, its
 // stream read by the AI SDK's useChat), your chats, and the composer carrying the page you are on.
+
+/** Every engine of the company's (`enginesOf`), as the chat column reads it from the config. */
+const allEngines = (config: AppConfig) => enginesOf(config.agents);
 
 /** The engine a person's new chats open on (none until they choose one), and choosing it. */
 interface EngineChoice {
@@ -68,7 +73,7 @@ export function ChatColumn({
   const id = picked ?? chats[0]?.id ?? fresh;
   const chat = chats.find((c) => c.id === id);
   // Every engine of the company's, to label a chat by, even one it can no longer open on here.
-  const { data: engines = [] } = useQuery({ ...configQuery(), select: (config) => enginesOf(config.agents) });
+  const { data: engines = [] } = useQuery({ ...configQuery(), select: allEngines });
   const optionOf = (name: string) => engines.find((e) => e.name === name);
   const opened = chat && optionOf(chat.engine);
   return (
@@ -204,11 +209,11 @@ function Conversation({
   // changes) and keeps it after.
   // The person's choice is one cookie for every company on this computer: one this company cannot run here is not taken.
   const { data: options = [] } = useQuery({ ...configQuery(), select: enginesHere });
-  const [engine, setEngine] = useState(
-    () => openedOn ?? (options.some((option) => option.name === choice.value) ? choice.value! : "loop"),
-  );
+  const [chosen, setChosen] = useState<string>();
+  const engine =
+    openedOn ?? chosen ?? (options.some((option) => option.name === choice.value) ? choice.value! : "loop");
   const choose = (name: string) => {
-    setEngine(name);
+    setChosen(name);
     choice.set(name);
   };
   const fresh = messages.length === 0;

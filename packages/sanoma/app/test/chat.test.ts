@@ -527,6 +527,13 @@ describe("the chat", () => {
     expect(await testApp.client.chats.load(id)).toEqual(stored);
     const nobody = await post({ id: `other-${RUN}`, message: userMessage("Hi") });
     expect(nobody.status).toBe(400);
+    // A new chat on an engine no connector of the company gives: refused before it opens.
+    for (const engine of ["nonsense", "acp-claude-code", "acp-loop"]) {
+      const none = await post({ id: `none-${RUN}`, engine, message: userMessage("Hi") }, { [ACTOR_HEADER]: "ada" });
+      expect(none.status, engine).toBe(400);
+      expect(await none.json(), engine).toMatchObject({ error: expect.stringMatching(/^No engine /) });
+    }
+    expect(await testApp.client.chats.get(`none-${RUN}`)).toBeUndefined();
     const elsewhere = await post(
       { id, message: userMessage("Hi") },
       { [ACTOR_HEADER]: "ada", origin: "https://evil.test" },
