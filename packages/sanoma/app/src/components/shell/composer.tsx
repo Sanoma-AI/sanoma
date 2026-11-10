@@ -13,7 +13,8 @@ import {
 } from "#/components/ui/dropdown-menu.tsx";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "#/components/ui/input-group.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { ENGINE_NAMES, type EngineName, ownPlan } from "../../lib/chat.ts";
+import type { EngineOption } from "../../lib/chat.ts";
+import { EngineMark } from "./engine-mark.tsx";
 
 /** Focuses a text box with its caret after its text: where a prompt's words go on. */
 const focusAtEnd = (box: HTMLTextAreaElement | null) => {
@@ -22,23 +23,20 @@ const focusAtEnd = (box: HTMLTextAreaElement | null) => {
   box.setSelectionRange(box.value.length, box.value.length);
 };
 
-/** The engines, the composer's choices: ours on the company's key, then a person's own (`ownPlan`). */
-const NAMES = Object.keys(ENGINE_NAMES) as EngineName[];
-const OURS = NAMES.filter((name) => !ownPlan(name));
-const OWN = NAMES.filter(ownPlan);
-
 /** An engine as the composer's choice. */
-const engineOption = (name: EngineName) => (
-  <DropdownMenuRadioItem key={name} closeOnClick value={name}>
-    {ENGINE_NAMES[name]}
+const engineOption = (engine: EngineOption) => (
+  <DropdownMenuRadioItem key={engine.name} closeOnClick value={engine.name}>
+    <EngineMark engine={engine} />
+    {engine.label}
   </DropdownMenuRadioItem>
 );
 
 /**
  * The composer: the page you are on as a chip (`page`), the message (starting as `draft`, focused at its end, when a
- * page opened the chat with it), the engine a new chat opens on (`engine`, only then: a person's
- * own agents in a group of their own), Send (Enter; Shift+Enter for a new line), and while there
- * is a `note` (where to connect a model), the note, Send off.
+ * page opened the chat with it), the engine a new chat opens on (`engine`, only then, of its
+ * `options`: ours on the company's key, then a person's own plans in a group of their own), Send
+ * (Enter; Shift+Enter for a new line), and while there is a `note` (where to connect a model), the
+ * note, Send off.
  */
 export function Composer({
   page,
@@ -52,11 +50,13 @@ export function Composer({
   busy: boolean;
   onSend: (text: string) => void;
   draft?: string;
-  engine?: { value: EngineName; set: (engine: EngineName) => void };
+  engine?: { value: string; set: (engine: string) => void; options: EngineOption[] };
   note?: ReactNode;
 }) {
   const [text, setText] = useState(draft ?? "");
   const noteId = useId();
+  const chosen = engine?.options.find((option) => option.name === engine.value);
+  const own = engine?.options.filter((option) => option.plan === "own") ?? [];
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -98,21 +98,26 @@ export function Composer({
                 render={
                   <InputGroupButton
                     size="sm"
-                    aria-label={`Engine: ${ENGINE_NAMES[engine.value]}`}
+                    aria-label={`Engine: ${chosen?.label ?? engine.value}`}
                     className="-ml-2 text-xs"
                   />
                 }
               >
-                {ENGINE_NAMES[engine.value]}
+                {chosen && <EngineMark engine={chosen} />}
+                {chosen?.label ?? engine.value}
                 <CaretDownIcon aria-hidden="true" data-icon="inline-end" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="min-w-56">
                 <DropdownMenuRadioGroup value={engine.value} onValueChange={engine.set}>
-                  <DropdownMenuGroup>{OURS.map(engineOption)}</DropdownMenuGroup>
                   <DropdownMenuGroup>
-                    <DropdownMenuLabel>Your own plan</DropdownMenuLabel>
-                    {OWN.map(engineOption)}
+                    {engine.options.filter((option) => option.plan === "onKey").map(engineOption)}
                   </DropdownMenuGroup>
+                  {own.length > 0 && (
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Your own plan</DropdownMenuLabel>
+                      {own.map(engineOption)}
+                    </DropdownMenuGroup>
+                  )}
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>

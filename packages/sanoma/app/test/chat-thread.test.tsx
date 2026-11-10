@@ -6,9 +6,14 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } fr
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { DECLARE_BOX } from "../src/api.ts";
 import { Composer } from "../src/components/shell/composer.tsx";
+import { ConnectAgent } from "../src/components/shell/connect-agent.tsx";
+import sanoma from "../src/icon-small.svg?url";
 import { Thread } from "../src/components/shell/thread.tsx";
-import type { ChatMessage, EngineName } from "../src/lib/chat.ts";
+import type { AppConfig } from "../src/api.ts";
+import { configQuery } from "../src/queries.ts";
+import { type ChatMessage, engineName, engineOf, enginesHere, enginesOf } from "../src/lib/chat.ts";
 
 // The chat's thread on a scripted conversation (`createChat`) through the real `useChat`: no model,
 // no server and no database, so what the column draws of each part is what is under test.
@@ -72,11 +77,13 @@ function Scripted({ script, onSend = () => {} }: { script: Script; onSend?: (tex
   );
 }
 
-/** Draws `page` in the app's router and query client. */
-function draw(page: () => ReactNode) {
+/** Draws `page` in the app's router and query client, which holds `config` when given. */
+function draw(page: () => ReactNode, config?: AppConfig) {
   const router = createRouter({ routeTree: createRootRoute({ component: page }), history: createMemoryHistory() });
+  const queryClient = new QueryClient();
+  if (config) queryClient.setQueryData(configQuery().queryKey, config);
   render(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
@@ -268,9 +275,39 @@ describe("the chat's thread", () => {
   });
 });
 
+/** The coding agents as `describeConfig` lists them, in their connectors' order: marks as its `data:` URLs. */
+const mark = (name: string) => ({ src: `data:image/svg+xml,${name}`, dark: `data:image/svg+xml,${name}-dark` });
+const AGENTS: AppConfig["agents"] = [
+  { id: "copilot", vendor: "github", title: "Copilot", mark: mark("copilot"), own: true },
+  {
+    id: "claude-code",
+    vendor: "anthropic",
+    title: "Claude Code",
+    mark: { src: "data:image/svg+xml,claude" },
+    own: true,
+    onKey: { model: "anthropic" },
+  },
+  { id: "codex", vendor: "openai", title: "Codex", mark: mark("codex"), own: true },
+  { id: "opencode", vendor: "opencode", title: "OpenCode", own: true, once: true },
+  { id: "pi", vendor: "pi", title: "Pi", mark: mark("pi"), own: true, once: true, onKey: { model: "anthropic" } },
+];
+
+/** The marks drawn in `element`, by their `src`: a one-colour mark's dark file after it. */
+const marks = (element: Element) => [...element.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+
+/** The names of the engines a chat can open on in `config`. */
+const names = (config: AppConfig) => enginesHere(config).map((engine) => engine.name);
+
+/** The Connect your agent cards drawn: each one's title, with its marks. */
+const cards = () =>
+  [...document.querySelectorAll('[data-slot="item"]')].map((item) => ({
+    title: item.querySelector('[data-slot="item-title"]')?.textContent,
+    marks: marks(item),
+  }));
+
 function EnginePicker() {
-  const [value, set] = useState<EngineName>("loop");
-  return <Composer busy={false} onSend={() => {}} engine={{ value, set }} />;
+  const [value, set] = useState("loop");
+  return <Composer busy={false} onSend={() => {}} engine={{ value, set, options: enginesOf(AGENTS) }} />;
 }
 
 describe("the chat's composer", () => {
@@ -306,17 +343,90 @@ describe("the chat's composer", () => {
     const engines = await screen.findAllByRole("menuitemradio");
     expect(engines.map((engine) => engine.textContent)).toEqual([
       "Sanoma",
-      "Pi",
       "Claude Code",
+      "Pi",
       "Copilot (your plan)",
-      "OpenCode (your plan)",
-      "Pi (your plan)",
       "Claude Code (your plan)",
       "Codex (your plan)",
+      "OpenCode (your plan)",
+      "Pi (your plan)",
     ]);
     expect(screen.getByText("Your own plan")).toBeTruthy();
+    // Each with its agent's mark from its connector, Sanoma's for our loop, none where the connector has none.
+    expect(marks(engines[0]!)).toEqual([sanoma]);
+    expect(marks(engines[1]!)).toEqual(["data:image/svg+xml,claude"]);
+    expect(marks(engines[3]!)).toEqual(["data:image/svg+xml,copilot", "data:image/svg+xml,copilot-dark"]);
+    expect(marks(engines[6]!)).toEqual([]);
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Codex (your plan)" }));
     await waitFor(() => expect(trigger.textContent).toBe("Codex (your plan)"));
     expect(trigger.getAttribute("aria-label")).toBe("Engine: Codex (your plan)");
+    expect(trigger.querySelector("img")?.getAttribute("src")).toBe("data:image/svg+xml,codex");
+  });
+});
+
+/** A config of `AGENTS`, on this computer or live, with or without a declared box: what the chat's engines read of it. */
+const config = (place: AppConfig["place"], box: boolean) =>
+  ({
+    agents: AGENTS,
+    place,
+    resourceTypes: [{ id: "agent37.instance", capabilities: ["sandbox"] }],
+    resources: box ? [{ id: "resources/sanoma/infra.ts#box", vendor: "agent37", type: "instance" }] : [],
+  }) as unknown as AppConfig;
+
+describe("the chat's engines", () => {
+  it("reads every name a chat or the cookie has kept as its agent and the account it runs on, and back", () => {
+    for (const [name, engine] of [
+      ["loop", { agent: "loop", plan: "onKey" }],
+      ["claude-code", { agent: "claude-code", plan: "onKey" }],
+      ["pi", { agent: "pi", plan: "onKey" }],
+      ["acp-claude-code", { agent: "claude-code", plan: "own" }],
+      ["acp-codex", { agent: "codex", plan: "own" }],
+    ] as const) {
+      expect(engineOf(name), name).toEqual(engine);
+      expect(engineName(engine)).toBe(name);
+    }
+  });
+
+  it("offers every installed agent's plans on this computer, and on a live instance only what runs there", () => {
+    const all = enginesOf(AGENTS).map((engine) => engine.name);
+    expect(names(config("this-computer", false))).toEqual(all);
+    // Live, an own plan that signs in by a command run once on the person's computer is no choice.
+    expect(names(config("live", true))).toEqual(all.filter((name) => name !== "acp-opencode" && name !== "acp-pi"));
+    // Live with no box declared, no coding agent runs: only our loop.
+    expect(names(config("live", false))).toEqual(["loop"]);
+  });
+});
+
+describe("Connect your agent", () => {
+  const choose = vi.fn<(engine: string) => void>();
+
+  it("offers each installed agent's own plan with its mark, and opens the chat on the one chosen", async () => {
+    draw(() => <ConnectAgent onChoose={choose} />, config("this-computer", false));
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in with Claude" }));
+    expect(choose).toHaveBeenLastCalledWith("acp-claude-code");
+    expect(screen.getByText(/^Other agents \(Copilot, OpenCode, Pi\)/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "More agents" }));
+    await waitFor(() => expect(cards()).toHaveLength(6));
+    expect(cards()).toEqual([
+      { title: "Your Claude plan Recommended", marks: ["data:image/svg+xml,claude"] },
+      { title: "Your ChatGPT plan", marks: ["data:image/svg+xml,codex", "data:image/svg+xml,codex-dark"] },
+      { title: "An API key", marks: [] },
+      { title: "Copilot", marks: ["data:image/svg+xml,copilot", "data:image/svg+xml,copilot-dark"] },
+      { title: "OpenCode", marks: [] },
+      { title: "Pi", marks: ["data:image/svg+xml,pi", "data:image/svg+xml,pi-dark"] },
+    ]);
+  });
+
+  it("offers no agent live whose sign-in runs once on the person's computer", async () => {
+    draw(() => <ConnectAgent onChoose={choose} />, config("live", true));
+    expect(await screen.findByRole("button", { name: "Sign in with Claude" })).toBeTruthy();
+    expect(screen.getByText(/^Other agents \(Copilot\)/)).toBeTruthy();
+  });
+
+  it("says, live with no box declared, what to declare in place of the Claude plan's sign-in", async () => {
+    draw(() => <ConnectAgent onChoose={choose} />, config("live", false));
+    expect(await screen.findByText(`${DECLARE_BOX}.`)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sign in with Claude" })).toBeNull();
+    expect(screen.queryByText(/Other agents/)).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import type { CheckResult } from "sanoma/workflows";
-import type { ConfigDescription } from "sanoma/workflows/describe";
+import type { AgentEntry } from "sanoma/workflows/description";
 import {
   type ChatStatus,
   DefaultChatTransport,
@@ -8,6 +8,7 @@ import {
   isToolUIPart,
   type UIMessage,
 } from "ai";
+import type { AppConfig } from "../api.ts";
 import type { LoopTools } from "../steps/agent/tools.ts";
 
 // The operator agent's chat as the browser and every engine share it: the message type, the
@@ -49,36 +50,80 @@ export interface SignInCard {
   after?: string;
 }
 
-/**
- * The engines a chat can open on, by the name its row keeps, with the name the chat shows: our
- * loop, an existing coding agent through `HarnessAgent` on the company's key, or a person's own
- * coding agent over ACP on their own plan (`acp-<agent>`, `ownPlan`).
- */
-export const ENGINE_NAMES = {
-  loop: "Sanoma",
-  pi: "Pi",
-  "claude-code": "Claude Code",
-  "acp-copilot": "Copilot (your plan)",
-  "acp-opencode": "OpenCode (your plan)",
-  "acp-pi": "Pi (your plan)",
-  "acp-claude-code": "Claude Code (your plan)",
-  "acp-codex": "Codex (your plan)",
-} as const;
-
-/** Whether an engine spends the person's own plan: their own agent over ACP. */
-export const ownPlan = (engine: string) => engine.startsWith("acp-");
-
-/** The engine of a person's own plan of the coding agent `id` (`ConfigDescription.agents`). */
-export const ownEngine = (id: string) => `acp-${id}`;
+/** The account a chat's agent runs on: the company's key (our loop's model, or an agent's `onKey`), or the person's own plan over ACP (`own`). */
+export type Plan = "onKey" | "own";
 
 /**
- * Whether the company can run an engine: our loop always, a coding agent only when a connector of
- * the company gives it for the plan the engine names (`ConfigDescription.agents`); a turn on any
- * other fails, saying which connector to add.
+ * What a chat runs on: the agent (`loop`, our own, or a coding agent's id,
+ * `ConfigDescription.agents`) and the account it runs on. A chat's row and the engine cookie keep
+ * it as one name (`engineName`), which every chat ever opened reads back with `engineOf`: `loop`,
+ * `<id>` on the company's key, `acp-<id>` on a person's own plan.
  */
-export const installed = (engine: string, agents: ConfigDescription["agents"]) =>
-  engine === "loop" ||
-  agents.some((a) => (ownPlan(engine) ? a.own && ownEngine(a.id) === engine : a.onKey && a.id === engine));
+export interface ChatEngine {
+  agent: string;
+  plan: Plan;
+}
+
+/** A chat's engine, from the name its row or the cookie keeps (`engineName`). */
+export const engineOf = (name: string): ChatEngine =>
+  name.startsWith("acp-") ? { agent: name.slice("acp-".length), plan: "own" } : { agent: name, plan: "onKey" };
+
+/** The name a chat's row and the cookie keep for an engine (`engineOf` reads it). */
+export const engineName = ({ agent, plan }: ChatEngine) => (plan === "own" ? `acp-${agent}` : agent);
+
+/** An engine as the chat offers and labels it: its name, its agent's title and mark (from its connector; none for our loop, whose mark is Sanoma's), and its label, the title with the plan. */
+export interface EngineOption extends ChatEngine {
+  name: string;
+  title: string;
+  label: string;
+  mark?: AgentEntry["mark"];
+  /** A person's own plan whose sign-in is a command they run once on their computer (`AgentEntry.once`). */
+  once?: true;
+}
+
+/** A coding agent's engine on `plan`. */
+const agentEngine = (agent: AgentEntry, plan: Plan): EngineOption => ({
+  name: engineName({ agent: agent.id, plan }),
+  agent: agent.id,
+  plan,
+  title: agent.title,
+  label: plan === "own" ? `${agent.title} (your plan)` : agent.title,
+  ...(agent.mark && { mark: agent.mark }),
+  ...(plan === "own" && agent.once && { once: true as const }),
+});
+
+/**
+ * The company's engines: our loop, then each coding agent its connectors give
+ * (`ConfigDescription.agents`) on the company's key, then each on a person's own plan.
+ */
+export function enginesOf(agents: AgentEntry[]): EngineOption[] {
+  return [
+    { name: "loop", agent: "loop", plan: "onKey", title: "Sanoma", label: "Sanoma" },
+    ...agents.filter((agent) => agent.onKey).map((agent) => agentEngine(agent, "onKey")),
+    ...agents.filter((agent) => agent.own).map((agent) => agentEngine(agent, "own")),
+  ];
+}
+
+/**
+ * Whether a live instance declares no box for the coding agents, which run in one there
+ * (`DECLARE_BOX`): no resource whose type meets the `sandbox` contract.
+ */
+export const boxless = (config: Pick<AppConfig, "place" | "resources" | "resourceTypes">) =>
+  config.place === "live" &&
+  !config.resources.some((r) =>
+    config.resourceTypes.find((t) => t.id === `${r.vendor}.${r.type}`)?.capabilities?.includes("sandbox"),
+  );
+
+/**
+ * The engines a chat can open on here, in `enginesOf`'s order: on a live instance, no coding
+ * agent while it declares no box (`boxless`), and no own plan whose sign-in runs once on the
+ * person's computer. A turn on any other fails, saying why.
+ */
+export function enginesHere(config: AppConfig): EngineOption[] {
+  const live = config.place === "live";
+  const box = !boxless(config);
+  return enginesOf(config.agents).filter((e) => e.agent === "loop" || (box && !(live && e.once)));
+}
 
 /** Whether an engine answers on the company's model connector (`chatModel`): our loop; a coding agent says what it lacks itself. */
 export const onModelConnector = (engine: string) => engine === "loop";
@@ -92,9 +137,6 @@ export function pathOf(input: unknown): string | undefined {
   const path = [fields.file_path, fields.path, fields.notebook_path].find((value) => typeof value === "string");
   return path as string | undefined;
 }
-
-/** An engine's name, as a chat's row keeps it. */
-export type EngineName = keyof typeof ENGINE_NAMES;
 
 /**
  * What a reply suggests the person ask next, the `data-suggestions` part (by the id `suggestions`)

@@ -25,7 +25,7 @@ import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
-import { type ChatMessage, chatTransport, type EngineName } from "../src/lib/chat.ts";
+import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
 import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's second engine, end to end: an existing
@@ -237,7 +237,7 @@ afterAll(async () => {
 });
 
 /** Opens the chat `id` on `engine` with `text`, as the chat column does: the reply's stream. */
-const opening = (id: string, engine: EngineName, text: string) =>
+const opening = (id: string, engine: string, text: string) =>
   chatTransport(new URL("/api/chat", app!.url).href, () => ({
     [ACTOR_HEADER]: "ada",
     origin: new URL(app!.url).origin,
@@ -251,14 +251,14 @@ const opening = (id: string, engine: EngineName, text: string) =>
   });
 
 /** Opens the chat `id` on `engine` with `text`; the reply as it ended. */
-async function send(id: string, engine: EngineName, text: string) {
+async function send(id: string, engine: string, text: string) {
   const stream = await opening(id, engine, text);
   let reply: ChatMessage | undefined;
   for await (const snapshot of readUIMessageStream<ChatMessage>({ stream })) reply = snapshot;
   return reply;
 }
 
-const engines: [EngineName, string, boolean][] = [
+const engines: [string, string, boolean][] = [
   ["pi", "Pi", true],
   ["claude-code", "Claude Code", process.env.SANOMA_LIVE === "1"],
 ];
