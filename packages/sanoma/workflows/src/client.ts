@@ -28,7 +28,7 @@ import {
   withdrawalRefusal,
 } from "./approvals.ts";
 import { beforeOf, decideCall, decideStart, decisionOf, deniedKeys, startHoldOf } from "./call.ts";
-import { type Call, callsOf, opCalled, outputsOf, recorded } from "./ctx.ts";
+import { type Call, callsOf, inputOf, opCalled, outputsOf, recorded } from "./ctx.ts";
 import { type Chats, chatStore } from "./chats.ts";
 import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection-driver.ts";
@@ -490,7 +490,7 @@ export class SanomaClient {
     }
     const fn = drivers.get(op.id);
     if (!fn) throw new SanomaError("invalid_input", `${op.id} has no driver: the connector package must attach one`);
-    const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
+    const parsed = inputOf(op, input);
     const connection = await this.config.connections.select(op.vendor, options.connection, actor.id);
     const selected = connection && {
       $connection: connection.id,

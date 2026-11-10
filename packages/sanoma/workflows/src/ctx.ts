@@ -14,6 +14,7 @@ import {
   type WorkflowDefinition,
 } from "./define.ts";
 import { parseOrThrow } from "./errors.ts";
+import type { LedgerBody, LedgerGroup, LedgerRecord } from "./ledger.ts";
 import { isOp, type Op } from "./op.ts";
 import type { CallNode } from "./outline.ts";
 import { DEFAULT_SLEEP_NAME, entryOpsOf, isBatch, LOGIN_CODE_WORKFLOW, shown } from "./shared.ts";
@@ -224,6 +225,36 @@ export const opCalled = (c: Call, workflow?: string) => ({
   effect: c.op.effect,
   input: recorded(c.op, c.input, workflow),
 });
+
+/** A call's input as its operation's schema takes it: `invalid_input` naming the operation when it does not. */
+export const inputOf = (op: Op, input: unknown): unknown =>
+  parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
+
+/**
+ * A run's record of `app`: `body` with what every record carries, its id `<runId>:<type>:<key>`
+ * (the `seq` unless a key is given), tagged with the `ctx.all` member it is written in. A
+ * worker's (`entry` in `ledger.ts`) and a page's.
+ */
+export function recordOf(
+  run: { id: string; workflow: string; actor: Principal },
+  app: string,
+  body: LedgerBody,
+  { seq, at, key, group }: { seq: number; at: number; key?: string | undefined; group?: LedgerGroup | undefined },
+): LedgerRecord {
+  const record = {
+    v: 1,
+    app,
+    id: `${run.id}:${body.type}:${key ?? seq}`,
+    runId: run.id,
+    seq,
+    at,
+    actor: run.actor,
+    workflow: run.workflow,
+    ...body,
+  } as LedgerRecord;
+  if (group) record.group = group;
+  return record;
+}
 
 /** The outputs of the calls a call made, from its output: a batch's, one per entry, in order. */
 export const outputsOf = (op: Op, output: unknown): unknown[] => (isBatch(op) ? (output as unknown[]) : [output]);

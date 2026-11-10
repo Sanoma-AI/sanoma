@@ -4,7 +4,7 @@ import { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
 import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
 import { connectionFakes } from "./fake.ts";
-import { applyGivens } from "./givens.ts";
+import { applyGivens, refuseUnfaked } from "./givens.ts";
 import type { ConnectionCatalog, ConnectionRef, ConnectionSnapshot } from "./connection.ts";
 import { entry, write } from "./ledger.ts";
 import type { DriverFn } from "./op.ts";
@@ -95,14 +95,7 @@ export async function seedSandbox(run: Run, name: string, input: unknown): Promi
       // which `applyGivens` checks.
       const uses =
         run.workflow === CALL_WORKFLOW ? [CallInput.parse(input).op] : opIdsOf(state.workflows.get(run.workflow)!);
-      const missing = [...new Set(uses)].filter((id) => !drivers.has(id));
-      if (missing.length) {
-        throw new SanomaError(
-          "invalid_input",
-          `A sandbox run of ${run.workflow} has no fake for ${missing.join(", ")}: no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`,
-          { scenario: name, missing },
-        );
-      }
+      refuseUnfaked(`A sandbox run of ${run.workflow} calls`, uses, drivers, { scenario: name });
       /** The run's fake of `vendor`, or of the account `ref` selects. */
       const fakeOf = (vendor: string, ref?: ConnectionRef) => {
         const selected = select(vendor, ref);

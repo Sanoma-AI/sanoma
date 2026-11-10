@@ -27,6 +27,26 @@ export interface GivenTarget {
   call(i: number, op: string, connection?: ConnectionRef): CallContext;
 }
 
+/**
+ * Refuses the operations among `ids` that no fake's driver in `drivers` implements, as what
+ * `subject` says calls them (`Workflow "x" uses`, `Scenario "y" seeds`): `invalid_input` with
+ * `data` and the ones `missing`. A sandbox run's, a world's and a page's workflows' one check.
+ */
+export function refuseUnfaked(
+  subject: string,
+  ids: Iterable<string>,
+  drivers: ReadonlyMap<string, unknown>,
+  data: Record<string, unknown>,
+): void {
+  const missing = [...new Set(ids)].filter((id) => !drivers.has(id));
+  if (missing.length === 0) return;
+  throw new SanomaError(
+    "invalid_input",
+    `${subject} ${missing.join(", ")}, but no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`,
+    { ...data, missing },
+  );
+}
+
 /** True for a fake that holds resources (`ResourceFake`, as `sanoma/internal/bridge`'s `tfFake` is). */
 const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & ResourceFake =>
   "override" in fake && "put" in fake && "remove" in fake;
@@ -97,14 +117,14 @@ export function seedResource(
  */
 export async function applyGivens(scenario: Pick<Scenario, "name" | "given">, target: GivenTarget): Promise<Seeds> {
   const { name, given } = scenario;
-  const missing = [...new Set(given.flatMap((g) => ("op" in g && !target.drivers.has(g.op) ? [g.op] : [])))];
-  if (missing.length) {
-    throw new SanomaError(
-      "invalid_input",
-      `Scenario "${name}" seeds ${missing.join(", ")}, but no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`,
-      { scenario: name, missing },
-    );
-  }
+  refuseUnfaked(
+    `Scenario "${name}" seeds`,
+    given.flatMap((g) => ("op" in g ? [g.op] : [])),
+    target.drivers,
+    {
+      scenario: name,
+    },
+  );
   const plain = missingResourceFake(scenario, target.fakes);
   if (plain) throw plain;
   const seeded: Seeds = [];

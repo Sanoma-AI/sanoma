@@ -7,8 +7,10 @@ import {
   checkSleep,
   ctxOf,
   type CtxRunner,
+  inputOf,
   opCalled,
   outputsOf,
+  recordOf,
   recorded,
   untilOf,
 } from "./ctx.ts";
@@ -16,7 +18,7 @@ import { AllMembers, type ApprovalState, opIdsOf, type Principal, type WorkflowD
 import { isDirect } from "./direct.ts";
 import { errorInfo, parseOrThrow, RejectedError, SanomaError } from "./errors.ts";
 import type { Fake } from "./fake.ts";
-import { applyGivens } from "./givens.ts";
+import { applyGivens, refuseUnfaked } from "./givens.ts";
 import type { LedgerBody, LedgerGroup, LedgerRecord } from "./ledger.ts";
 import { type CallContext, type Connector, type DriverFn, indexConnectors, makersOf, type Op } from "./op.ts";
 import { resourceTypesOf } from "./resource.ts";
@@ -84,10 +86,6 @@ interface Seeded {
   secrets: Secrets;
 }
 
-/** The input as the operation's schema takes it. */
-const inputOf = (op: Op, input: unknown) =>
-  parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
-
 /** The operation called on its fake in `seeded`, its output checked against its schema. */
 const callFake = async (
   { drivers, secrets }: Seeded,
@@ -151,32 +149,14 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
 
   let current = await make();
   for (const wf of workflows) {
-    const missing = opIdsOf(wf).filter((id) => !current.drivers.has(id));
-    if (missing.length) {
-      throw new SanomaError(
-        "invalid_input",
-        `Workflow "${wf.name}" uses ${missing.join(", ")}, but no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`,
-        { workflow: wf.name, missing },
-      );
-    }
+    refuseUnfaked(`Workflow "${wf.name}" uses`, opIdsOf(wf), current.drivers, { workflow: wf.name });
   }
   let runs = new Map<string, PageRun>();
   let started = 0;
 
-  /** Appends a record to the run, at its clock, with the next `seq` unless one is given. */
-  const write = (run: PageRun, body: LedgerBody, seq = run.seq++) =>
-    run.records.push({
-      v: 1,
-      app: PAGE_APP,
-      id: `${run.id}:${body.type}:${seq}`,
-      runId: run.id,
-      seq,
-      at: run.clock,
-      actor: run.actor,
-      workflow: run.workflow,
-      ...(run.group && { group: run.group }),
-      ...body,
-    } as LedgerRecord);
+  /** Appends a record to the run, at its clock, with the next `seq` unless one is given, keyed as a worker keys it. */
+  const write = (run: PageRun, body: LedgerBody, { seq = run.seq++, key }: { seq?: number; key?: string } = {}) =>
+    run.records.push(recordOf(run, PAGE_APP, body, { seq, at: run.clock, key, group: run.group }));
 
   /** How the run's `ctx` members are made in the page: on the world's fakes, at once; none once the run has ended. */
   const runnerOf = (run: PageRun, seeded: Seeded): CtxRunner => ({
@@ -205,7 +185,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
               durationMs: Date.now() - begun,
               ...outcome(i),
             } as LedgerBody,
-            seq + i,
+            { seq: seq + i },
           ),
         );
       let output: unknown;
@@ -242,15 +222,19 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
         refused: [],
       };
       run.approvals.push(state);
-      write(run, {
-        type: "approval.requested",
-        approval: state.id,
-        ...at,
-        title,
-        approver: state.approver,
-        requestedBy: "workflow",
-        covers: state.covers,
-      });
+      write(
+        run,
+        {
+          type: "approval.requested",
+          approval: state.id,
+          ...at,
+          title,
+          approver: state.approver,
+          requestedBy: "workflow",
+          covers: state.covers,
+        },
+        { key: state.id },
+      );
       run.status = "waiting";
       const decision = await decide(state);
       run.status = "running";
@@ -261,7 +245,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
         decidedBy: by,
         decidedAt: run.clock,
       });
-      write(run, { type: "approval.decided", approval: state.id, decision, by });
+      write(run, { type: "approval.decided", approval: state.id, decision, by }, { key: state.id });
       if (decision === "reject") throw new RejectedError(title, { id: by }, undefined, state.id);
       return { approvedBy: by, at: run.clock };
     },

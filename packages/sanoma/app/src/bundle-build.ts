@@ -211,6 +211,7 @@ async function bundlePlugins(
           ? JSON.stringify({ version: (JSON.parse(readFileSync(id, "utf8")) as { version: string }).version })
           : undefined,
     },
+    { ...vendorInfos(), applyToEnvironment: ssr },
     { ...importMetaUrl(), applyToEnvironment: ssr },
     { ...companyFiles(root), applyToEnvironment: ssr },
     { ...optional(), applyToEnvironment: ssr },
@@ -298,33 +299,62 @@ export function optional(): Plugin {
 }
 
 /**
- * Each module given its file's `import.meta.url`, as Node gives it, where the runtime gives a
- * module none (workerd), and what `vendorInfo(import.meta.url)` reads of a connector's package
- * (which neither workerd nor a browser has) read at build time: a connector's module calls it as
- * it is evaluated. A page's build (`sanoma/workflows/page`) takes `vendorInfoOnly`: a browser
- * has `import.meta.url`, and Vite's own assets need it, never the build machine's paths.
+ * The module with each node `replace` gives text for replaced by it, the nodes visited parents
+ * first and a replaced node's own left alone; undefined when it replaces none.
  */
-export function importMetaUrl({ vendorInfoOnly = false } = {}): Plugin {
+function rewritten(
+  parse: (code: string, options: { lang: ReturnType<typeof langOf> }) => unknown,
+  code: string,
+  file: string,
+  replace: (node: AstNode) => string | undefined,
+) {
+  const out = new MagicString(code);
+  let replaced = { start: -1, end: -1 };
+  for (const node of nodesOf(parse(code, { lang: langOf(file) }))) {
+    if (replaced.start <= node.start && node.end <= replaced.end) continue;
+    const text = replace(node);
+    if (text === undefined) continue;
+    out.overwrite(node.start, node.end, text);
+    replaced = node;
+  }
+  return out.hasChanged() ? { code: out.toString(), map: out.generateMap({ hires: true }) } : undefined;
+}
+
+/**
+ * What `vendorInfo(import.meta.url)` reads of a connector's package, read at build time: a
+ * runtime with no package files (workerd, a browser) has none to read, and a connector's module
+ * calls it as it is evaluated. The Worker's build and a page's (`sanoma/workflows/page`).
+ */
+export function vendorInfos(): Plugin {
+  return {
+    name: "sanoma:vendor-info",
+    transform: {
+      filter: { id: /\.[cm]?[jt]sx?(\?|$)/, code: "vendorInfo" },
+      handler(code, id) {
+        const file = id.split("?")[0]!;
+        const info = (node: AstNode) =>
+          node.type === "CallExpression" && isVendorInfo(node)
+            ? `(${JSON.stringify(vendorInfo(pathToFileURL(file).href))})`
+            : undefined;
+        return rewritten(this.parse.bind(this), code, file, info);
+      },
+    },
+  };
+}
+
+/**
+ * Each module given its file's `import.meta.url`, as Node gives it, where the runtime gives a
+ * module none: the Worker's build (after `vendorInfos`), never a page's, whose browser has one.
+ */
+export function importMetaUrl(): Plugin {
   return {
     name: "sanoma:import-meta-url",
     transform: {
       filter: { id: /\.[cm]?[jt]sx?(\?|$)/, code: "import.meta.url" },
       handler(code, id) {
         const file = id.split("?")[0]!;
-        const url = pathToFileURL(file).href;
-        const out = new MagicString(code);
-        // The call last replaced: its own `import.meta.url`, visited right after it, goes with it.
-        let replaced = { start: -1, end: -1 };
-        for (const node of nodesOf(this.parse(code, { lang: langOf(file) }))) {
-          if (replaced.start <= node.start && node.end <= replaced.end) continue;
-          if (node.type === "CallExpression" && isVendorInfo(node)) {
-            out.overwrite(node.start, node.end, `(${JSON.stringify(vendorInfo(url))})`);
-            replaced = node;
-          } else if (!vendorInfoOnly && isImportMetaUrl(node)) {
-            out.overwrite(node.start, node.end, JSON.stringify(url));
-          }
-        }
-        return { code: out.toString(), map: out.generateMap({ hires: true }) };
+        const url = JSON.stringify(pathToFileURL(file).href);
+        return rewritten(this.parse.bind(this), code, file, (node) => (isImportMetaUrl(node) ? url : undefined));
       },
     },
   };

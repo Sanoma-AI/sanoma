@@ -9,6 +9,7 @@ import {
   checkApproval,
   checkSleep,
   ctxOf,
+  inputOf,
   opCalled,
   outputsOf,
   type Placed,
@@ -491,7 +492,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
       workflow: run.workflow,
     });
   }
-  const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
+  const parsed = inputOf(op, input);
   // The calls this one makes (a batch's entries), each decided and recorded on its own.
   const calls = callsOf(op, parsed, run.state.ops);
   // The call's identity (its ledger seq and id, and the driver's idempotency key) is taken

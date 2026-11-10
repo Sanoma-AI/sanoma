@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { companyFiles, importMetaUrl, optional } from "sanoma/app/bundle";
+import { companyFiles, optional, vendorInfos } from "sanoma/app/bundle";
 import { afterAll, expect, it } from "vitest";
 import { build, type Rolldown } from "vite";
 
@@ -26,7 +26,7 @@ it("builds a page's runtime for a browser without Node, DBOS or a database, and 
     configFile: false,
     logLevel: "silent",
     root: fixture,
-    plugins: [importMetaUrl({ vendorInfoOnly: true }), companyFiles(fixture, { fromRoot: true }), optional()],
+    plugins: [vendorInfos(), companyFiles(fixture, { fromRoot: true }), optional()],
     resolve: { conditions: ["sanoma-source", "browser", "module", "import", "default"] },
     build: {
       write: false,
