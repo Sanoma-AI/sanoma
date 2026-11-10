@@ -9,6 +9,35 @@ export function sitePath(site: string, path: string): string {
   return path === prefix || path.startsWith(`${prefix}/`) ? path.slice(prefix.length) || "/" : path;
 }
 
+/**
+ * Where a public site's own host finds a file at `path` (decoded): the site's public file at its
+ * root, `/sites/<site>/<path>`; none under `/sites/`, where only the app's host has every site's.
+ */
+export const publicPath = (site: string, path: string): string | undefined =>
+  path.startsWith("/sites/") ? undefined : `/sites/${site}${path}`;
+
+/** A path the Worker looks among its assets for: its last segment has an extension (`mount.js`). */
+export const hasExtension = (path: string): boolean => /\.[^/]+$/.test(path);
+
+/**
+ * The path a request asks a file at, decoded: a GET's or a HEAD's, never a server function's, and
+ * only one a URL keeps as it is, so no `..`, `\` or `?` decoded from it steps out of a site's
+ * folder once `publicPath` puts it there (`/..%2Fother/x.js`).
+ */
+export function filePath(request: Request): string | undefined {
+  const { pathname } = new URL(request.url);
+  if ((request.method !== "GET" && request.method !== "HEAD") || pathname.startsWith("/_serverFn/")) return undefined;
+  try {
+    const path = decodeURIComponent(pathname);
+    return decodeURIComponent(new URL(path, "http://file").pathname) === path ? path : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A route path as its page's URL: no optional segment, and a character escaped in its file's name (`feed[.]xml`) as it is. */
+export const pageUrl = (path: string): string => withoutOptional(path).replaceAll(/\[([^\]]*)\]/g, "$1");
+
 /** A route path without its optional parameters (`{-$locale}`): the page's path when none is given. */
 export const withoutOptional = (path: string): string => path.replace(/\/\{-\$[^}]*\}/g, "");
 
