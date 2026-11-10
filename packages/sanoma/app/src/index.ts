@@ -376,7 +376,7 @@ async function devResponder(
       // A site's public file, looked for on disk as it is now: on a public site's host, its own at its root.
       const path = filePath(request);
       const at = path === undefined || site === undefined ? path : publicPath(site, path);
-      const found = at?.startsWith("/sites/") ? await publicFileAt(repo, at) : undefined;
+      const found = at?.startsWith("/sites/") ? publicFileAt(repo, at) : undefined;
       if (found) return fileResponse(request, { path: found.file, headers: fileHeaders(at!.slice(1), found.size) });
       const { req, res } = sockets.get(request)!;
       return new Promise((done, fail) => {

@@ -186,22 +186,32 @@ async function publicFiles(repo: string): Promise<PublicFile[]> {
     .toSorted((a, b) => a.path.localeCompare(b.path));
 }
 
-/** The public file at `path` (`/sites/<key>/<under>`, decoded) and its size, looked for on disk as it is now: the dev server's. */
-export async function publicFileAt(repo: string, path: string): Promise<{ file: string; size: number } | undefined> {
-  const { sitesUnder } = await import("sanoma/workflows/describe");
-  const site = sitesUnder(repo).find(({ name }) => path.startsWith(`/sites/${name}/`));
-  const parts = site && servedParts(path.slice(`/sites/${site.name}/`.length));
-  if (!site || !parts) return undefined;
-  const file = join(repo, site.dir, "public", ...parts);
-  const stat = lstatSync(file, { throwIfNoEntry: false });
-  return stat?.isFile() ? { file, size: stat.size } : undefined;
+/**
+ * The public file at `path` (`/sites/<key>/<under>`, decoded) and its size, looked for on disk as it
+ * is now, a link not followed: a root site's (`sites/<name>/public/`) or an app's site's
+ * (`apps/<app>/sites/<name>/public/`). The dev server's, on every request it maps there.
+ */
+export function publicFileAt(repo: string, path: string): { file: string; size: number } | undefined {
+  const parts = path.startsWith("/sites/") ? servedParts(path.slice("/sites/".length)) : undefined;
+  if (!parts) return undefined;
+  for (const [site, under] of [
+    [["sites", parts[0]!], parts.slice(1)],
+    [["apps", parts[0]!, "sites", parts[1] ?? ""], parts.slice(2)],
+  ]) {
+    const folder = join(repo, ...site!, "public");
+    const file = join(folder, ...under!);
+    const stat = lstatSync(file, { throwIfNoEntry: false });
+    if (stat?.isFile() && realpathSync(file) === join(realpathSync(folder), ...under!))
+      return { file, size: stat.size };
+  }
+  return undefined;
 }
 
 /** The sites' public folders, from the repo: built already, so no tool looks into them for its own sources. */
 const PUBLIC_DIRS = ["sites/*/public", "apps/*/sites/*/public"];
 
-/** What a site's own host answers itself, never a public file there: its robots.txt, sitemap, login and the build's files, and nothing under `sites/`. */
-const OWN_PATHS = /^(robots\.txt|sitemap\.xml|(assets|auth|sites)\/.*)$/;
+/** What a site's own host answers itself, never a public file there: its robots.txt, sitemap, login, server functions, prerendered pages and the build's files, and nothing under `sites/`. */
+const OWN_PATHS = /^(robots\.txt|sitemap\.xml|(assets|auth|sites|_serverFn|__sanoma)\/.*)$/;
 
 /** The most a public file holds: Cloudflare's limit on one of a Worker's assets, 25 MiB. */
 const MAX_PUBLIC_FILE = 25 * 1024 * 1024;

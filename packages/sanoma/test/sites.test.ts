@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -303,6 +303,9 @@ describe("sanoma with sites: the dev server", () => {
     const own = await rawGet(`${url}/demo/mount.js`, `hello.localhost:${new URL(url).port}`);
     expect([own.status, own.body]).toEqual([200, text]);
     expect((await rawGet(`${url}/sites/hello/demo/mount.js`, `hello.localhost:${new URL(url).port}`)).status).toBe(404);
+    // A link is not followed, as the build leaves it out: a folder linked to outside the site is no public file.
+    symlinkSync(join(repo, "workflows"), join(repo, "sites/hello/public/linked"));
+    expect((await fetch(`${url}/sites/hello/linked/hello.ts`)).status).not.toBe(200);
   }, 60_000);
 
   it("writes .sanoma/api.ts at start, and again when a workflow changes", async () => {
