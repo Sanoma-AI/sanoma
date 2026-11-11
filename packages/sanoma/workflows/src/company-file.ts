@@ -27,13 +27,13 @@ export function upFrom<T>(dir: string, found: (dir: string) => T | undefined): T
 }
 
 /**
- * The file of the code that called the function calling this one (`defineWorkflow`'s caller),
- * from V8's call sites, as a path; where they name none, or there are none (a page), the file a
- * bundle says it is evaluating (`bundledFile`); undefined where there is neither.
+ * The file of the code that called the function calling this one (`defineWorkflow`'s caller):
+ * the company file a bundle says it is evaluating (`bundledFile`), whose call sites name the
+ * bundle's chunk instead; else from V8's call sites, as a path; undefined where there is neither.
  */
 export function callerFile(): string | undefined {
   // Frame 0 is this function, frame 1 its caller, frame 2 theirs: by index, since a bundle may hold all three.
-  return scriptPath(builtin("node:util")?.getCallSites(3)[2]?.scriptName) ?? bundledFile();
+  return bundledFile() ?? scriptPath(builtin("node:util")?.getCallSites(3)[2]?.scriptName);
 }
 
 /** A V8 script name (a `file:` URL for a module, a path for a script) as a path; undefined for none. */
@@ -60,7 +60,8 @@ const roots = new Map<string, string>();
 export function appOfFile(file: string | undefined): string | undefined {
   if (file === undefined) return undefined;
   const path = builtin("node:path");
-  if (!path) return appOfPath(file);
+  // A page's file is named from the root (`apps/crm/resources/data.ts`), in a browser or in Node.
+  if (!path?.isAbsolute(file)) return appOfPath(file);
   const { existsSync } = builtin("node:fs")!;
   const { basename, dirname, join, relative, resolve, sep } = path;
   /** Whether `dir` is a company's root: it holds a `sanoma.config.ts`, or a bundle registered its snapshot (`useRootSnapshot`). */

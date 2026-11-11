@@ -22,7 +22,6 @@ import { STAGED_FIRST } from "../../../components/grid/staged.tsx";
 import { RecordForm } from "../../../components/record-form.tsx";
 import { RecordHistory } from "../../../components/record-history.tsx";
 import {
-  api,
   closeRecord,
   collectionNamed,
   configQuery,
@@ -33,6 +32,7 @@ import {
   recordsQuery,
   usedBy,
 } from "../../../queries.ts";
+import { api } from "../../../site-api.ts";
 
 /** No records view yet: nothing staged to be told of. */
 const unstaged = () => () => {};

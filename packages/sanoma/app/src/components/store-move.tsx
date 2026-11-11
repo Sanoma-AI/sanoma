@@ -11,7 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#
 import type { Tone } from "#/lib/tone.ts";
 import { errorBodyOf } from "../api.ts";
 import type { UntypedApi } from "../api-client.ts";
-import { api, runLink, storeMovesQuery, useStartRun } from "../queries.ts";
+import { runLink, storeMovesQuery, useStartRun } from "../queries.ts";
+import { api } from "../site-api.ts";
 import { Fact, Facts, Notice, ToneBadge } from "./kit.tsx";
 import { UtcTime } from "./common.tsx";
 

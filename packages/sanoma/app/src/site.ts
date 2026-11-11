@@ -41,7 +41,7 @@ export type { CollectionApi, ListQuery, OpFn, Saved, WorkflowFn } from "sanoma/w
 // A workflow's start form (`<RunForm workflow="hello" />`), and who is on the page.
 export { RunForm } from "./form/run-form.tsx";
 export { type ActorState, useActor } from "./actor.ts";
-export { api } from "./queries.ts";
+export { api } from "./site-api.ts";
 // A page's absolute URLs, for its canonical link and Open Graph: at the site's domain, else the request's host.
 export { siteOrigin, siteUrl } from "./site-url.ts";
 

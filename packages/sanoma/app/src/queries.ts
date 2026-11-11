@@ -63,18 +63,11 @@ import {
   getStoreMoves,
   openChangeFn,
   previewFn,
-  callFn,
   saveDraftFn,
   startRunFn,
 } from "./functions.ts";
-import { type Api, createApi, type UntypedApi } from "./api-client.ts";
-
-/**
- * The company's operations and workflows, called as the person on the page (`callFn`): a loader's
- * call runs in-process while the server renders the page, as the person whose request it is.
- * A site's, from `sanoma/site`; the app's own calls through it are untyped.
- */
-export const api: Api = createApi((request) => callFn({ data: request }));
+import type { UntypedApi } from "./api-client.ts";
+import { api } from "./site-api.ts";
 
 /**
  * The app's own built-in workflows on the repository (`app-workflows.ts` in the runtime), typed:

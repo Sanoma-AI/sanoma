@@ -106,14 +106,15 @@ const callFake = async (
 };
 
 const RunRef = z.object({ runId: z.string().min(1) });
+const ResultRef = RunRef.extend({ waitMs: z.number().int().min(0).optional() });
 const RunsLimit = z.object({ limit: z.number().int().positive().optional() });
 
 /**
  * The page's runtime: `transport` takes what a site's `api` sends (`createApi`), as the app's
  * `callApi` does. An operation `isDirect` allows is called on its fake, as the actor; a
  * workflow's api name (`apiNameOf`) or `<name>.start` starts a run, `{ runId }` (a start's `id`
- * is its run's id, and the same id again is the same run); `.result` waits for the run's end, its
- * output or its failure; `.latest`, `.runs` (`{ limit? }`, 20 unless given), `.approvals` and
+ * is its run's id, and the same id again is the same run); `.result` (`{ runId, waitMs? }`) waits for the
+ * run's end, its output or its failure, or `run_running` once `waitMs` has passed; `.latest`, `.runs` (`{ limit? }`, 20 unless given), `.approvals` and
  * `.ledger` (`{ runId }`, the run's records in order: its run card) read the runs. Each
  * approval is decided at once (`decide`), `ctx.sleep` moves the run's clock on instead of
  * waiting, and `ctx.now()` reads that clock. Refuses a workflow that uses an operation no fake
@@ -398,8 +399,20 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       switch (method) {
         case "start":
           return { runId: start(wf, input, id) };
-        case "result":
-          return runOf(wf.name, input).done;
+        case "result": {
+          // As the app's: a run still going after `waitMs` is `run_running`, which `createApi` asks again on.
+          const { waitMs } = parseOrThrow(ResultRef, input ?? {}, "The input");
+          const run = runOf(wf.name, input);
+          if (waitMs === undefined || isEnded(run.status)) return run.done;
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const running = new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new SanomaError("run_running", `Run ${run.id} is still running`, { runId: run.id })),
+              waitMs,
+            );
+          });
+          return Promise.race([run.done, running]).finally(() => clearTimeout(timer));
+        }
         case "latest": {
           const run = runsOf(wf.name).find((r) => r.status === "finished");
           return run ? { runId: run.id, output: await run.done, at: run.updatedAt! } : null;

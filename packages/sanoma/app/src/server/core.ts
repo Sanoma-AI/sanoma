@@ -6,9 +6,7 @@ import {
   type ApprovalState,
   type DriftReport,
   deploymentKey,
-  errorCode,
   errorMessage,
-  type InputIssue,
   invalidInput,
   isEnded,
   type LedgerRecord,
@@ -20,7 +18,6 @@ import {
   remoteFor,
   type RunSummary,
   SanomaError,
-  vendorCodeOf,
 } from "sanoma/workflows";
 import {
   apiNameOf,
@@ -38,6 +35,7 @@ import { z } from "zod";
 import {
   ACTOR_HEADER,
   ApiError,
+  asApiError,
   type AppConfig,
   CallRequest,
   type ChangeDetail,
@@ -53,10 +51,10 @@ import {
   type DisconnectConnectionRequest,
   type DecideCall,
   type EnforcementResponse,
-  type ErrorResponse,
   type FieldChange,
   type HistoryEntry,
   type RecordHistory,
+  runFailure,
   type HistoryRequest,
   type PermissionsResponse,
   type PreviewQuery,
@@ -788,20 +786,6 @@ export async function postCall(request: Request, context: ActorContext): Promise
   }
 }
 
-/**
- * What `.result` answers for a run that failed or was cancelled: the runtime's answer when its
- * error has a code with a status of its own (`policy_denied`, 403), else a 422 with the run's
- * failure as the run recorded it and its code (`driver_failed`), if any. The failure is the
- * run's answer, so the caller sees it (a 500 would hide it, and a client would try again).
- */
-function runFailure(run: RunSummary, err: unknown): ApiError {
-  const answered = asApiError(err);
-  if (answered.status < 500) return answered;
-  const code = errorCode(err);
-  const error = run.error ?? `Run ${run.runId} ${run.status === "cancelled" ? "was cancelled" : "failed"}`;
-  return new ApiError(422, { error, ...(code && { code }), runId: run.runId });
-}
-
 /** The 400 for a name `callApi` does not know. */
 const notCallable = (name: string) =>
   new ApiError(400, {
@@ -822,91 +806,6 @@ async function runOf(
   if (run?.workflow !== workflow || (startedBy && run.startedBy?.id !== startedBy.id))
     throw new ApiError(404, { error: `No run ${runId} of ${workflow}`, code: "run_not_found" });
   return run;
-}
-
-const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
-  invalid_input: 400,
-  not_approver: 403,
-  not_admitted: 403,
-  policy_denied: 403,
-  run_not_found: 404,
-  no_pending_approval: 404,
-  already_decided: 409,
-  approval_withdrawn: 409,
-  run_ended: 409,
-  run_running: 409,
-  approval_pending: 409,
-};
-
-/**
- * An ApiError for any error: the runtime's codes get their status, and anything else is a 500.
- * A 500 answers only that something went wrong: its message may name internal details (a
- * database host, say), so the detail goes to the log (`toApiError`), not the caller.
- */
-export function asApiError(err: unknown): ApiError {
-  if (err instanceof ApiError) return err;
-  const failure = err as { name?: string; code?: string; problem?: string } | null;
-  // These two boundaries deliberately discard provider errors. Reconstruct their safe reason
-  // rather than forwarding a message/cause that could include submitted authentication data.
-  if (failure?.name === "AuthenticationError") {
-    const problems = [
-      "missing",
-      "expired",
-      "revoked",
-      "rejected",
-      "wrong_account",
-      "scope_changed",
-      "uncertain",
-      "unavailable",
-      "unsupported",
-    ];
-    const problem = problems.includes(failure.problem ?? "") ? failure.problem! : "unavailable";
-    return new ApiError(400, { error: `Authentication: ${problem.replaceAll("_", " ")}` });
-  }
-  if (failure?.name === "SecretStoreError") {
-    const codes = [
-      "invalid_configuration",
-      "unavailable",
-      "denied",
-      "conflict",
-      "read_only",
-      "unsupported",
-      "too_large",
-      "invalid_value",
-    ];
-    const reason = codes.includes(failure.code ?? "") ? failure.code! : "unavailable";
-    return new ApiError(reason === "conflict" ? 409 : 400, { error: `Secret store: ${reason.replaceAll("_", " ")}` });
-  }
-  // A collection's record changed since the caller read it (`ifRecord`), or there already
-  // (`ifAbsent`): the caller's to resolve, with the record as it stands when the error carries it,
-  // or, for a batch, each entry's.
-  const vendorCode = vendorCodeOf(err);
-  if (vendorCode === "record_changed" || vendorCode === "record_exists") {
-    const { current, conflicts } = err as Pick<ErrorResponse, "current" | "conflicts">;
-    return new ApiError(409, {
-      error: errorMessage(err),
-      code: vendorCode,
-      ...(current !== undefined && { current }),
-      ...(Array.isArray(conflicts) && { conflicts }),
-    });
-  }
-  const code = errorCode(err);
-  const status = (code && STATUS[code]) || 500;
-  if (status === 500) return new ApiError(500, { error: "Something went wrong", ...(code ? { code } : {}) });
-  const body: ErrorResponse = { error: errorMessage(err), code };
-  // Read by property, not instanceof: DBOS hands a run's errors back as copies.
-  const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
-  if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
-  // A batch's refusal names every entry the policy denied, saves and deletes alike.
-  if (code === "policy_denied" && Array.isArray(data.denied)) body.denied = data.denied.map(String);
-  if (typeof data.field === "string") body.field = data.field;
-  if (code === "not_approver") {
-    body.approver = data.approver as ErrorResponse["approver"];
-    if (typeof data.reason === "string") body.reason = data.reason;
-  }
-  if ((code === "approval_pending" || code === "run_running") && typeof data.runId === "string")
-    body.runId = data.runId;
-  return new ApiError(status, body);
 }
 
 /** `asApiError`, logging what it turns into a 500: only those are unexpected. */

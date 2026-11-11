@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+.invoice-title {
+  letter-spacing: 0.02em;
+}

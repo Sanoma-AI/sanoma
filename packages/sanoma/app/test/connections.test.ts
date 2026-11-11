@@ -24,14 +24,13 @@ import { connectionHealth, connections as connectionRows, connectionSetups, ledg
 import { eq, sql } from "drizzle-orm";
 import { lazyDb } from "../../workflows/src/db.ts";
 import { tree } from "../../workflows/test/tree.ts";
-import { PreviewConnectionRequest, ConnectConnectionRequest } from "../src/api.ts";
+import { asApiError, ConnectConnectionRequest, PreviewConnectionRequest } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { startApp } from "../src/index.ts";
 import {
-  asApiError,
   connections,
   connectConnection,
   previewConnection,

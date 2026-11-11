@@ -3,7 +3,8 @@
 import type { Principal } from "sanoma/workflows";
 import { createApi, type UntypedApi } from "../src/api-client.ts";
 import type { AppContext } from "../src/context.ts";
-import { asApiError, callApi } from "../src/server/core.ts";
+import { asApiError } from "../src/api.ts";
+import { callApi } from "../src/server/core.ts";
 
 /**
  * `api` as the page of `actor` calls it (`queries.ts`): each call through `callApi`, failing with

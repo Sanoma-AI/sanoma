@@ -1,0 +1,13 @@
+/*
+ * A demo's stylesheet, `demo.css` (`demo-build.ts`): Tailwind's theme and utilities and the kit's
+ * look (ui.css), never preflight, which would restyle the host's page. The build scopes every rule
+ * to the element `mount` renders into (`[data-sanoma-demo]`) and adds the sites as sources.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "../ui.css";
+/* What a site's page draws of the app's own: the start form, its notices and boundaries. */
+@source "../form";
+@source "../components/boundaries.tsx";
+@source "../components/common.tsx";

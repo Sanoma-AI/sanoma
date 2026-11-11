@@ -1,5 +1,5 @@
 {
-  // The Node entries only: startApp and its types, the build (`./build`), the Worker's (`./bundle`) and the worker's
+  // The Node entries only: startApp and its types, the build (`./build`), the Worker's (`./bundle`), a demo's (`./demo`) and the worker's
   // steps (`./steps`). `vite build` builds the app itself into dist/client and dist/server, emptying them, so
   // `build` runs this after it, with `tsc -p` (no build info to call it up to date). Not composite: its entries
   // import modules all over src/, which a composite project would have to list one by one; the package's own
@@ -16,5 +16,5 @@
   },
   "references": [{ "path": "../workflows/tsconfig.build.json" }, { "path": "../better-auth/tsconfig.build.json" }],
   "include": [],
-  "files": ["src/index.ts", "src/build.ts", "src/bundle-build.ts", "src/steps/index.ts"]
+  "files": ["src/index.ts", "src/build.ts", "src/bundle-build.ts", "src/demo-build.ts", "src/steps/index.ts"]
 }

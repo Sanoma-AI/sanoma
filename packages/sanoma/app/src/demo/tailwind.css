@@ -1,0 +1,4 @@
+/* `tailwindcss` in a demo's build (`demo-build.ts`): a site's own stylesheet's Tailwind without preflight, which would restyle the host's page. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);

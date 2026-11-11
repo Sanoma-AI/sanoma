@@ -463,30 +463,47 @@ function tailwindFromApp(): void {
 /** `file` as an import specifier: an absolute path with forward slashes, as Vite writes one on Windows too. */
 export const specifier = (file: string) => JSON.stringify(file.split(sep).join("/"));
 
+export interface RepoConfigOptions {
+  /** The plugins that make it the Worker's app bundle (`buildAppBundle`). */
+  bundle?: PluginOption[];
+  /**
+   * The plugins that make it a demo (`buildDemo`): the sites alone under the demo's own root
+   * (`demo/root.tsx`), in a route tree of its own, and no public files.
+   */
+  demo?: PluginOption[];
+}
+
 /**
  * A company repo's build: the repo is Vite's root, the app's `src` (real path) Start's source
  * directory, the route tree the app's routes with `sites/` mounted at `/sites`, all of it written
- * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does. With `bundle`,
- * the plugins that make it the Worker's app bundle instead (`buildAppBundle`).
+ * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does. With `bundle`
+ * or `demo`, the plugins that make it the Worker's app bundle (`buildAppBundle`) or a demo (`buildDemo`) instead.
  */
-export function repoConfig(repo: string, bundle?: PluginOption[]): InlineConfig {
+export function repoConfig(repo: string, { bundle, demo }: RepoConfigOptions = {}): InlineConfig {
   const { src } = appSources();
-  // The route tree is the one both builds share; the Worker's keeps its own cache and temporary files.
-  const routeTree = join(repo, ".sanoma", "app", "routeTree.gen.ts");
-  const out = join(repo, ".sanoma", "app", ...(bundle ? ["bundle"] : []));
+  // The route tree is the one the app's builds share; the Worker's keeps its own cache and
+  // temporary files, and a demo its own tree too.
+  const out = join(repo, ".sanoma", "app", ...(bundle ? ["bundle"] : demo ? ["demo"] : []));
+  const routeTree = join(demo ? out : join(repo, ".sanoma", "app"), "routeTree.gen.ts");
   const sites = join(repo, "sites");
   // Start joins srcDirectory to the root for its entries, so it must be relative.
   const srcDirectory = relative(repo, src);
   const fromApp = createRequire(join(src, "router.tsx"));
   const tailwind = installed("tailwindcss");
   tailwindFromApp();
-  // The app's routes at the root, and the sites' listing at /sites.
+  // The app's routes at the root (a demo has none of them), and the sites' listing at /sites.
   const children = [
-    { type: "physical" as const, directory: ".", pathPrefix: "" },
+    ...(demo ? [] : [{ type: "physical" as const, directory: ".", pathPrefix: "" }]),
     ...(existsSync(join(sites, "__virtual.ts"))
       ? [{ type: "physical" as const, directory: sites, pathPrefix: "/sites" }]
       : []),
   ];
+  // The tree's root, from the routes' directory: the app's, or a demo's.
+  const rootFile = demo
+    ? relative(join(src, "routes"), join(src, "demo", "root.tsx"))
+        .split(sep)
+        .join("/")
+    : "__root.tsx";
   return {
     configFile: false,
     root: repo,
@@ -505,10 +522,10 @@ export function repoConfig(repo: string, bundle?: PluginOption[]): InlineConfig 
       },
       sharedDeps(repo, src),
       runtimeExternal(bundle !== undefined),
-      ...(bundle ?? []),
+      ...(bundle ?? demo ?? []),
       contentPlugin(repo),
       sitesPlugin(repo),
-      publicPlugin(repo),
+      ...(demo ? [] : [publicPlugin(repo)]),
       stylesheetPlugin(),
       publicUnscanned(repo),
       tailwindcss(),
@@ -519,7 +536,7 @@ export function repoConfig(repo: string, bundle?: PluginOption[]): InlineConfig 
           // The generator's temporary files, otherwise under `.tanstack/tmp` in the process's cwd.
           tmpDir: join(out, "tmp"),
           // The app's __root.tsx is the tree's root, not a route of the "." mount.
-          virtualRouteConfig: { type: "root", file: "__root.tsx", children },
+          virtualRouteConfig: { type: "root", file: rootFile, children },
           routeFileIgnorePattern: "^__root\\.tsx$",
         },
         importProtection: {

@@ -40,6 +40,9 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
   sanoma wakeup account <label>       mints an account of that service, printing {"id","token"} on stdout
   sanoma check                        typecheck, lint, read the config, build and typecheck the sites, run every
                                       scenario on a database of its own; exit 1 on a problem
+  sanoma demo --out <dir>             the sites as static files that run their workflows in the page, on the
+                                      connectors' fakes from scenarios/world.feature: mount.js, demo.css and
+                                      index.html, emptying <dir> first (a site's public/demos/<name>/, say)
   sanoma env [--check]                write .env.example from the drivers' variables; --check exits 1 when it is out of date
   sanoma ledger export <runId> [--out <file>]
                                       a run's ledger records as JSON lines
@@ -160,6 +163,14 @@ export async function main(argv: string[]): Promise<number> {
       const domains = parseDomains(process.env.SANOMA_DOMAINS) ?? {};
       const bundle = await buildAppBundle(root, { config, domains, log });
       writeFileSync(values.out, JSON.stringify(bundle));
+      return 0;
+    }
+    case "demo": {
+      if (!values.out || rest.length) throw new UsageError("usage: sanoma demo --out <dir>");
+      const { config, root } = await loadConfig();
+      const { buildDemo } = await import("sanoma/app/demo");
+      const { files } = await buildDemo(root, { config, out: values.out, log });
+      log(`sanoma: the demo is in ${values.out}: ${files.length} files, mount.js its entry`);
       return 0;
     }
     case "env":

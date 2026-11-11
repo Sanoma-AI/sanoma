@@ -292,13 +292,14 @@ async function bundlePlugins(
 /**
  * The runtime's `OPTIONAL` imports, each `worker/missing.js`, whose every use throws: a build for a
  * runtime that never loads them (the Worker's, a page's) resolves them without their packages.
+ * Those in `keep` resolve as they are: a demo keeps the PDF renderer when the company installs it.
  */
-export function optional(): Plugin {
+export function optional(keep: readonly string[] = []): Plugin {
   const missing = join(pkgDir, "src", "worker", "missing.js");
   return {
     name: "sanoma:optional",
     enforce: "pre",
-    resolveId: (source) => (OPTIONAL.includes(source) ? missing : undefined),
+    resolveId: (source) => (OPTIONAL.includes(source) && !keep.includes(source) ? missing : undefined),
   };
 }
 
@@ -377,7 +378,10 @@ export function companyFiles(root: string, { fromRoot = false } = {}): Plugin {
       const file = id.split("?")[0]!;
       if (!companyFile(id, root) || !/\.[cm]?[jt]sx?$/.test(file)) return;
       const named = fromRoot ? relative(root, file).split(sep).join("/") : file;
-      const out = new MagicString(code).prepend(`globalThis[Symbol.for("sanoma.file")] = ${JSON.stringify(named)};\n`);
+      // Said as its body begins (after its imports'), and unsaid as it ends: what evaluates after it is not it.
+      const out = new MagicString(code)
+        .prepend(`globalThis[Symbol.for("sanoma.file")] = ${JSON.stringify(named)};\n`)
+        .append(`\nglobalThis[Symbol.for("sanoma.file")] = undefined;\n`);
       return { code: out.toString(), map: out.generateMap({ hires: true }) };
     },
   };
@@ -648,15 +652,14 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
   rmSync(outDir, { recursive: true, force: true });
   const vite = await import("vite");
   const built: InlineConfig = {
-    ...repoConfig(
-      root,
-      await bundlePlugins(
+    ...repoConfig(root, {
+      bundle: await bundlePlugins(
         root,
         config.file,
         snapshot,
         pages.map(({ asset }) => asset),
       ),
-    ),
+    }),
     build: { outDir, emptyOutDir: true },
     logLevel: "warn",
     customLogger: quietLogger(vite, log),
