@@ -426,7 +426,8 @@ export async function startRun(
 }
 
 /** The latest runs, or the latest with a status, of a workflow (`getRuns`). */
-export const listRuns = ({ client }: AppContext, query: z.output<typeof RunsQuery>) => client.runs(query);
+export const listRuns = ({ client }: Pick<AppContext, "client">, query: z.output<typeof RunsQuery>) =>
+  client.runs(query);
 
 /**
  * Each workflow's latest run, by name (`getLastRuns`): one read of each workflow's newest, all at
@@ -741,6 +742,13 @@ const ResultRef = RunRef.extend({ waitMs: z.number().int().min(0).optional() });
 const RunsLimit = RunsQuery.pick({ limit: true });
 
 /**
+ * What `callApi` needs of the app: its client, its resolved config and the company's description.
+ * A request's `AppContext` is one; the worker's chat turn makes one from its step (the agent
+ * catalog's host, `server/catalog.ts`).
+ */
+export type CallHost = Pick<AppContext, "client" | "resolved"> & { snapshot: Pick<AppSnapshot, "description"> };
+
+/**
  * A site's `api` call (`callFn`), as the person asking. An operation's id calls it directly
  * (`SanomaClient.call`, which refuses one that is not direct), with `{}` for no input. A
  * workflow's api name (`apiNameOf`) starts it, as does `<name>.start`, answering `{ runId }`;
@@ -752,7 +760,7 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * reads are `policy_denied`. A declared agent (`isDeclaredAgent`) starts no built-in workflow but
  * those in `AGENT_BUILT_INS` (`policy_denied`), as the client refuses it too.
  */
-export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
+export async function callApi(app: CallHost, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
   const { client, resolved } = app;
   if (name === DESCRIBE_CALL) {
     if (isVisitor(actor)) throw new PolicyDeniedError(name, "a visitor does not read the company's description");
@@ -935,7 +943,7 @@ const notCallable = (name: string) =>
 
 /** The run, when it is one of the workflow's (and `startedBy`'s, when given); a 404 otherwise. */
 async function runOf(
-  { client }: AppContext,
+  { client }: Pick<AppContext, "client">,
   workflow: string,
   runId: string,
   startedBy?: Principal,
