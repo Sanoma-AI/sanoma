@@ -909,7 +909,6 @@ export async function postCall(request: Request, context: ActorContext): Promise
     return Response.json({ error: "An api token is taken only on a public site's host" }, { status: 401 });
   }
   try {
-    // On this machine, the declared agent `x-sanoma-agent` names, acting for the person, as `/mcp` takes it.
     const actor = actingFor(context.app, request, await requireActor(context));
     const call = parse(CallRequest, await request.json().catch(() => undefined), "The request");
     return Response.json((await callApi(context.app, actor, call)) ?? null);

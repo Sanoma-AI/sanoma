@@ -331,9 +331,11 @@ describe("POST /api/call", () => {
   });
 });
 
+/** Who a run is started by when the declared agent `claude-code` starts it for ada. */
+const agentForAda = { id: "claude-code", groups: ["agents"], onBehalfOf: "ada" };
+
 describe("POST /api/call as a declared agent, named in x-sanoma-agent", () => {
   const agent = { [AGENT_HEADER]: "claude-code" };
-  const startedBy = { id: "claude-code", groups: ["agents"], onBehalfOf: "ada" };
 
   it("starts a run as the agent for the person on this machine, and as the person without the header", async () => {
     const id = crypto.randomUUID();
@@ -341,7 +343,7 @@ describe("POST /api/call as a declared agent, named in x-sanoma-agent", () => {
       headers: agent,
     });
     expect(started).toEqual({ status: 200, body: { runId: id } });
-    expect((await testApp.client.run(id))?.startedBy).toEqual(startedBy);
+    expect((await testApp.client.run(id))?.startedBy).toEqual(agentForAda);
     const own = (await post({ name: "outboundNext", input: { company: "Agent Co" } })).body.runId as string;
     expect((await testApp.client.run(own))?.startedBy).toMatchObject({ id: "ada" });
   });
@@ -406,6 +408,8 @@ describe("POST /api/call through the app", () => {
     await app?.close();
   });
 
+  /** The app's own origin, which a client that is not a browser sends as its `Origin`. */
+  const origin = () => new URL(app!.url).origin;
   const send = (headers: Record<string, string>, body: unknown = { name: "data.outbound.list" }) =>
     fetch(new URL("/api/call", app!.url), {
       method: "POST",
@@ -414,8 +418,7 @@ describe("POST /api/call through the app", () => {
     });
 
   it("takes a request that is no browser's when it names the app's own Origin, as sanoma call does", async () => {
-    const origin = new URL(app!.url).origin;
-    const res = await send({ origin });
+    const res = await send({ origin: origin() });
     expect(res.status, await res.clone().text()).toBe(200);
     expect(Array.isArray(await res.json())).toBe(true);
   });
@@ -428,18 +431,13 @@ describe("POST /api/call through the app", () => {
   });
 
   it("starts a run as the agent x-sanoma-agent names, for the person", async () => {
-    const origin = new URL(app!.url).origin;
     const id = crypto.randomUUID();
     const res = await send(
-      { origin, [AGENT_HEADER]: "claude-code" },
+      { origin: origin(), [AGENT_HEADER]: "claude-code" },
       { name: "outboundNext.start", input: { company: "Route Co" }, id },
     );
     expect([res.status, await res.json()]).toEqual([200, { runId: id }]);
-    expect((await testApp.client.run(id))?.startedBy).toEqual({
-      id: "claude-code",
-      groups: ["agents"],
-      onBehalfOf: "ada",
-    });
+    expect((await testApp.client.run(id))?.startedBy).toEqual(agentForAda);
   });
 });
 

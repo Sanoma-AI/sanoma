@@ -25,13 +25,18 @@ const unconfigured = { ...env, GHOST_ADMIN_URL: "", GHOST_ADMIN_API_KEY: "" };
 
 let dir = "";
 
-/** A port nothing listens on: one a server had, closed. */
-async function closedPort(): Promise<number> {
-  const server = createServer();
+/** Where `server` listens once it does, on a free port of 127.0.0.1. */
+async function listening(server: ReturnType<typeof createServer>): Promise<string> {
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-  const { port } = server.address() as AddressInfo;
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+/** An address nothing listens at: one a server had, closed. */
+async function closedAddress(): Promise<string> {
+  const server = createServer();
+  const url = await listening(server);
   await new Promise((done) => server.close(done));
-  return port;
+  return url;
 }
 beforeAll(ensureBuilt, 600_000);
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -315,47 +320,46 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
     const done = await runCli(cwd, args, { ...calls, ...more });
     return { ...done, json: done.code === 0 ? (JSON.parse(done.stdout) as any) : undefined };
   };
+  /** The served app's address, asked as ada. */
+  const at = () => ["--url", server!.url, "--as", "ada"];
+  /** hello started as ada by the declared agent `agent`. */
+  const asAgent = (agent: string) =>
+    sanoma(["call", "hello", "--input", '{"title":"Agent"}', ...at(), "--agent", agent]);
+  /** Who started the run `runId` of hello, from `hello.runs`. */
+  const startedBy = async (runId: string) => {
+    const runs = await sanoma(["call", "hello.runs", ...at()]);
+    return (runs.json as { runId: string; startedBy?: { id: string } }[]).find((r) => r.runId === runId)?.startedBy;
+  };
 
   it("describes the company's own workflows as JSON, on one line, and nothing else on stdout", async () => {
-    const described = await sanoma(["describe", "--url", server!.url, "--as", "ada"]);
+    const described = await sanoma(["describe", ...at()]);
     expect(described.code, described.stderr).toBe(0);
     expect(described.stdout.trimEnd().split("\n")).toHaveLength(1);
     expect(described.json.workflows.map((wf: { name: string }) => wf.name)).toEqual(["hello"]);
   });
 
   it("starts a workflow, printing its run, and reads the run's failure, exiting 1", async () => {
-    const started = await sanoma(["call", "hello", "--input", '{"title":"Hi"}', "--url", server!.url, "--as", "ada"]);
+    const started = await sanoma(["call", "hello", "--input", '{"title":"Hi"}', ...at()]);
     expect(started.code, started.stderr).toBe(0);
     expect(Object.keys(started.json)).toEqual(["runId"]);
     const { runId } = started.json as { runId: string };
-    const result = await sanoma([
-      "call",
-      "hello.result",
-      "--input",
-      JSON.stringify({ runId }),
-      "--url",
-      server!.url,
-      "--as",
-      "ada",
-    ]);
+    const result = await sanoma(["call", "hello.result", "--input", JSON.stringify({ runId }), ...at()]);
     // Ghost is not configured, so the run fails: its error, its code and its run on stderr, nothing on stdout.
     expect(result.code, result.stderr).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toMatch(/\(driver_failed\)\nrun [\w-]+\n$/);
     expect(result.stderr).toContain(`run ${runId}`);
     // A run's reads take no start: its list, by the person who started it.
-    const runs = await sanoma(["call", "hello.runs", "--url", server!.url, "--as", "ada"]);
-    expect(runs.code, runs.stderr).toBe(0);
-    expect(JSON.stringify(runs.json)).toContain(runId);
+    expect(await startedBy(runId)).toMatchObject({ id: "ada" });
   });
 
   it("names the input's issues, and refuses the runtime's own workflows however written, exiting 2", async () => {
-    const invalid = await sanoma(["call", "hello", "--input", '{"title":""}', "--url", server!.url, "--as", "ada"]);
+    const invalid = await sanoma(["call", "hello", "--input", '{"title":""}', ...at()]);
     expect(invalid.code).toBe(1);
     expect(invalid.stderr).toMatch(/\(invalid_input\)/);
     expect(invalid.stderr).toMatch(/^ {2}title: /m);
     for (const name of ["change", "go-live", "goLive", "goLive.start", "login-code", "drift.start"]) {
-      const refused = await sanoma(["call", name, "--url", server!.url, "--as", "ada"]);
+      const refused = await sanoma(["call", name, ...at()]);
       expect(refused.code, name).toBe(2);
       expect(refused.stderr, name).toMatch(
         /is the runtime's own workflow: the runtime's own workflows are not started here/,
@@ -364,32 +368,31 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
   });
 
   it("exits 2 for a mistake in the call: no name, input that is not JSON, an unknown flag, a flag of another command", async () => {
-    const at = ["--url", server!.url, "--as", "ada"];
     const mistakes = [
-      ["call", ...at],
-      ["call", "hello", "--input", "{", ...at],
-      ["call", "hello", "--nope", ...at],
-      ["describe", "--input", "{}", ...at],
-      ["describe", "extra", ...at],
+      ["call", ...at()],
+      ["call", "hello", "--input", "{", ...at()],
+      ["call", "hello", "--nope", ...at()],
+      ["describe", "--input", "{}", ...at()],
+      ["describe", "extra", ...at()],
       ["check", "--as", "ada"],
       ["env", "--url", server!.url],
       ["describe", "--url", "not a url", "--as", "ada"],
       ["describe", "--as", "", "--url", server!.url],
       ["describe", "--as", "ada", "--agent", " ", "--url", server!.url],
-      ["describe", "--id", "x", ...at],
-      ["call", "hello.result", "--id", "x", "--input", '{"runId":"r"}', ...at],
-      ["call", "hello", "--id", "not/an id", ...at],
+      ["describe", "--id", "x", ...at()],
+      ["call", "hello.result", "--id", "x", "--input", '{"runId":"r"}', ...at()],
+      ["call", "hello", "--id", "not/an id", ...at()],
       ["env", "--id", "x"],
     ];
+    const done = [];
     for (const args of mistakes) {
-      const done = await sanoma(args);
-      expect(done.code, args.join(" ")).toBe(2);
-      expect(done.stdout, args.join(" ")).toBe("");
+      const one = await sanoma(args);
+      expect(one.code, args.join(" ")).toBe(2);
+      expect(one.stdout, args.join(" ")).toBe("");
+      done.push(one);
     }
-    expect((await sanoma(["call", "hello", "--input", "{", ...at])).stderr).toMatch(/^--input is not JSON/);
-    expect((await sanoma(["check", "--as", "ada"])).stderr).toMatch(
-      /^--input, --id, --as, --url and --agent are sanoma describe's and sanoma call's/,
-    );
+    expect(done[1]!.stderr).toMatch(/^--input is not JSON/);
+    expect(done[5]!.stderr).toMatch(/^--input, --id, --as, --url and --agent are sanoma describe's and sanoma call's/);
   });
 
   it("exits 1 naming the address it tried when nothing answers there", async () => {
@@ -438,12 +441,7 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
         cwd: other,
         more: git,
       });
-      if (started.code !== 0) return started;
-      const runs = await sanoma(["call", "hello.runs", "--url", server!.url, "--as", "ada"]);
-      const run = (runs.json as { runId: string; startedBy?: { id: string } }[]).find(
-        (r) => r.runId === started.json.runId,
-      );
-      return run?.startedBy?.id;
+      return started.code === 0 ? (await startedBy(started.json.runId))?.id : started;
     };
     try {
       mkdirSync(join(other, "resources"), { recursive: true });
@@ -490,10 +488,30 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
       const nobody = await sanoma(["describe", "--url", server!.url], { cwd: empty });
       expect(nobody.code).toBe(2);
       expect(nobody.stderr).toMatch(/--as/);
-      const named = await sanoma(["describe", "--url", server!.url, "--as", "ada"], { cwd: empty });
+      const named = await sanoma(["describe", ...at()], { cwd: empty });
       expect(named.code, named.stderr).toBe(0);
     } finally {
       rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it("takes the company above an app that kept its own config, and stops at a node_modules", async () => {
+    const other = copyFixture();
+    try {
+      mkdirSync(join(other, ".sanoma"));
+      writeFileSync(join(other, ".sanoma/app.json"), JSON.stringify({ url: server!.url, pid: process.pid }));
+      // An app merged from a company's repo keeps that repo's config: the company is the one above.
+      mkdirSync(join(other, "apps/crm/workflows"), { recursive: true });
+      writeFileSync(join(other, "apps/crm/sanoma.config.ts"), "");
+      const inApp = await sanoma(["describe", "--as", "ada"], { cwd: join(other, "apps/crm/workflows") });
+      expect(inApp.code, inApp.stderr).toBe(0);
+      // Under a node_modules is a package's directory, no company's.
+      mkdirSync(join(other, "node_modules/some-package"), { recursive: true });
+      const inPackage = await sanoma(["describe", "--as", "ada"], { cwd: join(other, "node_modules/some-package") });
+      expect(inPackage.code).toBe(2);
+      expect(inPackage.stderr).toMatch(/^No sanoma\.config\.ts in /);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
     }
   });
 
@@ -508,7 +526,7 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
       const planted = await sanoma(["describe", "--as", "ada"], { cwd: other, more: { SANOMA_APP_PORT: port } });
       expect(planted.code, planted.stderr).toBe(0);
       // On this machine, where nothing listens: the message names the file it came from.
-      writeFileSync(file, JSON.stringify({ url: `http://127.0.0.1:${await closedPort()}`, pid: process.pid }));
+      writeFileSync(file, JSON.stringify({ url: await closedAddress(), pid: process.pid }));
       const gone = await sanoma(["describe", "--as", "ada"], { cwd: other });
       expect(gone.code).toBe(1);
       expect(gone.stderr).toMatch(
@@ -522,10 +540,10 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
   it("makes a start with the same --id once, and refuses that id for another input", async () => {
     const id = crypto.randomUUID();
     const start = (title: string) =>
-      sanoma(["call", "hello", "--input", JSON.stringify({ title }), "--id", id, "--url", server!.url, "--as", "ada"]);
+      sanoma(["call", "hello", "--input", JSON.stringify({ title }), "--id", id, ...at()]);
     expect((await start("Once")).json).toEqual({ runId: id });
     expect((await start("Once")).json).toEqual({ runId: id });
-    const runs = await sanoma(["call", "hello.runs", "--url", server!.url, "--as", "ada"]);
+    const runs = await sanoma(["call", "hello.runs", ...at()]);
     expect((runs.json as { runId: string }[]).filter((r) => r.runId === id)).toHaveLength(1);
     const other = await start("Twice");
     expect(other.code).toBe(1);
@@ -534,34 +552,10 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
   });
 
   it("calls as a declared agent for the person with --agent, and refuses a person named as one", async () => {
-    const started = await sanoma([
-      "call",
-      "hello",
-      "--input",
-      '{"title":"Agent"}',
-      "--url",
-      server!.url,
-      "--as",
-      "ada",
-      "--agent",
-      "claude-code",
-    ]);
+    const started = await asAgent("claude-code");
     expect(started.code, started.stderr).toBe(0);
-    const runs = await sanoma(["call", "hello.runs", "--url", server!.url, "--as", "ada"]);
-    const run = (runs.json as { runId: string; startedBy?: unknown }[]).find((r) => r.runId === started.json.runId);
-    expect(run?.startedBy).toEqual({ id: "claude-code", groups: ["agents"], onBehalfOf: "ada" });
-    const person = await sanoma([
-      "call",
-      "hello",
-      "--input",
-      '{"title":"Agent"}',
-      "--url",
-      server!.url,
-      "--as",
-      "ada",
-      "--agent",
-      "lin",
-    ]);
+    expect(await startedBy(started.json.runId)).toEqual({ id: "claude-code", groups: ["agents"], onBehalfOf: "ada" });
+    const person = await asAgent("lin");
     expect(person.code).toBe(1);
     expect(person.stderr).toMatch(/\(not_admitted\)/);
   });
@@ -581,8 +575,7 @@ describe("sanoma call against a stand-in app", () => {
         res.end(JSON.stringify(answer.body));
       });
     });
-    await new Promise<void>((done) => stand!.listen(0, "127.0.0.1", done));
-    at = `http://127.0.0.1:${(stand!.address() as AddressInfo).port}`;
+    at = await listening(stand);
   });
   afterAll(() => stand?.close());
 
@@ -617,9 +610,8 @@ describe("sanoma call against a stand-in app", () => {
     dir = copyFixture();
     // A connection the app drops once it has the request.
     const dropping = createServer((req) => req.socket.destroy());
-    await new Promise<void>((done) => dropping.listen(0, "127.0.0.1", done));
+    const url = await listening(dropping);
     try {
-      const url = `http://127.0.0.1:${(dropping.address() as AddressInfo).port}`;
       const done = await runCli(dir, ["call", "hello", "--id", "retry-1", "--url", url, "--as", "ada"], env);
       expect(done.code).toBe(1);
       expect(done.stderr).toMatch(

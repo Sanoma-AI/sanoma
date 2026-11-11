@@ -4,7 +4,8 @@ import { type CallToolResult, createMcpHandler, McpServer } from "@modelcontextp
 import { type Principal, RUNTIME_VERSION } from "sanoma/workflows";
 import {
   apiNameOf,
-  BUILT_IN_WORKFLOWS,
+  builtInNamed,
+  builtInRefusal,
   DESCRIBE_CALL,
   DRIFT_WORKFLOW,
   isRecord,
@@ -249,10 +250,10 @@ function startable(app: AppContext, workflow: string) {
     (wf) => wf.name === workflow || wf.apiName === workflow,
   );
   if (named) return named;
-  const builtIn = [...BUILT_IN_WORKFLOWS].find((name) => name === workflow || apiNameOf(name) === workflow);
+  const builtIn = builtInNamed(workflow);
   throw new ApiError(400, {
     error: builtIn
-      ? `${builtIn} is the runtime's own workflow: the runtime's own workflows are not started here (drift has the drift tool)`
+      ? `${builtInRefusal(builtIn)} (drift has the drift tool)`
       : `No workflow "${workflow}" to start: start_run starts one of the company's own workflows, by the name or api name describe lists (the runtime's own workflows are not started here; drift has the drift tool)`,
     code: "invalid_input",
   });

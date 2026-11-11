@@ -21,6 +21,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { Client } from "pg";
 import { UsageError } from "sanoma/workflows/shared";
+import { alive } from "./app-file.ts";
 import { postgresBin } from "./postgres-bin.ts";
 import { system32 } from "./windows.ts";
 
@@ -253,17 +254,6 @@ export function mayBePostgres(
   }
   const ps = run("ps", ["-o", "comm=", "-p", String(pid)]);
   return Boolean(ps.error) || /(^|\/)postgres$/.test(ps.stdout.trim());
-}
-
-/** Whether a process runs as `pid` (another user's too). */
-function alive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 /**

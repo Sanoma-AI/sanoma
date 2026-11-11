@@ -70,9 +70,17 @@ export async function loadConfig(cwd = process.cwd(), { fresh = false } = {}): P
 }
 
 /** Loads `<cwd>/.env` into this process's environment, when there is one: a variable already set wins. */
-export function loadDotEnv(cwd = process.cwd()): void {
+export function loadDotEnv(cwd: string): void {
   const env = join(cwd, ".env");
   if (existsSync(env)) process.loadEnvFile(env);
+}
+
+/**
+ * Where the app listens, as the environment says and the app reads it: `SANOMA_APP_HOST` (unset or
+ * empty, 127.0.0.1) and `SANOMA_APP_PORT` (unset, `port`; an empty value is 0, any free port).
+ */
+export function appAddress(port = 3000): { host: string; port: number } {
+  return { host: process.env.SANOMA_APP_HOST || "127.0.0.1", port: Number(process.env.SANOMA_APP_PORT ?? port) };
 }
 
 /**

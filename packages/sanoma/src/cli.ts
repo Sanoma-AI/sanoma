@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, parseEnv } from "node:util";
 import type { SanomaConfig } from "sanoma/workflows";
 import { errorMessage, UsageError } from "sanoma/workflows/shared";
-import { type Loaded, type LoadedConfig, loadConfig } from "./config.ts";
+import { appAddress, type Loaded, type LoadedConfig, loadConfig } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
 import { emit, eventsOn, stage } from "./events.ts";
 import type { EnsuredPostgres } from "./postgres.ts";
@@ -151,7 +151,7 @@ export async function main(argv: string[]): Promise<number> {
     case "app": {
       const { runApp } = await import("./serve.ts");
       return keep(await load({ postgres: "find" }), (config, resolved) =>
-        runApp(config, { port: port(), log, resolved }),
+        runApp(config, { port: appAddress().port, log, resolved }),
       );
     }
     case "identity": {
@@ -252,9 +252,6 @@ async function initCompany(values: ReturnType<typeof parse>["values"] = {}): Pro
   return startCompany(process.cwd(), { name, creator: () => whoIsStarting({ name: you, email }), log });
 }
 
-/** `SANOMA_APP_PORT`, or `fallback` when it is unset. */
-const port = (fallback = 3000) => Number(process.env.SANOMA_APP_PORT ?? fallback);
-
 /**
  * The config, loaded and resolved, with its policy from `policies/**\/*.cedar` (`policyAt`): a
  * problem with them is a `UsageError`, so nothing starts on policies that do not hold. Without
@@ -337,8 +334,7 @@ async function keep(
     await postgres?.stop().catch(() => {});
     throw err;
   }
-  // What removes `.sanoma/app.json` again: nothing, until the app listens.
-  let forget = nothing;
+  let forget: (() => void) | undefined;
   const running = `${resolved.name} running ${[...resolved.workflows.keys()].join(", ")}`;
   if (started.url === undefined) {
     console.log(`${running}; ctrl-c to stop`);
@@ -354,7 +350,7 @@ async function keep(
   }
   // Postgres last, once the worker and the app have closed their connections.
   const stopOnce = onSignal(() => {
-    forget();
+    forget?.();
     return started.stop().finally(() => postgres?.stop());
   });
   // Done on its own (`runWorker`): stopped as a signal stops it, exiting 1 when it failed.
@@ -364,8 +360,6 @@ async function keep(
   );
   return new Promise(() => {});
 }
-
-const nothing = () => {};
 
 /**
  * `sanoma serve` (and `sanoma` outside dev mode): Postgres (the company's own unless one is
@@ -380,7 +374,7 @@ async function serveCommand(devServer: boolean): Promise<never> {
       externalStore: config.secrets?.store !== undefined,
     });
     const { serve } = await import("./serve.ts");
-    return serve(config, { port: port(), log, dev: devServer, resolved });
+    return serve(config, { port: appAddress().port, log, dev: devServer, resolved });
   });
 }
 
@@ -523,8 +517,7 @@ async function wakeupCommand(): Promise<never> {
   let served: Listening;
   try {
     const { runWakeup } = await import("./wakeup.ts");
-    const host = process.env.SANOMA_APP_HOST || "127.0.0.1";
-    served = await runWakeup(postgres.databaseUrl, { host, port: port(3100), log });
+    served = await runWakeup(postgres.databaseUrl, { ...appAddress(3100), log });
   } catch (err) {
     await postgres.stop().catch(() => {});
     throw err;

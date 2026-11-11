@@ -50,6 +50,7 @@ import { sourceKeyIds } from "./host.ts";
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
 export * from "./description.ts";
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
+export { companyRootOf } from "./company-file.ts";
 export {
   admit,
   agentActing,

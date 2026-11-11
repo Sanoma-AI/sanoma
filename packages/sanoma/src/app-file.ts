@@ -9,7 +9,7 @@ import { errorMessage, isLoopback } from "sanoma/workflows/shared";
 export const APP_FILE = ".sanoma/app.json";
 
 /** What `.sanoma/app.json` holds: the app's URL, and the process serving it. */
-export interface RunningApp {
+interface RunningApp {
   url: string;
   pid: number;
 }
@@ -63,12 +63,8 @@ export function runningApp(cwd: string): RunningApp | undefined {
 }
 
 function onThisMachine(url: string): boolean {
-  try {
-    const { protocol, hostname } = new URL(url);
-    return (protocol === "http:" || protocol === "https:") && isLoopback(hostname);
-  } catch {
-    return false;
-  }
+  const parsed = URL.parse(url);
+  return !!parsed && (parsed.protocol === "http:" || parsed.protocol === "https:") && isLoopback(parsed.hostname);
 }
 
 function readApp(file: string): RunningApp | undefined {
@@ -83,8 +79,8 @@ function readApp(file: string): RunningApp | undefined {
   return typeof url === "string" && typeof pid === "number" ? { url, pid } : undefined;
 }
 
-/** Whether a process runs as `pid` (another user's too), as `postgres.ts` asks of its postmaster. */
-function alive(pid: number): boolean {
+/** Whether a process runs as `pid` (another user's too): `postgres.ts` asks it of its postmaster too. */
+export function alive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);

@@ -23,6 +23,7 @@ import type { ConfigDescription, PermissionsGrid, Span } from "sanoma/workflows/
 import { ConfigDescriptionSchema } from "sanoma/workflows/description";
 import type { RunCheck, Scenario } from "sanoma/workflows/scenario";
 import {
+  CALL_ID,
   COMMIT_ID,
   DRAFT_ID,
   EFFECTS,
@@ -43,18 +44,8 @@ import { ColumnChange } from "./components/grid/plan.ts";
  * `sanoma/workflows/description`.
  */
 
-/**
- * Who is asking, without a login: the page asks once and sends the name in this header with
- * every server function call, which the default loopback login reads.
- */
-export const ACTOR_HEADER = "x-sanoma-actor";
-
-/**
- * The declared agent (`sanoma.agent`) a call is made by, on behalf of the person the login names,
- * on `/mcp` and `/api/call` (`sanoma call --agent`): read on the loopback login alone (`actingFor`),
- * refused on a host, whose sign-in says who acts.
- */
-export const AGENT_HEADER = "x-sanoma-agent";
+// The headers the loopback login reads, defined beside the runtime's other shared names so the bin's `sanoma call` sends the same.
+export { ACTOR_HEADER, AGENT_HEADER } from "sanoma/workflows/shared";
 
 /**
  * The same name, kept in a cookie by the page as well (URI-encoded), so the loopback login knows
@@ -627,11 +618,7 @@ export type ClearCredentialRequest = z.infer<typeof ClearCredentialRequest>;
 export const CallRequest = z.object({
   name: z.string().min(1, "Name an operation or a workflow"),
   input: z.unknown().optional(),
-  // Letters, digits, _ and -: never one of the runtime's own run ids (`call:<actor>:<id>`, `direct:…`).
-  id: z
-    .string()
-    .regex(/^[\w-]{1,200}$/, "An id is letters, digits, _ and -")
-    .optional(),
+  id: z.string().regex(CALL_ID, "An id is letters, digits, _ and -").optional(),
 });
 export type CallRequest = z.infer<typeof CallRequest>;
 

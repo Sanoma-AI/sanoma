@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
-  apiNameOf,
-  BUILT_IN_WORKFLOWS,
+  ACTOR_HEADER,
+  AGENT_HEADER,
+  builtInNamed,
+  builtInRefusal,
+  CALL_ID,
   DESCRIBE_CALL,
   errorMessage,
   isLoopback,
@@ -13,12 +15,13 @@ import {
   UsageError,
 } from "sanoma/workflows/shared";
 import { APP_FILE, runningApp } from "./app-file.ts";
-import { loadDotEnv } from "./config.ts";
+import { appAddress, loadDotEnv } from "./config.ts";
 
 // `sanoma describe` and `sanoma call`: thin clients of a running app's `POST /api/call`, which does
 // the dispatch (`callApi`). Only Node's modules, sanoma/workflows/shared, `./app-file.ts` and
-// `./config.ts` for its `.env`, so neither command loads the worker or the app; the declared people
-// are read through sanoma/workflows/describe, imported only when they are (`readPeople`).
+// `./config.ts` for its `.env`, so neither command loads the worker or the app; the company's root
+// and its people are read through sanoma/workflows/describe (`companyRootOf`, `readPeople`), imported
+// when the command runs.
 
 /** What the two commands take from the command line. */
 export interface CallOptions {
@@ -38,7 +41,7 @@ export interface CallOptions {
 const REQUEST_TIMEOUT_MS = 60_000;
 
 /** How long `<workflow>.result` keeps asking while the run is running: 10 minutes. */
-export const RESULT_DEADLINE_MS = 10 * 60_000;
+const RESULT_DEADLINE_MS = 10 * 60_000;
 
 /** The least time between two requests of a `.result` asked again: one with `waitMs: 0` answers at once. */
 const RETRY_MS = 1_000;
@@ -46,17 +49,9 @@ const RETRY_MS = 1_000;
 /** The reads of a workflow's runs `callApi` answers (`<api>.<read>`), which start nothing and take no id. */
 const READS = new Set(["result", "latest", "runs", "approvals", "ledger"]);
 
-/** An id `CallRequest` takes (the app's `api.ts`): letters, digits, `_` and `-`. */
-const ID = /^[\w-]{1,200}$/;
-
-/** The headers the loopback login reads (`ACTOR_HEADER` and `AGENT_HEADER` in the app's `api.ts`, not imported: it is the app's). */
-const ACTOR_HEADER = "x-sanoma-actor";
-const AGENT_HEADER = "x-sanoma-agent";
-
 /** `sanoma describe`: the app's description for an agent (`sanoma.describe`), as JSON on stdout. */
 export async function describeCommand(options: CallOptions): Promise<number> {
   if (options.input !== undefined) throw new UsageError("sanoma describe takes no --input");
-  if (options.id !== undefined) throw new UsageError("sanoma describe takes no --id: it starts nothing");
   return request(DESCRIBE_CALL, undefined, options);
 }
 
@@ -75,24 +70,17 @@ export async function callCommand(name: string, options: CallOptions): Promise<n
       throw new UsageError(`--input is not JSON: ${errorMessage(err)}`);
     }
   }
-  const builtIn = builtInStarted(name);
-  if (builtIn) {
-    throw new UsageError(`${builtIn} is the runtime's own workflow: the runtime's own workflows are not started here`);
-  }
+  // A built-in, by its name or api name, with or without `.start`.
+  const builtIn = builtInNamed(name.endsWith(".start") ? name.slice(0, -".start".length) : name);
+  if (builtIn) throw new UsageError(builtInRefusal(builtIn));
   return request(name, input, options);
 }
 
-/** The built-in workflow `name` starts (by its name or api name, with or without `.start`), if it is one. */
-function builtInStarted(name: string): string | undefined {
-  const started = name.endsWith(".start") ? name.slice(0, -".start".length) : name;
-  return [...BUILT_IN_WORKFLOWS].find((workflow) => workflow === started || apiNameOf(workflow) === started);
-}
-
-/** Where the call goes, and what said so. */
+/** Where the call goes. */
 interface Target {
   app: URL;
-  /** `--url`, `.sanoma/app.json` (`file`, its path) or the environment. */
-  from: { flag: true } | { file: string } | { env: true };
+  /** Where the address came from, for a message that nothing answers there: empty for `--url`. */
+  from: string;
   /** `SANOMA_APP_HOST`, when it names an address beyond this machine, whose app signs people in. */
   host?: string;
 }
@@ -105,10 +93,11 @@ async function request(name: string, input: unknown, options: CallOptions): Prom
   const result = method === "result" && !rest.length;
   if (options.id !== undefined) {
     if (read) throw new UsageError(`--id is for a start or an operation's call: ${name} starts nothing`);
-    if (!ID.test(options.id)) throw new UsageError(`--id: "${options.id}" is not an id: letters, digits, _ and -`);
+    if (!CALL_ID.test(options.id)) throw new UsageError(`--id: "${options.id}" is not an id: letters, digits, _ and -`);
   }
   const cwd = process.cwd();
-  const root = companyRoot(cwd);
+  const { companyRootOf } = await import("sanoma/workflows/describe");
+  const root = companyRootOf(cwd);
   if (root === undefined && options.url === undefined) {
     throw new UsageError(`No sanoma.config.ts in ${cwd}: run sanoma from the directory that holds it`);
   }
@@ -132,7 +121,7 @@ async function request(name: string, input: unknown, options: CallOptions): Prom
   if (result) stopOnInterrupt(input);
   for (;;) {
     const sent = Date.now();
-    const answer = await send(target, headers, body, id);
+    const answer = await send(target, headers, body);
     if (answer.ok) {
       process.stdout.write(`${JSON.stringify(answer.body, null, process.stdout.isTTY ? 2 : undefined)}\n`);
       return 0;
@@ -143,7 +132,7 @@ async function request(name: string, input: unknown, options: CallOptions): Prom
       if (wait > 0) await sleep(wait);
       continue;
     }
-    throw new Error(failure(target, answer.status, answer.problem, answer.text, result));
+    throw new Error(failure(target, answer, result));
   }
 }
 
@@ -169,7 +158,15 @@ interface Problem {
   issues?: { path?: (string | number)[]; message?: string }[];
 }
 
-type Answer = { ok: true; body: unknown } | { ok: false; status: number; problem?: Problem; text: string };
+/** What the app answered that is no answer of the call's: its status, its body as text, and as an error body when it is one. */
+interface Failed {
+  ok: false;
+  status: number;
+  problem?: Problem;
+  text: string;
+}
+
+type Answer = { ok: true; body: unknown } | Failed;
 
 /** Errors that mean the request never left: nothing listens there, or no such host. */
 const NOT_SENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH"]);
@@ -178,14 +175,19 @@ const NOT_SENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREAC
  * One `POST /api/call`: the answer, or an error naming the address (and where it came from) when
  * nothing answers in time; for a call with an `id`, how to make the same call again.
  */
-async function send(target: Target, headers: Record<string, string>, body: object, id?: string): Promise<Answer> {
-  const { app } = target;
+async function send(
+  target: Target,
+  headers: Record<string, string>,
+  body: { name: string; id?: string },
+): Promise<Answer> {
+  const { app, from } = target;
+  const { id } = body;
   const again =
     id === undefined
       ? ""
       : `\nThe call's id was ${id}: running the command again with --id ${id} is the same call, not a second one`;
   const timedOut = () =>
-    new Error(`The app at ${app.origin} did not answer in ${REQUEST_TIMEOUT_MS / 1000} s${source(target)}${again}`);
+    new Error(`The app at ${app.origin} did not answer in ${REQUEST_TIMEOUT_MS / 1000} s${from}${again}`);
   let res: Response;
   let text: string;
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
@@ -203,7 +205,7 @@ async function send(target: Target, headers: Record<string, string>, body: objec
     const cause = (err as { cause?: { code?: string; message?: string } } | null)?.cause;
     const sentMaybe = !NOT_SENT.has(cause?.code ?? "");
     throw new Error(
-      `Nothing answers at ${app.origin} (${cause?.code ?? cause?.message ?? errorMessage(err)})${source(target)}: ` +
+      `Nothing answers at ${app.origin} (${cause?.code ?? cause?.message ?? errorMessage(err)})${from}: ` +
         `start the app with sanoma, or name where it runs with --url${sentMaybe ? again : ""}`,
       { cause: err },
     );
@@ -226,14 +228,6 @@ async function send(target: Target, headers: Record<string, string>, body: objec
   return { ok: false, status: res.status, ...(problem && { problem }), text };
 }
 
-/** Where the address came from, when that is not `--url`: for a message about it. */
-const source = ({ from }: Target) =>
-  "file" in from
-    ? `; the address is the one ${from.file} names`
-    : "env" in from
-      ? "; the address is SANOMA_APP_HOST's and SANOMA_APP_PORT's"
-      : "";
-
 /** The text of the server's that is printed, without control characters but newline and tab (a terminal's escapes). */
 // oxlint-disable-next-line no-control-regex -- the control characters are what it removes
 const clean = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f]/g, "");
@@ -242,7 +236,7 @@ const clean = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f]/g, ""
 const str = (value: unknown) => (typeof value === "string" ? clean(value) : undefined);
 
 /** The message a refused or failed call exits 1 with: the app's error, its code, the run, the input's issues. */
-function failure(target: Target, status: number, problem: Problem | undefined, text: string, result: boolean): string {
+function failure(target: Target, { status, problem, text }: Failed, result: boolean): string {
   const { app } = target;
   const lines: string[] = [];
   const error = str(problem?.error);
@@ -281,14 +275,6 @@ function failure(target: Target, status: number, problem: Problem | undefined, t
   return lines.join("\n");
 }
 
-/** The nearest directory from `cwd` up that holds `sanoma.config.ts`: the company's; undefined when none does. */
-export function companyRoot(cwd: string): string | undefined {
-  for (let dir = resolve(cwd); ; dir = dirname(dir)) {
-    if (existsSync(join(dir, "sanoma.config.ts"))) return dir;
-    if (dirname(dir) === dir) return undefined;
-  }
-}
-
 /**
  * Where the app listens: `--url`; else the app the company's `.sanoma/app.json` names while its
  * process runs (`runningApp`: an http(s) URL on this machine, written by `sanoma`, `sanoma serve`
@@ -298,23 +284,20 @@ export function companyRoot(cwd: string): string | undefined {
  * machine's address, where such an app answers too, but an app on any address but this machine's
  * signs people in with the staff login, which refuses these commands: the failure says so.
  */
-export function targetOf(url: string | undefined, root: string | undefined): Target {
+function targetOf(url: string | undefined, root: string | undefined): Target {
   if (url !== undefined) {
-    let parsed: URL | undefined;
-    try {
-      parsed = new URL(url);
-    } catch {
-      parsed = undefined;
-    }
+    const parsed = URL.parse(url);
     if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
       throw new UsageError(`--url: "${url}" is not an http(s) URL, such as http://127.0.0.1:3000`);
     }
-    return { app: parsed, from: { flag: true } };
+    return { app: parsed, from: "" };
   }
   const running = root === undefined ? undefined : runningApp(root);
-  if (running) return { app: new URL(running.url), from: { file: join(root!, APP_FILE) } };
-  // As the app reads it: unset is 3000, and an empty value is 0, any free port.
-  const port = Number(process.env.SANOMA_APP_PORT ?? 3000);
+  if (running) {
+    return { app: new URL(running.url), from: `; the address is the one ${join(root!, APP_FILE)} names` };
+  }
+  // As the app reads them (`appAddress`): an empty port is 0, any free port.
+  const { host: named, port } = appAddress();
   if (port === 0) {
     throw new UsageError(
       "SANOMA_APP_PORT is 0 or empty, any free port, and no running app here says which: name the app's address with --url (sanoma prints it)",
@@ -323,10 +306,13 @@ export function targetOf(url: string | undefined, root: string | undefined): Tar
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
     throw new UsageError(`SANOMA_APP_PORT is "${process.env.SANOMA_APP_PORT}", which is no port`);
   }
-  const named = process.env.SANOMA_APP_HOST || "127.0.0.1";
   const host = named === "0.0.0.0" ? "127.0.0.1" : named === "::" ? "::1" : named;
   const app = new URL(`http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${port}`);
-  return { app, from: { env: true }, ...(!isLoopback(named) && { host: named }) };
+  return {
+    app,
+    from: "; the address is SANOMA_APP_HOST's and SANOMA_APP_PORT's",
+    ...(!isLoopback(named) && { host: named }),
+  };
 }
 
 /**
@@ -336,7 +322,7 @@ export function targetOf(url: string | undefined, root: string | undefined): Tar
  * listing the declared ids. The people are read from the company's `resources/` (`readPeople`,
  * imported only here); outside a company (`root` undefined), `--as` is needed.
  */
-export async function personAsking(as: string | undefined, root: string | undefined): Promise<string> {
+async function personAsking(as: string | undefined, root: string | undefined): Promise<string> {
   const named = as?.trim();
   if (as !== undefined && !named) throw new UsageError("--as names nobody");
   if (root === undefined) {
