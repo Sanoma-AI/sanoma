@@ -128,6 +128,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "patch",
       "go-live",
       "go-live-host",
+      "go-live-cloud",
       "connect-existing",
       "save-draft",
       "chat",
