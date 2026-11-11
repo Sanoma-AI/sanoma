@@ -20,7 +20,7 @@ import type { Listening } from "./listen.ts";
 const INIT_USAGE = "sanoma init [--name <name>] [--you <name>] [--email <email>]";
 const CALL_OPTIONS = "[--as <person>] [--url <url>] [--agent <agent>]";
 const DESCRIBE_USAGE = `sanoma describe ${CALL_OPTIONS}`;
-const CALL_USAGE = `sanoma call <name> [--input <json>] ${CALL_OPTIONS}`;
+const CALL_USAGE = `sanoma call <name> [--input <json>] [--id <id>] ${CALL_OPTIONS}`;
 
 const USAGE = `usage: sanoma [command]
 
@@ -56,9 +56,11 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
                                       calls the running app: a workflow by its api name (or <api>.start) starts it,
                                       printing {"runId"}; <api>.result waits for the run's end (up to 10 minutes);
                                       <api>.runs and the other reads; an operation by its id. The answer as JSON
-                                      on stdout. The app: --url, else the one .sanoma/app.json names while it
-                                      runs, else SANOMA_APP_HOST and SANOMA_APP_PORT. Who asks: --as (an id or an
-                                      email), else the one person declared, else git's user.email; --agent a
+                                      on stdout. Each call is a new run or call unless --id names it: the same --id
+                                      again is the same call. From the company's directory or one under it; the app:
+                                      --url, else the one its .sanoma/app.json names while it runs, else
+                                      SANOMA_APP_HOST and SANOMA_APP_PORT. Who asks: --as (an id, email or GitHub
+                                      login), else the one person declared, else git's user.email; --agent a
                                       declared agent acting for them. On this machine's app only
   sanoma dev <link|unlink|update>     from a contributor's own Sanoma repo: link it to a sanoma checkout, unlink it,
                                       or update it to the latest release (sanoma dev --help)
@@ -115,10 +117,10 @@ export async function main(argv: string[]): Promise<number> {
   if (command !== "init" && (values.name ?? values.you ?? values.email) !== undefined) {
     throw new UsageError(`--name, --you and --email are sanoma init's: ${INIT_USAGE}`);
   }
-  const calling = { input: values.input, as: values.as, url: values.url, agent: values.agent };
+  const calling = { input: values.input, as: values.as, url: values.url, agent: values.agent, id: values.id };
   if (command !== "describe" && command !== "call" && Object.values(calling).some((value) => value !== undefined)) {
     throw new UsageError(
-      `--input, --as, --url and --agent are sanoma describe's and sanoma call's: ${DESCRIBE_USAGE}, ${CALL_USAGE}`,
+      `--input, --id, --as, --url and --agent are sanoma describe's and sanoma call's: ${DESCRIBE_USAGE}, ${CALL_USAGE}`,
     );
   }
   switch (command) {
@@ -234,6 +236,7 @@ const parse = (argv: string[]) =>
       as: { type: "string" },
       url: { type: "string" },
       agent: { type: "string" },
+      id: { type: "string" },
     },
   });
 

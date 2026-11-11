@@ -1,5 +1,16 @@
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { mintInstanceToken } from "sanoma/workflows/wakeup-service";
@@ -13,6 +24,15 @@ const env = { SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-cli"), SANOMA_APP_POR
 const unconfigured = { ...env, GHOST_ADMIN_URL: "", GHOST_ADMIN_API_KEY: "" };
 
 let dir = "";
+
+/** A port nothing listens on: one a server had, closed. */
+async function closedPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const { port } = server.address() as AddressInfo;
+  await new Promise((done) => server.close(done));
+  return port;
+}
 beforeAll(ensureBuilt, 600_000);
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -262,13 +282,25 @@ describe("sanoma check", () => {
 });
 
 describe("sanoma describe and sanoma call, against a running app", () => {
-  // One app for the describe: the fixture, which declares nobody, so the app admits any id; on a
-  // database of its own, so its runs of hello never reach the other tests' (the Workflows page lists by the latest run).
+  // One app for the describe: the fixture with people (those the tests below name as they ask, from
+  // copies of their own) and an agent, on a database of its own, so its runs of hello never reach
+  // the other tests' (the Workflows page lists by the latest run).
   const calls = { ...unconfigured, SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-call") };
   let served = "";
   let server: Awaited<ReturnType<typeof serving>> | undefined;
   beforeAll(async () => {
     served = copyFixture();
+    mkdirSync(join(served, "resources"));
+    writeFileSync(
+      join(served, "resources/people.ts"),
+      `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada" });
+export const lin = sanoma.person({ id: "lin" });
+export const founder = sanoma.person({ id: "founder" });
+export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
+`,
+    );
     server = await serving(served, ["serve"], calls);
   }, 120_000);
   afterAll(async () => {
@@ -342,6 +374,12 @@ describe("sanoma describe and sanoma call, against a running app", () => {
       ["check", "--as", "ada"],
       ["env", "--url", server!.url],
       ["describe", "--url", "not a url", "--as", "ada"],
+      ["describe", "--as", "", "--url", server!.url],
+      ["describe", "--as", "ada", "--agent", " ", "--url", server!.url],
+      ["describe", "--id", "x", ...at],
+      ["call", "hello.result", "--id", "x", "--input", '{"runId":"r"}', ...at],
+      ["call", "hello", "--id", "not/an id", ...at],
+      ["env", "--id", "x"],
     ];
     for (const args of mistakes) {
       const done = await sanoma(args);
@@ -350,7 +388,7 @@ describe("sanoma describe and sanoma call, against a running app", () => {
     }
     expect((await sanoma(["call", "hello", "--input", "{", ...at])).stderr).toMatch(/^--input is not JSON/);
     expect((await sanoma(["check", "--as", "ada"])).stderr).toMatch(
-      /^--input, --as, --url and --agent are sanoma describe's and sanoma call's/,
+      /^--input, --id, --as, --url and --agent are sanoma describe's and sanoma call's/,
     );
   });
 
@@ -421,7 +459,9 @@ describe("sanoma describe and sanoma call, against a running app", () => {
       ]);
       const several = await sanoma(["describe", "--url", server!.url], { cwd: other, more: git });
       expect(several.code).toBe(2);
-      expect(several.stderr).toMatch(/^Say who is asking with --as <id or email>: the people are ada, lin\n/);
+      expect(several.stderr).toMatch(
+        /^Say who is asking with --as <id, email or GitHub login>: the people are ada, lin\n/,
+      );
       expect(await starter(["--as", "LIN@acme.test"])).toBe("lin");
       expect(await starter(["--as", "lin-gh"])).toBe("lin");
       expect(await starter(["--as", "ada"])).toBe("ada");
@@ -437,6 +477,158 @@ describe("sanoma describe and sanoma call, against a running app", () => {
       rmSync(other, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it("works from under the company's directory, and needs a company or --url and --as outside one", async () => {
+    // SANOMA_APP_PORT is 0: the company's .sanoma/app.json says where.
+    const below = await sanoma(["describe", "--as", "ada"], { cwd: join(served, "workflows") });
+    expect(below.code, below.stderr).toBe(0);
+    const empty = mkdtempSync(join(tmpdir(), "sanoma-nowhere-"));
+    try {
+      const nowhere = await sanoma(["describe", "--as", "ada"], { cwd: empty });
+      expect(nowhere.code).toBe(2);
+      expect(nowhere.stderr).toMatch(/^No sanoma\.config\.ts in /);
+      const nobody = await sanoma(["describe", "--url", server!.url], { cwd: empty });
+      expect(nobody.code).toBe(2);
+      expect(nobody.stderr).toMatch(/--as/);
+      const named = await sanoma(["describe", "--url", server!.url, "--as", "ada"], { cwd: empty });
+      expect(named.code, named.stderr).toBe(0);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it("trusts .sanoma/app.json only for an address on this machine, and says so when nothing answers there", async () => {
+    const other = copyFixture();
+    try {
+      mkdirSync(join(other, ".sanoma"));
+      // A live process (this one), at an address beyond this machine: ignored for the environment's port.
+      const file = join(other, ".sanoma/app.json");
+      writeFileSync(file, JSON.stringify({ url: "http://192.0.2.1:9", pid: process.pid }));
+      const port = new URL(server!.url).port;
+      const planted = await sanoma(["describe", "--as", "ada"], { cwd: other, more: { SANOMA_APP_PORT: port } });
+      expect(planted.code, planted.stderr).toBe(0);
+      // On this machine, where nothing listens: the message names the file it came from.
+      writeFileSync(file, JSON.stringify({ url: `http://127.0.0.1:${await closedPort()}`, pid: process.pid }));
+      const gone = await sanoma(["describe", "--as", "ada"], { cwd: other });
+      expect(gone.code).toBe(1);
+      expect(gone.stderr).toMatch(
+        /^Nothing answers at http:\/\/127\.0\.0\.1:\d+ \(ECONNREFUSED\); the address is the one \S+\/\.sanoma\/app\.json names: /,
+      );
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("makes a start with the same --id once, and refuses that id for another input", async () => {
+    const id = crypto.randomUUID();
+    const start = (title: string) =>
+      sanoma(["call", "hello", "--input", JSON.stringify({ title }), "--id", id, "--url", server!.url, "--as", "ada"]);
+    expect((await start("Once")).json).toEqual({ runId: id });
+    expect((await start("Once")).json).toEqual({ runId: id });
+    const runs = await sanoma(["call", "hello.runs", "--url", server!.url, "--as", "ada"]);
+    expect((runs.json as { runId: string }[]).filter((r) => r.runId === id)).toHaveLength(1);
+    const other = await start("Twice");
+    expect(other.code).toBe(1);
+    expect(other.stdout).toBe("");
+    expect(other.stderr).toMatch(/\(invalid_input\)/);
+  });
+
+  it("calls as a declared agent for the person with --agent, and refuses a person named as one", async () => {
+    const started = await sanoma([
+      "call",
+      "hello",
+      "--input",
+      '{"title":"Agent"}',
+      "--url",
+      server!.url,
+      "--as",
+      "ada",
+      "--agent",
+      "claude-code",
+    ]);
+    expect(started.code, started.stderr).toBe(0);
+    const runs = await sanoma(["call", "hello.runs", "--url", server!.url, "--as", "ada"]);
+    const run = (runs.json as { runId: string; startedBy?: unknown }[]).find((r) => r.runId === started.json.runId);
+    expect(run?.startedBy).toEqual({ id: "claude-code", groups: ["agents"], onBehalfOf: "ada" });
+    const person = await sanoma([
+      "call",
+      "hello",
+      "--input",
+      '{"title":"Agent"}',
+      "--url",
+      server!.url,
+      "--as",
+      "ada",
+      "--agent",
+      "lin",
+    ]);
+    expect(person.code).toBe(1);
+    expect(person.stderr).toMatch(/\(not_admitted\)/);
+  });
+});
+
+describe("sanoma call against a stand-in app", () => {
+  let stand: ReturnType<typeof createServer> | undefined;
+  let requests = 0;
+  /** What the stand-in answers every request: its status and body. */
+  let answer = { status: 409, body: { error: "still running", code: "run_running", runId: "r1" } as object };
+  let at = "";
+  beforeAll(async () => {
+    stand = createServer((req, res) => {
+      requests++;
+      req.resume().on("end", () => {
+        res.writeHead(answer.status, { "content-type": "application/json" });
+        res.end(JSON.stringify(answer.body));
+      });
+    });
+    await new Promise<void>((done) => stand!.listen(0, "127.0.0.1", done));
+    at = `http://127.0.0.1:${(stand!.address() as AddressInfo).port}`;
+  });
+  afterAll(() => stand?.close());
+
+  it("asks a running run's result again a second apart at least, and stops on SIGINT saying the run goes on", async () => {
+    dir = copyFixture();
+    requests = 0;
+    const waiting = startCli(
+      dir,
+      ["call", "hello.result", "--input", '{"runId":"r1","waitMs":0}', "--url", at, "--as", "ada"],
+      env,
+    );
+    await new Promise((done) => setTimeout(done, 3_500));
+    waiting.child.kill("SIGINT");
+    const done = await waiting.finished;
+    // At once, then after a second, two and three: never a flood.
+    expect(requests).toBeGreaterThanOrEqual(2);
+    expect(requests).toBeLessThanOrEqual(5);
+    expect(done.code).toBe(130);
+    expect(done.stdout).toBe("");
+    expect(done.stderr).toBe("stopped waiting: run r1 goes on, ask again for its result\n");
+  });
+
+  it("prints the server's words without a terminal's control characters, and a plain 400 without the host's hint", async () => {
+    dir = copyFixture();
+    answer = { status: 400, body: { error: "bad \u001b[31mred\u0007 thing\tok", code: "invalid_input" } };
+    const done = await runCli(dir, ["call", "hello", "--url", at, "--as", "ada"], env);
+    expect(done.code).toBe(1);
+    expect(done.stderr).toBe("bad [31mred thing\tok (invalid_input)\n");
+  });
+
+  it("names the call's id when the app may have taken it, so the same call can be made again", async () => {
+    dir = copyFixture();
+    // A connection the app drops once it has the request.
+    const dropping = createServer((req) => req.socket.destroy());
+    await new Promise<void>((done) => dropping.listen(0, "127.0.0.1", done));
+    try {
+      const url = `http://127.0.0.1:${(dropping.address() as AddressInfo).port}`;
+      const done = await runCli(dir, ["call", "hello", "--id", "retry-1", "--url", url, "--as", "ada"], env);
+      expect(done.code).toBe(1);
+      expect(done.stderr).toMatch(
+        /\nThe call's id was retry-1: running the command again with --id retry-1 is the same call, not a second one\n$/,
+      );
+    } finally {
+      dropping.close();
+    }
+  });
 });
 
 describe("the commands that run nothing", () => {

@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { errorMessage } from "sanoma/workflows/shared";
+import { errorMessage, isLoopback } from "sanoma/workflows/shared";
 
 // Only Node's modules and sanoma/workflows/shared: `sanoma` imports this when its app listens, and
 // `sanoma call` to find that app, neither of which may load the worker or the app for it.
@@ -25,12 +25,13 @@ export interface RunningApp {
 export function recordApp(cwd: string, url: string, log: (line: string) => void): () => void {
   const file = join(cwd, APP_FILE);
   const app: RunningApp = { url, pid: process.pid };
+  const partial = `${file}.${process.pid}`;
   try {
     mkdirSync(join(cwd, ".sanoma"), { recursive: true });
-    const partial = `${file}.${process.pid}`;
     writeFileSync(partial, `${JSON.stringify(app)}\n`);
     renameSync(partial, file);
   } catch (err) {
+    rmSync(partial, { force: true });
     log(`sanoma: could not write ${APP_FILE}: ${errorMessage(err)}`);
     return () => {};
   }
@@ -51,12 +52,23 @@ export function recordApp(cwd: string, url: string, log: (line: string) => void)
 
 /**
  * The app `<cwd>/.sanoma/app.json` names, when the process it names still runs (as the company's
- * own Postgres is found by its `postmaster.pid`); undefined when there is none, it is not one, or
- * its process is gone (a `sanoma` that crashed leaves it behind).
+ * own Postgres is found by its `postmaster.pid`) and its URL is an http(s) one on this machine
+ * (`isLoopback`), as only the app's own listen address ever is there; undefined when there is none,
+ * it is not one, or its process is gone (a `sanoma` that crashed leaves it behind). A pid reused by
+ * another process since is taken as alive: the call then finds nothing at that address and says so.
  */
 export function runningApp(cwd: string): RunningApp | undefined {
   const app = readApp(join(cwd, APP_FILE));
-  return app && alive(app.pid) ? app : undefined;
+  return app && onThisMachine(app.url) && alive(app.pid) ? app : undefined;
+}
+
+function onThisMachine(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return (protocol === "http:" || protocol === "https:") && isLoopback(hostname);
+  } catch {
+    return false;
+  }
 }
 
 function readApp(file: string): RunningApp | undefined {
