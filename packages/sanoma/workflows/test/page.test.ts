@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { collection } from "../src/collection.ts";
 import { defineWorkflow, errorCode } from "../src/index.ts";
-import { type PageRuntime, pageRuntime } from "../src/page-run.ts";
+import { type PageRuntime, type PageRuntimeOptions, pageRuntime } from "../src/page-run.ts";
 import type { World } from "../src/scenario.ts";
 
 const DAY = 86_400_000;
@@ -52,7 +52,7 @@ const world: World = {
   ],
 };
 
-const page = (decide?: () => "approve" | "reject") =>
+const page = (decide?: PageRuntimeOptions["decide"]) =>
   pageRuntime({
     workflows: [chase],
     collections: [invoices],
@@ -109,6 +109,7 @@ describe("pageRuntime", () => {
     const running = transport({ name: "chaseInvoice.result", input: { runId, waitMs: 10 } }).catch((err) => err);
     await vi.advanceTimersByTimeAsync(10);
     expect(errorCode(await running)).toBe("run_running");
+    expect(await running).toMatchObject({ data: { runId } });
 
     // A day short of the week, it still rests; at the week, it goes on.
     await vi.advanceTimersByTimeAsync(6 * DAY);
@@ -235,11 +236,48 @@ describe("pageRuntime", () => {
     await vi.advanceTimersByTimeAsync(7 * DAY);
     expect(decide).not.toHaveBeenCalled();
     expect(await steps(transport, runId)).toEqual([...RESTING, "run.failed"]);
+    // One started after it stops at its first call, before it reads anything.
     const after = await begin(transport);
-    expect(await steps(transport, after)).toEqual(["run.started", "run.failed"]);
+    expect(await steps(transport, after)).toEqual(["run.started"]);
     expect(await transport({ name: "data.invoices.get", input: { key: "INV-1" } })).toMatchObject({
       record: { status: "sent" },
     });
+  });
+
+  it("halts a dropped run that catches the drop, rather than letting it spin on calls that fail", async () => {
+    let caught = 0;
+    const retry = defineWorkflow({
+      name: "retry",
+      trigger: "manual",
+      input: z.object({}),
+      uses: ["sleep"],
+      run: async (ctx) => {
+        for (let i = 0; i < 1000; i++) {
+          try {
+            await ctx.sleep({ hours: 1 });
+          } catch {
+            caught++;
+          }
+        }
+      },
+    });
+    const { transport, stop } = await pageRuntime({ workflows: [retry] });
+    await transport({ name: "retry", input: {} });
+    await vi.advanceTimersByTimeAsync(0);
+    stop();
+    await vi.advanceTimersByTimeAsync(DAY);
+    expect(caught).toBe(1);
+    expect(await transport({ name: "retry.runs" })).toEqual([expect.objectContaining({ status: "running" })]);
+  });
+
+  it("reads waiting while an approval is pending, as the app does, and goes on once it is decided", async () => {
+    const decision = Promise.withResolvers<"approve">();
+    const { transport } = await page(() => decision.promise);
+    const runId = await begin(transport);
+    await vi.advanceTimersByTimeAsync(7 * DAY);
+    expect(await transport({ name: "chaseInvoice.runs" })).toEqual([expect.objectContaining({ status: "waiting" })]);
+    decision.resolve("approve");
+    expect(await transport({ name: "chaseInvoice.result", input: { runId } })).toEqual({ waitedMs: 7 * DAY });
   });
 
   it("refuses a vendor's send called directly, a name it does not run, a start it cannot make, and a workflow whose operation has no fake", async () => {

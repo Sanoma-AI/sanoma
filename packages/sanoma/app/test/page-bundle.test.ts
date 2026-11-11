@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { companyFiles, optional, vendorInfos } from "sanoma/app/bundle";
-import { afterAll, expect, it } from "vitest";
+import { afterAll, expect, it, onTestFinished } from "vitest";
 import { build, type Rolldown } from "vite";
 
 // `sanoma/workflows/page` built for a browser, as a demo's build will, with a fixture page that
@@ -62,6 +62,8 @@ it("builds a page's runtime for a browser without Node, DBOS or a database, and 
     page: Promise<{ transport(request: { name: string; input?: unknown }): Promise<unknown>; stop(): void }>;
   };
   const { transport, stop } = await page;
+  // No week-long timer left behind, however the test ends.
+  onTestFinished(stop);
   const before = Date.now();
   const { runId } = (await transport({ name: "sendInvoice", input: { number: "INV-1" } })) as { runId: string };
   const ledger = async () =>
@@ -77,5 +79,4 @@ it("builds a page's runtime for a browser without Node, DBOS or a database, and 
   const [, , sent, sleep] = await ledger();
   expect(sent!.output).toEqual({ id: expect.any(String) });
   expect(sleep!.until).toBeGreaterThanOrEqual(before + 7 * 86_400_000);
-  stop();
 });

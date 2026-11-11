@@ -59,8 +59,10 @@ export interface PageRuntime {
   /** Back to the world as it began: fresh fakes, seeded again, and no runs, each dropped as `stop` drops it. */
   reset(): Promise<void>;
   /**
-   * Drops every run, a sleeping one's timer with it, so nothing a run would do next happens: a
-   * demo's unmount. A run started after it fails at its first call.
+   * Drops every run: a sleeping one's sleep fails with `run_ended`, its timer cleared, and any
+   * call a run makes after it never settles, so the run goes no further: a demo's unmount. A run
+   * awaiting an operation or `decide` stops at its next call. Until a `reset` seeds again, a run
+   * started after it stops at its first call.
    */
   stop(): void;
 }
@@ -113,6 +115,13 @@ const callFake = async (
 const RunRef = z.object({ runId: z.string().min(1) });
 const ResultRef = RunRef.extend({ waitMs: z.number().int().min(0).optional() });
 const RunsLimit = z.object({ limit: z.number().int().positive().optional() });
+
+/**
+ * A call of a dropped run: it never settles, so the run stops there, one that caught the drop's
+ * error too, rather than spinning on calls that fail at once. A new promise each time, so nothing
+ * holds the run once the page lets it go.
+ */
+const halted = () => new Promise<never>(() => {});
 
 /** The longest delay a timer takes (2^31 - 1 ms, about 24.8 days): a longer one would fire at once. */
 const MAX_DELAY = 2 ** 31 - 1;
@@ -188,7 +197,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
   }
   let runs = new Map<string, PageRun>();
   let started = 0;
-  /** Aborted to drop the runs started under it (`stop`, `reset`): each sleep's timer cleared, each call after refused. */
+  /** Aborted to drop the runs started under it (`stop`, `reset`): each sleep's timer cleared, each call after halted. */
   let dropping = new AbortController();
 
   /** Appends a record to the run, now, with the next `seq` unless one is given, keyed as a worker keys it. */
@@ -197,17 +206,17 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
 
   /**
    * How the run's `ctx` members are made in the page: on the world's fakes, at once, but a sleep,
-   * which waits; none once the run has ended or `dropped` has aborted.
+   * which waits; none once the run has ended, and none settling once `dropped` has aborted.
    */
   const runnerOf = (run: PageRun, seeded: Seeded, dropped: AbortSignal): CtxRunner => ({
     place: () => {
-      dropped.throwIfAborted();
       if (isEnded(run.status)) {
         throw new SanomaError("run_ended", `run ${run.id} has ended; a call made after it was not`, { runId: run.id });
       }
       return undefined;
     },
     async op(op, input, at) {
+      if (dropped.aborted) return halted();
       const parsed = inputOf(op, input);
       // Recorded as a worker records it: one `op.called` per call it makes (a batch's entries).
       const calls = callsOf(op, parsed, ops);
@@ -249,6 +258,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
     },
     now: async () => Date.now(),
     async approval(title, req, at) {
+      if (dropped.aborted) return halted();
       const checked = checkApproval(title, req);
       const state: ApprovalState = {
         id: `approval-${run.approvals.length + 1}`,
@@ -293,11 +303,13 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       return { approvedBy: by, at: decidedAt };
     },
     async sleep(raw, at) {
+      if (dropped.aborted) return halted();
       const until = untilOf(checkSleep(raw), Date.now());
       write(run, { type: "sleep.started", ...at, until });
       await waitUntil(until, dropped);
     },
     async all(list, at) {
+      if (dropped.aborted) return halted();
       // Nested, or two at once: either way the members' records would not read as one fan-out.
       if (run.group) {
         throw new SanomaError(
@@ -439,7 +451,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
           const running = new Promise<never>((_, reject) => {
             timer = setTimeout(
               () => reject(new SanomaError("run_running", `Run ${run.id} is still running`, { runId: run.id })),
-              waitMs,
+              Math.min(waitMs, MAX_DELAY),
             );
           });
           return Promise.race([run.done, running]).finally(() => clearTimeout(timer));
@@ -462,9 +474,11 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
     },
     async reset() {
       stop();
-      current = await make();
+      const seeded = await make();
+      // Again after the seeding: a run started while it seeded, or under another reset that ended first, goes too.
+      stop();
+      current = seeded;
       runs = new Map();
-      // After the seeding: a run started while it seeds is dropped with the runs before it.
       dropping = new AbortController();
     },
     stop,
