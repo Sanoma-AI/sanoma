@@ -13,11 +13,14 @@ import type { EnsuredPostgres } from "./postgres.ts";
 import type { Listening } from "./listen.ts";
 
 // Only Node's modules, sanoma/workflows/shared, ./config.ts and ./events.ts are imported here: each
-// command imports what it runs, so `--help`, `env`, `ledger export` and the dev-mode parent load
-// neither the worker nor the app (the parent loads the app's Node-only build module to see whether
-// there are sites).
+// command imports what it runs, so `--help`, `env`, `ledger export`, `describe`, `call` and the
+// dev-mode parent load neither the worker nor the app (the parent loads the app's Node-only build
+// module to see whether there are sites).
 
 const INIT_USAGE = "sanoma init [--name <name>] [--you <name>] [--email <email>]";
+const CALL_OPTIONS = "[--as <person>] [--url <url>] [--agent <agent>]";
+const DESCRIBE_USAGE = `sanoma describe ${CALL_OPTIONS}`;
+const CALL_USAGE = `sanoma call <name> [--input <json>] ${CALL_OPTIONS}`;
 
 const USAGE = `usage: sanoma [command]
 
@@ -46,6 +49,17 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
   sanoma env [--check]                write .env.example from the drivers' variables; --check exits 1 when it is out of date
   sanoma ledger export <runId> [--out <file>]
                                       a run's ledger records as JSON lines
+  ${DESCRIBE_USAGE}
+                                      what the running app offers an agent: the company's workflows, direct
+                                      operations and collections, as JSON on stdout
+  ${CALL_USAGE}
+                                      calls the running app: a workflow by its api name (or <api>.start) starts it,
+                                      printing {"runId"}; <api>.result waits for the run's end (up to 10 minutes);
+                                      <api>.runs and the other reads; an operation by its id. The answer as JSON
+                                      on stdout. The app: --url, else the one .sanoma/app.json names while it
+                                      runs, else SANOMA_APP_HOST and SANOMA_APP_PORT. Who asks: --as (an id or an
+                                      email), else the one person declared, else git's user.email; --agent a
+                                      declared agent acting for them. On this machine's app only
   sanoma dev <link|unlink|update>     from a contributor's own Sanoma repo: link it to a sanoma checkout, unlink it,
                                       or update it to the latest release (sanoma dev --help)
   sanoma tfschema <resources.config.ts> <resources.gen.ts> [--fixtures <dir>]
@@ -63,9 +77,10 @@ app's "url" (where it listens, on the port SANOMA_APP_PORT names) and its "sites
 "message" when it cannot start or stop, "database" with "how" ("answered", "started" or "created"), "url" and
 "place" once the company's own Postgres answers, and "stage" with "stage" and "status" ("start" or "done") for each
 stage of starting a company: "template", "people", "git", "install", then "database" (around the company's own
-Postgres, on every run); the end of stdin then stops it as SIGTERM does. sanoma never prompts, reads stdin only then,
-and opens no browser; SIGTERM stops everything it started, the app, the worker, then the Postgres it started unless
-another client is connected; exit 2 is a mistake in the call or the config, 1 a failure.
+Postgres, on every run); the end of stdin then stops it as SIGTERM does. While the app listens, .sanoma/app.json
+holds its {"url","pid"}. sanoma never prompts, reads stdin only then, and opens no browser; SIGTERM stops
+everything it started, the app, the worker, then the Postgres it started unless another client is connected; exit 2
+is a mistake in the call or the config, 1 a failure.
 `;
 
 /** Exit codes: 2 for how the bin was called or what it found, 1 for failed checks and failures while running. */
@@ -99,6 +114,12 @@ export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = positionals;
   if (command !== "init" && (values.name ?? values.you ?? values.email) !== undefined) {
     throw new UsageError(`--name, --you and --email are sanoma init's: ${INIT_USAGE}`);
+  }
+  const calling = { input: values.input, as: values.as, url: values.url, agent: values.agent };
+  if (command !== "describe" && command !== "call" && Object.values(calling).some((value) => value !== undefined)) {
+    throw new UsageError(
+      `--input, --as, --url and --agent are sanoma describe's and sanoma call's: ${DESCRIBE_USAGE}, ${CALL_USAGE}`,
+    );
   }
   switch (command) {
     case undefined: {
@@ -175,6 +196,17 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "env":
       return env(values.check ?? false);
+    case "describe": {
+      if (rest.length) throw new UsageError(`usage: ${DESCRIBE_USAGE}`);
+      const { describeCommand } = await import("./call.ts");
+      return describeCommand(calling);
+    }
+    case "call": {
+      const [name, ...extra] = rest;
+      if (!name?.trim() || extra.length) throw new UsageError(`usage: ${CALL_USAGE}`);
+      const { callCommand } = await import("./call.ts");
+      return callCommand(name, calling);
+    }
     case "ledger": {
       const [sub, runId, ...extra] = rest;
       if (sub !== "export" || !runId || extra.length)
@@ -198,6 +230,10 @@ const parse = (argv: string[]) =>
       name: { type: "string" },
       you: { type: "string" },
       email: { type: "string" },
+      input: { type: "string" },
+      as: { type: "string" },
+      url: { type: "string" },
+      agent: { type: "string" },
     },
   });
 
@@ -280,8 +316,9 @@ async function withPostgres(
 
 /**
  * Starts what `start` starts over the loaded config, prints what runs (and where, when it
- * listens), and stops it on SIGINT or SIGTERM, or once what it started has `exited` (done), then the Postgres `load` started, then exits 0. The worker names the vendors not
- * configured yet itself, in one line.
+ * listens, recording that in `.sanoma/app.json` for `sanoma call`, `recordApp`, until it stops), and
+ * stops it on SIGINT or SIGTERM, or once what it started has `exited` (done), then the Postgres
+ * `load` started, then exits 0. The worker names the vendors not configured yet itself, in one line.
  */
 async function keep(
   { config, resolved, postgres }: Loaded & { postgres?: EnsuredPostgres },
@@ -297,6 +334,8 @@ async function keep(
     await postgres?.stop().catch(() => {});
     throw err;
   }
+  // What removes `.sanoma/app.json` again: nothing, until the app listens.
+  let forget = nothing;
   const running = `${resolved.name} running ${[...resolved.workflows.keys()].join(", ")}`;
   if (started.url === undefined) {
     console.log(`${running}; ctrl-c to stop`);
@@ -304,11 +343,17 @@ async function keep(
     console.log(running);
     // Each public site at its own host, before the line that says how to stop.
     for (const [name, url] of Object.entries(started.sites ?? {})) console.log(`${name}: ${url}`);
+    // Where `sanoma call` finds it, until it stops: written before it says it is ready.
+    const { recordApp } = await import("./app-file.ts");
+    forget = recordApp(process.cwd(), started.url, log);
     console.log(`${resolved.name} at ${started.url}; ctrl-c to stop`);
     emit({ event: "ready", url: started.url, sites: started.sites ?? {} });
   }
   // Postgres last, once the worker and the app have closed their connections.
-  const stopOnce = onSignal(() => started.stop().finally(() => postgres?.stop()));
+  const stopOnce = onSignal(() => {
+    forget();
+    return started.stop().finally(() => postgres?.stop());
+  });
   // Done on its own (`runWorker`): stopped as a signal stops it, exiting 1 when it failed.
   void started.exited?.then(
     () => stopOnce(),
@@ -316,6 +361,8 @@ async function keep(
   );
   return new Promise(() => {});
 }
+
+const nothing = () => {};
 
 /**
  * `sanoma serve` (and `sanoma` outside dev mode): Postgres (the company's own unless one is

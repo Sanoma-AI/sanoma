@@ -1,8 +1,9 @@
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { mintInstanceToken } from "sanoma/workflows/wakeup-service";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { copyFixture, FIXTURE_GRID, ensureBuilt, runCli, serving, startCli } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the packages' builds: the fixture copy loads them as a
@@ -64,7 +65,9 @@ describe("sanoma serve", () => {
       // On a config without problems: startApp warns about any it finds in the files before it listens.
       expect(output().stderr).not.toContain("the config's files have problems");
       // No sites: the build the app ships, and nothing written under .sanoma but the generated files.
-      expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "schema.cedarschema"]);
+      // And where it listens, for `sanoma call`: this process's, until it stops.
+      expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "app.json", "schema.cedarschema"]);
+      expect(JSON.parse(readFileSync(join(dir, ".sanoma/app.json"), "utf8"))).toEqual({ url, pid: child.pid });
     } finally {
       child.kill("SIGINT");
     }
@@ -73,6 +76,7 @@ describe("sanoma serve", () => {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("did not exit")), 15_000)),
     ]);
     expect(done.code, done.stderr).toBe(0);
+    expect(existsSync(join(dir, ".sanoma/app.json"))).toBe(false);
   }, 60_000);
 });
 
@@ -255,6 +259,222 @@ describe("sanoma check", () => {
     // The scenarios use the fakes alone: no credentials to report, and nothing but check's own lines and DBOS's setup.
     expect(`${ok.stdout}${ok.stderr}`).not.toMatch(/not configured|DeprecationWarning|Error in step/);
   }, 180_000);
+});
+
+describe("sanoma describe and sanoma call, against a running app", () => {
+  // One app for the describe: the fixture, which declares nobody, so the app admits any id; on a
+  // database of its own, so its runs of hello never reach the other tests' (the Workflows page lists by the latest run).
+  const calls = { ...unconfigured, SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-call") };
+  let served = "";
+  let server: Awaited<ReturnType<typeof serving>> | undefined;
+  beforeAll(async () => {
+    served = copyFixture();
+    server = await serving(served, ["serve"], calls);
+  }, 120_000);
+  afterAll(async () => {
+    await server?.stop();
+    rmSync(served, { recursive: true, force: true });
+  }, 30_000);
+  /** The bin in `cwd` (the served copy's directory unless named), its stdout parsed when it exited 0. */
+  const sanoma = async (
+    args: string[],
+    { cwd = served, more = {} }: { cwd?: string; more?: NodeJS.ProcessEnv } = {},
+  ) => {
+    const done = await runCli(cwd, args, { ...calls, ...more });
+    return { ...done, json: done.code === 0 ? (JSON.parse(done.stdout) as any) : undefined };
+  };
+
+  it("describes the company's own workflows as JSON, on one line, and nothing else on stdout", async () => {
+    const described = await sanoma(["describe", "--url", server!.url, "--as", "ada"]);
+    expect(described.code, described.stderr).toBe(0);
+    expect(described.stdout.trimEnd().split("\n")).toHaveLength(1);
+    expect(described.json.workflows.map((wf: { name: string }) => wf.name)).toEqual(["hello"]);
+  });
+
+  it("starts a workflow, printing its run, and reads the run's failure, exiting 1", async () => {
+    const started = await sanoma(["call", "hello", "--input", '{"title":"Hi"}', "--url", server!.url, "--as", "ada"]);
+    expect(started.code, started.stderr).toBe(0);
+    expect(Object.keys(started.json)).toEqual(["runId"]);
+    const { runId } = started.json as { runId: string };
+    const result = await sanoma([
+      "call",
+      "hello.result",
+      "--input",
+      JSON.stringify({ runId }),
+      "--url",
+      server!.url,
+      "--as",
+      "ada",
+    ]);
+    // Ghost is not configured, so the run fails: its error, its code and its run on stderr, nothing on stdout.
+    expect(result.code, result.stderr).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/\(driver_failed\)\nrun [\w-]+\n$/);
+    expect(result.stderr).toContain(`run ${runId}`);
+    // A run's reads take no start: its list, by the person who started it.
+    const runs = await sanoma(["call", "hello.runs", "--url", server!.url, "--as", "ada"]);
+    expect(runs.code, runs.stderr).toBe(0);
+    expect(JSON.stringify(runs.json)).toContain(runId);
+  });
+
+  it("names the input's issues, and refuses the runtime's own workflows however written, exiting 2", async () => {
+    const invalid = await sanoma(["call", "hello", "--input", '{"title":""}', "--url", server!.url, "--as", "ada"]);
+    expect(invalid.code).toBe(1);
+    expect(invalid.stderr).toMatch(/\(invalid_input\)/);
+    expect(invalid.stderr).toMatch(/^ {2}title: /m);
+    for (const name of ["change", "go-live", "goLive", "goLive.start", "login-code", "drift.start"]) {
+      const refused = await sanoma(["call", name, "--url", server!.url, "--as", "ada"]);
+      expect(refused.code, name).toBe(2);
+      expect(refused.stderr, name).toMatch(
+        /is the runtime's own workflow: the runtime's own workflows are not started here/,
+      );
+    }
+  });
+
+  it("exits 2 for a mistake in the call: no name, input that is not JSON, an unknown flag, a flag of another command", async () => {
+    const at = ["--url", server!.url, "--as", "ada"];
+    const mistakes = [
+      ["call", ...at],
+      ["call", "hello", "--input", "{", ...at],
+      ["call", "hello", "--nope", ...at],
+      ["describe", "--input", "{}", ...at],
+      ["describe", "extra", ...at],
+      ["check", "--as", "ada"],
+      ["env", "--url", server!.url],
+      ["describe", "--url", "not a url", "--as", "ada"],
+    ];
+    for (const args of mistakes) {
+      const done = await sanoma(args);
+      expect(done.code, args.join(" ")).toBe(2);
+      expect(done.stdout, args.join(" ")).toBe("");
+    }
+    expect((await sanoma(["call", "hello", "--input", "{", ...at])).stderr).toMatch(/^--input is not JSON/);
+    expect((await sanoma(["check", "--as", "ada"])).stderr).toMatch(
+      /^--input, --as, --url and --agent are sanoma describe's and sanoma call's/,
+    );
+  });
+
+  it("exits 1 naming the address it tried when nothing answers there", async () => {
+    const done = await sanoma(["describe", "--url", "http://127.0.0.1:1", "--as", "ada"]);
+    expect(done.code).toBe(1);
+    expect(done.stdout).toBe("");
+    expect(done.stderr).toMatch(/^Nothing answers at http:\/\/127\.0\.0\.1:1 /);
+  });
+
+  it("finds the app by .sanoma/app.json, and ignores one whose process is gone", async () => {
+    // SANOMA_APP_PORT is 0 here: only the file says where.
+    const found = await sanoma(["describe", "--as", "ada"]);
+    expect(found.code, found.stderr).toBe(0);
+    expect(found.json.workflows).toHaveLength(1);
+    // Another directory, whose file names an app that crashed: the port in the environment, then.
+    const other = copyFixture();
+    try {
+      mkdirSync(join(other, ".sanoma"));
+      writeFileSync(join(other, ".sanoma/app.json"), JSON.stringify({ url: "http://127.0.0.1:1", pid: 2 ** 30 }));
+      const port = new URL(server!.url).port;
+      const stale = await sanoma(["describe", "--as", "ada"], { cwd: other, more: { SANOMA_APP_PORT: port } });
+      expect(stale.code, stale.stderr).toBe(0);
+      // With port 0 and no running app to say where: a mistake in the call.
+      const unknown = await sanoma(["describe", "--as", "ada"], { cwd: other });
+      expect(unknown.code).toBe(2);
+      expect(unknown.stderr).toMatch(/^SANOMA_APP_PORT is 0.*--url/);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("asks as the one person declared, as git's user.email says among several, or as --as says by id or email", async () => {
+    const other = copyFixture();
+    const gitConfig = join(other, "gitconfig");
+    // Git's own configuration alone: no user.email unless this test writes one.
+    const git = { GIT_CONFIG_GLOBAL: gitConfig, GIT_CONFIG_NOSYSTEM: "1" };
+    writeFileSync(gitConfig, "");
+    const people = (lines: string[]) =>
+      writeFileSync(
+        join(other, "resources/people.ts"),
+        `import { sanoma } from "sanoma/resources";\n\n${lines.join("\n")}\n`,
+      );
+    /** Who started the run `sanoma call hello` starts from `other` with `args`: the served app admits anyone. */
+    const starter = async (args: string[]) => {
+      const started = await sanoma(["call", "hello", "--input", '{"title":"Who"}', "--url", server!.url, ...args], {
+        cwd: other,
+        more: git,
+      });
+      if (started.code !== 0) return started;
+      const runs = await sanoma(["call", "hello.runs", "--url", server!.url, "--as", "ada"]);
+      const run = (runs.json as { runId: string; startedBy?: { id: string } }[]).find(
+        (r) => r.runId === started.json.runId,
+      );
+      return run?.startedBy?.id;
+    };
+    try {
+      mkdirSync(join(other, "resources"), { recursive: true });
+      // Nobody declared: --as is needed.
+      const nobody = await sanoma(["describe", "--url", server!.url], { cwd: other, more: git });
+      expect(nobody.code).toBe(2);
+      expect(nobody.stderr).toMatch(/^No person is declared in resources\/: say who is asking with --as <id>/);
+      people([`export const founder = sanoma.person({ id: "founder", email: "founder@acme.test" });`]);
+      expect(await starter([])).toBe("founder");
+      people([
+        `export const ada = sanoma.person({ id: "ada", email: "ada@acme.test" });`,
+        `export const lin = sanoma.person({ id: "lin", email: "lin@acme.test", github: "lin-gh" });`,
+      ]);
+      const several = await sanoma(["describe", "--url", server!.url], { cwd: other, more: git });
+      expect(several.code).toBe(2);
+      expect(several.stderr).toMatch(/^Say who is asking with --as <id or email>: the people are ada, lin\n/);
+      expect(await starter(["--as", "LIN@acme.test"])).toBe("lin");
+      expect(await starter(["--as", "lin-gh"])).toBe("lin");
+      expect(await starter(["--as", "ada"])).toBe("ada");
+      const stranger = await sanoma(["describe", "--url", server!.url, "--as", "bob@acme.test"], {
+        cwd: other,
+        more: git,
+      });
+      expect(stranger.code).toBe(2);
+      expect(stranger.stderr).toMatch(/^--as: bob@acme\.test is no declared person; the people are ada, lin/);
+      writeFileSync(gitConfig, "[user]\n\temail = lin@acme.test\n");
+      expect(await starter([])).toBe("lin");
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+describe("the commands that run nothing", () => {
+  it("load neither the worker nor the app: --help, env, describe and call", async () => {
+    dir = copyFixture();
+    // A hook that writes every module the bin loads, at its exit.
+    const hook = join(dir, "loaded.mjs");
+    writeFileSync(
+      hook,
+      `import { registerHooks } from "node:module";
+import { appendFileSync } from "node:fs";
+const seen = [];
+registerHooks({ load(url, context, next) { seen.push(url); return next(url, context); } });
+process.on("exit", () => appendFileSync(process.env.LOADED, seen.join("\\n") + "\\n"));
+`,
+    );
+    // The app's modules and the commands that start the worker never; `env` resolves the config with
+    // the runtime (`sanoma/workflows`, whose entry holds the worker's module too), the rest load not even that.
+    const app = /\/sanoma\/(app\/(dist|src)\/|(dist|src)\/(serve|worker-port)\.[jt]s$)/;
+    const worker = /\/sanoma\/workflows\/(dist|src)\/worker\.[jt]s$/;
+    const runs: string[][] = [
+      ["--help"],
+      ["env"],
+      ["describe", "--url", "http://127.0.0.1:1", "--as", "ada"],
+      ["call", "hello", "--url", "http://127.0.0.1:1"],
+    ];
+    for (const args of runs) {
+      const loaded = join(tmpdir(), `sanoma-loaded-${process.pid}-${args[0]}`);
+      rmSync(loaded, { force: true });
+      const done = await runCli(dir, args, { ...env, NODE_OPTIONS: `--import ${hook}`, LOADED: loaded });
+      expect(done.code, done.stderr).not.toBeNull();
+      const urls = readFileSync(loaded, "utf8").split("\n").filter(Boolean);
+      rmSync(loaded, { force: true });
+      expect(urls.length, args.join(" ")).toBeGreaterThan(1);
+      const loadsTooMuch = (url: string) => app.test(url) || (args[0] !== "env" && worker.test(url));
+      expect(urls.filter(loadsTooMuch), args.join(" ")).toEqual([]);
+    }
+  }, 60_000);
 });
 
 describe("sanoma --help and mistakes", () => {
