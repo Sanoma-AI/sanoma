@@ -50,6 +50,12 @@ import { ColumnChange } from "./components/grid/plan.ts";
 export const ACTOR_HEADER = "x-sanoma-actor";
 
 /**
+ * The declared agent (`sanoma.agent`) a call is made by, on behalf of the person the login names:
+ * read on the loopback login alone (`actingFor`), refused on a host, whose sign-in says who acts.
+ */
+export const AGENT_HEADER = "x-sanoma-agent";
+
+/**
  * The same name, kept in a cookie by the page as well (URI-encoded), so the loopback login knows
  * who is asking while the server renders a page, whose loader may call `api`. The header wins.
  */
@@ -862,8 +868,13 @@ export function runFailure(run: Pick<RunSummary, "runId" | "status" | "error">, 
 /** A run's short name, for a title: "Run" and its id's first 8 characters (a UUID's first group). */
 export const runName = (runId: string) => `Run ${runId.slice(runId.lastIndexOf(":") + 1).slice(0, 8)}`;
 
-/** Who started a run, as text. */
-export const starterName = (run: Pick<RunSummary, "startedBy">): string => run.startedBy?.id ?? "unknown";
+/** Who started a run, as text: "claude-code for ada" for an agent acting for someone. */
+export const starterName = ({ startedBy }: Pick<RunSummary, "startedBy">): string =>
+  startedBy === undefined
+    ? "unknown"
+    : startedBy.onBehalfOf === undefined
+      ? startedBy.id
+      : `${startedBy.id} for ${startedBy.onBehalfOf}`;
 
 /** A run's approvals still waiting for a decision. */
 export const pendingApprovals = (run: Pick<RunSummary, "approvals">): ApprovalState[] =>

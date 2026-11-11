@@ -16,13 +16,13 @@ import {
   withSetup,
 } from "sanoma/workflows";
 import { defineFake } from "sanoma/workflows/fake";
-import { BUILT_IN_WORKFLOWS } from "sanoma/workflows/shared";
+import { AGENT_BUILT_IN_REFUSAL, BUILT_IN_WORKFLOWS } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { customers as crmCustomers } from "../../workflows/test/fixtures/company-apps/apps/crm/resources/data.ts";
 import followUp from "../../workflows/test/fixtures/company-apps/apps/crm/workflows/follow-up.ts";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
-import { ACTOR_HEADER } from "../src/api.ts";
+import { ACTOR_HEADER, AGENT_HEADER, starterName } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
@@ -91,6 +91,7 @@ writeFileSync(
 
 export const ada = sanoma.person({ id: "ada" });
 export const lead = sanoma.person({ id: "lead" });
+export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
 `,
 );
 writeFileSync(
@@ -156,6 +157,10 @@ interface Asked {
   site?: string;
   /** Who the login says is asking, instead of the loopback header's name: a visitor, say. */
   as?: Principal;
+  /** The declared agent the request names in `x-sanoma-agent`, acting for the person. */
+  agent?: string;
+  /** The app's context, instead of the loopback one: a host's, say. */
+  app?: AppContext;
 }
 
 /**
@@ -165,7 +170,7 @@ interface Asked {
  * from an SSE stream's one event when it streams.
  */
 async function mcp(method: string, params: Record<string, unknown> = {}, asked: Asked = {}) {
-  const { era = "modern", actor = "ada", headers = {}, site, as } = asked;
+  const { era = "modern", actor = "ada", headers = {}, site, as, agent } = asked;
   const modern = era === "modern";
   const name = typeof params.name === "string" ? { "mcp-name": params.name } : {};
   const request = new Request("http://127.0.0.1/mcp", {
@@ -174,6 +179,7 @@ async function mcp(method: string, params: Record<string, unknown> = {}, asked: 
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
       ...(actor === null ? {} : { [ACTOR_HEADER]: actor }),
+      ...(agent !== undefined && { [AGENT_HEADER]: agent }),
       ...(modern && { "mcp-protocol-version": MODERN, "mcp-method": method, ...name }),
       ...headers,
     },
@@ -184,7 +190,7 @@ async function mcp(method: string, params: Record<string, unknown> = {}, asked: 
       params: modern ? { ...params, _meta: envelope } : params,
     }),
   });
-  const app = appContext();
+  const app = asked.app ?? appContext();
   const actorFn = as ? async () => as : actorOf(app, request);
   const res = await postMcp(request, { app, actor: actorFn, ...(site !== undefined && { site }) });
   return { status: res.status, body: await messageOf(res) };
@@ -456,6 +462,105 @@ describe("drift", () => {
     expect((await messageOf(res)).result).toMatchObject({
       isError: true,
       structuredContent: { code: "invalid_input", error: expect.stringMatching(/declares no resources/) },
+    });
+  });
+});
+
+describe("a declared agent acting for the person, named in x-sanoma-agent", () => {
+  const agent = "claude-code";
+  const startedBy = { id: "claude-code", groups: ["agents"], onBehalfOf: "ada" };
+
+  it("starts a run as the agent for the person, which get_run, the ledger and the run's starter say", async () => {
+    const started = await tool("start_run", { workflow: "greet-customer", input: { id: "c5" } }, { agent });
+    expect(started.isError, JSON.stringify(started.structuredContent)).toBeFalsy();
+    const { runId } = started.structuredContent;
+    expect(await tool("wait_run", { runId }, { agent })).toMatchObject({
+      structuredContent: { runId, status: "finished", output: "Acme Ltd" },
+    });
+    const run = (await tool("get_run", { runId }, { agent })).structuredContent;
+    expect(run.startedBy).toEqual(startedBy);
+    expect(starterName(run)).toBe("claude-code for ada");
+    const ledger = await testApp.client.ledger(runId);
+    expect(ledger.map((r) => r.actor)).toEqual(ledger.map(() => startedBy));
+  });
+
+  it("starts drift as the agent for the person, the policy asked", async () => {
+    const { runId } = (await tool("drift", { waitMs: 0 }, { agent })).structuredContent;
+    await waitFor(
+      async () => (await tool("wait_run", { runId }, { agent })).structuredContent,
+      (answer: any) => answer.status === "finished",
+    );
+    expect((await tool("get_run", { runId }, { agent })).structuredContent).toMatchObject({
+      workflow: "drift",
+      startedBy,
+    });
+  });
+
+  it("holds a lookup as the agent's call for the person", async () => {
+    const id = crypto.randomUUID();
+    const held = await tool("lookup", { op: "acme.customer.get", input: { id: "held" }, id }, { agent });
+    expect(held.structuredContent).toMatchObject({ code: "approval_pending", runId: `call:claude-code:${id}` });
+    expect((await tool("get_run", { runId: held.structuredContent.runId })).structuredContent).toMatchObject({
+      workflow: "call",
+      startedBy,
+    });
+  });
+
+  it("keeps one person's run from another's with the same agent and id", async () => {
+    const id = crypto.randomUUID();
+    const start = (actor: string) =>
+      tool("start_run", { workflow: "greet-customer", input: { id: "c6" }, id }, { agent, actor });
+    expect((await start("ada")).structuredContent).toEqual({ runId: id });
+    expect((await start("lead")).structuredContent).toMatchObject({
+      code: "invalid_input",
+      error: expect.stringMatching(/different startedBy/),
+    });
+  });
+
+  it("takes the agent's name URI-encoded or not, as the person's", async () => {
+    for (const named of ["claude%2Dcode", "claude-code", " claude-code "]) {
+      const started = await tool("start_run", { workflow: "greet-customer", input: { id: "c7" } }, { agent: named });
+      const { runId } = started.structuredContent;
+      expect((await tool("get_run", { runId })).structuredContent.startedBy, named).toEqual(startedBy);
+    }
+    // Not URI-encoded: taken as sent.
+    expect(await mcp("tools/list", {}, { agent: "claude%code" })).toMatchObject({
+      status: 403,
+      body: { code: "not_admitted", error: expect.stringContaining("claude%code is not an agent") },
+    });
+  });
+
+  it("refuses an id that is no declared agent: nobody's, a person's, a runtime agent's", async () => {
+    for (const named of ["nobody", "lead", "host-check"]) {
+      expect(await mcp("tools/list", {}, { agent: named }), named).toMatchObject({
+        status: 403,
+        body: { code: "not_admitted" },
+      });
+    }
+    expect(await mcp("tools/list", {}, { agent: " " })).toMatchObject({
+      status: 400,
+      body: { code: "invalid_input", error: expect.stringMatching(/names no agent/) },
+    });
+  });
+
+  it("refuses the header on a host, whose sign-in says who is asking, and serves the person without it", async () => {
+    const app = appContext();
+    const hosted: AppContext = { ...app, login: { ...app.login, name: "staff" } };
+    expect(await mcp("tools/list", {}, { app: hosted, as: { id: "ada" }, agent })).toMatchObject({
+      status: 400,
+      body: {
+        code: "invalid_input",
+        error: expect.stringMatching(/x-sanoma-agent header is taken on this machine alone/),
+      },
+    });
+    expect((await mcp("tools/list", {}, { app: hosted, as: { id: "ada" } })).status).toBe(200);
+  });
+
+  it("refuses an agent any other of the runtime's own workflows through callApi too", async () => {
+    // In the client's words.
+    await expect(callApi(appContext(), startedBy, { name: "goLiveHost.start", input: {} })).rejects.toMatchObject({
+      code: "policy_denied",
+      message: `goLiveHost.start was denied by policy: ${AGENT_BUILT_IN_REFUSAL}`,
     });
   });
 });

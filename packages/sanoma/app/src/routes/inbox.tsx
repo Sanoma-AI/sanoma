@@ -294,7 +294,14 @@ function Asks({ run, approval, workflow }: Entry & { workflow: string }) {
       : `${pending ? "is waiting on" : "waited on"} this decision`;
   return (
     <p className="text-muted-foreground">
-      <Link {...runLink(run)}>{run.startedBy ? `${run.startedBy.id}'s run` : "A run"}</Link> of{" "}
+      <Link {...runLink(run)}>
+        {run.startedBy === undefined
+          ? "A run"
+          : run.startedBy.onBehalfOf === undefined
+            ? `${run.startedBy.id}'s run`
+            : `The run by ${starterName(run)}`}
+      </Link>{" "}
+      of{" "}
       <Link to="/workflows/$name" params={{ name: run.workflow }}>
         {workflow}
       </Link>{" "}

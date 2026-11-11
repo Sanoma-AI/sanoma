@@ -17,11 +17,13 @@ import {
   ANONYMOUS,
   ANONYMOUS_PRINCIPAL,
   type At,
+  declaredAgentOf,
   declaresPeople,
   isToken,
   isVisitor,
   type PeopleResource,
   personOf,
+  personsOf,
   principalOf,
   problemLine,
   RUNTIME_AGENTS,
@@ -176,10 +178,99 @@ export function admit(
     }
   } else {
     const id = signIn ? personOf(asking, people) : asking.id;
+    // A declared agent named with whom it acts for is checked as `agentActing` checks it, and keeps
+    // them; anyone else's `onBehalfOf` is dropped for the declared one (`principalOf`).
+    if (id !== undefined && asking.onBehalfOf !== undefined && declaredAgentOf(id, people)) {
+      return agentActing(id, asking.onBehalfOf, { people, problems });
+    }
     const admitted = id === undefined ? undefined : principalOf(id, people);
     if (admitted) return admitted;
   }
   throw new NotAdmittedError(who);
+}
+
+/**
+ * The principal of the declared agent `agent` acting on behalf of the declared person `person`:
+ * the agent's id and declared groups (`agents` among them, `principalOf`), with `onBehalfOf`
+ * the person, so the policy, holds (`on-behalf-of`) and the ledger see both. The one trusted way
+ * to make one: the app calls it with the person its login admitted, and `admit` checks an agent's
+ * `onBehalfOf` with it. Throws `NotAdmittedError` while the people's files have problems, for an
+ * id that is not a declared `sanoma.agent` (a person's, one of the runtime's own agents', anyone
+ * undeclared), for a `person` who is not a declared `sanoma.person`, and for an agent whose
+ * declaration fixes `onBehalfOf` to someone else.
+ */
+export function agentActing(
+  agent: string,
+  person: string,
+  { people, problems }: { people: readonly PeopleResource[]; problems: readonly ResourceProblem[] },
+): Principal {
+  if (problems.length) throw new NotAdmittedError(agent, problems.map(problemLine));
+  const declared = declaredAgentOf(agent, people);
+  if (!declared) {
+    const why = RUNTIME_AGENTS.includes(agent)
+      ? `${agent} is one of the runtime's own agents, which acts for no one`
+      : principalOf(agent, people)
+        ? `${agent} is a person, not an agent: declare the agent with sanoma.agent in resources/people.ts`
+        : `${agent} is not an agent resources/people.ts declares`;
+    throw new NotAdmittedError(agent, [], why);
+  }
+  if (!personsOf(people).some((p) => p.id === person)) {
+    throw new NotAdmittedError(agent, [], `${agent} acts for no one but a declared person, and ${person} is not one`);
+  }
+  if (declared.onBehalfOf !== undefined && declared.onBehalfOf !== person) {
+    throw new NotAdmittedError(
+      agent,
+      [],
+      `${agent} acts for ${declared.onBehalfOf} alone, as resources/people.ts declares it, not for ${person}`,
+    );
+  }
+  return { id: agent, groups: principalOf(agent, people)!.groups ?? [], onBehalfOf: person };
+}
+
+/**
+ * Two agents declaring one `client` (`readPeople`'s people): a problem `sanoma check` reports,
+ * but not one of `readPeople`'s, which would admit nobody, since nothing reads a client at run time
+ * yet; `agentOfClient` answers no agent for such a client.
+ */
+export function clientClashes(people: readonly DeclaredResource[]): ResourceProblem[] {
+  const clients = new Map<string, DeclaredResource>();
+  return people.flatMap((r) => {
+    const { client } = r.desired as { client?: string };
+    if (r.vendor !== "sanoma" || r.type !== "agent" || client === undefined) return [];
+    const declaring = clients.get(client);
+    if (!declaring) {
+      clients.set(client, r);
+      return [];
+    }
+    return [
+      {
+        ...r.at,
+        message: `${r.id} declares the client "${client}", which ${declaring.id} declares: give each agent its own`,
+      },
+    ];
+  });
+}
+
+/**
+ * What is worth fixing in the people the data files declare (`readPeople`), but not wrong: an
+ * agent with no fixed `onBehalfOf`, which acts for whoever names it (`agentActing`), in a declared
+ * group, whose groups then reach whoever that is.
+ */
+export function peopleWarnings(people: readonly DeclaredResource[]): ResourceProblem[] {
+  const groups = people.filter((r) => r.vendor === "sanoma" && r.type === "group");
+  return people.flatMap((r) => {
+    const { id, onBehalfOf } = r.desired as { id?: string; onBehalfOf?: string };
+    if (r.vendor !== "sanoma" || r.type !== "agent" || onBehalfOf !== undefined || id === undefined) return [];
+    const of = groups.filter((g) => (g.desired as { members?: string[] }).members?.includes(id)).map((g) => g.name);
+    if (!of.length) return [];
+    const named = of.length === 1 ? `the group ${of[0]}` : `the groups ${of.join(", ")}`;
+    return [
+      {
+        ...r.at,
+        message: `${r.id} acts for whoever names it and is in ${named}: through it, whoever that is acts in ${of.length === 1 ? "that group" : "those groups"} too`,
+      },
+    ];
+  });
 }
 
 /**
