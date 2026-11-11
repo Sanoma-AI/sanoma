@@ -678,6 +678,19 @@ export function errorCode(e: unknown): ErrorCode | undefined {
   return code !== undefined && KNOWN.has(code) ? (code as ErrorCode) : undefined;
 }
 
+/**
+ * A runner that runs each piece of work it is given after the one before it settles, failed or
+ * not: one at a time, in the order given.
+ */
+export function oneAtATime(): <T>(work: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (work) => {
+    const done = tail.then(work);
+    tail = done.catch(() => undefined);
+    return done;
+  };
+}
+
 /** A `DriverError`'s `vendorCode` (`no_token`, `bad_signature`), read as a property: undefined for anything else. */
 export const vendorCodeOf = (e: unknown): string | undefined => ownProperty<string>(e, "vendorCode", "string");
 

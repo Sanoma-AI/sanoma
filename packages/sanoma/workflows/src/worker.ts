@@ -6,7 +6,14 @@ import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { followBase } from "./change.ts";
 import { dbosStatusesOf, SanomaClient } from "./client.ts";
-import { declaredWakeup, envWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import {
+  declaredWakeup,
+  envWakeup,
+  queueFor,
+  type ResolvedConfig,
+  resolveConfig,
+  type SanomaConfig,
+} from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import {
   type AppBehind,
@@ -45,7 +52,7 @@ import {
 import type { DatabasePreparation } from "./op.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
-import { approverLabel, errorMessage, RENEWAL_AGENT, WORKFLOW_ACTION } from "./shared.ts";
+import { APPLY_WORKFLOW, approverLabel, errorMessage, oneAtATime, RENEWAL_AGENT, WORKFLOW_ACTION } from "./shared.ts";
 import { renewWhenDue } from "./renewal.ts";
 
 export interface Worker {
@@ -209,7 +216,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       behind = undefined;
     })();
   };
-  const serially = serialWrites();
+  // Each write waits for the one before it to settle, failed or not.
+  const serially = oneAtATime();
   const state: WorkerState = {
     app: resolved.appName,
     connections: resolved.connections,
@@ -249,7 +257,9 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     startRun: async (name, runId, args) => {
       const fn = registered.get(name) as unknown as ((args: RunArgs) => Promise<unknown>) | undefined;
       if (!fn) throw new Error(`The worker has no workflow "${name}" to start`);
-      return DBOS.startWorkflow(fn, { workflowID: runId })(args);
+      // A live apply waits its turn on the apply queue, as the client's do; anything else runs at once.
+      const queueName = queueFor(resolved, name, args.sandbox);
+      return DBOS.startWorkflow(fn, { workflowID: runId, ...(queueName && { queueName }) })(args);
     },
     stopped: false,
     deadlines: deadlineRegistry(),
@@ -343,13 +353,23 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         );
       }
     }
-    // Built-in runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
-    if (isLatest) await carryBuiltInRuns(resolved, () => secrets.db());
-    // How often it looks for queued runs: DBOS's default second, unless a test suite asks for less.
+    // The queues, once this worker is the latest when promoted: DBOS updates a queue's settings
+    // only for the latest version. How often each is looked at: DBOS's default second, unless a
+    // test suite asks for less.
     const pollMs = process.env.SANOMA_QUEUE_POLL_MS;
     if (pollMs && !(Number(pollMs) > 0))
       throw new Error(`SANOMA_QUEUE_POLL_MS is milliseconds above zero, not "${pollMs}"`);
-    await DBOS.registerQueue(resolved.queueName, pollMs ? { minPollingIntervalMs: Number(pollMs) } : undefined);
+    const polling = pollMs ? { minPollingIntervalMs: Number(pollMs) } : {};
+    await Promise.all([
+      DBOS.registerQueue(resolved.queueName, polling),
+      // One live apply at a time across every worker on the database: the limit is counted in Postgres.
+      DBOS.registerQueue(resolved.applyQueueName, { globalConcurrency: 1, ...polling }),
+    ]);
+    // Built-in runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
+    if (isLatest) {
+      await cancelStrandedApplies(resolved);
+      await carryBuiltInRuns(resolved, () => secrets.db());
+    }
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
       await applyScheduled(resolved, registered, () => secrets.db());
@@ -451,19 +471,6 @@ function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
 }
 
 /**
- * `WorkerState.serially`, over a chain of its own: each write waits for the one before it to
- * settle, failed or not.
- */
-function serialWrites(): WorkerState["serially"] {
-  let tail: Promise<unknown> = Promise.resolve();
-  return (next) => {
-    const done = tail.then(next);
-    tail = done.catch(() => undefined);
-    return done;
-  };
-}
-
-/**
  * Tells how far each app under `root` taken from a source (its `app.ts` names one) is behind it,
  * fetched now (`Source.behind`), or why that cannot be told: offline, no shared history, a
  * repository that cannot fetch. Written to the runtime's table for the app (`writeAppsBehind`),
@@ -499,10 +506,11 @@ async function recordAppsBehind(
 }
 
 /**
- * Takes over the unfinished runs of the built-in workflows (apply, change, …) started on other
- * versions whose code is this worker's (`builtInCodes`), keeping each run's id, history and unread
- * messages: a deploy restarts the worker on the merged code, a new version, which DBOS would never
- * give the run to, and the apply or change run that made the deploy is one of them. Each is stamped
+ * Takes over the unfinished runs of the built-in workflows that wait across a deploy (a change, a
+ * move between stores: `stampVersion`'s) started on other versions whose code is this worker's
+ * (`builtInCodes`), keeping each run's id, history and unread messages: a deploy restarts the
+ * worker on the merged code, a new version, which DBOS would never give the run to, and the change
+ * run that made the deploy is one of them. An apply is not carried: `cancelStrandedApplies`. Each is stamped
  * with this version (`stampVersion`), and a PENDING one queued again on the app's queue
  * (`resumeWorkflows`); one stopped between the two is PENDING on this version, which DBOS's
  * recovery takes. Not `rewindWorkflow`, which takes only a cancelled run and deletes its unread
@@ -541,11 +549,44 @@ async function carryBuiltInRuns({ appName, version, builtInCodes, queueName }: R
 }
 
 /**
+ * Cancels the unfinished applies of other versions on the apply queue, warning with their ids: no
+ * worker would ever run one (DBOS gives a run only to its version), and one left PENDING would hold
+ * the queue's one place for good, so no apply, a change's deploy or a push's, would run again.
+ * Nothing is lost: an apply plans again from the files when it runs, so the next one does what
+ * they would have. A change whose deploy this cancels reports it as the deploy's error (`child`
+ * in change-steps.ts). A failure is warned about, and the worker starts.
+ */
+async function cancelStrandedApplies({ appName, version, applyQueueName }: ResolvedConfig) {
+  try {
+    const stranded = (
+      await DBOS.listWorkflows({
+        workflowName: APPLY_WORKFLOW,
+        status: dbosStatusesOf("queued", "running"),
+        applicationName: appName,
+        queueName: applyQueueName,
+        loadInput: false,
+        loadOutput: false,
+      })
+    )
+      .filter((r) => r.applicationVersion && r.applicationVersion !== version)
+      .map((r) => r.workflowID);
+    if (!stranded.length) return;
+    await DBOS.cancelWorkflows(stranded);
+    warn(
+      `cancelled ${stranded.length} apply run(s) of another version, which no worker would run: ${stranded.join(", ")}. Apply again.`,
+    );
+  } catch (err) {
+    warn(`cancelling the apply runs of other versions failed, so they stay queued: ${errorMessage(err)}`);
+  }
+}
+
+/**
  * Warns about unfinished runs this worker will never pick up: started on another version of
  * the app, or queued on another queue (such as the single "sanoma" queue before queues were
  * named per app, or the sandbox queue before sandbox runs went on the app's).
  */
-async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedConfig) {
+async function warnAboutStrandedRuns(resolved: ResolvedConfig) {
+  const { appName, version, queueName } = resolved;
   const runs = await DBOS.listWorkflows({
     status: dbosStatusesOf("queued", "running"),
     applicationName: appName,
@@ -554,7 +595,7 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
   });
   const otherVersion = runs.filter((r) => r.applicationVersion && r.applicationVersion !== version);
   // Recovery moves a worker's own runs to DBOS's internal queues, which are fine.
-  const otherQueue = runs.filter((r) => !otherVersion.includes(r) && !onOwnQueue(r.queueName, queueName));
+  const otherQueue = runs.filter((r) => !otherVersion.includes(r) && !onOwnQueue(r.queueName, resolved));
   if (!otherVersion.length && !otherQueue.length) return;
   const ids = [...otherVersion, ...otherQueue].map((r) => r.workflowID);
   warn(

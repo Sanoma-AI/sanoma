@@ -144,6 +144,7 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
         { name: "a run queued while the worker is stopping still runs", ok: true },
         { name: "a page of the app answers while the container is stopped", ok: true },
         { name: "a deploy never answers 503 to a visitor", ok: true },
+        { name: "two deploys at once leave one revision, the loser at once", ok: true },
         { name: "a new commit shows as drift that apply clears", ok: true },
         { name: "no secret is in the ledger", ok: true },
       ]);

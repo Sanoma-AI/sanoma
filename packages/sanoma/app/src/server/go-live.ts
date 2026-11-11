@@ -32,7 +32,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
-import { invalid } from "./core.ts";
+import { applyAheadOf, invalid } from "./core.ts";
 import { declaredEmail } from "./people.ts";
 import { secretValues } from "./secrets.ts";
 import { WAKEUP_URL } from "./setup.ts";
@@ -341,12 +341,13 @@ function hostWakeup(
   };
 }
 
-/** A run as going live follows it: what it waits on (with an apply's plan), and once an apply finished, what it did. */
+/** A run as going live follows it: what it waits on (with an apply's plan, or the apply ahead of a queued one), and once an apply finished, what it did. */
 export async function goLiveRunOf(client: SanomaClient, run: RunSummary): Promise<GoLiveRun> {
   const pending = run.approvals.find((a) => a.status === "pending");
   const plan = pending && asApplyPlan(pending.details);
   const report =
     run.workflow === APPLY_WORKFLOW && run.status === "finished" ? await client.applyReport(run.runId) : undefined;
+  const ahead = await applyAheadOf(client, run);
   return {
     runId: run.runId,
     workflow: run.workflow,
@@ -354,6 +355,7 @@ export async function goLiveRunOf(client: SanomaClient, run: RunSummary): Promis
     ...(pending && { pending: { approvalId: pending.id, ...(plan && { plan }) } }),
     ...(report && { results: report.results }),
     ...(run.error && { error: run.error }),
+    ...(ahead && { ahead }),
   };
 }
 

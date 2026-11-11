@@ -231,7 +231,7 @@ describe("the deadline registry", () => {
   });
 });
 
-const scope = { appName: "app", version: "app@v2", queueName: "sanoma:app" };
+const scope = { appName: "app", version: "app@v2", queueName: "sanoma:app", applyQueueName: "sanoma:app:apply" };
 /** A run of `scope`'s, PENDING on its version and queue, but for what `s` says. */
 const status = (s: Partial<WorkflowStatus>): WorkflowStatus =>
   ({

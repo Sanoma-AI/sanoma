@@ -84,6 +84,30 @@ const createWith = (...asks: Exchange[]) => [
 ];
 /** The version the create's Worker without an app answers with: its second upload's, after the application. */
 const CREATED = { "x-sanoma-deployment": "00000002-0000-4000-a000-000000000000" };
+/** The id of the create's last upload, the version its restart waits for. */
+const UPLOADED_ID = "00000003-0000-4000-a000-000000000000";
+const CREATED_ID = CREATED["x-sanoma-deployment"];
+/** A version deployed before the create's, and one after (another deploy's), as the `deployments` fixture lists it. */
+const OLDER = "00000001-0000-4000-a000-000000000000";
+const NEWER = "00000009-0000-4000-a000-000000000000";
+/** An answer's mark: the version that answered. */
+const by = (version: string) => ({ "x-sanoma-app-bundle": "1", "x-sanoma-deployment": version });
+const DEPLOYMENTS = `${API}/workers/scripts/sanoma-company/deployments`;
+/** The Worker's deployments, as the `deployments` fixture's reply lists them: one per version, newest first. */
+const deploymentsOf = (...versions: string[]): Exchange => {
+  const [listing] = fixture("deployments");
+  const [deployment] = (listing!.body as { result: { deployments: object[] } }).result.deployments;
+  return {
+    ...listing!,
+    body: cfResult({
+      deployments: versions.map((version_id, i) => ({
+        ...deployment,
+        created_on: `2026-10-26T12:0${9 - i}:00.000000Z`,
+        versions: [{ percentage: 100, version_id }],
+      })),
+    }),
+  };
+};
 /** The deploy's reads of what is deployed, between its writes. */
 const reads = (r: string) => r === "GET /workers/subdomain" || r.endsWith("/settings") || r.includes(PREPARATIONS);
 /** The header the worker's bundle route marks its answers with, as the create's object passes them on. */
@@ -678,11 +702,14 @@ describe.skipIf(live)("cloudflareDriver", () => {
         // The deployed app read back, and the Worker at def456 uploaded with it.
         "GET /workers/scripts/sanoma-company/content/v2",
         "PUT /workers/scripts/sanoma-company",
-        // The version before still answers, then the upload does.
+        // The version before still answers, deployed before the upload (an earlier version's,
+        // not a newer deploy's), then the upload does.
         "GET /__sanoma/health",
+        "GET /workers/scripts/sanoma-company/deployments",
         "GET /__sanoma/health",
         // The version before's 401 is an earlier version's: def456's container builds it.
         "GET /__sanoma/app-bundle?revision=def456",
+        "GET /workers/scripts/sanoma-company/deployments",
         "GET /__sanoma/app-bundle?revision=def456",
         "GET /__sanoma/app-bundle?revision=def456",
         "POST /workers/scripts/sanoma-company/assets-upload-session",
@@ -769,6 +796,53 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(asked).toBeGreaterThan(1);
     });
 
+    it("ends a deploy at once when a version Cloudflare lists after its own answers: a newer deploy has the host", async () => {
+      // The `deployments` fixture lists NEWER deployed after the create's version.
+      play(
+        "superseded",
+        createWith({ ...reply(BUNDLE, 202, { building: "abc999" }), headers: by(NEWER) }, ...fixture("deployments")),
+      );
+      await expect(op("container.create", { desired })).rejects.toMatchObject({
+        retryable: false,
+        vendorCode: "superseded",
+        message: `cloudflare: sanoma-company: superseded by version ${NEWER}, uploaded after this deploy's (${CREATED_ID}): a newer deploy has the host`,
+      });
+      expect(requests().filter((r) => r.includes("app-bundle"))).toHaveLength(1);
+    });
+
+    it("asks again when the version answering was deployed before its own, or the listing does not have its own yet, or fails", async () => {
+      const create = fixture("create");
+      play("earlier-or-lagging", [
+        ...createWith(
+          { ...reply(BUNDLE, 202, {}), headers: by(OLDER) },
+          deploymentsOf(CREATED_ID, OLDER),
+          { ...reply(BUNDLE, 202, {}), headers: by(NEWER) },
+          deploymentsOf(NEWER),
+          { ...reply(BUNDLE, 202, {}), headers: by(NEWER) },
+          reply(DEPLOYMENTS, 503, cfError(10013, "Service unavailable")),
+        ),
+        ...create.slice(create.findIndex((e) => e.path === BUNDLE)),
+      ]);
+      expect(await op("container.create", { desired })).toEqual({ id: "company", state });
+    });
+
+    it("ends the restart's wait when a version deployed after the deploy's last upload answers", async () => {
+      const create = fixture("create");
+      const restarting = create.findIndex((e) => e.path === "/__sanoma/health?start=1");
+      play("restart-superseded", [
+        ...create.slice(0, restarting),
+        { ...reply("/__sanoma/health?start=1", 200, { revision: "abc999" }), headers: by(NEWER) },
+        deploymentsOf(NEWER, UPLOADED_ID),
+      ]);
+      await expect(op("container.create", { desired })).rejects.toMatchObject({
+        retryable: false,
+        vendorCode: "superseded",
+        message: expect.stringContaining(
+          `superseded by version ${NEWER}, uploaded after this deploy's (${UPLOADED_ID})`,
+        ),
+      });
+    });
+
     it("confirms an update whose upload is made by the restart alone, though the update approved was a deploy", async () => {
       // The Worker runs def456 already: a deploy that died in its restart, or the worker that ran it restarted.
       const [settings, app, subdomain] = only("update", (_, i) => i < 3).map((e) =>
@@ -778,9 +852,16 @@ describe.skipIf(live)("cloudflareDriver", () => {
         settings!,
         app!,
         subdomain!,
-        // The plan's read is the restart's: no second read.
-        reply("/__sanoma/health?start=1", 202, { revision: "def456", running: true, ready: false }),
-        reply("/__sanoma/health?start=1", 200, { revision: "def456", running: true, ready: true }),
+        // The plan's read is the restart's: no second read. Another version's answers ask no
+        // listing: the restart alone uploaded none to compare it with.
+        {
+          ...reply("/__sanoma/health?start=1", 202, { revision: "def456", running: true, ready: false }),
+          headers: by(NEWER),
+        },
+        {
+          ...reply("/__sanoma/health?start=1", 200, { revision: "def456", running: true, ready: true }),
+          headers: by(NEWER),
+        },
       ]);
       expect(await update({ desired: { ...desired, revision: "def456" } })).toEqual({
         id: "company",

@@ -94,6 +94,30 @@ export async function waitFor<T>(
   }
 }
 
+/**
+ * Refuses (`superseded`) when the version `by` answered and Cloudflare lists it deployed after this
+ * deploy's own upload (`mine`): another deploy uploaded since and has the host, and waiting would
+ * only run out the time. Nothing for no version, this deploy's own, or an earlier one still
+ * answering while the upload reaches every location; nor when either id is not listed (a listing
+ * that lags) or the listing fails, so a deploy never fails on the listing alone.
+ */
+export async function refuseIfSuperseded(
+  cf: CloudflareApi,
+  script: string,
+  mine: string,
+  by: string | null | undefined,
+): Promise<void> {
+  if (!by || by === mine) return;
+  const ids = await cf.deployments(script).catch((): string[] => []);
+  const [newer, own] = [ids.indexOf(by), ids.indexOf(mine)];
+  if (newer >= 0 && own >= 0 && newer < own) {
+    throw refused(
+      `${script}: superseded by version ${by}, uploaded after this deploy's (${mine}): a newer deploy has the host`,
+      "superseded",
+    );
+  }
+}
+
 interface BundleAsk {
   script: string;
   url: string;
@@ -108,7 +132,8 @@ interface BundleAsk {
  * gives it: the object starts its container at the revision when it is stopped or runs another,
  * and both it and the worker answer 202 meanwhile. An answer without the version `deployment` is an
  * earlier version's, still answering while the upload reaches every location: asked again,
- * whatever its status. A failed build, a revision the route refuses, a container that ended or the
+ * whatever its status; unless Cloudflare lists it deployed after `deployment`, which ends the wait
+ * at once (`refuseIfSuperseded`). A failed build, a revision the route refuses, a container that ended or the
  * version uploaded refusing the ask (any 4xx of its own, such as another token's 401) is a refusal. Any other answer (no answer, an error of Cloudflare's, a body cut off, a workers.dev URL
  * not routed yet) is asked again. Still none after `startTimeoutMs` is a retryable `DriverError`
  * that says what the last ask saw. One ask may take the whole budget: a bundle is large.
@@ -128,6 +153,7 @@ export function appBundle(
       const by = res.headers.get(DEPLOYMENT_HEADER);
       if (by !== deployment) {
         await res.body?.cancel();
+        await refuseIfSuperseded(cf, script, deployment, by);
         return { last: `an earlier version (${by || "unmarked"}) answered ${res.status}` };
       }
       const route = res.headers.has(APP_BUNDLE_HEADER);

@@ -91,6 +91,13 @@ const TYPE_OF = new Map(
 
 const isStatus = (error: unknown, status: number) => error instanceof DriverError && error.status === status;
 
+/**
+ * A Worker version's id with its hyphens, as the object's `CF_VERSION_METADATA` has it: Cloudflare
+ * may give one without them (as Wrangler reads an upload's).
+ */
+const hyphenated = (id: string) =>
+  id.includes("-") ? id : id.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
+
 /** A request to a Worker, with a timeout: a redirect is no answer of the Worker's, and would carry the token elsewhere. */
 /** `fetch` within `timeoutMs`, unless the caller gives its own signal (a large body's). */
 const sender = (timeoutMs: number) => (url: string, init: RequestInit) =>
@@ -180,12 +187,24 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
           result?: { deployment_id?: string | null };
         };
       });
-      // The version's id, which Cloudflare names `deployment_id` and may give without its hyphens
-      // (as Wrangler reads it); the object's `CF_VERSION_METADATA` has them.
+      // The version's id, which Cloudflare names `deployment_id`.
       const id = answer.result?.deployment_id;
       if (!id) throw refused(`${script}: its upload answered no version id`);
-      return id.includes("-") ? id : id.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
+      return hyphenated(id);
     },
+    deployments: (script) =>
+      calling(`GET workers/scripts/${script}/deployments`, async (cf) => {
+        // Not the SDK's `deployments.list`: its page reads `result.items`, and the endpoint answers
+        // `result.deployments`. Ordered here by when each was made, newest first, each one's
+        // versions once (a deployment that splits traffic has two).
+        const answer = await cf.get<{ result?: { deployments?: Cloudflare.Workers.Scripts.Deployment[] } | null }>(
+          `/accounts/${account_id}/workers/scripts/${script}/deployments`,
+        );
+        const deployments = (answer.result?.deployments ?? []).toSorted((a, b) =>
+          b.created_on.localeCompare(a.created_on),
+        );
+        return [...new Set(deployments.flatMap((d) => d.versions.map((v) => hyphenated(v.version_id))))];
+      }),
     async assetsSession(script, manifest) {
       const { jwt, buckets } = await calling(`POST workers/scripts/${script}/assets-upload-session`, (cf) =>
         cf.workers.scripts.assets.upload.create(script, { account_id, manifest }),

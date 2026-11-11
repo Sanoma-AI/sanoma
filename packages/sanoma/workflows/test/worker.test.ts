@@ -115,6 +115,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       databaseUrl: "postgresql://unused@localhost:1/unused",
       version: expect.stringMatching(/^sanoma@[0-9a-f]{64}$/),
       queueName: "sanoma:sanoma",
+      applyQueueName: "sanoma:sanoma:apply",
     });
     // The config's workflow, drift and apply for the resource type a connector declares
     // (`resend.domain`), the change workflow, follow, the app's actions and the chat every config has, and call for the listing of apps.
