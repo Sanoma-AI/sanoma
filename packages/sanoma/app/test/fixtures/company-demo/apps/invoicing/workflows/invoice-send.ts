@@ -28,11 +28,10 @@ export default defineWorkflow({
     });
     await ctx.resend.emails.send(email(`Invoice ${number}`));
     await ctx.data.invoicing.invoices.save({ record: { ...draft.record, number, status: "sent" } });
-    const sentAt = await ctx.now();
     await ctx.sleep({ days: 7 });
     const later = await ctx.data.invoicing.invoices.get({ key: id });
     const reminded = later?.record.status === "sent";
     if (reminded) await ctx.resend.emails.send(email(`Reminder: invoice ${number}`));
-    return { number, reminded, waitedDays: ((await ctx.now()) - sentAt) / 86_400_000 };
+    return { number, reminded };
   },
 });

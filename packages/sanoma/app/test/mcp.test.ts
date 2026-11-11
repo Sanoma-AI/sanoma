@@ -511,6 +511,13 @@ describe("POST /mcp through the app", () => {
     expect((await messageOf(res)).result.tools.map((t: { name: string }) => t.name).toSorted()).toEqual(TOOLS);
   });
 
+  it("answers a GET or a DELETE 405, without asking who it is", async () => {
+    for (const method of ["GET", "DELETE"]) {
+      const res = await fetch(new URL("/mcp", app!.url), { method });
+      expect([res.status, res.headers.get("allow")], method).toEqual([405, "POST"]);
+    }
+  });
+
   it("refuses a browser's request from another site or origin, by Sec-Fetch-Site or by Origin", async () => {
     for (const site of ["cross-site", "same-site"]) {
       expect((await post({ [ACTOR_HEADER]: "ada", "sec-fetch-site": site })).status, site).toBe(403);

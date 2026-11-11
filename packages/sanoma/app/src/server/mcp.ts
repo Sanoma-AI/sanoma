@@ -2,7 +2,14 @@
 import "@tanstack/react-start/server-only";
 import { type CallToolResult, createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { type Principal, RUNTIME_VERSION } from "sanoma/workflows";
-import { apiNameOf, BUILT_IN_WORKFLOWS, DESCRIBE_CALL, DRIFT_WORKFLOW, isVisitor } from "sanoma/workflows/shared";
+import {
+  apiNameOf,
+  BUILT_IN_WORKFLOWS,
+  DESCRIBE_CALL,
+  DRIFT_WORKFLOW,
+  isRecord,
+  isVisitor,
+} from "sanoma/workflows/shared";
 import { z } from "zod";
 import { ApiError, asApiError } from "../api.ts";
 import type { AppContext } from "../context.ts";
@@ -32,17 +39,23 @@ const CallId = z
   .optional();
 
 /**
- * What the handler reports that is not a client's own mistake (a rejected request, or the
- * refused `subscriptions/listen`, which are answered to the client): logged, as `toApiError`
- * logs what it did not expect.
+ * What the handler reports that is not a client's own mistake (a rejected or malformed request, a
+ * method, media type or protocol version it does not take, or the refused `subscriptions/listen`,
+ * each answered to the client): logged, as `toApiError` logs what it did not expect.
  */
 function logUnexpected(error: Error): void {
-  if (/^(Rejected |Unsupported Media Type|subscriptions\/listen refused)/.test(error.message)) return;
+  if (
+    /^(Rejected |Invalid Request|Not Acceptable|Method not allowed|Unsupported (Media Type|protocol version)|subscriptions\/listen refused)/i.test(
+      error.message,
+    )
+  ) {
+    return;
+  }
   console.error("sanoma app: an MCP request failed:", error);
 }
 
 /**
- * `POST /mcp` (and its GET and DELETE, which the stateless server answers 405): the request's
+ * `POST /mcp` (the route answers a GET or a DELETE 405 itself): the request's
  * guards, then an MCP server built for it (`createMcpHandler`, at its default `legacy: 'stateless'`,
  * so a 2025-era client and a 2026-07-28 one are both served). A public site's host has no such
  * route (404); a request whose `Origin` is another site's is refused, so a page elsewhere cannot
@@ -274,6 +287,3 @@ async function answer(what: string, call: () => Promise<unknown>): Promise<CallT
     return { content: [{ type: "text", text: JSON.stringify(error) }], structuredContent: error, isError: true };
   }
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);

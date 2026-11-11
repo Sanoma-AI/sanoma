@@ -5,7 +5,8 @@ import type { UntypedApi } from "../src/api-client.ts";
 import { api, serve } from "../src/demo/api.ts";
 
 /** A runtime, seeded, that answers every request with its own name. */
-const runtime = (name: string) => Promise.resolve<PageRuntime>({ transport: async () => name, reset: async () => {} });
+const runtime = (name: string) =>
+  Promise.resolve<PageRuntime>({ transport: async () => name, reset: async () => {}, stop: () => {} });
 const read = () => (api as UntypedApi).data.invoices.list({});
 /** Serves `seeding` as `mount` does, returning once it has seeded or failed, as `mount` renders. */
 const mounted = async (seeding: Promise<PageRuntime>) => {

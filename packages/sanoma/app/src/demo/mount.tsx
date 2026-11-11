@@ -32,7 +32,8 @@ const latest = new WeakMap<Element, Promise<unknown>>();
 /**
  * Renders the sites into `element`, from `path`, on a history of their own (the host's URL and
  * history untouched), over a fresh runtime seeded from the world. Resolves to the unmount, which
- * empties the element; one that another `mount` on the element overtook while it seeded renders
+ * empties the element and stops the runtime (`stop`: its runs dropped, a sleeping one's timer
+ * with it); one that another `mount` on the element overtook while it seeded renders
  * nothing and resolves to an unmount that does nothing. `api` is its runtime's (`serve`).
  */
 export async function mount(element: Element, { path = `/sites/${sites[0]}`, exit }: MountOptions = {}) {
@@ -41,9 +42,10 @@ export async function mount(element: Element, { path = `/sites/${sites[0]}`, exi
   latest.set(element, seeding);
   const release = serve(seeding);
   seeding.catch(release);
-  await seeding;
+  const page = await seeding;
   if (latest.get(element) !== seeding) {
     release();
+    page.stop();
     return () => {};
   }
   const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 1_000 } } });
@@ -91,6 +93,7 @@ export async function mount(element: Element, { path = `/sites/${sites[0]}`, exi
     root.unmount();
     unblock();
     release();
+    page.stop();
     queryClient.clear();
     element.removeAttribute(SCOPE);
   };

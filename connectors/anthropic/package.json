@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-anthropic",
-  "version": "0.11.22",
+  "version": "0.11.23",
   "description": "Anthropic's Claude models for Sanoma's agent, through the AI SDK, on the company's API key; and Claude Code, a coding agent for the chat on a person's own plan or the company's key",
   "keywords": [
     "ai-sdk",

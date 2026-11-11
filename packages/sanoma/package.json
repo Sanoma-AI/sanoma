@@ -1,6 +1,6 @@
 {
   "name": "sanoma",
-  "version": "0.11.22",
+  "version": "0.11.23",
   "description": "Sanoma's core in one package: the bin a company repo runs, checks and exports itself with, the durable workflow runtime, the web app and the test helpers",
   "keywords": [
     "approvals",
