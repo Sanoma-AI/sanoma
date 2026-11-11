@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { hostnameUrl } from "sanoma/workflows/shared";
+import { hostnameUrl, oneAtATime } from "sanoma/workflows/shared";
 import {
   defineConnector,
   defineDriver,
@@ -193,7 +193,11 @@ export async function credentialHeard(
  * while it was stopped continues; and for its end: it stops once its worker is idle (`running`),
  * and a run queued while the worker stops (as the worker records `stopped_at`) still runs. With a
  * `page`, the page answers while the host is stopped, and every ask of it answers 200 throughout a
- * deploy of a new commit. Leaves the host applied, and its check's credential cleared.
+ * deploy of a new commit. Two deploys of a new commit at once: one finishes, and the other
+ * finishes too (a host that takes one after another) or fails at once as superseded, never by
+ * waiting out its time, and the host is then clean in drift: it reaches the driver only when
+ * `apply` calls the type's operations itself (README.md says which hosts it exercises). Leaves the
+ * host applied, and its check's credential cleared.
  */
 export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   const { type, client, timeoutMs = 60_000 } = host;
@@ -356,6 +360,19 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
       if (!seen.size) throw new Error(`${page} was never asked during the deploy`);
     });
   }
+  await check("two deploys at once leave one revision, the loser at once", async () => {
+    await host.commit();
+    const both = await Promise.allSettled([apply(), apply()]);
+    const failed = both.flatMap((r) => (r.status === "rejected" ? [errorMessage(r.reason)] : []));
+    if (failed.length === both.length) throw new Error(`neither deploy finished: ${failed.join("; ")}`);
+    // A loser that waited out its time ("after N s") held the deploy up: it must end on seeing the newer one.
+    const lost = failed.find((message) => !/superseded/.test(message));
+    if (lost !== undefined) throw new Error(`the deploy that lost did not end as superseded: ${lost}`);
+    await apply();
+    const after = await awake(host.drift());
+    if (after.status !== "clean")
+      throw new Error(`after both deploys and an apply, drift says ${after.status} ${JSON.stringify(after.fields)}`);
+  });
   await check("a new commit shows as drift that apply clears", async () => {
     const revision = await host.commit();
     const drifted = await awake(host.drift());
@@ -652,7 +669,7 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived" }: FakeHost
     hosts.delete(id);
     await host?.running.stop();
   };
-  const run = async (desired: Record<string, unknown>, secrets: Parameters<typeof resolveSecrets>[1]) => {
+  const put = async (desired: Record<string, unknown>, secrets: Parameters<typeof resolveSecrets>[1]) => {
     const declared = fakeSchema.parse(await resolveSecrets(desired, secrets));
     const revision = declared.revision ?? "";
     const begin = () =>
@@ -677,6 +694,10 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived" }: FakeHost
     hosts.set(declared.name, { state, running });
     return { id: declared.name, state };
   };
+  // One put after another: the fake models no race between two deploys (`checkHost` says what that leaves unchecked).
+  const inTurn = oneAtATime();
+  const run = (desired: Record<string, unknown>, secrets: Parameters<typeof resolveSecrets>[1]) =>
+    inTurn(() => put(desired, secrets));
   const driver = defineDriver(ops, {
     app: {
       import: read,

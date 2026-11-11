@@ -222,6 +222,11 @@ export interface ResolvedConfig {
   builtInCodes: Readonly<Record<string, string>>;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
+  /**
+   * The DBOS queue every live run of apply is started on, one at a time across the database's
+   * workers: `sanoma:<appName>:apply` (`queueFor`).
+   */
+  applyQueueName: string;
   /** The config's `login`, checked (`checkLogin`); the built-in `login-code` workflow sends through its `sender`, from its `from`. */
   login?: Login;
   /**
@@ -318,6 +323,18 @@ export interface ResolvedConfig {
  * URL named it starts the company's own Postgres and sets `SANOMA_DATABASE_URL` to it.
  */
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
+
+/**
+ * The queue a run of `workflow` must wait on: a live apply's is the apply queue, which runs one at
+ * a time across the database's workers, so two never write the hosts at once; anything else, a
+ * sandbox apply too (it calls fakes), none (the client queues it on the app's, a run's child runs
+ * at once). The one rule the client and the worker share.
+ */
+export const queueFor = (
+  { applyQueueName }: Pick<ResolvedConfig, "applyQueueName">,
+  workflow: string,
+  sandbox: string | undefined,
+): string | undefined => (workflow === APPLY_WORKFLOW && sandbox === undefined ? applyQueueName : undefined);
 
 /** Returns the config, with the file it is called from as its `file`: its directory is the config's `root`. */
 export function defineConfig(config: SanomaConfig): SanomaConfig {
@@ -594,6 +611,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
         [...names.values()].filter((wf) => BUILT_IN_WORKFLOWS.has(wf.name)).map((wf) => [wf.name, builtInCodeOf(wf)]),
       ),
     queueName: `sanoma:${appName}`,
+    applyQueueName: `sanoma:${appName}:apply`,
     ...(login && { login }),
     ops,
     drivers,

@@ -32,7 +32,7 @@ import { type Call, callsOf, inputOf, opCalled, outputsOf, recorded } from "./ct
 import { type Chats, chatStore } from "./chats.ts";
 import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection-driver.ts";
-import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import { queueFor, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import { readStoreMoves, type StoreMove } from "./store-move.ts";
 import {
@@ -410,7 +410,7 @@ export class SanomaClient {
     const handle = await this.dbos
       .enqueue(
         {
-          queueName: this.config.queueName,
+          queueName: queueFor(this.config, workflow.name, sandbox) ?? this.config.queueName,
           workflowName: workflow.name,
           workflowID: runId,
           applicationName: this.config.appName,
@@ -968,6 +968,27 @@ export class SanomaClient {
    */
   async apply(input: ApplyInput, options: StartOptions): Promise<string> {
     return this.start(this.builtIn(APPLY_WORKFLOW), input, options);
+  }
+
+  /**
+   * The apply that the apply `runId`, queued, waits for: one runs at a time (`queueFor`), so the
+   * one running (or waiting for a person), else the oldest queued before it. Undefined when
+   * `runId` is not a live apply queued behind another.
+   */
+  async applyAhead(runId: string): Promise<RunSummary | undefined> {
+    const unfinished = await this.dbos.listWorkflows({
+      workflowName: APPLY_WORKFLOW,
+      applicationName: this.config.appName,
+      status: dbosStatusesOf("queued", "running"),
+      queueName: this.config.applyQueueName,
+      sortDesc: false,
+      loadInput: false,
+      loadOutput: false,
+    });
+    const at = unfinished.findIndex((r) => r.workflowID === runId);
+    if (at < 0 || unfinished[at]!.status !== "ENQUEUED") return undefined;
+    const ahead = unfinished.find((r) => r.status === "PENDING") ?? (at > 0 ? unfinished[0] : undefined);
+    return ahead && this.summarize(ahead);
   }
 
   /**

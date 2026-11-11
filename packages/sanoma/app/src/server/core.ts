@@ -17,10 +17,12 @@ import {
   Principal,
   remoteFor,
   type RunSummary,
+  type SanomaClient,
   SanomaError,
 } from "sanoma/workflows";
 import {
   apiNameOf,
+  APPLY_WORKFLOW,
   CALL_WORKFLOW,
   isVisitor,
   flatten,
@@ -58,6 +60,7 @@ import {
   type HistoryRequest,
   type PermissionsResponse,
   type PreviewQuery,
+  type ApplyAhead,
   type RunDetail,
   RunsQuery,
   SEALED_SHOWN,
@@ -196,13 +199,22 @@ function sealedShown(record: LedgerRecord): LedgerRecord {
     : record;
 }
 
-/** The run with its ledger and approvals, and a sandbox run's checks as the worker last ran them, or a 404. */
+/**
+ * The apply that `run`, a queued apply, waits for (`SanomaClient.applyAhead`), as the page names
+ * it; undefined for any other run, and once it is the one running.
+ */
+export async function applyAheadOf(client: SanomaClient, run: RunSummary): Promise<ApplyAhead | undefined> {
+  if (run.workflow !== APPLY_WORKFLOW || run.status !== "queued") return undefined;
+  const ahead = await client.applyAhead(run.runId);
+  return ahead && { runId: ahead.runId, status: ahead.status, startedBy: ahead.startedBy, createdAt: ahead.createdAt };
+}
+
+/** The run with its ledger and approvals, a sandbox run's checks as the worker last ran them, and the apply a queued one waits for; or a 404. */
 export async function runDetail(app: AppContext, runId: string): Promise<RunDetail> {
   const { client, snapshot } = app;
   const run = await client.run(runId);
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
-  const { approvals } = run;
-  const [read, told] = await Promise.all([
+  const [read, told, ahead] = await Promise.all([
     client.ledger(runId).then(
       (records) => ({ records }),
       (err: unknown) => ({ err }),
@@ -213,40 +225,42 @@ export async function runDetail(app: AppContext, runId: string): Promise<RunDeta
       logReadOnce(runId, error, "the checks", err);
       return { error };
     }),
+    applyAheadOf(client, run),
   ]);
+  // What every answer has: the run, its approvals, and the apply a queued one waits for.
+  const base = { run, approvals: run.approvals, ...(ahead && { ahead }) };
   if ("err" in read) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
     // corrupt file, a permission): logged for the operator once, and the page shows the run and
     // why its ledger is missing.
     const ledgerError = errorMessage(read.err);
     logReadOnce(runId, ledgerError, "the ledger", read.err);
-    return { run, ledger: [], ledgerError, approvals };
+    return { ...base, ledger: [], ledgerError };
   }
   const ledger = run.workflow === LOGIN_CODE_WORKFLOW ? read.records.map(sealedShown) : read.records;
   // A run that has started records run.started first. Seeing none, the likeliest cause is an
   // app on another ledger than the worker's (another database, or a jsonl directory relative to
   // another cwd).
   if (ledger.length === 0 && run.status !== "queued") {
-    return { run, ledger, ledgerError: NO_RECORDS, approvals };
+    return { ...base, ledger, ledgerError: NO_RECORDS };
   }
   const seeded = ledger.find((r) => r.type === "scenario.seeded");
-  if (!seeded) return { run, ledger, approvals };
+  if (!seeded) return { ...base, ledger };
   if (!told) {
     // Not checked yet (the worker checks a seeded run when it first waits): its scenario's Then
     // steps, each not answered yet.
     const scenario = snapshot.scenarios.scenarios.find((s) => s.name === seeded.scenario);
     const pending = scenario?.steps.filter((step) => step.kind === "then");
     return {
-      run,
+      ...base,
       ledger,
-      approvals,
       ...(pending && { checks: pending.map(({ text }) => ({ step: text, ok: false, settled: false })) }),
     };
   }
-  if ("error" in told) return { run, ledger, approvals, checksError: told.error };
+  if ("error" in told) return { ...base, ledger, checksError: told.error };
   // Every answer is final once the run has ended.
   const ended = isEnded(run.status);
-  return { run, ledger, approvals, checks: told.checks.map((c) => ({ ...c, settled: ended || c.settled })) };
+  return { ...base, ledger, checks: told.checks.map((c) => ({ ...c, settled: ended || c.settled })) };
 }
 
 /**

@@ -25,7 +25,16 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/co
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { errorBodyOf, INFRA, type GoLiveChoices, type GoLiveRun, SETUP_VENDORS, type SetupStatus } from "../api.ts";
+import {
+  errorBodyOf,
+  INFRA,
+  type GoLiveChoices,
+  type GoLiveRun,
+  runName,
+  SETUP_VENDORS,
+  type SetupStatus,
+  starterName,
+} from "../api.ts";
 import { goLiveSignInFn } from "../functions.ts";
 import { RUN_TONE } from "../lib/tone.ts";
 import {
@@ -39,7 +48,7 @@ import {
   useStartRun,
 } from "../queries.ts";
 import { ApplyPlanView } from "./apply-plan.tsx";
-import { ButtonLink, ItemHeading, Notice, Region, ToneBadge } from "./common.tsx";
+import { ButtonLink, ItemHeading, Notice, Region, ToneBadge, When } from "./common.tsx";
 
 /**
  * What `GoLive` reads, into the query client: for the loader of the page that shows it. A query
@@ -393,6 +402,7 @@ export function RunStatus({ run }: { run: GoLiveRun }) {
           {run.pending.plan && <ApplyPlanView plan={run.pending.plan} />}
         </>
       )}
+      <ApplyAhead {...run} />
       {run.error && <Notice variant="destructive">{run.error}</Notice>}
       {failed.map((r) => (
         <Notice key={r.id} variant="destructive">
@@ -400,6 +410,25 @@ export function RunStatus({ run }: { run: GoLiveRun }) {
         </Notice>
       ))}
     </div>
+  );
+}
+
+/**
+ * Why an apply has not run: one apply runs at a time, so a queued one names the apply it waits
+ * for (`ahead`), and one a worker on a new version cancelled says so. Nothing for any other run.
+ */
+export function ApplyAhead({ workflow, status, ahead }: Pick<GoLiveRun, "workflow" | "status" | "ahead">) {
+  if (workflow !== APPLY_WORKFLOW) return null;
+  if (status === "cancelled")
+    return <Notice>Cancelled when the worker restarted on a new version. Apply again.</Notice>;
+  if (!ahead) return null;
+  return (
+    <Notice>
+      One apply runs at a time. This one starts when{" "}
+      <Link {...runLink({ ...ahead, workflow })}>{runName(ahead.runId)}</Link> ({ahead.status}, started{" "}
+      <When at={ahead.createdAt} /> by {starterName(ahead)}) ends.
+      {ahead.status === "waiting" && " It waits for a person in the Inbox."}
+    </Notice>
   );
 }
 

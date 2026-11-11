@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { DBOS } from "@dbos-inc/dbos-sdk";
+import { DBOS, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import { type ApprovalMessage, nextApprovalId, topicOf, withdrawApprovals } from "./approvals.ts";
 import { decide } from "./call.ts";
 import {
@@ -20,7 +20,7 @@ import {
 } from "./change.ts";
 import type { ChangeSteps } from "./change-workflow.ts";
 import type { DriftReport } from "./drift.ts";
-import { isRunControlError } from "./errors.ts";
+import { causes, isRunControlError } from "./errors.ts";
 import { warn } from "./log.ts";
 import { inside } from "./paths.ts";
 import { peopleSources, readPeople } from "./resources.ts";
@@ -106,7 +106,8 @@ async function drain(
 /**
  * Starts a run of the built-in `name` as a child of this one, with the id `<run>:<suffix>` (so a
  * replay finds it), as the run's own actor, and waits for its output, counted as a wait for
- * another run: undefined and the error's message when it failed.
+ * another run: undefined and the error's message when it failed, or was cancelled (a worker on a
+ * new version cancels an apply started on other code, `carryBuiltInRuns`).
  */
 async function child(
   run: Run,
@@ -123,6 +124,9 @@ async function child(
   try {
     return { runId, output: await run.state.deadlines.waiting(run.id, { kind: "run" }, () => handle.getResult()) };
   } catch (err) {
+    // The child's cancellation, not this run's own (`DBOSWorkflowCancelledError`, which ends it).
+    if (causes(err).some((e) => e instanceof DBOSErrors.DBOSAwaitedWorkflowCancelledError))
+      return { runId, error: "it was cancelled: the worker restarted on a new version before it ended" };
     if (isRunControlError(err)) throw err;
     return { runId, error: errorMessage(err) };
   }
