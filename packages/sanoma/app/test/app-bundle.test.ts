@@ -388,6 +388,17 @@ describe("buildAppBundle", () => {
     expect(cookie).toMatch(/session_token=/);
     const home = await secure(`${app}/`, { headers: { cookie: cookie! } });
     expect(home.status).toBe(200);
+    // The agent surface (`/mcp`) on the Worker: behind the staff sign-in, then the MCP server, as the person.
+    const listTools = (headers: Record<string, string>) =>
+      secure(`${app}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      });
+    expect((await listTools({})).status).toBe(401);
+    const listed = await listTools({ cookie: cookie! });
+    expect(listed.status).toBe(200);
+    expect(await listed.text()).toContain('"name":"start_run"');
   });
 
   it("serves a site with a login on the Worker, its half made on the request's client", async () => {

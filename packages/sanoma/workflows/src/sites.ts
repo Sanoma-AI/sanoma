@@ -15,6 +15,7 @@ import {
   apiNameOf,
   BUILT_IN_WORKFLOWS,
   DATA_VENDOR,
+  DESCRIBE_CALL,
   DOMAIN_NAME,
   entryOpsOf,
   isBatch,
@@ -132,7 +133,8 @@ export function readSites(
 
   return sitesUnder(root).map(({ name, app, dir }) => {
     const read = readSiteFiles(root, dir);
-    const resolved = read.flatMap(({ uses }) => uses.filter((use) => !isAppCollection(use)).map(resolve));
+    const written = read.flatMap((file) => file.uses.filter((use) => !isAppCollection(use)));
+    const resolved = written.filter((use) => !isDescribe(use)).map(resolve);
     const pages = pagesOf(read);
     // Its declared domain is the production host's to attach (`siteDomains`): where the site answers
     // is `domain`, which only the app sets, from the `SANOMA_DOMAINS` that host hands it.
@@ -143,6 +145,14 @@ export function readSites(
         const message = problem ?? (options.public ? refused(call, options.login) : undefined);
         return message === undefined ? [] : [{ file: call.file, line: call.line, column: call.column, message }];
       }),
+      ...(options.public
+        ? written.filter(isDescribe).map(({ file, line, column }) => ({
+            file,
+            line,
+            column,
+            message: `a visitor's call to ${DESCRIBE_CALL} is refused: the description is for people and agents`,
+          }))
+        : []),
       ...optionProblems,
     ];
     const sorted = [...pages.keys()].toSorted().map((path) => pages.get(path)!);
@@ -282,6 +292,10 @@ const siteNames = (dir: string): string[] =>
 
 /** A use of `api` or a `RunForm`, as written: the name it gives, before it is resolved. */
 type Written = Omit<SiteCall, "target"> & { name: string };
+
+/** Whether a use is `api.sanoma.describe`, the runtime's description (`DESCRIBE_CALL`): none of the company's calls. */
+const isDescribe = ({ kind, name, method }: Written): boolean =>
+  kind === "workflow" && `${name}.${method}` === DESCRIBE_CALL;
 
 /**
  * What one file holds: its uses, in its order, and the page it is, from its route's id, with the

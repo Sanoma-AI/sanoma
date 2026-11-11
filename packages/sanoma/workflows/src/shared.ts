@@ -1026,6 +1026,13 @@ export const credentialReady = ({ status, optional }: CredentialStatus): boolean
 export const apiNameOf = (name: string): string => name.replace(/[-.]([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 
 /**
+ * The app's `callApi` name for the company as an agent reads it (`agentDescription` in the app):
+ * the runtime's vendor `sanoma`, which no connector takes, a workflow's api name may not be, and
+ * whose operations have three parts, so it names nothing of the company's.
+ */
+export const DESCRIBE_CALL = "sanoma.describe";
+
+/**
  * A workflow as a site's `api` has it (`api.<apiNameOf(name)>`), started as the person on the
  * page. Called, it starts a run and resolves with its output once the run ends, or rejects with
  * its error; `start` gives the run's id at once, and the rest read runs of this workflow.

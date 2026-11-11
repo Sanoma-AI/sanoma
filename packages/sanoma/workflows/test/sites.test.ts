@@ -716,6 +716,27 @@ describe("readSites", () => {
     expect(problems()).toEqual({ desk: [], members: [], www: readsAndBuiltIns });
   });
 
+  it("reads api.sanoma.describe as the runtime's description, none of the company's calls, refused only on a public site", () => {
+    const root = tree("describe", {
+      ...calling("www", ["public: true"], ["api.sanoma.describe()"]),
+      ...calling("desk", ['title: "Desk"'], ["api.sanoma.describe()"]),
+    });
+    const sites = describeConfig(config(root)).sites;
+    expect(Object.fromEntries(sites.map((s) => [s.name, { calls: s.calls, problems: s.problems }]))).toEqual({
+      desk: { calls: [], problems: [] },
+      www: {
+        calls: [],
+        problems: [
+          pageProblem(
+            "www",
+            7,
+            "a visitor's call to sanoma.describe is refused: the description is for people and agents",
+          ),
+        ],
+      },
+    });
+  });
+
   it("finds no sites in a root without sites/, or a config without a root", () => {
     expect(describeConfig(config(tree("empty"))).sites).toEqual([]);
     const { root: _, ...rootless } = config("");
