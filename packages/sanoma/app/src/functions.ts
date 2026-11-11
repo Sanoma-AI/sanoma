@@ -7,6 +7,7 @@ import {
   CallRequest,
   ChangesQuery,
   ClearCredentialRequest,
+  CloudSlug,
   PreviewConnectionRequest,
   ConnectConnectionRequest,
   AuthorizeConnectionRequest,
@@ -61,7 +62,8 @@ import { authorizeConnection } from "./server/connect.ts";
 import { availableConnectors } from "./server/available.ts";
 import { proposeColumnChange } from "./server/columns.ts";
 import { companyState } from "./server/company-state.ts";
-import { goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
+import { cloudAddress, goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
+import { sanomaSignIn, startSanomaSignIn } from "./server/sanoma-sign-in.ts";
 import { hostDerived } from "./server/host-derived.ts";
 import { invitePerson, peopleSignIns } from "./server/people.ts";
 import { setSetupToken, setupStatus } from "./server/setup.ts";
@@ -283,6 +285,24 @@ export const getHostDerived = createServerFn(READ).handler(({ context }) => host
 export const goLiveSignInFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .handler(({ context }) => goLiveSignIn(context.app, context.principal));
+
+/**
+ * Starts signing in to Sanoma, on this computer: the Cloud's page to open in the browser, for the
+ * company's address (`address`, when the person changed it); the callback stores the token.
+ */
+export const startSanomaSignInFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(z.object({ address: CloudSlug.optional() })))
+  .handler(({ data, context }) => startSanomaSignIn(context.app, context.principal, context.origin, data));
+
+/** Whether a Cloud token is stored, and whether a sign-in to Sanoma is being made: never the token. */
+export const getSanomaSignIn = createServerFn(READ).handler(({ context }) => sanomaSignIn(context.app));
+
+/** Whether an address at Sanoma Cloud can be the company's: free, its account's own, or someone else's. */
+export const getCloudAddress = createServerFn(READ)
+  .middleware([withPrincipal])
+  .validator(validate(z.object({ slug: CloudSlug })))
+  .handler(({ data, context }) => cloudAddress(context.app, context.principal, data.slug));
 
 /** When each declared person last signed in, and whether this app mints invite links. */
 export const getPeopleSignIns = createServerFn(READ).handler(({ context }) => peopleSignIns(context.app));

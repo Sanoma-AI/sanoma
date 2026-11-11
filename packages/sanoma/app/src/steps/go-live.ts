@@ -15,6 +15,7 @@ import {
   sourceKeyPair,
   type RepoRef,
   type Resource,
+  type Source,
   VENDOR,
   vendorCodeOf,
 } from "sanoma/workflows";
@@ -31,6 +32,7 @@ import {
   idOf,
   KEYS,
   missingTypes,
+  replaceable,
   toConnect,
 } from "../server/go-live.ts";
 import { mintWakeupToken } from "../server/setup.ts";
@@ -229,12 +231,16 @@ async function declaredHost(
  * `SANOMA_SOURCE_KEY`) and declares its public half on the repository; for any other, going live
  * mints it here and the file declares it. Apply creates them, binds them in the lockfile and, once
  * the project is healthy, stores its database URL (its `afterCreate`). Refused once the file is
- * written: going live writes it once.
+ * written: going live writes it once; but a file that declares Sanoma Cloud (the template's) with
+ * nothing of it bound is written again (`replaceable`).
  */
 export async function goLive(step: AppStepContext, choices: GoLiveInput) {
   const { client, source, by } = step;
-  const path = join(rootOf(step), INFRA);
-  if (existsSync(path)) throw writtenAlready();
+  const root = rootOf(step);
+  const path = join(root, INFRA);
+  const replacing = async () =>
+    replaceable(step, await readFile(path, "utf8").catch(() => ""), Object.keys(readLockfile(root).bindings));
+  if (existsSync(path) && !(await replacing())) throw writtenAlready();
   // Host bootstrap follows the same direct-or-mounted-file rules as the runtime. An external
   // store has its own authority and does not need the built-in store's encryption key.
   const bootstrap: ("SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY")[] = ["SANOMA_SIGNING_KEY"];
@@ -261,7 +267,10 @@ export async function goLive(step: AppStepContext, choices: GoLiveInput) {
   const text = await renderInfra(step, choices, key?.publicKey, chosen);
   await step.serially(async () => {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, text, { flag: "wx" }).catch((err: NodeJS.ErrnoException) => {
+    // Read again under the lock: another run may have written it, or bound what it declares, since.
+    const replaces = existsSync(path) && (await replacing());
+    const before = replaces ? await readFile(path, "utf8") : undefined;
+    await writeFile(path, text, { flag: replaces ? "w" : "wx" }).catch((err: NodeJS.ErrnoException) => {
       throw err.code === "EEXIST" ? writtenAlready() : err;
     });
     try {
@@ -269,8 +278,8 @@ export async function goLive(step: AppStepContext, choices: GoLiveInput) {
       // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
       if (chosen.wakeup.type) await mintWakeupToken(client, by);
     } catch (err) {
-      // Unwritten again, so going live can be tried again.
-      await rm(path, { force: true });
+      // As it was again, so going live can be tried again.
+      await (before === undefined ? rm(path, { force: true }) : writeFile(path, before));
       throw err;
     }
     await source?.commit({
@@ -302,6 +311,13 @@ async function pushToken(step: AppStepContext, repo: RepoRef): Promise<string> {
   }
 }
 
+/** Refused unless `main` is checked out: what going live pushes is `main`, where it committed. */
+export async function onMain(source: Source) {
+  if ((await source.head()) !== (await Promise.resolve(source.head("main")).catch(() => undefined))) {
+    throw new Error("Check out main, where infra.ts and the lockfile are committed, then push");
+  }
+}
+
 /**
  * Step 5: pushes the local repository's `main`, with `infra.ts` and the lockfile on top, to the
  * repository apply made; its run then applies the host (and its wakeup, when declared), step 6.
@@ -322,10 +338,7 @@ export async function goLiveHost(step: AppStepContext, _input: GoLiveHostInput) 
     throw new Error(`${DATABASE_URL} is not stored: the database's URL was not stored after its create`);
   }
   await step.serially(async () => {
-    // What is pushed is `main`, where going live committed: refused on another branch.
-    if ((await source.head()) !== (await Promise.resolve(source.head("main")).catch(() => undefined))) {
-      throw new Error("Check out main, where infra.ts and the lockfile are committed, then push");
-    }
+    await onMain(source);
     // The repository's owner and name as going live wrote them, first in the file.
     const [, owner, name] = REPO.exec(infra) ?? [];
     if (!owner || !name) throw new Error(`Cannot tell the repository from ${INFRA}`);

@@ -552,7 +552,14 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in, in every config: what a git host's webhook says happened, which the worker with the checkout follows.
   names.set(FOLLOW_WORKFLOW, followWorkflow(followSteps({ remotes, hosts })));
   // Built-in, in every config: the app's own actions on the repository, which a worker given the app's steps runs.
-  for (const wf of appWorkflows(appRunner)) names.set(wf.name, wf);
+  // Going live on a host in its vendor's account calls the operation that makes its repository there.
+  const repositories = [
+    ...new Set([...types.values()].flatMap((type) => (type.host?.account ? [type.host.account.repository] : []))),
+  ].flatMap((id) => {
+    const op = ops.get(id);
+    return op && drivers.has(id) ? [op] : [];
+  });
+  for (const wf of appWorkflows(appRunner, repositories)) names.set(wf.name, wf);
   // Built-in, in every config: a chat turn, which a worker given the app's steps runs.
   names.set(CHAT_WORKFLOW, chatWorkflow(chatSteps()));
   // Built-in: an OAuth connection's exchange, which the app's callback starts, when a declared

@@ -440,6 +440,7 @@ describe("the built-in drift workflow in a config", () => {
       { name: "drift", builtin: true, ops: [] },
       { name: "follow", builtin: true, ops: [] },
       { name: "go-live", builtin: true, ops: [] },
+      { name: "go-live-cloud", builtin: true, ops: [] },
       { name: "go-live-host", builtin: true, ops: [] },
       { name: "patch", builtin: true, ops: [] },
       { name: "save-draft", builtin: true, ops: [] },

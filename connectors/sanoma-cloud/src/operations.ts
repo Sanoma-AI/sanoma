@@ -2,7 +2,7 @@ import { type CallContext, diffDeclared, DriverError, type PlanAction } from "sa
 import type { z } from "zod";
 import { database, host, hostSlug, PORT, REGIONS, repositoryOf, SLUG, SLUG_RULE } from "./connector.ts";
 
-// The connector's operations over Sanoma Cloud's API (`CloudApi`, sanoma-ops's four workflows):
+// The connector's operations over Sanoma Cloud's API (`CloudApi`, sanoma-ops's workflows):
 // the driver's starts them over the public api, the fake's answers from its state. Both go
 // through `cloudOperations`, so they plan, adopt and refuse alike.
 
@@ -11,7 +11,11 @@ export interface SignupInput {
   slug: string;
   /** The company's display name: its slug, here. */
   name: string;
-  part: "database" | "host";
+  /**
+   * The part made: the database, the host, or the company's repository, which the Sanoma.work
+   * GitHub App makes empty in the account it is installed on, for a computer to push to.
+   */
+  part: "database" | "host" | "repository";
   repository?: { owner: string; name: string };
   ref?: string;
   /**
@@ -37,6 +41,12 @@ export interface Company {
   domains?: Record<string, string>;
 }
 
+/** Whether an address is free: `available` for anyone, or the token's account's own already (`yours`). */
+export interface Availability {
+  available: boolean;
+  yours: boolean;
+}
+
 /** Sanoma Cloud's API: sanoma-ops's workflows, each a run's output. Each call fails with a `DriverError`. */
 export interface CloudApi {
   /** Its answer is not read: `create` reads the part from `list`, as `read` will. */
@@ -45,6 +55,10 @@ export interface CloudApi {
   list(input: { slug?: string }): Promise<Company[]>;
   deploy(input: { slug: string; revision: string }): Promise<unknown>;
   close(input: { slug: string; part: "database" | "host" }): Promise<unknown>;
+  /** `cloud-available`: whether the address `<slug>.sanoma.work` is free, or the account's own. */
+  available(input: { slug: string }): Promise<Availability>;
+  /** `cloud-invite`: a one-use link that signs the account's own `email` in on the company's host. */
+  invite(input: { slug: string; email: string }): Promise<{ url: string }>;
 }
 
 /** The driver's own refusal, before or instead of a call: never retried. */
@@ -196,7 +210,8 @@ function answer(planned: Planned & { state?: unknown }): Planned {
 
 /**
  * The connector's operations over the API `api(call)` gives for each call: the database type's
- * (`database.*`, with `storeUrl`) and the host type's (`host.*`).
+ * (`database.*`, with `storeUrl`), the host type's (`host.*`), and the account's (`company.*`):
+ * whether an address is free, the company's repository made, a sign-in link on its host.
  */
 export function cloudOperations(api: (call: CallContext) => CloudApi) {
   const databaseRead = async ({ id }: { id: string }, call: CallContext) => readDatabase(api(call), id);
@@ -242,6 +257,29 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
         stored: false as const,
         reason: "Sanoma Cloud binds the database's URL to the company's host itself",
       }),
+    },
+    company: {
+      available: async ({ slug }: { slug: string }, call: CallContext) => {
+        const { available, yours } = await api(call).available({ slug });
+        return { available, yours };
+      },
+      repository: async ({ slug }: { slug: string }, call: CallContext) => {
+        const cloud = api(call);
+        // Made once: a retry, or a company the wizard made with its repository, reads the one there.
+        let found = await company(cloud, slug);
+        if (!found?.repository) {
+          await cloud.signup({ slug, name: slug, part: "repository" });
+          found = await company(cloud, slug);
+        }
+        if (!found?.repository) {
+          throw refused(`company.repository: the Cloud made no repository for ${slug}`, "not_made");
+        }
+        return { owner: found.repository.owner, name: found.repository.name };
+      },
+      invite: async ({ slug, email }: { slug: string; email: string }, call: CallContext) => {
+        const { url } = await api(call).invite({ slug, email });
+        return { url };
+      },
     },
     host: {
       import: hostRead,

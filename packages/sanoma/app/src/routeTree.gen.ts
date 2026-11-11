@@ -46,6 +46,7 @@ import { Route as WorkflowsNameRouteRouteImport } from './routes/workflows/$name
 import { Route as ConnectVendorCallbackRouteImport } from './routes/connect/$vendor/callback'
 import { Route as DataNameIndexRouteImport } from './routes/data/$name/index'
 import { Route as DataNameImportRouteImport } from './routes/data/$name/import'
+import { Route as HostingSanomaCallbackRouteImport } from './routes/hosting/sanoma/callback'
 import { Route as SetupGithubCallbackRouteImport } from './routes/setup/github/callback'
 import { Route as SetupGithubManifestRouteImport } from './routes/setup/github/manifest'
 import { Route as WorkflowsNameIndexRouteImport } from './routes/workflows/$name/index'
@@ -237,6 +238,11 @@ const DataNameImportRoute = DataNameImportRouteImport.update({
   path: '/import',
   getParentRoute: () => DataNameRouteRoute,
 } as any)
+const HostingSanomaCallbackRoute = HostingSanomaCallbackRouteImport.update({
+  id: '/sanoma/callback',
+  path: '/sanoma/callback',
+  getParentRoute: () => HostingRouteRoute,
+} as any)
 const SetupGithubCallbackRoute = SetupGithubCallbackRouteImport.update({
   id: '/setup/github/callback',
   path: '/setup/github/callback',
@@ -300,6 +306,7 @@ export interface FileRoutesByFullPath {
   '/workflows/': typeof WorkflowsIndexRoute
   '/connect/$vendor/callback': typeof ConnectVendorCallbackRoute
   '/data/$name/import': typeof DataNameImportRoute
+  '/hosting/sanoma/callback': typeof HostingSanomaCallbackRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
   '/workflows/$name/new': typeof WorkflowsNameNewRoute
@@ -336,6 +343,7 @@ export interface FileRoutesByTo {
   '/workflows': typeof WorkflowsIndexRoute
   '/connect/$vendor/callback': typeof ConnectVendorCallbackRoute
   '/data/$name/import': typeof DataNameImportRoute
+  '/hosting/sanoma/callback': typeof HostingSanomaCallbackRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
   '/workflows/$name/new': typeof WorkflowsNameNewRoute
@@ -381,6 +389,7 @@ export interface FileRoutesById {
   '/workflows/': typeof WorkflowsIndexRoute
   '/connect/$vendor/callback': typeof ConnectVendorCallbackRoute
   '/data/$name/import': typeof DataNameImportRoute
+  '/hosting/sanoma/callback': typeof HostingSanomaCallbackRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
   '/workflows/$name/new': typeof WorkflowsNameNewRoute
@@ -427,6 +436,7 @@ export interface FileRouteTypes {
     | '/workflows/'
     | '/connect/$vendor/callback'
     | '/data/$name/import'
+    | '/hosting/sanoma/callback'
     | '/setup/github/callback'
     | '/setup/github/manifest'
     | '/workflows/$name/new'
@@ -463,6 +473,7 @@ export interface FileRouteTypes {
     | '/workflows'
     | '/connect/$vendor/callback'
     | '/data/$name/import'
+    | '/hosting/sanoma/callback'
     | '/setup/github/callback'
     | '/setup/github/manifest'
     | '/workflows/$name/new'
@@ -507,6 +518,7 @@ export interface FileRouteTypes {
     | '/workflows/'
     | '/connect/$vendor/callback'
     | '/data/$name/import'
+    | '/hosting/sanoma/callback'
     | '/setup/github/callback'
     | '/setup/github/manifest'
     | '/workflows/$name/new'
@@ -803,6 +815,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DataNameImportRouteImport
       parentRoute: typeof DataNameRouteRoute
     }
+    '/hosting/sanoma/callback': {
+      id: '/hosting/sanoma/callback'
+      path: '/sanoma/callback'
+      fullPath: '/hosting/sanoma/callback'
+      preLoaderRoute: typeof HostingSanomaCallbackRouteImport
+      parentRoute: typeof HostingRouteRoute
+    }
     '/setup/github/callback': {
       id: '/setup/github/callback'
       path: '/setup/github/callback'
@@ -915,12 +934,14 @@ interface HostingRouteRouteChildren {
   HostingConnectRoute: typeof HostingConnectRoute
   HostingExistingRoute: typeof HostingExistingRoute
   HostingIndexRoute: typeof HostingIndexRoute
+  HostingSanomaCallbackRoute: typeof HostingSanomaCallbackRoute
 }
 
 const HostingRouteRouteChildren: HostingRouteRouteChildren = {
   HostingConnectRoute: HostingConnectRoute,
   HostingExistingRoute: HostingExistingRoute,
   HostingIndexRoute: HostingIndexRoute,
+  HostingSanomaCallbackRoute: HostingSanomaCallbackRoute,
 }
 
 const HostingRouteRouteWithChildren = HostingRouteRoute._addFileChildren(

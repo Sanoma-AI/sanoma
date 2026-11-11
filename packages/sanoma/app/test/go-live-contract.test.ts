@@ -1,8 +1,9 @@
 import { createPublicKey } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { github } from "@sanoma-ai/connector-github";
+import { cloud } from "@sanoma-ai/connector-sanoma-cloud";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import {
   type Connector,
@@ -20,8 +21,9 @@ import { describeConfig } from "sanoma/workflows/describe";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { secret } from "sanoma/resources";
 import { z } from "zod";
+import { INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
-import { choose, goLiveChoices } from "../src/server/go-live.ts";
+import { accountOf, choose, goLiveChoices, replaceable } from "../src/server/go-live.ts";
 import { renderInfra } from "../src/steps/go-live.ts";
 import type { AppSnapshot } from "../src/snapshot.ts";
 
@@ -512,5 +514,21 @@ describe("going live by contract", () => {
     await expect(renderInfra(app, choices, DEPLOY_KEY)).rejects.toThrow(
       "The config's connectors declare no a host type",
     );
+  });
+
+  it("goes live on Sanoma Cloud through its account's operations, and writes the template's file again only while nothing of it is bound", () => {
+    const template = readFileSync(new URL("../../template/resources/sanoma/infra.ts", import.meta.url), "utf8");
+    const app = contextOf([github, cloud]);
+    expect(accountOf(app, template)).toEqual({
+      repository: "cloud.company.repository",
+      available: "cloud.company.available",
+      invite: "cloud.company.invite",
+    });
+    expect(replaceable(app, template, [])).toBe(true);
+    expect(replaceable(app, template, [`${INFRA}#store`])).toBe(false);
+    // A host of the company's own accounts has no account to go live through.
+    const own = 'export const host = docker.container({ name: "acme" });\n';
+    expect(accountOf(contextOf([github, docker]), own)).toBeUndefined();
+    expect(replaceable(contextOf([github, docker]), own, [])).toBe(false);
   });
 });

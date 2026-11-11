@@ -1,4 +1,5 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import type { ApplyReport } from "./apply.ts";
 import type { AppAction, AppRunner, AppStepContext, AppSteps } from "./app-workflows.ts";
 import type { ResolvedConfig, SanomaConfig } from "./config.ts";
 import { type Run, runNow } from "./run.ts";
@@ -64,5 +65,19 @@ export const appRunner: AppRunner = {
     const runId = `${run.id}:apply`;
     await run.state.startRun(APPLY_WORKFLOW, runId, { input: apply, startedBy: run.actor });
     return { ...rest, runId };
+  },
+  async applyAndWait(apply) {
+    const run = runNow("An app step");
+    const runId = `${run.id}:apply`;
+    const handle = await run.state.startRun(APPLY_WORKFLOW, runId, { input: apply, startedBy: run.actor });
+    // Counted as a wait for another run, so the worker is not idle under it.
+    const report = (await run.state.deadlines.waiting(run.id, { kind: "run" }, () =>
+      handle.getResult(),
+    )) as ApplyReport;
+    const undone = report.results.filter((r) => r.status !== "done");
+    if (undone.length) {
+      throw new Error(`Apply did not finish: ${undone.map((r) => `${r.id} ${r.error ?? r.status}`).join("; ")}`);
+    }
+    return { runId };
   },
 };

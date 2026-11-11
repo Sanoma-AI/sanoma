@@ -5,12 +5,16 @@ import type { ResolvedConfig, SanomaConfig } from "./config.ts";
 import type { SanomaClient } from "./client.ts";
 import { defineWorkflow, type Principal, type WorkflowDefinition } from "./define.ts";
 import { AtSchema } from "./description.ts";
+import type { Op } from "./op.ts";
 import {
   type ADOPT_WORKFLOW,
+  CLOUD_SLUG,
+  CLOUD_SLUG_RULE,
   COMMIT_ID,
   type CONNECT_EXISTING_WORKFLOW,
   DRAFT_ID,
   FIELD_NAME,
+  type GO_LIVE_CLOUD_WORKFLOW,
   type GO_LIVE_HOST_WORKFLOW,
   type GO_LIVE_WORKFLOW,
   type PATCH_WORKFLOW,
@@ -18,14 +22,15 @@ import {
   undoDraftOf,
   type WorkflowFn,
 } from "./shared.ts";
-import type { Source } from "./source.ts";
+import type { RepoRef, Source } from "./source.ts";
 
 // The app's own actions on the company's repository, as built-in workflows: the app starts each
 // (its pages through `api.<name>`, polling `.result`) and the worker runs it, since only the
 // worker has the checkout. What each does is the app's, given to the worker as `AppSteps`
 // (`WorkerOptions.app`, `sanoma/app/steps`), and each is called in a step of its own run
 // (`app-steps.ts`), its writes to the checkout one at a time per worker. Workflows like any other, held to
-// the same lint: no DBOS here, and no operation, so nothing goes through `ctx`.
+// the same lint: no DBOS here, and no operation but the one going live on Sanoma Cloud makes the
+// company's repository with, which goes through `ctx`.
 
 /** Adopt's input: a drift run, a resource it found drifted, and the fields whose value at the vendor to write into the resource's data file. */
 export const AdoptInput = z.object({
@@ -79,6 +84,32 @@ export type GoLiveInput = z.infer<typeof GoLiveInput>;
 /** Going live's second half takes nothing: what it pushes and applies is in `infra.ts`. */
 export const GoLiveHostInput = z.strictObject({});
 export type GoLiveHostInput = z.infer<typeof GoLiveHostInput>;
+
+/**
+ * Going live on a host in its vendor's account (Sanoma Cloud's), as `infra.ts` declares it: the
+ * company's address (its slug, `<address>.sanoma.work`) when the person changed it from the one
+ * declared, which the run writes into the file first (`CLOUD_SLUG`).
+ */
+export const GoLiveCloudInput = z.strictObject({
+  address: z.string().regex(CLOUD_SLUG, `An address is ${CLOUD_SLUG_RULE}`).optional(),
+});
+export type GoLiveCloudInput = z.infer<typeof GoLiveCloudInput>;
+
+/**
+ * What going live on a host in its vendor's account found, ready to go: the company's slug, the
+ * operation that makes its repository there (the host type's `account.repository`), and whether
+ * `origin` names the repository already, which nothing then makes.
+ */
+export interface CloudReady {
+  slug: string;
+  account: string;
+  origin: boolean;
+}
+
+/** What the push of going live on a host in its vendor's account is given: the repository made there, when `origin` named none. */
+export interface PushCloudInput {
+  repository?: RepoRef;
+}
 
 /** An existing GitHub repository (`owner/name`: the owner is always written) and a Supabase project's ref, either or both. */
 export const ConnectExistingInput = z
@@ -216,6 +247,13 @@ export interface AppSteps {
   goLive(step: AppStepContext, input: GoLiveInput): Promise<{ apply: ApplyInput }>;
   /** Going live's second half: `main` pushed to the repository apply made; the host (and its wakeup) to apply. */
   goLiveHost(step: AppStepContext, input: GoLiveHostInput): Promise<{ apply: ApplyInput }>;
+  /**
+   * Going live on a host in its vendor's account, first: what must hold (`infra.ts` declares it,
+   * its host unbound, the vendor's token stored), and the address written when it changed.
+   */
+  goLiveCloud(step: AppStepContext, input: GoLiveCloudInput): Promise<CloudReady>;
+  /** Then: `origin` set to the repository made there, when given, and `main` pushed; the database and the host to apply. */
+  pushCloud(step: AppStepContext, input: PushCloudInput): Promise<{ apply: ApplyInput }>;
   /** An existing repository and/or project declared in `infra.ts` and committed; the apply that only binds them. */
   connectExisting(
     step: AppStepContext,
@@ -251,6 +289,12 @@ export interface AppRunner {
     name: K,
     input: Parameters<AppSteps[K]>[1],
   ): Promise<Omit<Awaited<ReturnType<AppSteps[K]>>, "apply"> & { runId: string }>;
+  /**
+   * `apply` started as a child run of this one (`<run>:apply`), as its own actor, and waited for
+   * (an approval it waits on included): its run id once every step of it is done; a failure,
+   * saying which did not, when the apply failed or left one undone.
+   */
+  applyAndWait(apply: ApplyInput): Promise<GoLiveOutput>;
 }
 
 /** The app's built-ins as its pages call them, by api name (`apiNameOf`): started, then their `.result` polled. */
@@ -259,12 +303,17 @@ export interface AppApi {
   patch: WorkflowFn<PatchInput, PatchOutput>;
   goLive: WorkflowFn<GoLiveInput, GoLiveOutput>;
   goLiveHost: WorkflowFn<GoLiveHostInput, GoLiveOutput>;
+  goLiveCloud: WorkflowFn<GoLiveCloudInput, GoLiveOutput>;
   connectExisting: WorkflowFn<ConnectExistingInput, ConnectExistingOutput>;
   saveDraft: WorkflowFn<SaveDraftInput, SaveDraftOutput>;
 }
 
-/** The built-in workflows of the app's actions, over `runner`: `resolveConfig` adds them to every config. */
-export function appWorkflows(runner: AppRunner): WorkflowDefinition<any, any>[] {
+/**
+ * The built-in workflows of the app's actions, over `runner`: `resolveConfig` adds them to every
+ * config, with the operations of the config's hosts' accounts that make a repository
+ * (`HostSpec.account.repository`), which going live on such a host calls.
+ */
+export function appWorkflows(runner: AppRunner, repositories: readonly Op[] = []): WorkflowDefinition<any, any>[] {
   return [
     defineWorkflow({
       // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
@@ -298,6 +347,22 @@ export function appWorkflows(runner: AppRunner): WorkflowDefinition<any, any>[] 
       input: GoLiveHostInput,
       uses: [],
       run: async (_ctx, input): Promise<GoLiveOutput> => runner.stepThenApply("goLiveHost", input),
+    }),
+    defineWorkflow({
+      name: "go-live-cloud" satisfies typeof GO_LIVE_CLOUD_WORKFLOW,
+      title: "Go live on Sanoma Cloud",
+      trigger: "manual",
+      input: GoLiveCloudInput,
+      uses: repositories,
+      run: async (ctx, input): Promise<GoLiveOutput> => {
+        const { slug, account, origin } = await runner.step("goLiveCloud", input);
+        // The repository, made in the vendor's account unless `origin` names one: through `ctx`,
+        // so the policy decides it and the ledger records it.
+        const [vendor, group, name] = account.split(".") as [string, string, string];
+        const repository = origin ? undefined : ((await ctx[vendor]![group]![name]!({ slug })) as RepoRef);
+        const { apply } = await runner.step("pushCloud", { ...(repository && { repository }) });
+        return runner.applyAndWait(apply);
+      },
     }),
     defineWorkflow({
       name: "connect-existing" satisfies typeof CONNECT_EXISTING_WORKFLOW,

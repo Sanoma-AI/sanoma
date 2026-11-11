@@ -112,6 +112,14 @@ export interface HostSpec {
    */
   bindsBootstrap?: boolean;
   /**
+   * For a host that binds its own bootstrap in its vendor's account (Sanoma Cloud's), the
+   * operations of that account that going live from a computer calls, each by id: `repository`
+   * (`{ slug } → { owner, name }`, the company's repository made, empty, for the computer to push
+   * to; a write), `available` (`{ slug } → { available, yours }`, whether the address is free; a
+   * read) and `invite` (`{ slug, email } → { url }`, a one-use sign-in link on the host).
+   */
+  account?: { repository: string; available: string; invite: string };
+  /**
    * True for a host whose declaration says only the decisions (see above): apply derives its
    * image, source, ref, secrets and domains, and a data file may not declare `secrets` or `domains`.
    */
@@ -155,7 +163,7 @@ function unwrap(schema: z.ZodType): z.ZodType {
 /**
  * Throws what is wrong with a resource type's `host`: an input or `revision` that names no field,
  * `secrets` that is not write-only, missing (unless the host binds its own bootstrap) or given
- * beside `bindsBootstrap`, a `revision` that is write-only, an unknown lifetime, a type apply
+ * beside `bindsBootstrap`, an `account` without it, a `revision` that is write-only, an unknown lifetime, a type apply
  * cannot change (not `writable`); for a host that does not derive, no `port`, or an `image`, a
  * `database` or a `name` (inputs of a host that derives); for one that does, a `port` (it runs the image's),
  * or a `database` that is not write-only (it stands for a URL, and is never compared).
@@ -178,8 +186,11 @@ export function checkHost(
   const secrets = host.inputs?.secrets;
   if (host.bindsBootstrap) {
     if (secrets !== undefined) problems.push("inputs.secrets is not taken by a host that binds its own bootstrap");
-  } else if (secrets === undefined || !type.fields.writeOnly.includes(secrets)) {
-    problems.push("inputs.secrets must be a write-only field, unless the host binds its own bootstrap");
+  } else {
+    if (secrets === undefined || !type.fields.writeOnly.includes(secrets)) {
+      problems.push("inputs.secrets must be a write-only field, unless the host binds its own bootstrap");
+    }
+    if (host.account !== undefined) problems.push("account is for a host that binds its own bootstrap");
   }
   if (host.derives) {
     if (host.inputs?.port !== undefined)

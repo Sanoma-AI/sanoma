@@ -79,7 +79,7 @@ export async function adopt(step: AppStepContext, { runId, id, paths }: AdoptInp
  * worker's repository, when it has one, as the run's actor: what Adopt and a patch without a
  * remote land as. Under `serially`, with the read it writes after.
  */
-async function written(step: AppStepContext, file: string, text: string, message: string): Promise<Written> {
+export async function written(step: AppStepContext, file: string, text: string, message: string): Promise<Written> {
   const path = join(rootOf(step), file);
   await writeFile(path, text);
   const { source, by } = step;

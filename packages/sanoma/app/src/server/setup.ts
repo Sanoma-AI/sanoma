@@ -10,6 +10,7 @@ import { type ActorContext, invalid } from "./core.ts";
 import { declaredEmail } from "./people.ts";
 import { actorCookie, cookie, cookies } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
+import { CLOUD_TOKEN, CLOUD_TOKEN_PATTERN } from "./sanoma-sign-in.ts";
 import { secretValues } from "./secrets.ts";
 
 // Going live, step 1: connect GitHub, and each vendor of a database, host or wakeup the config
@@ -57,6 +58,10 @@ export const SETUP_TOKENS: Record<string, { description: string; optional?: true
     description:
       "Optional: an Agent37 API key (sk_live_…), from agent37.com's Cloud API keys page, so that coding agents work in a box of their own.",
     optional: true,
+  },
+  [CLOUD_TOKEN]: {
+    description:
+      "A Cloud token (sca_…), from your account at sanoma.work: what going live on Sanoma Cloud makes the database and the host with. Signing in to Sanoma on Hosting stores one for you.",
   },
   [WAKEUP_URL]: {
     description:
@@ -205,7 +210,8 @@ async function signInStatus(app: AppContext, actor?: Principal) {
 }
 
 /**
- * Stores a pasted token as the actor: one of the config's setup tokens only. Storing a wakeup
+ * Stores a pasted token as the actor: one of the config's setup tokens only, a Cloud token only
+ * when it looks like one. Storing a wakeup
  * service's account token also mints the instance's own (`SANOMA_WAKEUP_TOKEN`) when none is stored, and a
  * new one for another account's, so going live can give the host it from the first apply, and the
  * wakeup's create registers it.
@@ -214,6 +220,9 @@ export async function setSetupToken(app: AppContext, actor: Principal, { name, v
   const names = setupTokens(app);
   if (!names.includes(name)) {
     invalid("name", `${name} is not a setup token; they are ${names.join(", ")}`);
+  }
+  if (name === CLOUD_TOKEN && !CLOUD_TOKEN_PATTERN.test(value)) {
+    invalid("value", "That is not a Cloud token: one starts with sca_");
   }
   const { client } = app;
   const account = name === WAKEUP_ACCOUNT_TOKEN;

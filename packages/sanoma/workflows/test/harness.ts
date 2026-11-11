@@ -48,6 +48,7 @@ export const AFTER_CHANGE = [
   "patch",
   "go-live",
   "go-live-host",
+  "go-live-cloud",
   "connect-existing",
   "save-draft",
   "chat",

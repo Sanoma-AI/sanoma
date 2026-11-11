@@ -19,6 +19,10 @@ export type StartRuntime = (input: { slug: string; revision: string }) => Promis
 export interface FakeCloudOptions extends FakeOptions {
   /** What a host runs. Default: a stub that answers `/healthz` 200 and `/wake` 204. */
   start?: StartRuntime;
+  /** The GitHub account the Sanoma.work App makes a company's repository in. Default `sanoma-test`. */
+  owner?: string;
+  /** Slugs another account holds: `cloud-available` says they are taken, and a sign-up of one is refused. */
+  taken?: readonly string[];
 }
 
 /** A company as the fake Cloud keeps it: the parts it has. */
@@ -150,7 +154,9 @@ function address(slug: string, start: StartRuntime) {
 /**
  * An in-memory Sanoma Cloud for tests: the token's companies in `state.companies`, keyed by slug,
  * each with the parts `cloud-signup` made (a database `fake-db-<n>` in its region, `us-east` by
- * default; a host at its revision), every part healthy. A host runs `start`'s runtime behind an
+ * default; a host at its revision; a repository, `<owner>/<slug>`, in `owner`'s account), every
+ * part healthy. `cloud-available` says a slug is the token's when it holds the company, taken when
+ * `taken` names it, else free; `cloud-invite` answers a made-up link on the host's address. A host runs `start`'s runtime behind an
  * address in this process that outlives it (`<slug>.sanoma.work`'s stand-in), which starts it on
  * a request, again once it ended on its own (`exited`); a deploy moves it to the new revision; a
  * close removes the part, and the company with its last. `stop(slug)` stops a host's runtime as
@@ -178,15 +184,20 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
     ...(c.repository && { repository: c.repository }),
   });
 
+  const owner = options.owner ?? "sanoma-test";
+  const taken = new Set(options.taken);
+
   const api = (state: FakeCloudState): CloudApi => ({
     async signup({ slug, part, repository, ref, revision, region, domains }) {
       if (!SLUG.test(slug)) throw fail("cloud-signup", `${slug} is not a company's address`);
+      if (taken.has(slug)) throw fail("cloud-signup", `${slug}.sanoma.work is someone else's`);
       if (region && !(REGIONS as readonly string[]).includes(region)) {
         throw fail("cloud-signup", `Sanoma Cloud has no region ${region}`);
       }
       const company = (state.companies[slug] ??= { slug });
       if (repository) company.repository = { ...repository, ref: ref ?? "main" };
-      if (part === "database") company.database ??= { id: `fake-db-${++state.seq}`, region: region ?? "us-east" };
+      if (part === "repository") company.repository ??= { owner, name: slug, ref: "main" };
+      else if (part === "database") company.database ??= { id: `fake-db-${++state.seq}`, region: region ?? "us-east" };
       else {
         if (!company.repository) throw fail("cloud-signup", "The host needs a repository: pass `repository`");
         const at = revision ?? company.host?.revision ?? "";
@@ -204,6 +215,17 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
       if (!company?.host) throw fail("cloud-deploy", `Company "${slug}" has no host: make it with cloud-signup`);
       company.host.revision = revision;
       return { revision, url: await addressOf(slug).run(revision) };
+    },
+    available: async ({ slug }) => {
+      const yours = state.companies[slug] !== undefined;
+      return { available: !yours && !taken.has(slug), yours };
+    },
+    async invite({ slug, email }) {
+      const company = state.companies[slug];
+      if (!company?.host) throw fail("cloud-invite", `Company "${slug}" has no host to sign in on`);
+      return {
+        url: `${addresses.get(slug)?.url ?? `https://${slug}.sanoma.work`}/auth/invite/fake-${++state.seq}-${email}`,
+      };
     },
     async close({ slug, part }) {
       const company = state.companies[slug];

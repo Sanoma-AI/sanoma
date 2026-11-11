@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import type { SanomaClient } from "sanoma/workflows";
-import { DRIFT_WORKFLOW, GO_LIVE_HOST_WORKFLOW } from "sanoma/workflows/shared";
+import { DRIFT_WORKFLOW, GO_LIVE_CLOUD_WORKFLOW, GO_LIVE_HOST_WORKFLOW } from "sanoma/workflows/shared";
 import type { CompanyState } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { companyStateOf, hostAt } from "../lib/company-state.ts";
@@ -20,13 +20,19 @@ const PROBE_MS = 10_000;
 const probes = new Map<string, { at: number; healthy: Promise<boolean> }>();
 
 /**
- * Going live's latest run: the latest `go-live-host`'s apply (`<run>:apply`) once it started it,
- * else that run itself, while it pushes or once it failed before its apply.
+ * Going live's latest run, of `go-live-host` (the company's own accounts) and `go-live-cloud`
+ * (Sanoma Cloud): its apply (`<run>:apply`) once it started it, else that run itself, while it
+ * pushes or once it failed before its apply. A `go-live-cloud` whose apply ended but that failed
+ * after it (an apply that left a step undone) is the run itself, which says why.
  */
 async function goLiveRun(client: SanomaClient) {
-  const [run] = await client.runs({ workflow: GO_LIVE_HOST_WORKFLOW, limit: 1 });
+  const latest = await Promise.all(
+    [GO_LIVE_HOST_WORKFLOW, GO_LIVE_CLOUD_WORKFLOW].map((workflow) => client.runs({ workflow, limit: 1 })),
+  );
+  const [run] = latest.flat().toSorted((a, b) => b.createdAt - a.createdAt);
   if (!run) return null;
-  return goLiveRunOf(client, (await client.run(`${run.runId}:apply`)) ?? run);
+  const apply = await client.run(`${run.runId}:apply`);
+  return goLiveRunOf(client, apply && (apply.status !== "finished" || run.status !== "failed") ? apply : run);
 }
 
 /** The host's row in the latest drift check that finished, when it read where the host answers. */

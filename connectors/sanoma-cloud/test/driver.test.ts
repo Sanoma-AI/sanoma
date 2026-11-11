@@ -322,6 +322,55 @@ describe("cloud's database through the workflows", () => {
   });
 });
 
+describe("cloud's account operations through the workflows", () => {
+  it("says whether an address is free with cloud-available, and refuses an answer that is not one", async () => {
+    workflows = { cloudAvailable: ({ slug }) => ({ output: { available: slug === "acme", yours: false } }) };
+    expect(await op("company.available", { slug: "acme" })).toEqual({ available: true, yours: false });
+    expect(sent.find((s) => s.name === "cloudAvailable.start")?.input).toEqual({ slug: "acme" });
+    workflows = { cloudAvailable: () => ({ output: { free: true } }) };
+    await expect(op("company.available", { slug: "acme" })).rejects.toThrow(
+      "Sanoma Cloud: cloud-available: its answer is not what it should be",
+    );
+  });
+
+  it("makes the company's repository with cloud-signup's repository part, once", async () => {
+    let made = false;
+    workflows = {
+      cloudList: () => ({
+        output: made ? [{ slug: "acme", status: "creating", repository: { owner: "sanoma-work", name: "acme" } }] : [],
+      }),
+      cloudSignup: () => ((made = true), { output: {} }),
+    };
+    expect(await op("company.repository", { slug: "acme" })).toEqual({ owner: "sanoma-work", name: "acme" });
+    expect(sent.find((s) => s.name === "cloudSignup.start")?.input).toEqual({
+      slug: "acme",
+      name: "acme",
+      part: "repository",
+    });
+    // Again: the one there, with no sign-up.
+    sent = [];
+    expect(await op("company.repository", { slug: "acme" })).toEqual({ owner: "sanoma-work", name: "acme" });
+    expect(sent.some((s) => s.name === "cloudSignup.start")).toBe(false);
+  });
+
+  it("refuses a repository cloud-list does not show after the sign-up", async () => {
+    workflows = { cloudList: () => ({ output: [] }), cloudSignup: () => ({ output: {} }) };
+    await expect(op("company.repository", { slug: "acme" })).rejects.toMatchObject({ vendorCode: "not_made" });
+  });
+
+  it("answers cloud-invite's link, and refuses one that is no web address", async () => {
+    workflows = { cloudInvite: () => ({ output: { url: "https://acme.sanoma.work/auth/invite/abc" } }) };
+    expect(await op("company.invite", { slug: "acme", email: "a@acme.test" })).toEqual({
+      url: "https://acme.sanoma.work/auth/invite/abc",
+    });
+    expect(sent.find((s) => s.name === "cloudInvite.start")?.input).toEqual({ slug: "acme", email: "a@acme.test" });
+    workflows = { cloudInvite: () => ({ output: { url: "javascript:alert(1)" } }) };
+    await expect(op("company.invite", { slug: "acme", email: "a@acme.test" })).rejects.toThrow(
+      "its answer is not what it should be",
+    );
+  });
+});
+
 describe("cloud's driver errors", () => {
   it("fails a call with a failed run's failure, as the api answers it (422), final", async () => {
     workflows = {
