@@ -111,17 +111,9 @@ function World() {
       <CardHeader>
         <CardHeading>{world ? `The demo's world: ${world.name}` : "The demo's world"}</CardHeading>
         <CardDescription>
-          {world ? (
-            <>
-              <code>sanoma demo</code> builds these sites to run in any page, seeded from{" "}
-              <code>scenarios/world.feature</code>:
-            </>
-          ) : (
-            <>
-              <code>sanoma demo</code> builds these sites to run in any page, on the connectors&apos; fakes, seeded from{" "}
-              <code>scenarios/world.feature</code>: one Scenario of Givens, which this repo has not written yet.
-            </>
-          )}
+          <code>sanoma demo</code> builds these sites to run in any page, on the connectors&apos; fakes, seeded from{" "}
+          <code>scenarios/world.feature</code>
+          {world ? ":" : ": one Scenario of Givens, which this repo has not written yet."}
         </CardDescription>
       </CardHeader>
       {world && (

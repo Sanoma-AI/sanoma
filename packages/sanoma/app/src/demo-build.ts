@@ -12,6 +12,7 @@ import {
   filesUnder,
   isCollection,
   isOp,
+  relPath,
   resolveConfig,
   type SanomaConfig,
   VENDOR,
@@ -26,14 +27,17 @@ import type { AppConfig } from "./api.ts";
 import {
   appSources,
   companyFile,
-  manifestFile,
+  MAX_PUBLIC_FILE,
+  moduleDir,
   pkgDir,
   quietLogger,
   repoConfig,
+  routeTreeOf,
   specifier,
   writeSiteFiles,
 } from "./build.ts";
-import { companyFiles, optional, vendorInfos } from "./bundle-build.ts";
+import { companyFiles, optional, reachedChunks, vendorInfos } from "./bundle-build.ts";
+import { withoutSources } from "./snapshot.ts";
 
 /** Where the world is, from the root (`WORLD_FILE`). */
 const WORLD = "scenarios/world.feature";
@@ -84,7 +88,7 @@ export function demoPlan<W extends Pick<WorkflowDefinition, "name" | "file" | "u
   input: DemoInput<W>,
 ): DemoPlan<W> {
   const { root, configFile, sites, workflows, connectors, fakes, collections, world } = input;
-  const from = (file: string) => relative(root, file).split(sep).join("/");
+  const from = (file: string) => relPath(root, file);
   const reasons: string[] = [];
   const bundled = new Set<W>();
   /** Each vendor used, and where first. */
@@ -150,8 +154,11 @@ export interface BuildDemoOptions {
 /** What a demo writes in its folder, each the only names a folder it is built into may hold. */
 const DEMO_FILES = new Set(["mount.js", "demo.css", "index.html", "chunks", "files"]);
 
-/** The most one file of a demo holds: a public file's, Cloudflare's limit on one of a Worker's assets. */
-const MAX_FILE = 25 * 1024 * 1024;
+/**
+ * The prefix of a site's stylesheet imported by its URL, which the demo bundles instead
+ * (`demoPlugins`): its id ends in `.js`, so Vite's CSS plugins leave the module alone.
+ */
+const STYLESHEET = "\0sanoma-demo-stylesheet:";
 
 /** The module the demo's entry imports (`virtual:sanoma/demo`, `demoModule`). */
 const DEMO = "virtual:sanoma/demo";
@@ -210,7 +217,7 @@ function demoModule(parts: {
   routeTree: string;
   workflows: { file: string; name: string }[];
   collections: { file: string; names: string[] }[];
-  connectors: { package: string; vendor: string }[];
+  connectors: { package: string; name: string }[];
   world: World | undefined;
   description: unknown;
   sites: string[];
@@ -223,14 +230,14 @@ function demoModule(parts: {
       ({ file, names }, i) =>
         `import { ${names.map((n, j) => `${n} as d${i}_${j}`).join(", ")} } from ${specifier(file)};\n`,
     ),
-    ...parts.connectors.map(({ package: pkg }, i) => `import * as c${i} from ${JSON.stringify(pkg)};\n`),
+    ...parts.connectors.map(
+      ({ package: pkg, name }, i) => `import { ${name} as c${i} } from ${JSON.stringify(pkg)};\n`,
+    ),
     `export { routeTree } from ${specifier(parts.routeTree)};\n`,
-    // A connector's package exports it by a name of its own: found by its vendor.
-    `const connector = (mod, id) => Object.values(mod).find((value) => value?.[Symbol.for("sanoma.vendor")]?.id === id);\n`,
     `const world = ${parts.world ? json(parts.world) : "undefined"};\n`,
     `export const runtime = () => pageRuntime({ workflows: [${parts.workflows.map((_, i) => `w${i}`).join(", ")}], `,
     `collections: [${collections.join(", ")}], `,
-    `connectors: [${parts.connectors.map(({ vendor }, i) => `connector(c${i}, ${JSON.stringify(vendor)})`).join(", ")}], world });\n`,
+    `connectors: [${parts.connectors.map((_, i) => `c${i}`).join(", ")}], world });\n`,
     `export const description = ${json(parts.description)};\n`,
     `export const sites = ${JSON.stringify(parts.sites)};\n`,
   ].join("");
@@ -242,8 +249,7 @@ function demoModule(parts: {
  * (`demo/client-rpc.ts`); a site's stylesheet imported for its `?url` part of `demo.css`; and the
  * client environment's entry `demo/mount.tsx`, built to `mount.js` with its chunks and `demo.css`.
  */
-function demoPlugins(root: string, text: string, conditions: string[], keep: string[]): PluginOption[] {
-  const { src } = appSources();
+function demoPlugins(root: string, src: string, text: string, conditions: string[], keep: string[]): PluginOption[] {
   // Vite's module ids have forward slashes, on Windows too.
   const siteApi = join(src, "site-api.ts").split(sep).join("/");
   const output = {
@@ -257,28 +263,24 @@ function demoPlugins(root: string, text: string, conditions: string[], keep: str
     {
       name: "sanoma:demo",
       enforce: "pre",
-      resolveId(source, importer, options) {
+      async resolveId(source, importer, options) {
         if (source === DEMO) return `\0${DEMO}`;
         // What the company module imports, as the company's own files do: from its root.
         if (importer === `\0${DEMO}`)
           return this.resolve(source, join(root, "package.json"), { ...options, skipSelf: true });
         if (source === "@tanstack/react-start/client-rpc") return join(src, "demo", "client-rpc.ts");
+        // A site's stylesheet by its URL (`?url`): the page has no head of the site's to link it
+        // from, so it is part of the demo's, and its URL none.
+        if (source.endsWith(".css?url") && importer && companyFile(importer, root)) {
+          const css = await this.resolve(source.slice(0, -"?url".length), importer, { skipSelf: true });
+          if (css) return `${STYLESHEET}${css.id}.js`;
+        }
       },
       load(id) {
         if (id === `\0${DEMO}`) return text;
         if (id === siteApi) return `export { api } from ${specifier(join(src, "demo", "api.ts"))};\n`;
-      },
-      transform: {
-        filter: { id: /\.[cm]?[jt]sx?(\?|$)/, code: ".css?url" },
-        handler(code, id) {
-          if (!companyFile(id, root)) return;
-          // The page has no head of the site's to link it from: the stylesheet is the demo's.
-          return code.replace(
-            /^(\s*)import\s+([\w$]+)\s+from\s*(["'])([^"'\n]+\.css)\?url\3;?/gm,
-            (_, indent: string, name: string, quote: string, file: string) =>
-              `${indent}import ${quote}${file}${quote};\n${indent}const ${name} = "";`,
-          );
-        },
+        if (id.startsWith(STYLESHEET))
+          return `import ${specifier(id.slice(STYLESHEET.length, -".js".length))};\nexport default "";\n`;
       },
     } satisfies Plugin,
     {
@@ -311,14 +313,7 @@ function demoPlugins(root: string, text: string, conditions: string[], keep: str
       generateBundle: {
         order: "post",
         handler(_options, bundle) {
-          const reached = new Set<string>();
-          const reach = (name: string) => {
-            const chunk = bundle[name];
-            if (reached.has(name) || chunk?.type !== "chunk") return;
-            reached.add(name);
-            for (const next of [...chunk.imports, ...chunk.dynamicImports]) reach(next);
-          };
-          for (const file of Object.values(bundle)) if (file.type === "chunk" && file.isEntry) reach(file.fileName);
+          const reached = reachedChunks(bundle);
           const found = [...reached]
             .flatMap((name) => (bundle[name] as { moduleIds: string[] }).moduleIds)
             .flatMap((id) => {
@@ -353,16 +348,6 @@ const SERVER_ONLY = /__vite-browser-external:?(.*)$|[\\/]node_modules[\\/](@dbos
 /** True when the app runs from a checkout of sanoma, whose `sanoma-source` entries are all there (an install ships some as `dist/` alone). */
 const fromCheckout = () => !pkgDir.split(sep).includes("node_modules");
 
-/** Whether `name` resolves from sanoma's install: an optional peer the company installed. */
-const installed = (name: string) => {
-  try {
-    createRequire(manifestFile).resolve(name);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 /** The page that shows the demo on its own: `index.html`, beside `mount.js`. */
 const INDEX = `<!doctype html>
 <html lang="en">
@@ -393,10 +378,11 @@ const INDEX = `<!doctype html>
  */
 export async function buildDemo(repo: string, { config, out, log }: BuildDemoOptions): Promise<{ files: string[] }> {
   const root = realpathSync(repo);
-  const [{ describeConfig }, { loadWorld }, { pageRuntime }] = await Promise.all([
+  const [{ describeConfig }, { loadWorld }, { pageRuntime }, vite] = await Promise.all([
     import("sanoma/workflows/describe"),
     import("sanoma/workflows/scenario"),
     import("sanoma/workflows/page"),
+    import("vite"),
   ]);
   writeSiteFiles(root);
   const description = describeConfig(config);
@@ -425,17 +411,16 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
       const vendor = connector[VENDOR].id;
       const [found] = await exportsOf(fromRoot.resolve(pkg), (value) => isConnectorOf(value, vendor));
       if (!found) throw new DemoRefused([`${pkg}: exports no connector of ${vendor}, which a demo imports`]);
-      return found[1] as Connector<any, any>;
+      return { package: pkg, name: found[0], connector: found[1] as Connector<any, any> };
     }),
   );
-  await pageRuntime({ workflows: plan.workflows, collections, connectors: exported, world });
+  await pageRuntime({ workflows: plan.workflows, collections, connectors: exported.map((c) => c.connector), world });
 
   const unexported: string[] = [];
   const workflows = await Promise.all(
     plan.workflows.map(async (wf) => {
       const name = (await exportsOf(wf.file, (value) => value === wf))[0]?.[0];
-      if (name === undefined)
-        unexported.push(`${relative(root, wf.file)}: exports no ${wf.name}, which a demo imports`);
+      if (name === undefined) unexported.push(`${relPath(root, wf.file)}: exports no ${wf.name}, which a demo imports`);
       return { file: wf.file, name: name ?? "" };
     }),
   );
@@ -449,7 +434,7 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
     appName: description.appName,
     name: description.name,
     version: description.version,
-    workflows: description.workflows.filter((wf) => plan.workflows.some((p) => p.name === wf.name)),
+    workflows: withoutSources(description).workflows.filter((wf) => plan.workflows.some((p) => p.name === wf.name)),
     ops: description.ops.filter((op) => vendors.has(op.vendor)),
     vendors: Object.fromEntries(Object.entries(description.vendors).filter(([vendor]) => vendors.has(vendor))),
     agents: [],
@@ -465,19 +450,20 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
     content: [],
   };
   const text = demoModule({
-    routeTree: join(root, ".sanoma", "app", "demo", "routeTree.gen.ts"),
+    routeTree: routeTreeOf(root, "demo"),
     workflows,
     collections: data
       .map(({ file, found }) => ({ file, names: found.map(([name]) => name) }))
       .filter((c) => c.names.length),
-    connectors: plan.connectors.map(({ connector, package: pkg }) => ({ package: pkg, vendor: connector[VENDOR].id })),
+    connectors: exported,
     world,
     // From the root, never the machine's paths: the page is public.
     description: JSON.parse(JSON.stringify(shown).replaceAll(JSON.stringify(`${root}${sep}`).slice(1, -1), "")),
     sites,
   });
   const conditions = [...(fromCheckout() ? ["sanoma-source"] : []), "browser", "module", "import", "default"];
-  const keep = installed("@react-pdf/renderer") ? ["@react-pdf/renderer"] : [];
+  // An optional peer, bundled when the company installed it.
+  const keep = moduleDir("@react-pdf/renderer", pkgDir) ? ["@react-pdf/renderer"] : [];
 
   const others = existsSync(out) ? readdirSync(out).filter((name) => !DEMO_FILES.has(name)) : [];
   if (others.length) {
@@ -486,10 +472,9 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
     );
   }
   const outDir = join(root, ".sanoma", "app", "demo", `build.${process.pid}`);
-  const vite = await import("vite");
-  const base = repoConfig(root, { demo: demoPlugins(root, text, conditions, keep) });
+  const { src } = appSources();
+  const base = repoConfig(root, { kind: "demo", plugins: demoPlugins(root, src, text, conditions, keep) });
   try {
-    const { src } = appSources();
     const builder = await vite.createBuilder({
       ...base,
       base: "./",
@@ -515,7 +500,7 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
     await builder.build(builder.environments.client!);
     const client = join(outDir, "client");
     const files = filesUnder(client, () => true).map((file) => relative(client, file).split(sep).join("/"));
-    const big = files.filter((file) => statSync(join(client, file)).size > MAX_FILE);
+    const big = files.filter((file) => statSync(join(client, file)).size > MAX_PUBLIC_FILE);
     if (big.length) throw new Error(`A demo's file is 25 MiB at most: ${big.join(", ")}`);
     writeFileSync(join(client, "index.html"), INDEX);
     rmSync(out, { recursive: true, force: true });

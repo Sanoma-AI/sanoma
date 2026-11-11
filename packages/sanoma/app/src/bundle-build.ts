@@ -13,7 +13,7 @@ import { declarationFiles, filesUnder, type SanomaConfig, timeMatcherFile, vendo
 import { domainsText } from "sanoma/workflows/shared";
 import type { SiteEntry } from "sanoma/workflows/describe";
 import MagicString from "magic-string";
-import type { InlineConfig, Plugin, PluginOption } from "vite";
+import type { InlineConfig, Plugin, PluginOption, Rollup } from "vite";
 import { type AppBundle, prerenderedAsset } from "./app-bundle.ts";
 import {
   appSources,
@@ -262,14 +262,7 @@ async function bundlePlugins(
       name: "sanoma:reachable",
       applyToEnvironment: ssr,
       generateBundle(_options, bundle) {
-        const reached = new Set<string>();
-        const reach = (name: string) => {
-          const chunk = bundle[name];
-          if (reached.has(name) || chunk?.type !== "chunk") return;
-          reached.add(name);
-          for (const next of [...chunk.imports, ...chunk.dynamicImports]) reach(next);
-        };
-        for (const file of Object.values(bundle)) if (file.type === "chunk" && file.isEntry) reach(file.fileName);
+        const reached = reachedChunks(bundle);
         for (const file of Object.values(bundle)) {
           if (file.type === "chunk" && !reached.has(file.fileName)) delete bundle[file.fileName];
         }
@@ -653,7 +646,8 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
   const vite = await import("vite");
   const built: InlineConfig = {
     ...repoConfig(root, {
-      bundle: await bundlePlugins(
+      kind: "bundle",
+      plugins: await bundlePlugins(
         root,
         config.file,
         snapshot,
@@ -717,4 +711,17 @@ function nodeOnlyOf(err: unknown): NodeOnlyImport | undefined {
     if (found) return found;
   }
   return undefined;
+}
+
+/** The chunks of `bundle` its entries reach, by static and dynamic imports, by file name. */
+export function reachedChunks(bundle: Rollup.OutputBundle): Set<string> {
+  const reached = new Set<string>();
+  const reach = (name: string) => {
+    const chunk = bundle[name];
+    if (reached.has(name) || chunk?.type !== "chunk") return;
+    reached.add(name);
+    for (const next of [...chunk.imports, ...chunk.dynamicImports]) reach(next);
+  };
+  for (const file of Object.values(bundle)) if (file.type === "chunk" && file.isEntry) reach(file.fileName);
+  return reached;
 }

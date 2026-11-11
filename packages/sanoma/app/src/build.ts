@@ -214,7 +214,7 @@ const PUBLIC_DIRS = ["sites/*/public", "apps/*/sites/*/public"];
 const OWN_PATHS = /^(robots\.txt|sitemap\.xml|(assets|auth|sites|_serverFn|__sanoma)\/.*)$/;
 
 /** The most a public file holds: Cloudflare's limit on one of a Worker's assets, 25 MiB. */
-const MAX_PUBLIC_FILE = 25 * 1024 * 1024;
+export const MAX_PUBLIC_FILE = 25 * 1024 * 1024;
 
 /**
  * Why each of `files` cannot be served, a line each: a name with no extension (the Worker looks
@@ -357,7 +357,7 @@ function siteTsconfig(root: string) {
 }
 
 /** Where a bare import from `from` finds the package `name`: its own node_modules, or (pnpm) beside it. */
-function moduleDir(name: string, from: string): string | undefined {
+export function moduleDir(name: string, from: string): string | undefined {
   for (let dir = from; ; dir = dirname(dir)) {
     const found = join(dir, "node_modules", name);
     if (existsSync(found)) return found;
@@ -464,27 +464,35 @@ function tailwindFromApp(): void {
 export const specifier = (file: string) => JSON.stringify(file.split(sep).join("/"));
 
 export interface RepoConfigOptions {
-  /** The plugins that make it the Worker's app bundle (`buildAppBundle`). */
-  bundle?: PluginOption[];
   /**
-   * The plugins that make it a demo (`buildDemo`): the sites alone under the demo's own root
-   * (`demo/root.tsx`), in a route tree of its own, and no public files.
+   * What it builds besides the app: the Worker's app bundle (`buildAppBundle`), or a demo
+   * (`buildDemo`): the sites alone under the demo's own root (`demo/root.tsx`), in a route tree of
+   * its own (`routeTreeOf`), and no public files.
    */
-  demo?: PluginOption[];
+  kind?: "bundle" | "demo";
+  /** The plugins that make it that. */
+  plugins?: PluginOption[];
 }
+
+/** Where a build of `kind` writes, under the repo: `.sanoma/app`, the bundle's and a demo's each in a folder of their own. */
+const outOf = (repo: string, kind?: RepoConfigOptions["kind"]) => join(repo, ".sanoma", "app", ...(kind ? [kind] : []));
+
+/** The route tree a build of `kind` generates: the one the app's builds share, a demo's its own. */
+export const routeTreeOf = (repo: string, kind?: RepoConfigOptions["kind"]) =>
+  join(outOf(repo, kind === "demo" ? kind : undefined), "routeTree.gen.ts");
 
 /**
  * A company repo's build: the repo is Vite's root, the app's `src` (real path) Start's source
  * directory, the route tree the app's routes with `sites/` mounted at `/sites`, all of it written
- * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does. With `bundle`
- * or `demo`, the plugins that make it the Worker's app bundle (`buildAppBundle`) or a demo (`buildDemo`) instead.
+ * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does. With a `kind`,
+ * its `plugins` make it the Worker's app bundle (`buildAppBundle`) or a demo (`buildDemo`) instead.
  */
-export function repoConfig(repo: string, { bundle, demo }: RepoConfigOptions = {}): InlineConfig {
+export function repoConfig(repo: string, { kind, plugins = [] }: RepoConfigOptions = {}): InlineConfig {
   const { src } = appSources();
-  // The route tree is the one the app's builds share; the Worker's keeps its own cache and
-  // temporary files, and a demo its own tree too.
-  const out = join(repo, ".sanoma", "app", ...(bundle ? ["bundle"] : demo ? ["demo"] : []));
-  const routeTree = join(demo ? out : join(repo, ".sanoma", "app"), "routeTree.gen.ts");
+  const demo = kind === "demo";
+  // The Worker's bundle keeps its own cache and temporary files, and a demo its own tree too.
+  const out = outOf(repo, kind);
+  const routeTree = routeTreeOf(repo, kind);
   const sites = join(repo, "sites");
   // Start joins srcDirectory to the root for its entries, so it must be relative.
   const srcDirectory = relative(repo, src);
@@ -499,11 +507,7 @@ export function repoConfig(repo: string, { bundle, demo }: RepoConfigOptions = {
       : []),
   ];
   // The tree's root, from the routes' directory: the app's, or a demo's.
-  const rootFile = demo
-    ? relative(join(src, "routes"), join(src, "demo", "root.tsx"))
-        .split(sep)
-        .join("/")
-    : "__root.tsx";
+  const rootFile = demo ? "../demo/root.tsx" : "__root.tsx";
   return {
     configFile: false,
     root: repo,
@@ -521,8 +525,8 @@ export function repoConfig(repo: string, { bundle, demo }: RepoConfigOptions = {
         },
       },
       sharedDeps(repo, src),
-      runtimeExternal(bundle !== undefined),
-      ...(bundle ?? demo ?? []),
+      runtimeExternal(kind === "bundle"),
+      ...plugins,
       contentPlugin(repo),
       sitesPlugin(repo),
       ...(demo ? [] : [publicPlugin(repo)]),
