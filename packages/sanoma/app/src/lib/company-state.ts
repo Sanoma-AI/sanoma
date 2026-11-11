@@ -3,8 +3,9 @@ import { hostnameUrl, isEnded } from "sanoma/workflows/shared";
 import { type CompanyState, GO_LIVE_LINES, type GoLiveRun, INFRA, type Place } from "../api.ts";
 
 // A company's one state, from facts, never from how it was made: what the bar's badge says, what
-// Home's last step ticks and which panel Hosting shows. `companyState` (server/company-state.ts)
-// gathers the facts; this file only reads them, so the browser and the tests share it.
+// Home's last step ticks (`isLive`) and which panel Hosting shows. `companyState`
+// (server/company-state.ts) gathers the facts; this file only reads them, so the tests call it
+// with facts of their own.
 
 /** What a company's state is read from. */
 export interface CompanyFacts {
@@ -24,6 +25,9 @@ export interface CompanyFacts {
 /** The lockfile's key of what `infra.ts` declares as `name`. */
 const key = (name: string) => `${INFRA}#${name}`;
 
+/** Whether the company runs online: its host bound, or this instance a hosted one. */
+export const isLive = (bound: readonly string[], place: Place) => bound.includes(key("host")) || place === "live";
+
 /** A run of going live that failed: ended so, or ended with a step that failed (an apply's host, say). */
 const failed = (run: GoLiveRun) =>
   run.status === "failed" || run.status === "cancelled" || (run.results?.some((r) => r.status === "failed") ?? false);
@@ -35,7 +39,7 @@ const failed = (run: GoLiveRun) =>
  */
 export function companyStateOf({ bound, place, declared, repository, run, host }: CompanyFacts): CompanyState {
   const hostBound = bound.includes(key("host"));
-  const live = hostBound || place === "live";
+  const live = isLive(bound, place);
   const state = run && !isEnded(run.status) ? "deploying" : live ? "live" : run && failed(run) ? "failed" : "local";
   const done = {
     repository,

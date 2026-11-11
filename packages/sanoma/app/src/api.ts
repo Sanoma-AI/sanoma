@@ -567,8 +567,8 @@ export interface CompanyState {
   /** Going live's latest run: its apply once it started one, else the run itself; none before going live. */
   run: GoLiveRun | null;
   /**
-   * Where the host answers, and whether `/healthz` did (unknown until asked): only while going
-   * live and when Hosting asks (`force`), so the badge never wakes a host that stops when idle.
+   * Where the host answers, and whether `/healthz` did (unknown until asked): only when Hosting
+   * asks (`force`), so the badge never wakes a host that stops when idle.
    */
   host: { url: string; healthy?: boolean } | null;
 }

@@ -358,13 +358,21 @@ export const goLiveProgressQuery = () =>
 /**
  * The company's state, under RUNS_KEY so a run started or decided refreshes it: read every 2 s
  * while going live, else every 30 s. With `force` (Hosting's), where the host answers and whether
- * it does, which is not polled but while going live, so an open page never keeps a host awake.
+ * it does, which is polled only while going live and until a host just bound answers (its DNS,
+ * certificate or cold start), and never read again as the window regains focus, so an open page
+ * never keeps a host awake.
  */
 export const companyStateQuery = ({ force = false } = {}) =>
   queryOptions({
     queryKey: [...RUNS_KEY, "company-state", force],
     queryFn: () => getCompanyState({ data: { force } }),
-    refetchInterval: (query) => (query.state.data?.state === "deploying" ? POLL_MS : force ? false : 30_000),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data?.state === "deploying") return POLL_MS;
+      if (!force) return 30_000;
+      return data?.state === "live" && data.host?.healthy === false ? POLL_MS : false;
+    },
+    refetchOnWindowFocus: !force,
   });
 
 /** Home's setup card: under RUNS_KEY, so a run that finishes ticks it; fresh for 5 s. */

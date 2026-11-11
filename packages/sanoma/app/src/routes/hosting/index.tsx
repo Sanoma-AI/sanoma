@@ -73,7 +73,7 @@ import {
 } from "../../components/common.tsx";
 import { DeclarationForm } from "../../components/declaration-form.tsx";
 import { type Adopt, FieldDiff } from "../../components/field-diff.tsx";
-import { GoLive, loadGoLive, RunStatus, useGoLiveHost } from "../../components/go-live.tsx";
+import { GoLive, HostAnswer, loadGoLive, RunStatus, useGoLiveHost } from "../../components/go-live.tsx";
 import { ReadyToGoLive } from "../../components/go-live-cloud.tsx";
 import { startRunFn } from "../../functions.ts";
 import {
@@ -88,6 +88,7 @@ import {
   RUNS_KEY,
   runLink,
   runsQuery,
+  setupStatusQuery,
   sourceQuery,
   useStartRun,
 } from "../../queries.ts";
@@ -95,13 +96,14 @@ import {
 export const Route = createFileRoute("/hosting/")({
   validateSearch: HostingSearch,
   loaderDeps: ({ search: { own } }) => ({ own: own === true }),
-  loader: async ({ context: { queryClient }, deps: { own } }) => {
+  loader: async ({ context: { queryClient }, deps: { own }, preload }) => {
     if (!import.meta.env.SSR) void loadCode();
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const drift = driftOf(config);
-    // The state, asking the host whether it answers; a failed read is said in the panel's place.
+    // The state, asking the host whether it answers as the page opens, but not for a link's
+    // preload (a hover), which must not wake it; a failed read is said in the panel's place.
     const [state] = await Promise.all([
-      queryClient.query({ ...companyStateQuery({ force: true }), staleTime: "static" }).catch(() => undefined),
+      queryClient.query({ ...companyStateQuery({ force: !preload }), staleTime: "static" }).catch(() => undefined),
       drift && loadLastCheck(queryClient, drift),
     ]);
     if (state && panelOf(state, own) === "goLive") await loadGoLive(queryClient);
@@ -682,10 +684,17 @@ function GoLiveFailed({ run }: { run: GoLiveRun }) {
 
 /**
  * Live: a warning while the host does not answer; on a hosted instance, how to open the company
- * on a Mac; on this computer, that it is the drafting copy of a company that runs online.
+ * on a Mac; on this computer, that it is the drafting copy of a company that runs online, and,
+ * once the host answers, Open, which signs the person in there (`HostAnswer`).
  */
 function Live({ state }: { state: CompanyState }) {
   const { data: place } = useSuspenseQuery({ ...configQuery(), select: (config) => config.place });
+  // Who the drafting copy signs in on the host, once it answers (`HostAnswer`).
+  const { data: you } = useQuery({
+    ...setupStatusQuery(),
+    select: (status) => status.signIn.you,
+    enabled: state.draftingCopy,
+  });
   const { host } = state;
   return (
     <>
@@ -693,6 +702,9 @@ function Live({ state }: { state: CompanyState }) {
         <Notice variant="destructive">
           The host is not answering at <ExternalLink href={host.url}>{host.url}</ExternalLink>.
         </Notice>
+      )}
+      {state.draftingCopy && host?.healthy === true && you !== undefined && (
+        <HostAnswer host={{ url: host.url, healthy: true }} you={you} />
       )}
       {state.draftingCopy && (
         <Notice>

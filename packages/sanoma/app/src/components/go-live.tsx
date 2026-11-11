@@ -622,7 +622,7 @@ function SignInFixes({ vendor, github }: { vendor: string | undefined; github: b
 }
 
 /** Where the host answers, once it does: Open signs the person in there by an invite when their email is declared. */
-function HostAnswer({ host, you }: { host: { url: string; healthy: boolean }; you: string | null }) {
+export function HostAnswer({ host, you }: { host: { url: string; healthy: boolean }; you: string | null }) {
   const signIn = useServerFn(goLiveSignInFn);
   const mutation = useMutation({
     // The tab opens on the click, so no popup blocker stops it, and is sent to the link once minted.

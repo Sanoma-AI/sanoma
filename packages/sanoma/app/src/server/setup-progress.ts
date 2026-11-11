@@ -2,7 +2,7 @@
 import "@tanstack/react-start/server-only";
 import type { SetupProgress } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { KEYS } from "./go-live.ts";
+import { isLive } from "../lib/company-state.ts";
 import { chatModel } from "./models.ts";
 
 /**
@@ -23,6 +23,6 @@ export async function setupProgress(app: AppContext, engine: string | undefined)
     agent: Boolean(engine) || model?.ready === true,
     try: finished.some((runs) => runs.length > 0),
     teammate: snapshot.people.people.filter((p) => p.type === "person").length > 1,
-    online: snapshot.bound.includes(KEYS.host) || place === "live",
+    online: isLive(snapshot.bound, place),
   };
 }

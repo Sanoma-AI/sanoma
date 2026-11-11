@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import type { SanomaClient } from "sanoma/workflows";
-import { DRIFT_WORKFLOW, GO_LIVE_HOST_WORKFLOW, isEnded } from "sanoma/workflows/shared";
+import { DRIFT_WORKFLOW, GO_LIVE_HOST_WORKFLOW } from "sanoma/workflows/shared";
 import type { CompanyState } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { companyStateOf, hostAt } from "../lib/company-state.ts";
@@ -9,12 +9,15 @@ import { answers, appliedHost, goLiveRunOf, KEYS } from "./go-live.ts";
 
 // The facts a company's state is read from (`companyStateOf`): the lockfile's bindings and
 // `infra.ts`'s host as the snapshot read them, where this instance is, going live's latest run,
-// and, only while going live and when Hosting asks, where the host answers and whether it does.
+// and, only when Hosting asks, where the host answers and whether it does.
 
 /** How long an answer from the host's `/healthz` is taken as it is. */
 const PROBE_MS = 10_000;
-/** The host's latest answers, by URL, in this process: so a page's polls never ask more than every `PROBE_MS`. */
-const probes = new Map<string, { at: number; healthy: boolean }>();
+/**
+ * The host's latest answers, by URL, in this process, each kept from when it was asked (so two
+ * requests at once share one): a page's polls never ask more than every `PROBE_MS`.
+ */
+const probes = new Map<string, { at: number; healthy: Promise<boolean> }>();
 
 /**
  * Going live's latest run: the latest `go-live-host`'s apply (`<run>:apply`) once it started it,
@@ -42,16 +45,16 @@ async function healthy(app: AppContext, host: { url: string; wakeUrl?: string })
   if (!app.snapshot.bound.includes(KEYS.host)) return undefined;
   const last = probes.get(host.url);
   if (last && Date.now() - last.at < PROBE_MS) return last.healthy;
-  const answer = { at: Date.now(), healthy: await answers(host) };
-  probes.set(host.url, answer);
-  return answer.healthy;
+  const answer = answers(host);
+  probes.set(host.url, { at: Date.now(), healthy: answer });
+  return answer;
 }
 
 /**
  * The company's state. Where the host answers (the latest apply that made it, else the latest
- * drift check, else its declared hostname) and whether `/healthz` does are read only while going
- * live and with `force` (Hosting, as it opens): the badge and Home never wake a host that stops
- * when idle.
+ * drift check, else its declared hostname) and whether `/healthz` does are read only with `force`
+ * (Hosting, as it opens and while going live): the badge and Home never wake a host that stops
+ * when idle, nor read the apply reports that say where it is.
  */
 export async function companyState(app: AppContext, { force = false } = {}): Promise<CompanyState> {
   const { snapshot, resolved, client, place } = app;
@@ -65,7 +68,7 @@ export async function companyState(app: AppContext, { force = false } = {}): Pro
     repository: snapshot.repository?.remote !== undefined || snapshot.bound.includes(KEYS.repo),
     run,
   } as const;
-  if (!force && !(run && !isEnded(run.status))) return companyStateOf(facts);
+  if (!force) return companyStateOf(facts);
   const hostname = declaredHost?.desired.hostname;
   const [applied, checked] = await Promise.all([appliedHost(client), checkedHost(client)]);
   const at = hostAt({ applied, checked, hostname: typeof hostname === "string" ? hostname : undefined });
