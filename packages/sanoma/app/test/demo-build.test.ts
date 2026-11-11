@@ -13,7 +13,8 @@ import { loadConfig } from "../../src/config.ts";
 
 // `sanoma demo` (`buildDemo`) of a company shaped as the invoicing app's: an app's site starting
 // an app's workflow that reads the company's and the app's collections, emails a PDF through
-// Resend's fake, sleeps a week and reminds, and renders a PDF in the page by a dynamic import.
+// Resend's fake, then rests at its week's sleep, as the app's run would; and renders a PDF in the
+// page by a dynamic import.
 // The demo is built once, then served as a host's page serves it, and driven in Chrome.
 const fixture = fileURLToPath(new URL("./fixtures/company-demo/", import.meta.url));
 const sanomaDir = fileURLToPath(new URL("../..", import.meta.url));
@@ -195,7 +196,8 @@ describe("buildDemo", () => {
             throw new Error(`${button}: ${String(err)}; the demo shows ${shown}; errors: ${errors.join("; ")}`);
           });
       };
-      await said("Send draft-1", /Sent INV-0001, reminded true after 7 days/);
+      // The run rests at its week's sleep, as the app's does: one email, no reminder.
+      await said("Send draft-1", /Sent INV-0001, 1 email, resting at sleep\.started/);
       await said("Send nothing", /Refused: No invoice nothing/);
       await said("Render a PDF", /PDF invoice-INV-0001\.pdf rendered/);
       // A toast shows, inside the demo's element.
