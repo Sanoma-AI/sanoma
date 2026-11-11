@@ -16,6 +16,7 @@ import type {
   TableChangePlan,
 } from "./description.ts";
 import type { OutlineNode } from "./outline.ts";
+import { isDate } from "./import.ts";
 
 // Types only: resource types as a UI reads them. Erased from the bundle.
 export type {
@@ -322,18 +323,6 @@ function checkField(where: string, field: string, kind: unknown): void {
 
 const NUMBER = /^-?\d+(\.\d+)?$/;
 const BOOLEANS: Readonly<Record<string, boolean>> = { true: true, false: false, yes: true, no: false };
-/** A date, or a date and time with seconds and an offset: what a `date` field takes (`z.iso.date()`, `z.iso.datetime({ offset: true })`). */
-const DATE = /^(\d{4})-(\d{2})-(\d{2})(T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]([01]\d|2[0-3]):[0-5]\d))?$/;
-
-/** Whether `text` is a date a `date` field takes: ISO 8601's shape, and a day its month has. */
-function isDate(text: string): boolean {
-  const parts = DATE.exec(text);
-  if (!parts) return false;
-  const [year, month, day] = [Number(parts[1]), Number(parts[2]), Number(parts[3])];
-  const at = new Date(0);
-  at.setUTCFullYear(year, month - 1, day); // not Date.UTC, which takes years 0 to 99 as 1900 to 1999
-  return at.getUTCMonth() === month - 1 && at.getUTCDate() === day;
-}
 
 /**
  * `value` as a column of `type` holds it, or undefined when it does not read as one: a number from
@@ -377,7 +366,7 @@ export const converts = (value: unknown, type: ColumnType): boolean => asType(va
  * What a reshape did to one record's value: moved to a new name, converted to the new type,
  * cleared or kept as it was because it cannot convert; none when it left the record alone.
  */
-export type Reshaping = "moved" | "converted" | "cleared" | "kept";
+type Reshaping = "moved" | "converted" | "cleared" | "kept";
 
 /** An empty value: `""` or `null`, which holds nothing to convert. */
 const isEmpty = (value: unknown) => value === "" || value === null;

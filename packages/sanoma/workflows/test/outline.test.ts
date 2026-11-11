@@ -375,6 +375,19 @@ describe("outlineWorkflow", () => {
     expect(source.slice(...nodes[0]!.span)).toMatch(/^try \{[\s\S]*finally \{[\s\S]*\}$/);
   });
 
+  it("reads a call whose failure a handler without ctx takes (`.catch`) as the call itself", () => {
+    const caught = defineWorkflow({
+      name: "caught",
+      trigger: "manual",
+      input: z.object({ text: z.string() }),
+      uses: [bluesky.post.create],
+      run: async (ctx, { text }) => {
+        await ctx.bluesky.post.create({ text }).catch((err: unknown) => ({ error: String(err) }));
+      },
+    });
+    expect(outlined(caught).nodes).toMatchObject([{ kind: "op", id: "bluesky.post.create", path: "0" }]);
+  });
+
   it("gives each node its path: its index among its siblings, under its parent's and the list it is in", () => {
     expect(outlineWorkflow(announce)).toMatchObject({
       nodes: ["0", "1", "2", "3", "4", "5", "6"].map((path) => ({ path })),

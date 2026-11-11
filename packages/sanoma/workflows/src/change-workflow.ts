@@ -4,7 +4,6 @@ import type {
   ChangeEvent,
   ChangeFacts,
   ChangeReport,
-  ChangeReshaped,
   ChangeState,
   ChangeVerified,
   changeOps,
@@ -13,7 +12,7 @@ import type {
 import { ADMIN, ChangeInput, initialChangeState } from "./change.ts";
 import type { recordsOps } from "./collection.ts";
 import { type Approver, defineWorkflow, type WorkflowDefinition } from "./define.ts";
-import { errorCode, isRunControlError, type SanomaError } from "./errors.ts";
+import { errorCode, isRunControlError, reported, type SanomaError } from "./errors.ts";
 import { approverLabel, type CHANGE_WORKFLOW, errorMessage, reshapeOf } from "./shared.ts";
 import type { CheckResult } from "./source.ts";
 
@@ -195,15 +194,7 @@ export function changeWorkflow(
           await show({ phase: "deploying" });
           // The records follow the merged declaration before the deploy: merged, a failure is the change's to report.
           const reshaping = reshapeOf(input.plan);
-          let reshaped: ChangeReshaped | undefined;
-          if (reshaping) {
-            try {
-              reshaped = await ctx.sanoma.records.reshape(reshaping);
-            } catch (err) {
-              if (isRunControlError(err)) throw err;
-              reshaped = { error: errorMessage(err) };
-            }
-          }
+          const reshaped = reshaping && (await ctx.sanoma.records.reshape(reshaping).catch(reported));
           const deploy = await steps.deploy(event.sha);
           const verified = await steps.verify(deploy);
           await steps.closeDraft(input.id);

@@ -194,6 +194,12 @@ const isDay = (text: string) => {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 };
 
+/** True for what a `date` field takes: a day of the calendar, or one with a time as `TIME` writes it. */
+export const isDate = (text: string): boolean => {
+  const time = TIME.exec(text);
+  return isDay(text) || (time !== null && isDay(time[1]!));
+};
+
 /** A cell's text as its field's value, or why the field refuses it (after the quoted text). */
 function valueOf(kind: Declared, text: string, people: ReadonlySet<string> | undefined) {
   if (typeof kind === "object" && kind.enum) {
@@ -208,12 +214,8 @@ function valueOf(kind: Declared, text: string, people: ReadonlySet<string> | und
       const lower = text.toLowerCase();
       return TRUE.has(lower) ? { value: true } : FALSE.has(lower) ? { value: false } : { refused: "is not yes or no" };
     }
-    case "date": {
-      const time = TIME.exec(text);
-      return isDay(text) || (time && isDay(time[1]!))
-        ? { value: text }
-        : { refused: "is not a date as 2026-11-01 writes one" };
-    }
+    case "date":
+      return isDate(text) ? { value: text } : { refused: "is not a date as 2026-11-01 writes one" };
     case "person":
       return !people || people.has(text) ? { value: text } : { refused: "is nobody declared" };
     default:

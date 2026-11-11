@@ -47,7 +47,9 @@ const INPUTS = {
 };
 const APP_WORKFLOWS = Object.keys(INPUTS) as (keyof typeof INPUTS)[];
 
-const root = rootWith({ "resources/people.ts": ALICE });
+// The archive's records are held as they are: a reshape of them is denied.
+const HELD = `forbid (principal, action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:archive");\n`;
+const root = rootWith({ "resources/people.ts": ALICE, "policies/held.cedar": HELD });
 /** A company with resource types, so apply is registered, and nothing declared. */
 const config = () => ({ workflows: [], connectors: companyFakes().connectors, root, ledger: memoryLedger() });
 
@@ -216,8 +218,8 @@ describe("on a worker given the app's steps", () => {
 
   it("says a reshape that fails on the patch's output, the file written and the run not failed", async () => {
     const at = { file: "resources/data.ts", export: "deals" };
-    // A rename to no name: the plan carries it, the operation refuses it.
-    const plan = { collection: "deals", rows: 0, changes: [{ kind: "rename", from: "seats", to: "" }] };
+    // A rename of the archive's field: the plan carries it, the policy denies the reshape.
+    const plan = { collection: "archive", rows: 0, changes: [{ kind: "rename", from: "seats", to: "count" }] };
     const runId = await app.client.start(
       PATCH_WORKFLOW,
       { at, fields: {}, rename: { "fields.seats": "count" }, plan },
@@ -229,6 +231,16 @@ describe("on a worker given the app's steps", () => {
       running: true,
     });
     expect((await app.client.run(runId))?.status).toBe("finished");
+    // A rename to no name is no plan: refused at the start.
+    const unnamed = { ...plan, changes: [{ kind: "rename", from: "seats", to: "" }] };
+    const err = await failure(
+      app.client.start(
+        PATCH_WORKFLOW,
+        { at, fields: {}, rename: { "fields.seats": "count" }, plan: unnamed },
+        { startedBy: "alice" },
+      ),
+    );
+    expect(errorCode(err)).toBe("invalid_input");
   });
 
   it("saves a draft only by saveDraft, as save:<id>, then ~<n> once one ended, listing them newest first with their outputs", async () => {

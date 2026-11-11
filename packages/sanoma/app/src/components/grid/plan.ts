@@ -2,25 +2,21 @@ import {
   type CollectionEntry,
   type ColumnType,
   ColumnTypeSchema,
+  type ConvertDecision,
   ConvertDecisionSchema,
-  type ReshapeChange,
+  FieldNameSchema,
   type ReshapeOutput,
   type TableChange,
   type TableChangePlan,
+  type WontConvert,
 } from "sanoma/workflows/description";
-import { FIELD_NAME, isRecord, reshaped, type Saved } from "sanoma/workflows/shared";
+import { isRecord, reshaped, type Saved } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 // A change to a collection's columns, as a person proposes it from the grid (`ColumnChange`) and
 // reviews it on its change's page (`TableChangePlan`, the runtime's: `sanoma/workflows/description`).
 // The app drafts the plan here from the rows it read and the declaration (`planOf`); the records
 // follow it when it lands (`sanoma.records.reshape`, by `reshaped`, which the counts here use too).
-
-/** A new field's name, as `collection()` takes it. */
-const NAME = z.string().regex(FIELD_NAME, "Letters, digits and _, not a digit first");
-
-/** The records a change cannot convert: how many, and at most `SAMPLE` of them by key. */
-type WontConvert = Extract<TableChange, { kind: "retype" }>["wontConvert"];
 
 /** How many of the rows that won't convert a plan names. */
 const SAMPLE = 20;
@@ -34,8 +30,8 @@ export const UNAVAILABLE = "Links and free-form columns aren't available yet";
  * choice in the column panel.
  */
 export const ColumnChange = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("add"), field: NAME, type: ColumnTypeSchema, required: z.boolean() }),
-  z.strictObject({ kind: z.literal("rename"), from: z.string().min(1), to: NAME }),
+  z.strictObject({ kind: z.literal("add"), field: FieldNameSchema, type: ColumnTypeSchema, required: z.boolean() }),
+  z.strictObject({ kind: z.literal("rename"), from: z.string().min(1), to: FieldNameSchema }),
   z.strictObject({
     kind: z.literal("retype"),
     field: z.string().min(1),
@@ -48,7 +44,7 @@ export const ColumnChange = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("convert"),
     field: z.string().min(1),
-    key: NAME,
+    key: FieldNameSchema,
     type: ColumnTypeSchema,
     decision: ConvertDecisionSchema.optional(),
   }),
@@ -84,24 +80,31 @@ export const takenToday = (type: ColumnType): boolean =>
 
 const filled = (value: unknown) => value !== undefined && value !== null && value !== "";
 
-/** The records of `rows` whose value `change` cannot convert (`reshaped` keeps or clears it), counted and sampled by key. */
-function wontConvert(
+/** The value under `key` of a free-form field's object; none for anything else. */
+const valueAt = (value: unknown, key: string): unknown => (isRecord(value) ? value[key] : undefined);
+
+/**
+ * The records of `rows` whose value a retype or a conversion cannot convert (`reshaped` keeps or
+ * clears it), counted and sampled by key, with the person's `decision` for them when there are some.
+ */
+function unconverted(
   rows: readonly Saved[],
-  change: ReshapeChange,
-  valueOf: (record: Saved["record"]) => unknown,
-): WontConvert {
+  change: Extract<ColumnChange, { kind: "retype" | "convert" }>,
+): { wontConvert: WontConvert; decision?: ConvertDecision } {
   const wont = rows.filter(({ record }) => {
     const { did } = reshaped(record, change);
     return did === "kept" || did === "cleared";
   });
+  const valueOf = (record: Saved["record"]) =>
+    change.kind === "retype" ? record[change.field] : valueAt(record[change.field], change.key);
   return {
-    count: wont.length,
-    sample: wont.slice(0, SAMPLE).map(({ key, record }) => ({ key, value: valueOf(record) })),
+    wontConvert: {
+      count: wont.length,
+      sample: wont.slice(0, SAMPLE).map(({ key, record }) => ({ key, value: valueOf(record) })),
+    },
+    ...(wont.length > 0 && change.decision && { decision: change.decision }),
   };
 }
-
-/** The value under `key` of a free-form field's object; none for anything else. */
-const valueAt = (value: unknown, key: string): unknown => (isRecord(value) ? value[key] : undefined);
 
 /** Each key of the objects in a free-form field, with how many of the rows have it, the most first. */
 export function keysIn(rows: readonly Saved[], field: string): { key: string; count: number }[] {
@@ -153,10 +156,8 @@ export function planOf(collection: CollectionEntry, rows: readonly Saved[], chan
       planned = change;
       break;
     case "retype": {
-      const { decision, ...rest } = change;
-      const from = typeOf(collection.fields[change.field]!);
-      const wont = wontConvert(rows, change, (record) => record[change.field]);
-      planned = { ...rest, from, wontConvert: wont, ...(wont.count > 0 && decision && { decision }) };
+      const { decision: _, ...rest } = change;
+      planned = { ...rest, from: typeOf(collection.fields[change.field]!), ...unconverted(rows, change) };
       break;
     }
     case "require":
@@ -170,10 +171,8 @@ export function planOf(collection: CollectionEntry, rows: readonly Saved[], chan
       planned = { ...change, unmatched: count(change.field) };
       break;
     case "convert": {
-      const { decision, ...rest } = change;
-      const inner = (record: Saved["record"]) => valueAt(record[change.field], change.key);
-      const wont = wontConvert(rows, change, inner);
-      planned = { ...rest, wontConvert: wont, ...(wont.count > 0 && decision && { decision }) };
+      const { decision: _, ...rest } = change;
+      planned = { ...rest, ...unconverted(rows, change) };
       break;
     }
   }
@@ -195,13 +194,7 @@ const rename = (field: string, to: string | null): DeclarationEdit => ({
 });
 /** A field kept with its values, `hidden: true` (and so optional): what removing a column is. */
 const hidden = (field: string, declared: Field): DeclarationEdit => ({
-  fields: {
-    [`fields.${field}`]: {
-      ...(typeof declared === "string" ? { type: declared } : declared),
-      optional: true,
-      hidden: true,
-    },
-  },
+  fields: { [`fields.${field}`]: { ...(fieldOf(typeOf(declared), false) as object), hidden: true } },
   rename: {},
 });
 

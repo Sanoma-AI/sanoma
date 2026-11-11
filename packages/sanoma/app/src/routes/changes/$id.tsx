@@ -1,4 +1,3 @@
-import { TableChangePlanSchema } from "sanoma/workflows/description";
 import { CHANGE_WORKFLOW } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
@@ -56,9 +55,8 @@ function ChangePage() {
   // The loader found it; a change once opened is never gone.
   if (!change) throw notFound();
   const { state } = change;
-  // A change to a collection's columns carries its plan: reviewed as the table change it is, when
-  // it reads as one (else as any change).
-  const plan = TableChangePlanSchema.safeParse(state.plan).data;
+  // A change to a collection's columns carries its plan: reviewed as the table change it is.
+  const { plan } = state;
   const { data: config } = useSuspenseQuery(configQuery());
   return (
     <>

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { LIFETIMES } from "./host.ts";
 import type { Outline } from "./outline.ts";
 import type { ResourceFields } from "./resource.ts";
-import { EFFECTS, FIELD_TYPES } from "./shared.ts";
+import { EFFECTS, FIELD_NAME, FIELD_TYPES } from "./shared.ts";
 
 /** A JSON Schema (draft 2020-12), as `jsonSchemaOf` writes one. */
 const JsonSchema = z.record(z.string(), z.unknown());
@@ -415,10 +415,31 @@ export type ConvertDecision = z.infer<typeof ConvertDecisionSchema>;
 
 const COUNT = z.number().int();
 
+/** A field's name, as `collection()` takes it (`FIELD_NAME`). */
+export const FieldNameSchema = z.string().regex(FIELD_NAME, "Letters, digits and _, not a digit first");
+
 /** The records a change cannot convert: how many, and a sample of them by key. */
 const WontConvertSchema = z.object({
   count: COUNT,
   sample: z.array(z.object({ key: z.string(), value: z.unknown() })),
+});
+export type WontConvert = z.infer<typeof WontConvertSchema>;
+
+// The changes that bring the records along, by names and the target type alone: what
+// `sanoma.records.reshape` takes, and, with their counts, a plan's.
+const RenameSchema = z.object({ kind: z.literal("rename"), from: z.string().min(1), to: FieldNameSchema });
+const RetypeSchema = z.object({
+  kind: z.literal("retype"),
+  field: z.string().min(1),
+  to: ColumnTypeSchema,
+  decision: ConvertDecisionSchema.optional(),
+});
+const ConvertSchema = z.object({
+  kind: z.literal("convert"),
+  field: z.string().min(1),
+  key: FieldNameSchema,
+  type: ColumnTypeSchema,
+  decision: ConvertDecisionSchema.optional(),
 });
 
 /**
@@ -427,28 +448,14 @@ const WontConvertSchema = z.object({
  * `hidden: true`, so the values stay); rename, retype and convert bring the records along
  * (`reshaped` in `shared.ts`).
  */
-export const TableChangeSchema = z.discriminatedUnion("kind", [
+const TableChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("add"), field: z.string(), type: ColumnTypeSchema, required: z.boolean(), empty: COUNT }),
-  z.object({ kind: z.literal("rename"), from: z.string(), to: z.string() }),
-  z.object({
-    kind: z.literal("retype"),
-    field: z.string(),
-    from: ColumnTypeSchema,
-    to: ColumnTypeSchema,
-    wontConvert: WontConvertSchema,
-    decision: ConvertDecisionSchema.optional(),
-  }),
+  RenameSchema,
+  RetypeSchema.extend({ from: ColumnTypeSchema, wontConvert: WontConvertSchema }),
   z.object({ kind: z.literal("require"), field: z.string(), empty: COUNT }),
   z.object({ kind: z.literal("hide"), field: z.string(), filled: COUNT }),
   z.object({ kind: z.literal("link"), field: z.string(), to: z.string(), unmatched: COUNT }),
-  z.object({
-    kind: z.literal("convert"),
-    field: z.string(),
-    key: z.string(),
-    type: ColumnTypeSchema,
-    wontConvert: WontConvertSchema,
-    decision: ConvertDecisionSchema.optional(),
-  }),
+  ConvertSchema.extend({ wontConvert: WontConvertSchema }),
 ]);
 export type TableChange = z.infer<typeof TableChangeSchema>;
 
@@ -469,22 +476,7 @@ export type TableChangePlan = z.infer<typeof TableChangePlanSchema>;
  * or a conversion, by names and the target type alone (a `TableChange` of those kinds, its counts
  * dropped).
  */
-export const ReshapeChangeSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("rename"), from: z.string().min(1), to: z.string().min(1) }),
-  z.object({
-    kind: z.literal("retype"),
-    field: z.string().min(1),
-    to: ColumnTypeSchema,
-    decision: ConvertDecisionSchema.optional(),
-  }),
-  z.object({
-    kind: z.literal("convert"),
-    field: z.string().min(1),
-    key: z.string().min(1),
-    type: ColumnTypeSchema,
-    decision: ConvertDecisionSchema.optional(),
-  }),
-]);
+const ReshapeChangeSchema = z.discriminatedUnion("kind", [RenameSchema, RetypeSchema, ConvertSchema]);
 export type ReshapeChange = z.infer<typeof ReshapeChangeSchema>;
 
 /** What `sanoma.records.reshape` takes: a collection's name and the changes to bring its records along, in order. */

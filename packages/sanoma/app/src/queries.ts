@@ -66,6 +66,7 @@ import {
   startRunFn,
 } from "./functions.ts";
 import { type Api, createApi, type UntypedApi } from "./api-client.ts";
+import { isHidden } from "./components/grid/plan.ts";
 
 /**
  * The company's operations and workflows, called as the person on the page (`callFn`): a loader's
@@ -215,7 +216,7 @@ export function siteCallers(config: ConfigDescription, kind: SiteCall["kind"], t
 /** A collection's enum fields the grid shows (none hidden), each with its values, in the collection's order. */
 export const enumFields = (fields: CollectionEntry["fields"]) =>
   Object.entries(fields).flatMap(([name, kind]) =>
-    typeof kind === "object" && "enum" in kind && !kind.hidden
+    typeof kind === "object" && "enum" in kind && !isHidden(kind)
       ? [{ name, values: kind.enum as readonly string[] }]
       : [],
   );

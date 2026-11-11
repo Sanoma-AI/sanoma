@@ -4,7 +4,7 @@ import type { ChatTurnInput, ChatTurnOutput } from "./chat-workflow.ts";
 import type { ResolvedConfig, SanomaConfig } from "./config.ts";
 import type { SanomaClient } from "./client.ts";
 import { defineWorkflow, type Principal, type WorkflowDefinition } from "./define.ts";
-import { isRunControlError } from "./errors.ts";
+import { reported } from "./errors.ts";
 import type { recordsOps } from "./collection.ts";
 import type { ChangeReshaped } from "./change.ts";
 import { AtSchema, TableChangePlanSchema } from "./description.ts";
@@ -16,7 +16,6 @@ import {
   FIELD_NAME,
   type GO_LIVE_HOST_WORKFLOW,
   type GO_LIVE_WORKFLOW,
-  errorMessage,
   type PATCH_WORKFLOW,
   reshapeOf,
   type SAVE_DRAFT_WORKFLOW,
@@ -310,15 +309,7 @@ export function appWorkflows(runner: AppRunner, records: typeof recordsOps): Wor
         let output = await runner.step("patch", input);
         if (!("change" in output) && input.plan !== undefined) {
           const reshaping = reshapeOf(input.plan);
-          let reshaped: ChangeReshaped | undefined;
-          if (reshaping) {
-            try {
-              reshaped = await ctx.sanoma.records.reshape(reshaping);
-            } catch (err) {
-              if (isRunControlError(err)) throw err;
-              reshaped = { error: errorMessage(err) };
-            }
-          }
+          const reshaped = reshaping && (await ctx.sanoma.records.reshape(reshaping).catch(reported));
           output = { ...output, ...(reshaped && { reshaped }), running: await runner.reload() };
         }
         return output;

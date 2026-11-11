@@ -27,11 +27,16 @@ export const ada = sanoma.person({ id: "ada" });
 export const bob = sanoma.person({ id: "bob" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 `;
-// A change that touches secret/ is denied: anything else is allowed, but for the runtime's own rule.
+// A change that touches secret/ is denied, and so is a reshape of the archive's records: anything
+// else is allowed, but for the runtime's own rule.
 const POLICY = `@id("no-secrets")
 @reason("A change to secret/ is refused")
 forbid (principal, action == Sanoma::Action::"sanoma.change.merge", resource is Sanoma::Change)
 when { resource.touches.contains("secret/") };
+
+@id("archive-held")
+@reason("The archive's records are held as they are")
+forbid (principal, action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:archive");
 `;
 const page = (id: string) => `https://sanoma.example/changes/${id}`;
 
@@ -334,11 +339,11 @@ describe("the change workflow", () => {
   });
 
   it("reports a reshape that fails on the change, merged all the same, the run not failed", async () => {
-    // A rename to no name: the plan carries it, the operation refuses it.
+    // A rename of the archive's field: the plan carries it, the policy denies the reshape.
     const plan: TableChangePlan = {
-      collection: "deals",
+      collection: "archive",
       rows: 0,
-      changes: [{ kind: "rename", from: "seats", to: "" }],
+      changes: [{ kind: "rename", from: "seats", to: "count" }],
     };
     const head = repo.edit("unnamed", { "notes/unnamed.md": "\n" });
     const runId = await app.client.openChange(

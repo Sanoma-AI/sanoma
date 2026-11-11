@@ -1,5 +1,5 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
-import type { TableChange, TableChangePlan } from "sanoma/workflows/description";
+import type { TableChange, TableChangePlan, WontConvert } from "sanoma/workflows/description";
 import type { ChangeReshaped } from "sanoma/workflows/shared";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
@@ -66,7 +66,7 @@ export function WontConvertSample({
 }: {
   keyField: string;
   field: string;
-  wontConvert: Extract<TableChange, { kind: "retype" }>["wontConvert"];
+  wontConvert: WontConvert;
 }) {
   return (
     <div className="overflow-auto rounded-lg border">
