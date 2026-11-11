@@ -42,7 +42,7 @@ export interface HostOutputs {
 }
 
 /** Where a wakeup, and a check of the host's own process, reaches it: its `wakeUrl`, else its `url`. */
-export const wakeUrlOf = (outputs: HostOutputs): string => outputs.wakeUrl ?? outputs.url;
+export const wakeUrlOf = (outputs: Pick<HostOutputs, "url" | "wakeUrl">): string => outputs.wakeUrl ?? outputs.url;
 
 /**
  * A resource type's `host`: the fields it takes the runtime's inputs in, by dotted path into its

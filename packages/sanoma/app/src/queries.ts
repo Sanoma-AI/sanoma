@@ -38,6 +38,7 @@ import {
   getChat,
   getChatModel,
   getChats,
+  getCompanyState,
   getConfig,
   getCredentials,
   getConnections,
@@ -56,6 +57,7 @@ import {
   getSaves,
   getScenarios,
   getPeopleSignIns,
+  getSetupProgress,
   getSetupStatus,
   getSource,
   getStoreMoves,
@@ -352,6 +354,30 @@ export const goLiveProgressQuery = () =>
       return running || (progress?.bound.host && !progress.host?.healthy) ? POLL_MS : false;
     },
   });
+
+/**
+ * The company's state, under RUNS_KEY so a run started or decided refreshes it: read every 2 s
+ * while going live, else every 30 s. With `force` (Hosting's), where the host answers and whether
+ * it does, which is polled only while going live and until a host just bound answers (its DNS,
+ * certificate or cold start), and never read again as the window regains focus, so an open page
+ * never keeps a host awake.
+ */
+export const companyStateQuery = ({ force = false } = {}) =>
+  queryOptions({
+    queryKey: [...RUNS_KEY, "company-state", force],
+    queryFn: () => getCompanyState({ data: { force } }),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data?.state === "deploying") return POLL_MS;
+      if (!force) return 30_000;
+      return data?.state === "live" && data.host?.healthy === false ? POLL_MS : false;
+    },
+    refetchOnWindowFocus: !force,
+  });
+
+/** Home's setup card: under RUNS_KEY, so a run that finishes ticks it; fresh for 5 s. */
+export const setupProgressQuery = () =>
+  queryOptions({ queryKey: [...RUNS_KEY, "setup-progress"], queryFn: () => getSetupProgress(), staleTime: 5_000 });
 
 /** The vendor's credential statuses, if its drivers declare any: for `select`. */
 export const credentialsFor = (vendor: string) => (all: CredentialsResponse) => all[vendor];
@@ -814,11 +840,13 @@ export const isPeople = (r: { vendor: string; type: string }) => r.vendor === "s
 
 /**
  * Hosting's search (`/hosting`, and `/resources`, which redirects there): `?resource=`, the
- * declaration whose file the page shows, and `?edit`, its form open above it.
+ * declaration whose file the page shows, `?edit`, its form open above it, and `?own`, going live
+ * on accounts of the company's own where `infra.ts` declares Sanoma Cloud.
  */
 export const HostingSearch = z.object({
   resource: z.string().optional().catch(undefined),
   edit: z.boolean().optional().catch(undefined),
+  own: z.boolean().optional().catch(undefined),
 });
 
 /** People's views (`?show=`): the people, the groups, the agents. */

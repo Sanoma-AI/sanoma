@@ -503,6 +503,8 @@ export interface GoLiveChoices {
 /** An apply run as going live (on Hosting) follows it: its status, the plan it waits on, and what it did. */
 export interface GoLiveRun {
   runId: string;
+  /** Its workflow: `apply`, or the built-in going live that started it, before its apply. */
+  workflow: string;
   status: RunSummary["status"];
   /** What it asks a person to approve, in the Inbox; the plan. */
   pending?: { approvalId: string; plan?: ApplyPlan };
@@ -543,6 +545,40 @@ export interface GoLiveProgress {
   /** Where the host answers, from the last apply that made or changed it, and whether `/healthz` answers. */
   host: { url: string; healthy: boolean } | null;
 }
+/**
+ * Where a company is, read from facts, never from how it was made (`companyStateOf`): `local`,
+ * nothing bound to run it online; `deploying`, going live's run under way; `live`, its host bound
+ * (or this instance a hosted one); `failed`, going live's latest run failed and its host is not bound.
+ */
+export type CompanyPhase = "local" | "deploying" | "live" | "failed";
+
+/** What going live makes, in its order: the progress list's lines. */
+export const GO_LIVE_LINES = ["repository", "database", "host", "signIn"] as const;
+
+/** A company's state (`getCompanyState`): the bar's badge, Home's last step and Hosting's panel. */
+export interface CompanyState {
+  state: CompanyPhase;
+  /** Live, and this instance is on this computer: a copy the person drafts changes in. */
+  draftingCopy: boolean;
+  /** The host `infra.ts` declares: Sanoma Cloud's (its type binds its own bootstrap), one of the company's own accounts, or none. */
+  declared: "cloud" | "own" | null;
+  /** How far going live is, a line each thing it makes: done or not. */
+  lines: { line: (typeof GO_LIVE_LINES)[number]; done: boolean }[];
+  /** Going live's latest run: its apply once it started one, else the run itself; none before going live. */
+  run: GoLiveRun | null;
+  /**
+   * Where the host answers, and whether `/healthz` did (unknown until asked): only when Hosting
+   * asks (`force`), so the badge never wakes a host that stops when idle.
+   */
+  host: { url: string; healthy?: boolean } | null;
+}
+
+/** Home's setup card, in its order: each step ticked from facts (`setupProgress`). */
+export const SETUP_STEPS = ["start", "agent", "try", "teammate", "online"] as const;
+export type SetupStep = (typeof SETUP_STEPS)[number];
+/** Whether each of Home's setup steps is done (`getSetupProgress`). */
+export type SetupProgress = Record<SetupStep, boolean>;
+
 /** Said at the top of `infra.ts` when it declares an existing database, and on the page. */
 export const PASSWORD_NOTE = [
   "The database password is declared as a generated secret, since Supabase never reads it back.",

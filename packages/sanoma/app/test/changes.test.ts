@@ -96,9 +96,9 @@ describe("the Changes section", () => {
 
   it("puts Changes after Inbox in the bar when the repository has a remote, and not without one", async () => {
     const { html } = await fixture.page("/inbox");
-    expect(barLabels(html)[0]).toEqual(["Inbox", "Changes", "Workflows"]);
+    expect(barLabels(html)[0]).toEqual(["Home", "Inbox", "Changes", "Workflows"]);
     const without = await (await fetch(new URL("/inbox", bare.url))).text();
-    expect(barLabels(without)[0]).toEqual(["Inbox", "Workflows"]);
+    expect(barLabels(without)[0]).toEqual(["Home", "Inbox", "Workflows"]);
   });
 
   it("lists the open change, and says how one opens when none is done", async () => {
