@@ -24,6 +24,7 @@ import {
   apiNameOf,
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
+  DESCRIBE_CALL,
   isVisitor,
   flatten,
   LOGIN_CODE_WORKFLOW,
@@ -151,6 +152,76 @@ export const appConfig = ({ snapshot, place, resolved }: AppContext): AppConfig 
   place,
   databaseHost: databaseHost(resolved.databaseUrl),
   content: snapshot.content,
+});
+
+/**
+ * The company as an agent reads it (`agentDescription`): what it may start, call and look up, as
+ * JSON Schema, and nothing an agent has no use for or should not see.
+ */
+export interface AgentDescription {
+  /** The company's name as people read it. */
+  name: string;
+  /** The company's own workflows (none of the runtime's): started by `name`, or `apiName` through `callApi`. */
+  workflows: {
+    name: string;
+    apiName: string;
+    title?: string;
+    trigger: ConfigDescription["workflows"][number]["trigger"];
+    input: Record<string, unknown>;
+  }[];
+  /** The operations that may be called directly (`OpEntry.direct`), outside a run: a lookup is one whose effect is read. */
+  ops: {
+    id: string;
+    effect: string;
+    description?: string;
+    input: Record<string, unknown>;
+    output: Record<string, unknown>;
+  }[];
+  /** The collections, with their operations' ids. */
+  collections: {
+    name: string;
+    title?: string;
+    key: string;
+    fields: ConfigDescription["collections"][number]["fields"];
+    ops: string[];
+  }[];
+}
+
+/**
+ * The snapshot's description narrowed for an agent (`DESCRIBE_CALL`): each of the company's own
+ * workflows' name, api name, title, trigger and input; each direct operation's contract; each
+ * collection's fields. One projection for `/mcp` and a site or script alike. Left out on purpose:
+ * the runtime's own workflows (`builtin`: an agent starts none; drift is `/mcp`'s own tool), the
+ * policy and its text, files and source, the resources' desired values, secret bindings,
+ * connections, sites and the database's host.
+ */
+export const agentDescription = (description: ConfigDescription): AgentDescription => ({
+  name: description.name,
+  workflows: description.workflows
+    .filter((wf) => !wf.builtin)
+    .map((wf) => ({
+      name: wf.name,
+      apiName: apiNameOf(wf.name),
+      ...(wf.title !== undefined && { title: wf.title }),
+      trigger: wf.trigger,
+      input: wf.input,
+    })),
+  ops: description.ops
+    .filter((op) => op.direct)
+    .map((op) => ({
+      id: op.id,
+      effect: op.effect,
+      ...(op.description !== undefined && { description: op.description }),
+      input: op.input,
+      output: op.output,
+    })),
+  collections: description.collections.map((c) => ({
+    name: c.name,
+    ...(c.title !== undefined && { title: c.title }),
+    key: c.key,
+    fields: c.fields,
+    ops: c.ops,
+  })),
 });
 
 /**
@@ -646,11 +717,17 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * workflow's api name (`apiNameOf`) starts it, as does `<name>.start`, answering `{ runId }`;
  * `<name>.result` (`{ runId, waitMs? }`, at most 20 s; a failed run's failure, `runFailure`), `.latest`, `.runs` (`{ limit? }`),
  * `.approvals` and `.ledger` (`{ runId }`) read its runs, a run of another workflow being none.
- * Anything else is `invalid_input`. A visitor (`isVisitor`) calls no built-in workflow and reads
- * only the result of a run it started: its other reads are `policy_denied`.
+ * `sanoma.describe` (`DESCRIBE_CALL`, a name of the runtime's vendor, so none of the company's)
+ * answers `agentDescription`. Anything else is `invalid_input`. A visitor (`isVisitor`) calls no
+ * built-in workflow, reads no description and reads only the result of a run it started: its other
+ * reads are `policy_denied`.
  */
 export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
   const { client, resolved } = app;
+  if (name === DESCRIBE_CALL) {
+    if (isVisitor(actor)) throw new PolicyDeniedError(name, "a visitor does not read the company's description");
+    return agentDescription(app.snapshot.description);
+  }
   if (resolved.ops.has(name)) {
     return client.call(name, input ?? {}, { actor, ...(id === undefined ? {} : { id }) });
   }

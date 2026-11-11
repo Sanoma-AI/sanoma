@@ -232,7 +232,7 @@ An operation's call and a start send a new id each (`crypto.randomUUID()`, lette
 | `code`             | Status | When                                                                                                                                                                                                                 |
 | ------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `invalid_input`    | 400    | Nobody said who is asking, the name is no operation or workflow, the operation is not direct, or the input does not match its schema (`issues`)                                                                      |
-| `policy_denied`    | 403    | The policy denied the call, or a visitor asked for a workflow's runs                                                                                                                                                 |
+| `policy_denied`    | 403    | The policy denied the call, or a visitor asked for a workflow's runs or the description                                                                                                                              |
 | `approval_pending` | 409    | The policy holds the call for an approval: `runId` is the run of the built-in `call` workflow that makes it once approved, in the Inbox and at `/workflows/call/runs/<runId>`; `api.call.result(runId)` waits for it |
 | `run_running`      | 409    | `.result` waited and the run has not ended (`runId`)                                                                                                                                                                 |
 | `record_changed`   | 409    | A collection's `save` with `ifRecord` found the record changed since it was read, or gone: nothing was written; `current` is the record as it stands, when the runtime says                                          |
@@ -258,6 +258,35 @@ async function markWon(company: string): Promise<string> {
 ```
 
 `describeConfig` reads what each site calls from its pages' source, parsed and never run, since they are browser code (`readSites`, in `sanoma/workflows/describe`: the site's outline, as a workflow has one): a workflow's page and a collection's list the sites' pages that call them under **Used by**, and a call to a workflow, collection or operation the config does not have, or to an operation a page may not call directly, fails `sanoma check`. A page links there only when this build serves it. Name what a site calls in its code (`<RunForm workflow="announce" />`, `api.announce.start(…)`, `api.data.outbound.list()`): a name held in a variable or built at run time is not read, so its page is not listed.
+
+### Agents over MCP
+
+An AI agent such as Claude Code can use the company through `/mcp`, an MCP server over Streamable HTTP. It serves clients of MCP 2026-07-28 and 2025-era clients alike, and keeps no session. The agent acts as the person the login names, so the policy decides each call and the ledger records it as theirs. On this machine the client names the person in the `x-sanoma-actor` header. For Claude Code, an `.mcp.json` entry:
+
+```json
+{
+  "mcpServers": {
+    "acme": { "type": "http", "url": "http://127.0.0.1:3000/mcp", "headers": { "x-sanoma-actor": "ada" } }
+  }
+}
+```
+
+On a host, `/mcp` is behind the staff sign-in like the rest of the app, so today only a browser with a signed-in session reaches it there; the header means nothing on a host. An API token (`sca_…`) acts as a visitor and is refused. An ordinary MCP client cannot sign in to a hosted company yet: that needs the hosted sign-in for agents, which is not built.
+
+It has six tools, as the person:
+
+| Tool        | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `describe`  | What `sanoma.describe` answers through `POST /api/call`: each of the company's own workflows (name, api name, title, trigger, input as JSON Schema), each operation that may be called directly (id, effect, description, input and output) and each collection. It leaves out the runtime's own workflows, which no tool starts, and the policy, file paths and source, the resources' declared values, secret bindings, connections and the database's host |
+| `lookup`    | Calls an operation that may be called directly and whose effect is read; any other is `invalid_input`. A call the policy holds is `approval_pending`, with the `runId` of its run                                                                                                                                                                                                                                                                             |
+| `get_run`   | A run's workflow, status, who started it, when, its approvals and its error                                                                                                                                                                                                                                                                                                                                                                                   |
+| `wait_run`  | Waits up to 20 s (`waitMs`) for the run to end: `{ runId, status: "finished", output }`, or `{ runId, status: "running" }` while it has not                                                                                                                                                                                                                                                                                                                   |
+| `drift`     | Starts the built-in drift, which reads each declared resource from its vendor and changes nothing, and answers as `wait_run` does. A company whose data files declare no resources has nothing to check: `invalid_input`, saying so                                                                                                                                                                                                                           |
+| `start_run` | Starts one of the company's own workflows, by the name or api name `describe` lists, with its input: `{ runId }`. Any other name is `invalid_input`; the runtime's own workflows, such as `apply`, are not started here                                                                                                                                                                                                                                       |
+
+`start_run`, `drift` and `lookup` take an optional `id` (letters, digits, `_` and `-`, at most 200), as the app's own calls send one. Send a new one for each call and the same one on a retry: a start or a drift with an id it already has answers that run (the run's id is the `id`) when the workflow, input and person are the same, and is refused (`invalid_input`) when they are not; a held lookup retried with its id is the same held run, so it files one approval.
+
+`/mcp` only answers requests: a 2026-07-28 client's `subscriptions/listen` is refused at once (JSON-RPC `-32603`), since the tools never change. A refusal of a tool call is a tool error whose structured content is the error body above, with its `status`. A visitor is refused (403), as is a request from a page on another site, told by its `Sec-Fetch-Site` or `Origin` header, so a page elsewhere cannot act with this browser's name; a public site's host has no `/mcp` (404). An MCP client sends neither header and needs no CSRF token.
 
 ### Content
 

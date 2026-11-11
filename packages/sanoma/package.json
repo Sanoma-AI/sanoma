@@ -330,6 +330,7 @@
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@google-cloud/kms": "^6.3.0",
     "@lezer/highlight": "^1.2.5",
+    "@modelcontextprotocol/server": "2.4.0",
     "@phosphor-icons/react": "^2.1.10",
     "@shadcn/react": "^0.3.1",
     "@tailwindcss/vite": "^4.3.3",
