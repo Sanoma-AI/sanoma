@@ -50,8 +50,9 @@ import { ColumnChange } from "./components/grid/plan.ts";
 export const ACTOR_HEADER = "x-sanoma-actor";
 
 /**
- * The declared agent (`sanoma.agent`) a call is made by, on behalf of the person the login names:
- * read on the loopback login alone (`actingFor`), refused on a host, whose sign-in says who acts.
+ * The declared agent (`sanoma.agent`) a call is made by, on behalf of the person the login names,
+ * on `/mcp` and `/api/call` (`sanoma call --agent`): read on the loopback login alone (`actingFor`),
+ * refused on a host, whose sign-in says who acts.
  */
 export const AGENT_HEADER = "x-sanoma-agent";
 

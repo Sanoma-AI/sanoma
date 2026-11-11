@@ -898,7 +898,9 @@ function fieldChanges(
  * `POST /api/call`: `callApi` over plain JSON, for a client that is not the app's page, such as
  * Sanoma Cloud's connector with a bearer token, taken only on a public site's host. The body is a
  * `CallRequest`; the answer is the call's output as JSON (`null` for none), or an `ApiError`'s body
- * with its status.
+ * with its status. On this machine, an `x-sanoma-agent` header makes the call the named declared
+ * agent's on the person's behalf (`actingFor`, as `/mcp` does: `not_admitted` for an id that is no
+ * declared agent, a 400 on a host); without it, the call is the person's.
  */
 export async function postCall(request: Request, context: ActorContext): Promise<Response> {
   // Only a public site's login reads a token: elsewhere the request would act as the cookie's
@@ -907,7 +909,8 @@ export async function postCall(request: Request, context: ActorContext): Promise
     return Response.json({ error: "An api token is taken only on a public site's host" }, { status: 401 });
   }
   try {
-    const actor = await requireActor(context);
+    // On this machine, the declared agent `x-sanoma-agent` names, acting for the person, as `/mcp` takes it.
+    const actor = actingFor(context.app, request, await requireActor(context));
     const call = parse(CallRequest, await request.json().catch(() => undefined), "The request");
     return Response.json((await callApi(context.app, actor, call)) ?? null);
   } catch (err) {

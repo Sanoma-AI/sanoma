@@ -16,13 +16,14 @@ import {
   visitorPrincipal,
   withSetup,
 } from "sanoma/workflows";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
 import outboundNext from "../../workflows/test/fixtures/outbound/workflows/outbound-next.ts";
-import { ACTOR_HEADER, ApiError, AppConfigSchema, CallRequest, type ErrorResponse } from "../src/api.ts";
+import { ACTOR_HEADER, AGENT_HEADER, ApiError, AppConfigSchema, CallRequest, type ErrorResponse } from "../src/api.ts";
 import { createApi } from "../src/api-client.ts";
 import type { AppContext } from "../src/context.ts";
+import { type App, startApp } from "../src/index.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { actorOf, appConfig, callApi, postCall, requireActor, serverFnFailure, validate } from "../src/server/core.ts";
@@ -74,6 +75,7 @@ writeFileSync(
 
 export const ada = sanoma.person({ id: "ada" });
 export const lead = sanoma.person({ id: "lead" });
+export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
 `,
 );
 mkdirSync(join(root, "policies"));
@@ -261,12 +263,26 @@ describe("callFn", () => {
   });
 });
 
-/** `POST /api/call` (`postCall`) with this body, as the loopback login reads `actor` from the header: the answer's status and JSON. */
-async function post(body: unknown, actor: string | null = "ada") {
-  const app = appContext();
-  const headers = { "content-type": "application/json", ...(actor === null ? {} : { [ACTOR_HEADER]: actor }) };
-  const request = new Request("http://127.0.0.1/api/call", { method: "POST", headers, body: JSON.stringify(body) });
-  const res = await postCall(request, { app, actor: actorOf(app, request) });
+/**
+ * `POST /api/call` (`postCall`) with this body, as the loopback login reads `actor` from the header
+ * (or as `as` says, a login's), with `headers` besides, on `app`: the answer's status and JSON.
+ */
+async function post(
+  body: unknown,
+  actor: string | null = "ada",
+  { headers = {}, app = appContext(), as }: { headers?: Record<string, string>; app?: AppContext; as?: Principal } = {},
+) {
+  const sent = {
+    "content-type": "application/json",
+    ...(actor === null ? {} : { [ACTOR_HEADER]: actor }),
+    ...headers,
+  };
+  const request = new Request("http://127.0.0.1/api/call", {
+    method: "POST",
+    headers: sent,
+    body: JSON.stringify(body),
+  });
+  const res = await postCall(request, { app, actor: as ? async () => as : actorOf(app, request) });
   return { status: res.status, body: (await res.json()) as any };
 }
 
@@ -311,6 +327,118 @@ describe("POST /api/call", () => {
     expect(await post({ name: "outboundNext.start", input: { company: "Bob" } }, null)).toMatchObject({
       status: 400,
       body: { code: "invalid_input" },
+    });
+  });
+});
+
+describe("POST /api/call as a declared agent, named in x-sanoma-agent", () => {
+  const agent = { [AGENT_HEADER]: "claude-code" };
+  const startedBy = { id: "claude-code", groups: ["agents"], onBehalfOf: "ada" };
+
+  it("starts a run as the agent for the person on this machine, and as the person without the header", async () => {
+    const id = crypto.randomUUID();
+    const started = await post({ name: "outboundNext.start", input: { company: "Agent Co" }, id }, "ada", {
+      headers: agent,
+    });
+    expect(started).toEqual({ status: 200, body: { runId: id } });
+    expect((await testApp.client.run(id))?.startedBy).toEqual(startedBy);
+    const own = (await post({ name: "outboundNext", input: { company: "Agent Co" } })).body.runId as string;
+    expect((await testApp.client.run(own))?.startedBy).toMatchObject({ id: "ada" });
+  });
+
+  it("refuses an id that is no declared agent, and an agent any built-in but its own", async () => {
+    for (const named of ["nobody", "lead"]) {
+      expect(
+        await post({ name: "data.outbound.list" }, "ada", { headers: { [AGENT_HEADER]: named } }),
+        named,
+      ).toMatchObject({
+        status: 403,
+        body: { code: "not_admitted" },
+      });
+    }
+    expect(await post({ name: "goLive", input: {} }, "ada", { headers: agent })).toMatchObject({
+      status: 403,
+      body: { code: "policy_denied" },
+    });
+  });
+
+  it("refuses the header on a host and on a public site's host, whose logins say who is asking", async () => {
+    const app = appContext();
+    const hosted: AppContext = { ...app, login: { ...app.login, name: "staff" } };
+    expect(
+      await post({ name: "data.outbound.list" }, null, { app: hosted, as: { id: "ada" }, headers: agent }),
+    ).toMatchObject({
+      status: 400,
+      body: {
+        code: "invalid_input",
+        error: expect.stringMatching(/x-sanoma-agent header is taken on this machine alone/),
+      },
+    });
+    expect((await post({ name: "data.outbound.list" }, null, { app: hosted, as: { id: "ada" } })).status).toBe(200);
+    // A request with a bearer on a public site's host (its front door's visitor; a token's admission
+    // is the tokens' own): as before without the header, refused with it.
+    const site: AppContext = { ...app, site: "members", login: { ...app.login, name: "site:members" } };
+    const token = visitorPrincipal("auth0", "u9");
+    const bearer = { authorization: "Bearer sca_t1" };
+    const started = await post({ name: "outboundNext", input: { company: "Token Co" } }, null, {
+      app: site,
+      as: token,
+      headers: bearer,
+    });
+    expect(started.status, JSON.stringify(started.body)).toBe(200);
+    expect((await testApp.client.run(started.body.runId))?.startedBy).toEqual(token);
+    expect(
+      await post({ name: "outboundNext", input: { company: "Token Co" } }, null, {
+        app: site,
+        as: token,
+        headers: { ...bearer, ...agent },
+      }),
+    ).toMatchObject({ status: 400, body: { code: "invalid_input" } });
+  });
+});
+
+describe("POST /api/call through the app", () => {
+  let app: App | undefined;
+  beforeAll(async () => {
+    app = await startApp(testApp.config, { port: 0 });
+  }, 60_000);
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  const send = (headers: Record<string, string>, body: unknown = { name: "data.outbound.list" }) =>
+    fetch(new URL("/api/call", app!.url), {
+      method: "POST",
+      headers: { "content-type": "application/json", [ACTOR_HEADER]: "ada", ...headers },
+      body: JSON.stringify(body),
+    });
+
+  it("takes a request that is no browser's when it names the app's own Origin, as sanoma call does", async () => {
+    const origin = new URL(app!.url).origin;
+    const res = await send({ origin });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(Array.isArray(await res.json())).toBe(true);
+  });
+
+  it("refuses one that says nothing of where it comes from, and another site's", async () => {
+    // Node's fetch sends no Origin, Sec-Fetch-Site or Referer: the route's CSRF check refuses it.
+    expect((await send({})).status).toBe(403);
+    expect((await send({ origin: "https://attacker.example" })).status).toBe(403);
+    expect((await send({ "sec-fetch-site": "cross-site" })).status).toBe(403);
+  });
+
+  it("starts a run as the agent x-sanoma-agent names, for the person", async () => {
+    const origin = new URL(app!.url).origin;
+    const id = crypto.randomUUID();
+    const res = await send(
+      { origin, [AGENT_HEADER]: "claude-code" },
+      { name: "outboundNext.start", input: { company: "Route Co" }, id },
+    );
+    expect([res.status, await res.json()]).toEqual([200, { runId: id }]);
+    expect((await testApp.client.run(id))?.startedBy).toEqual({
+      id: "claude-code",
+      groups: ["agents"],
+      onBehalfOf: "ada",
     });
   });
 });
