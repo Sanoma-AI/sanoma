@@ -16,12 +16,22 @@ import type {
   PreviewRequest,
   Principal,
   RunSummary,
+  SanomaError,
   SaveView,
 } from "sanoma/workflows";
 import type { ConfigDescription, PermissionsGrid, Span } from "sanoma/workflows/describe";
 import { ConfigDescriptionSchema } from "sanoma/workflows/description";
 import type { RunCheck, Scenario } from "sanoma/workflows/scenario";
-import { COMMIT_ID, DRAFT_ID, EFFECTS, RUN_STATUSES, type Saved } from "sanoma/workflows/shared";
+import {
+  COMMIT_ID,
+  DRAFT_ID,
+  EFFECTS,
+  errorCode,
+  errorMessage,
+  RUN_STATUSES,
+  type Saved,
+  vendorCodeOf,
+} from "sanoma/workflows/shared";
 import { z } from "zod";
 import { ColumnChange } from "./components/grid/plan.ts";
 
@@ -210,6 +220,8 @@ export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text"
 export interface ScenariosResponse {
   scenarios: ScenarioEntry[];
   errors: { file: string; message: string }[];
+  /** The world (`scenarios/world.feature`) a demo opens on (`sanoma demo`): its name and its Givens' steps, when the root has one that compiles. */
+  world?: { name: string; steps: string[] };
 }
 
 /**
@@ -503,6 +515,8 @@ export interface GoLiveChoices {
 /** An apply run as going live (on Hosting) follows it: its status, the plan it waits on, and what it did. */
 export interface GoLiveRun {
   runId: string;
+  /** Its workflow: `apply`, or the built-in going live that started it, before its apply. */
+  workflow: string;
   status: RunSummary["status"];
   /** What it asks a person to approve, in the Inbox; the plan. */
   pending?: { approvalId: string; plan?: ApplyPlan };
@@ -543,6 +557,40 @@ export interface GoLiveProgress {
   /** Where the host answers, from the last apply that made or changed it, and whether `/healthz` answers. */
   host: { url: string; healthy: boolean } | null;
 }
+/**
+ * Where a company is, read from facts, never from how it was made (`companyStateOf`): `local`,
+ * nothing bound to run it online; `deploying`, going live's run under way; `live`, its host bound
+ * (or this instance a hosted one); `failed`, going live's latest run failed and its host is not bound.
+ */
+export type CompanyPhase = "local" | "deploying" | "live" | "failed";
+
+/** What going live makes, in its order: the progress list's lines. */
+export const GO_LIVE_LINES = ["repository", "database", "host", "signIn"] as const;
+
+/** A company's state (`getCompanyState`): the bar's badge, Home's last step and Hosting's panel. */
+export interface CompanyState {
+  state: CompanyPhase;
+  /** Live, and this instance is on this computer: a copy the person drafts changes in. */
+  draftingCopy: boolean;
+  /** The host `infra.ts` declares: Sanoma Cloud's (its type binds its own bootstrap), one of the company's own accounts, or none. */
+  declared: "cloud" | "own" | null;
+  /** How far going live is, a line each thing it makes: done or not. */
+  lines: { line: (typeof GO_LIVE_LINES)[number]; done: boolean }[];
+  /** Going live's latest run: its apply once it started one, else the run itself; none before going live. */
+  run: GoLiveRun | null;
+  /**
+   * Where the host answers, and whether `/healthz` did (unknown until asked): only when Hosting
+   * asks (`force`), so the badge never wakes a host that stops when idle.
+   */
+  host: { url: string; healthy?: boolean } | null;
+}
+
+/** Home's setup card, in its order: each step ticked from facts (`setupProgress`). */
+export const SETUP_STEPS = ["start", "agent", "try", "teammate", "online"] as const;
+export type SetupStep = (typeof SETUP_STEPS)[number];
+/** Whether each of Home's setup steps is done (`getSetupProgress`). */
+export type SetupProgress = Record<SetupStep, boolean>;
+
 /** Said at the top of `infra.ts` when it declares an existing database, and on the page. */
 export const PASSWORD_NOTE = [
   "The database password is declared as a generated secret, since Supabase never reads it back.",
@@ -701,6 +749,105 @@ export class ApiError extends Error {
 /** The error body an error carries, when it is an `ApiError`. */
 export const errorBodyOf = (err: unknown): ErrorResponse | undefined =>
   err instanceof ApiError ? err.body : undefined;
+
+const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
+  invalid_input: 400,
+  not_approver: 403,
+  not_admitted: 403,
+  policy_denied: 403,
+  run_not_found: 404,
+  no_pending_approval: 404,
+  already_decided: 409,
+  approval_withdrawn: 409,
+  run_ended: 409,
+  run_running: 409,
+  approval_pending: 409,
+};
+
+/**
+ * An ApiError for any error: the runtime's codes get their status, and anything else is a 500.
+ * A 500 answers only that something went wrong: its message may name internal details (a
+ * database host, say), so the detail goes to the log (`toApiError`), not the caller.
+ */
+export function asApiError(err: unknown): ApiError {
+  if (err instanceof ApiError) return err;
+  const failure = err as { name?: string; code?: string; problem?: string } | null;
+  // These two boundaries deliberately discard provider errors. Reconstruct their safe reason
+  // rather than forwarding a message/cause that could include submitted authentication data.
+  if (failure?.name === "AuthenticationError") {
+    const problems = [
+      "missing",
+      "expired",
+      "revoked",
+      "rejected",
+      "wrong_account",
+      "scope_changed",
+      "uncertain",
+      "unavailable",
+      "unsupported",
+    ];
+    const problem = problems.includes(failure.problem ?? "") ? failure.problem! : "unavailable";
+    return new ApiError(400, { error: `Authentication: ${problem.replaceAll("_", " ")}` });
+  }
+  if (failure?.name === "SecretStoreError") {
+    const codes = [
+      "invalid_configuration",
+      "unavailable",
+      "denied",
+      "conflict",
+      "read_only",
+      "unsupported",
+      "too_large",
+      "invalid_value",
+    ];
+    const reason = codes.includes(failure.code ?? "") ? failure.code! : "unavailable";
+    return new ApiError(reason === "conflict" ? 409 : 400, { error: `Secret store: ${reason.replaceAll("_", " ")}` });
+  }
+  // A collection's record changed since the caller read it (`ifRecord`), or there already
+  // (`ifAbsent`): the caller's to resolve, with the record as it stands when the error carries it,
+  // or, for a batch, each entry's.
+  const vendorCode = vendorCodeOf(err);
+  if (vendorCode === "record_changed" || vendorCode === "record_exists") {
+    const { current, conflicts } = err as Pick<ErrorResponse, "current" | "conflicts">;
+    return new ApiError(409, {
+      error: errorMessage(err),
+      code: vendorCode,
+      ...(current !== undefined && { current }),
+      ...(Array.isArray(conflicts) && { conflicts }),
+    });
+  }
+  const code = errorCode(err);
+  const status = (code && STATUS[code]) || 500;
+  if (status === 500) return new ApiError(500, { error: "Something went wrong", ...(code ? { code } : {}) });
+  const body: ErrorResponse = { error: errorMessage(err), code };
+  // Read by property, not instanceof: DBOS hands a run's errors back as copies.
+  const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
+  if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
+  // A batch's refusal names every entry the policy denied, saves and deletes alike.
+  if (code === "policy_denied" && Array.isArray(data.denied)) body.denied = data.denied.map(String);
+  if (typeof data.field === "string") body.field = data.field;
+  if (code === "not_approver") {
+    body.approver = data.approver as ErrorResponse["approver"];
+    if (typeof data.reason === "string") body.reason = data.reason;
+  }
+  if ((code === "approval_pending" || code === "run_running") && typeof data.runId === "string")
+    body.runId = data.runId;
+  return new ApiError(status, body);
+}
+
+/**
+ * What `.result` answers for a run that failed or was cancelled: the runtime's answer when its
+ * error has a code with a status of its own (`policy_denied`, 403), else a 422 with the run's
+ * failure as the run recorded it and its code (`driver_failed`), if any. The failure is the
+ * run's answer, so the caller sees it (a 500 would hide it, and a client would try again).
+ */
+export function runFailure(run: Pick<RunSummary, "runId" | "status" | "error">, err: unknown): ApiError {
+  const answered = asApiError(err);
+  if (answered.status < 500) return answered;
+  const code = errorCode(err);
+  const error = run.error ?? `Run ${run.runId} ${run.status === "cancelled" ? "was cancelled" : "failed"}`;
+  return new ApiError(422, { error, ...(code && { code }), runId: run.runId });
+}
 
 /** A run's short name, for a title: "Run" and its id's first 8 characters (a UUID's first group). */
 export const runName = (runId: string) => `Run ${runId.slice(runId.lastIndexOf(":") + 1).slice(0, 8)}`;

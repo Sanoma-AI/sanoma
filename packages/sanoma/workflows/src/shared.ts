@@ -817,6 +817,51 @@ export function personOf(
 export const approverLabel = (approver: Approver): string =>
   typeof approver === "string" ? approver : `group ${approver.group}`;
 
+const CODES = [
+  "policy_denied",
+  "approval_rejected",
+  "approval_withdrawn",
+  "not_approver",
+  "no_pending_approval",
+  "already_decided",
+  "run_not_found",
+  "driver_failed",
+  "invalid_input",
+  "run_ended",
+  "run_running",
+  "call_not_in_outline",
+  "approval_pending",
+  "not_admitted",
+] as const;
+
+/**
+ * Why something failed, as a stable string a caller can branch on. Messages are for people
+ * and may change; codes are the contract.
+ */
+export type ErrorCode = (typeof CODES)[number];
+
+const KNOWN = new Set<string>(CODES);
+
+/** The error's code, read from its own `code` property, or undefined when it has none of ours. */
+export function errorCode(e: unknown): ErrorCode | undefined {
+  const code = ownProperty<string>(e, "code", "string");
+  return code !== undefined && KNOWN.has(code) ? (code as ErrorCode) : undefined;
+}
+
+/** A `DriverError`'s `vendorCode` (`no_token`, `bad_signature`), read as a property: undefined for anything else. */
+export const vendorCodeOf = (e: unknown): string | undefined => ownProperty<string>(e, "vendorCode", "string");
+
+/** The error's own property `key`, when it is of the type given. Own: a copy from DBOS has no prototype to read. */
+export function ownProperty<T>(
+  err: unknown,
+  key: string,
+  type: "number" | "string" | "boolean" | "object",
+): T | undefined {
+  if (typeof err !== "object" || err === null || !Object.hasOwn(err, key)) return undefined;
+  const value = (err as Record<string, unknown>)[key];
+  return typeof value === type && value !== null ? (value as T) : undefined;
+}
+
 /** An error's message, or the value as text when it is not an Error. */
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 

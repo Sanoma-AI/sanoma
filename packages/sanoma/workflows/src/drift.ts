@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { isRunControlError } from "./errors.ts";
-import type { HostSpec } from "./host.ts";
+import type { HostOutputs, HostSpec } from "./host.ts";
 import type { Op } from "./op.ts";
 import { type DriftField, diffDeclared, fieldPathOf, type Resource, valueAt, withFrom } from "./resource.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
@@ -41,6 +41,8 @@ export interface DriftResult {
   fields: DriftField[];
   /** Why it could not be read, for `error`. */
   error?: string;
+  /** For a bound host its vendor holds: where it answers, as its state says (`HostSpec.outputs`). */
+  host?: HostOutputs;
 }
 
 /** The drift workflow's output. */
@@ -132,7 +134,8 @@ export const observed = (out: { gone: boolean; state?: State }): Found =>
  * (so GitHub's node id for a repository counts as its name), and a `from` reference's field
  * against that resource's state at its path, left out while that resource is absent, gone or
  * unreadable (its own row says so). A host with a `revisions` entry also compares its revision
- * against the commit its ref names now (or is that entry's `error`).
+ * against the commit its ref names now (or is that entry's `error`); a host's row carries where
+ * its state says it answers (`host`).
  */
 export function compare(
   types: ReadonlyMap<string, Resource>,
@@ -171,12 +174,13 @@ export function compare(
     const fields = diffDeclared(resource, now.state, declared, accept);
     const resolved = revisions.get(id);
     if (resolved && "error" in resolved) return { ...row, status: "error", fields: [], error: resolved.error };
+    const host = resource.host?.outputs(now.state);
     // A host whose state does not say which commit it runs is not compared.
-    const actual = resource.host?.outputs(now.state).revision;
+    const actual = host?.revision;
     if (resolved && actual !== undefined && actual !== resolved.revision) {
       fields.push({ path: resource.host!.revision, desired: resolved.revision, actual });
     }
-    return { ...row, status: fields.length ? "drifted" : "clean", fields };
+    return { ...row, status: fields.length ? "drifted" : "clean", fields, ...(host && { host }) };
   });
 }
 

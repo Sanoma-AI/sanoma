@@ -22,7 +22,8 @@ import { MatchColumns } from "../../../components/import/match.tsx";
 import { Review } from "../../../components/import/review.tsx";
 import { guessMapping, keyRange, planImport, readSheet, type Sheet } from "../../../components/import/sheet.ts";
 import { Upload } from "../../../components/import/upload.tsx";
-import { api, collectionNamed, configQuery, useStartRun } from "../../../queries.ts";
+import { collectionNamed, configQuery, useStartRun } from "../../../queries.ts";
+import { api } from "../../../site-api.ts";
 
 /** The import's steps after Upload, in the search so Back and Forward move between them: `?step=match`, `?step=review`. */
 const ImportSearch = z.object({ step: z.enum(["match", "review"]).optional().catch(undefined) });

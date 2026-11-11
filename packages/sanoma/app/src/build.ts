@@ -214,7 +214,7 @@ const PUBLIC_DIRS = ["sites/*/public", "apps/*/sites/*/public"];
 const OWN_PATHS = /^(robots\.txt|sitemap\.xml|(assets|auth|sites|_serverFn|__sanoma)\/.*)$/;
 
 /** The most a public file holds: Cloudflare's limit on one of a Worker's assets, 25 MiB. */
-const MAX_PUBLIC_FILE = 25 * 1024 * 1024;
+export const MAX_PUBLIC_FILE = 25 * 1024 * 1024;
 
 /**
  * Why each of `files` cannot be served, a line each: a name with no extension (the Worker looks
@@ -357,7 +357,7 @@ function siteTsconfig(root: string) {
 }
 
 /** Where a bare import from `from` finds the package `name`: its own node_modules, or (pnpm) beside it. */
-function moduleDir(name: string, from: string): string | undefined {
+export function moduleDir(name: string, from: string): string | undefined {
   for (let dir = from; ; dir = dirname(dir)) {
     const found = join(dir, "node_modules", name);
     if (existsSync(found)) return found;
@@ -463,30 +463,51 @@ function tailwindFromApp(): void {
 /** `file` as an import specifier: an absolute path with forward slashes, as Vite writes one on Windows too. */
 export const specifier = (file: string) => JSON.stringify(file.split(sep).join("/"));
 
+export interface RepoConfigOptions {
+  /**
+   * What it builds besides the app: the Worker's app bundle (`buildAppBundle`), or a demo
+   * (`buildDemo`): the sites alone under the demo's own root (`demo/root.tsx`), in a route tree of
+   * its own (`routeTreeOf`), and no public files.
+   */
+  kind?: "bundle" | "demo";
+  /** The plugins that make it that. */
+  plugins?: PluginOption[];
+}
+
+/** Where a build of `kind` writes, under the repo: `.sanoma/app`, the bundle's and a demo's each in a folder of their own. */
+const outOf = (repo: string, kind?: RepoConfigOptions["kind"]) => join(repo, ".sanoma", "app", ...(kind ? [kind] : []));
+
+/** The route tree a build of `kind` generates: the one the app's builds share, a demo's its own. */
+export const routeTreeOf = (repo: string, kind?: RepoConfigOptions["kind"]) =>
+  join(outOf(repo, kind === "demo" ? kind : undefined), "routeTree.gen.ts");
+
 /**
  * A company repo's build: the repo is Vite's root, the app's `src` (real path) Start's source
  * directory, the route tree the app's routes with `sites/` mounted at `/sites`, all of it written
- * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does. With `bundle`,
- * the plugins that make it the Worker's app bundle instead (`buildAppBundle`).
+ * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does. With a `kind`,
+ * its `plugins` make it the Worker's app bundle (`buildAppBundle`) or a demo (`buildDemo`) instead.
  */
-export function repoConfig(repo: string, bundle?: PluginOption[]): InlineConfig {
+export function repoConfig(repo: string, { kind, plugins = [] }: RepoConfigOptions = {}): InlineConfig {
   const { src } = appSources();
-  // The route tree is the one both builds share; the Worker's keeps its own cache and temporary files.
-  const routeTree = join(repo, ".sanoma", "app", "routeTree.gen.ts");
-  const out = join(repo, ".sanoma", "app", ...(bundle ? ["bundle"] : []));
+  const demo = kind === "demo";
+  // The Worker's bundle keeps its own cache and temporary files, and a demo its own tree too.
+  const out = outOf(repo, kind);
+  const routeTree = routeTreeOf(repo, kind);
   const sites = join(repo, "sites");
   // Start joins srcDirectory to the root for its entries, so it must be relative.
   const srcDirectory = relative(repo, src);
   const fromApp = createRequire(join(src, "router.tsx"));
   const tailwind = installed("tailwindcss");
   tailwindFromApp();
-  // The app's routes at the root, and the sites' listing at /sites.
+  // The app's routes at the root (a demo has none of them), and the sites' listing at /sites.
   const children = [
-    { type: "physical" as const, directory: ".", pathPrefix: "" },
+    ...(demo ? [] : [{ type: "physical" as const, directory: ".", pathPrefix: "" }]),
     ...(existsSync(join(sites, "__virtual.ts"))
       ? [{ type: "physical" as const, directory: sites, pathPrefix: "/sites" }]
       : []),
   ];
+  // The tree's root, from the routes' directory: the app's, or a demo's.
+  const rootFile = demo ? "../demo/root.tsx" : "__root.tsx";
   return {
     configFile: false,
     root: repo,
@@ -504,11 +525,11 @@ export function repoConfig(repo: string, bundle?: PluginOption[]): InlineConfig 
         },
       },
       sharedDeps(repo, src),
-      runtimeExternal(bundle !== undefined),
-      ...(bundle ?? []),
+      runtimeExternal(kind === "bundle"),
+      ...plugins,
       contentPlugin(repo),
       sitesPlugin(repo),
-      publicPlugin(repo),
+      ...(demo ? [] : [publicPlugin(repo)]),
       stylesheetPlugin(),
       publicUnscanned(repo),
       tailwindcss(),
@@ -519,7 +540,7 @@ export function repoConfig(repo: string, bundle?: PluginOption[]): InlineConfig 
           // The generator's temporary files, otherwise under `.tanstack/tmp` in the process's cwd.
           tmpDir: join(out, "tmp"),
           // The app's __root.tsx is the tree's root, not a route of the "." mount.
-          virtualRouteConfig: { type: "root", file: "__root.tsx", children },
+          virtualRouteConfig: { type: "root", file: rootFile, children },
           routeFileIgnorePattern: "^__root\\.tsx$",
         },
         importProtection: {

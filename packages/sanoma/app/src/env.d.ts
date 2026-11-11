@@ -46,3 +46,15 @@ declare module "virtual:sanoma/app-bundle" {
 declare module "virtual:sanoma/prerendered" {
   export const pages: string[];
 }
+
+/**
+ * A demo's company (`demoModule` in `demo-build.ts`): its route tree, the sites over the root's own
+ * (`demo/root.tsx`), the page runtime over its workflows, collections, connectors' fakes and world,
+ * the config as the app describes it, and the sites' keys.
+ */
+declare module "virtual:sanoma/demo" {
+  export const routeTree: import("@tanstack/react-router").AnyRoute;
+  export const runtime: () => Promise<import("sanoma/workflows/page").PageRuntime>;
+  export const description: import("./api.ts").AppConfig;
+  export const sites: readonly string[];
+}

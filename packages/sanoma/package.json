@@ -198,6 +198,11 @@
       "types": "./app/dist/bundle-build.d.ts",
       "default": "./app/dist/bundle-build.js"
     },
+    "./app/demo": {
+      "sanoma-source": "./app/src/demo-build.ts",
+      "types": "./app/dist/demo-build.d.ts",
+      "default": "./app/dist/demo-build.js"
+    },
     "./app/steps": {
       "sanoma-source": "./app/src/steps/index.ts",
       "types": "./app/dist/steps/index.d.ts",

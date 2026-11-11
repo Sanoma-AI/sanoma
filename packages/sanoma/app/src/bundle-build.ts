@@ -13,7 +13,7 @@ import { declarationFiles, filesUnder, type SanomaConfig, timeMatcherFile, vendo
 import { domainsText } from "sanoma/workflows/shared";
 import type { SiteEntry } from "sanoma/workflows/describe";
 import MagicString from "magic-string";
-import type { InlineConfig, Plugin, PluginOption } from "vite";
+import type { InlineConfig, Plugin, PluginOption, Rollup } from "vite";
 import { type AppBundle, prerenderedAsset } from "./app-bundle.ts";
 import {
   appSources,
@@ -262,17 +262,7 @@ async function bundlePlugins(
       name: "sanoma:reachable",
       applyToEnvironment: ssr,
       generateBundle(_options, bundle) {
-        const reached = new Set<string>();
-        const reach = (name: string) => {
-          const chunk = bundle[name];
-          if (reached.has(name) || chunk?.type !== "chunk") return;
-          reached.add(name);
-          for (const next of [...chunk.imports, ...chunk.dynamicImports]) reach(next);
-        };
-        for (const file of Object.values(bundle)) if (file.type === "chunk" && file.isEntry) reach(file.fileName);
-        for (const file of Object.values(bundle)) {
-          if (file.type === "chunk" && !reached.has(file.fileName)) delete bundle[file.fileName];
-        }
+        pruneUnreached(bundle);
       },
     },
     cloudflare({
@@ -292,13 +282,14 @@ async function bundlePlugins(
 /**
  * The runtime's `OPTIONAL` imports, each `worker/missing.js`, whose every use throws: a build for a
  * runtime that never loads them (the Worker's, a page's) resolves them without their packages.
+ * Those in `keep` resolve as they are: a demo keeps the PDF renderer when the company installs it.
  */
-export function optional(): Plugin {
+export function optional(keep: readonly string[] = []): Plugin {
   const missing = join(pkgDir, "src", "worker", "missing.js");
   return {
     name: "sanoma:optional",
     enforce: "pre",
-    resolveId: (source) => (OPTIONAL.includes(source) ? missing : undefined),
+    resolveId: (source) => (OPTIONAL.includes(source) && !keep.includes(source) ? missing : undefined),
   };
 }
 
@@ -377,7 +368,10 @@ export function companyFiles(root: string, { fromRoot = false } = {}): Plugin {
       const file = id.split("?")[0]!;
       if (!companyFile(id, root) || !/\.[cm]?[jt]sx?$/.test(file)) return;
       const named = fromRoot ? relative(root, file).split(sep).join("/") : file;
-      const out = new MagicString(code).prepend(`globalThis[Symbol.for("sanoma.file")] = ${JSON.stringify(named)};\n`);
+      // Said as its body begins (after its imports'), and unsaid as it ends: what evaluates after it is not it.
+      const out = new MagicString(code)
+        .prepend(`globalThis[Symbol.for("sanoma.file")] = ${JSON.stringify(named)};\n`)
+        .append(`\nglobalThis[Symbol.for("sanoma.file")] = undefined;\n`);
       return { code: out.toString(), map: out.generateMap({ hires: true }) };
     },
   };
@@ -648,15 +642,15 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
   rmSync(outDir, { recursive: true, force: true });
   const vite = await import("vite");
   const built: InlineConfig = {
-    ...repoConfig(
-      root,
-      await bundlePlugins(
+    ...repoConfig(root, {
+      kind: "bundle",
+      plugins: await bundlePlugins(
         root,
         config.file,
         snapshot,
         pages.map(({ asset }) => asset),
       ),
-    ),
+    }),
     build: { outDir, emptyOutDir: true },
     logLevel: "warn",
     customLogger: quietLogger(vite, log),
@@ -714,4 +708,23 @@ function nodeOnlyOf(err: unknown): NodeOnlyImport | undefined {
     if (found) return found;
   }
   return undefined;
+}
+
+/**
+ * Deletes each chunk of `bundle` its entries do not reach by static and dynamic imports; returns
+ * those they do, by file name.
+ */
+export function pruneUnreached(bundle: Rollup.OutputBundle): Set<string> {
+  const reached = new Set<string>();
+  const reach = (name: string) => {
+    const chunk = bundle[name];
+    if (reached.has(name) || chunk?.type !== "chunk") return;
+    reached.add(name);
+    for (const next of [...chunk.imports, ...chunk.dynamicImports]) reach(next);
+  };
+  for (const file of Object.values(bundle)) if (file.type === "chunk" && file.isEntry) reach(file.fileName);
+  for (const file of Object.values(bundle)) {
+    if (file.type === "chunk" && !reached.has(file.fileName)) delete bundle[file.fileName];
+  }
+  return reached;
 }

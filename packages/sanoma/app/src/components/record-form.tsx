@@ -20,7 +20,7 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import type { UntypedApi } from "../api-client.ts";
 import { buildInput, fieldsOf, initialValues } from "../form/schema.ts";
 import { errorsOf, FieldView, FormFoot, useSchemaForm } from "../form/start-form.tsx";
-import { api } from "../queries.ts";
+import { api } from "../site-api.ts";
 import { Notice } from "./common.tsx";
 import { type RecordsView, savedIn } from "./grid/collection.ts";
 import { isHidden } from "./grid/plan.ts";

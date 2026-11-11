@@ -86,7 +86,7 @@ export {
 // An app's `app.ts` (`defineApp`), and where the launcher finds an app's workflows and data file.
 export { type AppEntry, appSourceOf, readApps } from "./apps.ts";
 export { type AppDefinition, defineApp } from "./definitions.ts";
-export { appFolders, APPS_DIR, declarationFiles, filesUnder, kindDirs } from "./paths.ts";
+export { appFolders, APPS_DIR, declarationFiles, filesUnder, kindDirs, relPath } from "./paths.ts";
 // `sanoma` itself (the people types' constructors) is at `sanoma/resources`, for data files.
 // `collection()` itself is at `sanoma/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
 export { isCollection } from "./collection.ts";

@@ -1,6 +1,6 @@
 import { ANONYMOUS, DRAFT_ID } from "sanoma/workflows/shared";
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest, setResponseHeader } from "@tanstack/react-start/server";
+import { getCookie, getRequest, setResponseHeader } from "@tanstack/react-start/server";
 import { z } from "zod";
 import {
   type ActorInfo,
@@ -61,10 +61,13 @@ import {
 import { authorizeConnection } from "./server/connect.ts";
 import { availableConnectors } from "./server/available.ts";
 import { planColumnChange, proposeColumnChange } from "./server/columns.ts";
+import { companyState } from "./server/company-state.ts";
 import { goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
 import { hostDerived } from "./server/host-derived.ts";
 import { invitePerson, peopleSignIns } from "./server/people.ts";
 import { setSetupToken, setupStatus } from "./server/setup.ts";
+import { setupProgress } from "./server/setup-progress.ts";
+import { ENGINE_COOKIE } from "./components/shell/prefs.ts";
 import { withPrincipal } from "./middleware.ts";
 import { chatFor } from "./server/chat.ts";
 import { chatModel } from "./server/models.ts";
@@ -260,6 +263,19 @@ export const getGoLiveChoices = createServerFn(READ).handler(async ({ context })
 
 /** How far going live is: `infra.ts`, the bindings, the latest apply run, the host. */
 export const getGoLiveProgress = createServerFn(READ).handler(({ context }) => goLiveProgress(context.app));
+
+/**
+ * The company's state: the badge's and Home's, or with `force` Hosting's, with where the host
+ * answers and whether it does.
+ */
+export const getCompanyState = createServerFn(READ)
+  .validator(validate(z.object({ force: z.boolean().optional() })))
+  .handler(({ data, context }) => companyState(context.app, data));
+
+/** Home's setup card: each step done or not, the agent's from the engine cookie too. */
+export const getSetupProgress = createServerFn(READ).handler(({ context }) =>
+  setupProgress(context.app, getCookie(ENGINE_COOKIE)),
+);
 
 /** What apply gives the declared host that derives: its image, source, branch, domains and keys (never a value). */
 export const getHostDerived = createServerFn(READ).handler(({ context }) => hostDerived(context.app));

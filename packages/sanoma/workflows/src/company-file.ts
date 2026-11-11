@@ -60,7 +60,8 @@ const roots = new Map<string, string>();
 export function appOfFile(file: string | undefined): string | undefined {
   if (file === undefined) return undefined;
   const path = builtin("node:path");
-  if (!path) return appOfPath(file);
+  // A page's file is named from the root (`apps/crm/resources/data.ts`), in a browser or in Node.
+  if (!path?.isAbsolute(file)) return appOfPath(file);
   const { existsSync } = builtin("node:fs")!;
   const { basename, dirname, join, relative, resolve, sep } = path;
   /** Whether `dir` is a company's root: it holds a `sanoma.config.ts`, or a bundle registered its snapshot (`useRootSnapshot`). */

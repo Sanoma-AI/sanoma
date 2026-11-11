@@ -1,15 +1,16 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import type { ConfigDescription, SiteEntry } from "sanoma/workflows/describe";
 import { siteDir } from "sanoma/workflows/shared";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Card } from "#/components/ui/card.tsx";
+import { Card, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { usePublicAddress, useSites } from "#/lib/sites.ts";
 import { CrumbHeader, Nothing, pageTitle } from "../components/common.tsx";
+import { CardHeading } from "../components/kit.tsx";
 import { SiteIcon } from "../components/site-icon.tsx";
-import { configQuery } from "../queries.ts";
+import { configQuery, scenariosQuery } from "../queries.ts";
 
 // `/sites` itself, the one path there no site can take (a site's pages are `/sites/<name>/…`):
 // the app's page listing them. Nothing else here may claim a path under `/sites`.
@@ -88,7 +89,44 @@ function SitesPage() {
           </Table>
         )}
       </Card>
+      {sites.length > 0 && <World />}
     </>
+  );
+}
+
+/**
+ * The world a demo of the sites opens on (`sanoma demo`): `scenarios/world.feature`'s Givens, as the
+ * page runtime seeds them on each mount; or how to write one.
+ */
+function World() {
+  const { data: world } = useQuery({
+    ...scenariosQuery(),
+    // The world changes with the repo's snapshot, which reloads the page: no polling for it.
+    refetchInterval: false,
+    select: (scenarios) => scenarios.world ?? null,
+  });
+  if (world === undefined) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardHeading>{world ? `The demo's world: ${world.name}` : "The demo's world"}</CardHeading>
+        <CardDescription>
+          <code>sanoma demo</code> builds these sites to run in any page, on the connectors&apos; fakes, seeded from{" "}
+          <code>scenarios/world.feature</code>
+          {world ? ":" : ": one Scenario of Givens, which this repo has not written yet."}
+        </CardDescription>
+      </CardHeader>
+      {world && (
+        <CardContent>
+          <ul aria-label="The world's Givens" className="flex flex-col gap-1 font-mono text-xs">
+            {world.steps.map((step, i) => (
+              // oxlint-disable-next-line react/no-array-index-key -- two Givens may read alike
+              <li key={i}>{step}</li>
+            ))}
+          </ul>
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
