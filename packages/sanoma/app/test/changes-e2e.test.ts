@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ghost } from "@sanoma-ai/connector-ghost";
+import { collection } from "sanoma/data";
 import { startTestWorker } from "sanoma/testing";
 import {
   defineWorkflow,
@@ -14,7 +15,9 @@ import {
   type SanomaConfig,
   type Worker,
 } from "sanoma/workflows";
-import { PATCH_WORKFLOW } from "sanoma/workflows/shared";
+import { readPeople } from "sanoma/workflows/describe";
+import { changeIdOf, PATCH_WORKFLOW } from "sanoma/workflows/shared";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { localGitSource } from "../../src/source.ts";
@@ -22,8 +25,13 @@ import { copyFixture, ensureBuilt } from "../../test/fixture.ts";
 import { gitIdentity } from "../../test/git.ts";
 import { type FakeRemote, fakeRemote } from "../../workflows/test/fakes/remote.ts";
 import { freshDatabase } from "../../workflows/test/harness.ts";
+import { lazyDb } from "../../workflows/src/db.ts";
+import { data } from "../../workflows/src/db/company.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
+import { admitting } from "../src/login/admission.ts";
+import { loopbackLogin } from "../src/loopback.ts";
+import { proposeColumnChange } from "../src/server/columns.ts";
 import { checks, tellCommits } from "../src/steps/agent/checkout.ts";
 import { change, openChange } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
@@ -36,7 +44,9 @@ import { PEOPLE, pageOf, publishedAgain, publishOf, renderDraftCard } from "./fi
 // its card offers Save and Review once `sanoma check` passes on it; the change waits for admin,
 // as its review, the Inbox and the Permissions page show; a new commit asks Publish again; admin
 // publishes, the host squash-merges and the checkout follows main. Another change is rejected,
-// and closed. Needs Postgres (`pnpm db:up`) and builds the packages the fixture loads.
+// and closed. Two column changes from the grid, a rename and a type change with its decision,
+// approved and applied: the records follow each, and its page says what became of them. Needs
+// Postgres (`pnpm db:up`) and builds the packages the fixture loads.
 
 const databaseUrl = freshDatabase("changes_e2e");
 
@@ -69,6 +79,25 @@ const ADMIN_SKIPS = HELLO_WAITS.replace(
 const WITH_SUPPORT = `${PEOPLE}export const support = sanoma.group({ name: "support", members: [alice] });
 `;
 const TITLE = "Admin skips the finance hold; support joins";
+/** The fixture's data file: one collection, `deals`, whose columns the grid changes. */
+const DATA = `import { collection } from "sanoma/data";
+
+export const deals = collection({
+  name: "deals",
+  key: "company",
+  fields: {
+    company: "text",
+    touched: { type: "date", optional: true },
+    seats: { type: "text", optional: true },
+  },
+});
+`;
+/** The data file's collection, as the worker runs it. */
+const deals = collection({
+  name: "deals",
+  key: "company",
+  fields: { company: "text", touched: { type: "date", optional: true }, seats: { type: "text", optional: true } },
+});
 
 /** The bare repository the checkout was cloned from, the fake host's. */
 let origin = "";
@@ -96,6 +125,7 @@ beforeAll(async () => {
   for (const folder of ["resources", "policies"]) mkdirSync(join(dir, folder));
   writeFileSync(join(dir, "resources/people.ts"), PEOPLE);
   writeFileSync(join(dir, "policies/hello.cedar"), HELLO_WAITS);
+  writeFileSync(join(dir, "resources/data.ts"), DATA);
   writeFileSync(join(dir, ".gitignore"), ".sanoma/\nnode_modules/\n");
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
@@ -107,6 +137,7 @@ beforeAll(async () => {
   config = {
     workflows: [hello],
     connectors: [ghost, remote.connector],
+    collections: [deals],
     root: dir,
     ledger: memoryLedger(),
     databaseUrl,
@@ -307,5 +338,78 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
     // Closed by admin, so no run waits as the worker stops.
     await client.changeEvent(id, { kind: "close", by: "ada" }, { by: { id: "ada" } });
     expect(await client.result(saved)).toMatchObject({ outcome: "closed" });
+  });
+});
+
+/** The app's context, as the server functions get it. */
+const contextOf = async (): Promise<AppContext> => ({
+  resolved: resolveConfig(config),
+  snapshot: await appSnapshot(config, { source }),
+  client,
+  place: "this-computer",
+  login: admitting(loopbackLogin(), () => readPeople(dir)),
+});
+
+describe("a column change from the grid, approved and applied", { timeout: 3 * ROUND_MS }, () => {
+  const pool = lazyDb(databaseUrl, "changes e2e test");
+  afterAll(() => pool.close());
+  const ada = { id: "ada", groups: ["admin", "finance"] };
+  /** A record of deals as stored. */
+  const stored = async (key: string) =>
+    (
+      await (
+        await pool.db()
+      )
+        .select({ record: data.record })
+        .from(data)
+        .where(and(eq(data.collection, "deals"), eq(data.key, key)))
+    )[0]?.record;
+  /** `change` proposed from the grid, approved and applied: its report and its page. */
+  async function applied(proposed: Omit<Parameters<typeof proposeColumnChange>[2], "collection">) {
+    const landed = await proposeColumnChange(await contextOf(), ada, { collection: "deals", ...proposed });
+    const runId = (landed as { change: string }).change;
+    await publishOf(client, runId, ROUND_MS);
+    await client.decide(runId, { decision: "approve", by: { id: "ada" } });
+    const report = await client.result(runId);
+    return { report, html: (await pageOf(app, `/changes/${changeIdOf(runId)}`)).html };
+  }
+
+  beforeAll(async () => {
+    for (const record of [
+      { company: "Acme", touched: "2026-01-02", seats: "12" },
+      { company: "Cedar", seats: "about 40" },
+    ]) {
+      await client.call("data.deals.save", { record }, { actor: { id: "ada" }, id: crypto.randomUUID() });
+    }
+  });
+
+  it("renames a column: once applied, each record holds its value under the new name, as the page says", async () => {
+    const { report, html } = await applied({ change: { kind: "rename", from: "touched", to: "nextAction" } });
+    expect(report).toMatchObject({
+      outcome: "merged",
+      reshaped: { rows: 2, changed: 1, converted: 0, cleared: 0, kept: 0 },
+    });
+    expect(readFileSync(join(dir, "resources/data.ts"), "utf8")).toContain(
+      'nextAction: { type: "date", optional: true },',
+    );
+    expect(await stored("Acme")).toEqual({ company: "Acme", nextAction: "2026-01-02", seats: "12" });
+    expect(html).toContain("<h2>Rename touched to nextAction</h2>");
+    expect(html).toContain("1 record now holds nextAction.");
+  });
+
+  it("changes a column's type, the values that won't convert left empty as chosen, as the page says", async () => {
+    const { report, html } = await applied({
+      change: { kind: "retype", field: "seats", to: "number", decision: "clear" },
+      clears: 1,
+    });
+    expect(report).toMatchObject({
+      outcome: "merged",
+      reshaped: { rows: 2, changed: 2, converted: 1, cleared: 1, kept: 0 },
+    });
+    expect(await stored("Acme")).toMatchObject({ seats: 12 });
+    expect(await stored("Cedar")).toEqual({ company: "Cedar" });
+    expect(html).toContain("Clears 1 value");
+    expect(html).toContain("Chosen: leave it empty.");
+    expect(html).toContain("1 seats value converted, 1 left empty.");
   });
 });

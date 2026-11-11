@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ApprovalState, Approver } from "./define.ts";
+import { type ReshapeOutput, TableChangePlanSchema } from "./description.ts";
 import { errorInfo } from "./errors.ts";
 import { type CallContext, defineConnector, defineDriver, type Driver, DriverError } from "./op.ts";
 import { approve, approvedFor, type Decision, deny } from "./policy.ts";
@@ -15,6 +16,7 @@ import {
   errorMessage,
   groupNamesOf,
   MIGRATE_STORE_WORKFLOW,
+  PATCH_WORKFLOW,
   type PeopleResource,
   STORE_MOVE_DIRECT,
 } from "./shared.ts";
@@ -55,7 +57,8 @@ export type ChangeFacts = z.infer<typeof ChangeFacts>;
 /**
  * What opening a change takes: its draft's id, and the pull request's title, body and the change
  * page's link; for a change to a collection's columns, its plan as the app drafted it, which the
- * change's review shows (`ChangeState.plan`): JSON the runtime carries and does not read. `save`,
+ * change's review shows (`ChangeState.plan`) and, once it merges, brings the records along with
+ * (`sanoma.records.reshape`, by the decisions it carries). `save`,
  * the head the person who opens it saved: their Publish of a round planned at that head, given
  * once the policy lets them decide it (`ChangeSteps.publishOnSave`); a round at any other head asks
  * Publish as usual.
@@ -65,7 +68,7 @@ export const ChangeInput = z.object({
   title: z.string().min(1),
   body: z.string().optional(),
   page: z.string().url().optional(),
-  plan: z.json().optional(),
+  plan: TableChangePlanSchema.optional(),
   save: z.string().regex(COMMIT_ID).optional(),
 });
 export type ChangeInput = z.infer<typeof ChangeInput>;
@@ -127,11 +130,16 @@ export const changeOps = defineConnector("sanoma", {
   },
 });
 
+/** One built-in workflow alone, as `reservedFor` answers it. */
+const only = (workflow: string) => ({ workflows: [workflow], by: `only ${workflow} does` });
+
 /**
- * The built-in workflow that alone may call `op`, what the operation does and what to do instead:
- * `change` for `sanoma.change.*`, `connect` for `sanoma.connection.exchange`, `migrate-store` for
+ * The built-in workflows that alone may call `op` (`by`, as a message names them), what the
+ * operation does and what to do instead: `change` for `sanoma.change.*`, `change` and `patch` for
+ * `sanoma.records.reshape` (rewriting a collection's records outside its own operations and their
+ * policy), `connect` for `sanoma.connection.exchange`, `migrate-store` for
  * `sanoma.storeMigration.*` but its plan and cancel; undefined for any other. `resolveConfig` refuses a workflow that
- * uses one, and a run's call of one outside its workflow fails. A resource type's change
+ * uses one, and a run's call of one outside those workflows fails. A resource type's change
  * operations are not reserved: any workflow may call them for an object no data file declares,
  * and the call refuses a declared one (`refuseDeclared` in `call.ts`), which only apply changes.
  */
@@ -139,12 +147,20 @@ export function reservedFor(op: {
   readonly vendor: string;
   readonly resource: string;
   readonly name: string;
-}): { workflow: string; does: string; instead: string } | undefined {
+}): { workflows: readonly string[]; by: string; does: string; instead: string } | undefined {
   if (op.vendor === "sanoma" && op.resource === "change") {
-    return { workflow: CHANGE_WORKFLOW, does: "changes the company's repository", instead: "send a draft for review" };
+    return { ...only(CHANGE_WORKFLOW), does: "changes the company's repository", instead: "send a draft for review" };
+  }
+  if (op.vendor === "sanoma" && op.resource === "records" && op.name === "reshape") {
+    return {
+      workflows: [CHANGE_WORKFLOW, PATCH_WORKFLOW],
+      by: `only ${CHANGE_WORKFLOW} and ${PATCH_WORKFLOW} do`,
+      does: "rewrites a collection's records",
+      instead: "change the collection's columns from its grid",
+    };
   }
   if (op.vendor === "sanoma" && op.resource === "connection" && op.name === "exchange") {
-    return { workflow: CONNECT_WORKFLOW, does: "exchanges an OAuth code", instead: "connect the account in the app" };
+    return { ...only(CONNECT_WORKFLOW), does: "exchanges an OAuth code", instead: "connect the account in the app" };
   }
   if (
     op.vendor === "sanoma" &&
@@ -152,7 +168,7 @@ export function reservedFor(op: {
     !STORE_MOVE_DIRECT.has(`sanoma.${op.resource}.${op.name}`)
   ) {
     return {
-      workflow: MIGRATE_STORE_WORKFLOW,
+      ...only(MIGRATE_STORE_WORKFLOW),
       does: "moves the company's secrets between stores",
       instead: "start a move from the Secret storage panel",
     };
@@ -417,6 +433,13 @@ export interface ChangeDeploy {
   apply?: { runId: string; hosts: string[]; error?: string };
 }
 
+/**
+ * What became of the records after a merge, or a patch written without a remote, whose plan brings
+ * them along (`sanoma.records.reshape`): its counts, or why it failed (the merge or the file written
+ * stands; the records are as they were, the call being one transaction).
+ */
+export type ChangeReshaped = ReshapeOutput | { error: string };
+
 /** The drift run that read the hosts back after their apply, and the hosts it found not as declared. */
 export interface ChangeVerified {
   runId: string;
@@ -456,7 +479,7 @@ export interface ChangeState {
   };
   /** The review card on the host: unavailable in this version. */
   card: { status: "unavailable"; reason: string };
-  merged?: { sha: string; at: number; deploy?: ChangeDeploy; verified?: ChangeVerified };
+  merged?: { sha: string; at: number; reshaped?: ChangeReshaped; deploy?: ChangeDeploy; verified?: ChangeVerified };
   /** Why the change cannot merge now: the policy denies it, or the host refuses the merge. */
   blocked?: string;
   /** Who closed it, when someone asked (a `close` event, or a rejection of the Publish approval). */
@@ -483,6 +506,7 @@ export interface ChangeReport {
   head: string;
   pullRequest: { number: number; url: string };
   sha?: string;
+  reshaped?: ChangeReshaped;
   deploy?: ChangeDeploy;
   verified?: ChangeVerified;
 }

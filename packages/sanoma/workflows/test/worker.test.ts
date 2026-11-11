@@ -168,6 +168,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "sanoma.identity.retire",
       "sanoma.identity.revoke",
       "sanoma.invite.mint",
+      "sanoma.records.reshape",
       "sanoma.run.inspect",
       "sanoma.secret.delete",
       "sanoma.secret.generate",

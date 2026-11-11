@@ -7,6 +7,7 @@ import {
   CallRequest,
   ChangesQuery,
   ClearCredentialRequest,
+  ColumnPlanRequest,
   PreviewConnectionRequest,
   ConnectConnectionRequest,
   AuthorizeConnectionRequest,
@@ -59,7 +60,7 @@ import {
 } from "./server/core.ts";
 import { authorizeConnection } from "./server/connect.ts";
 import { availableConnectors } from "./server/available.ts";
-import { proposeColumnChange } from "./server/columns.ts";
+import { planColumnChange, proposeColumnChange } from "./server/columns.ts";
 import { companyState } from "./server/company-state.ts";
 import { goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
 import { hostDerived } from "./server/host-derived.ts";
@@ -314,8 +315,18 @@ export const getHistory = createServerFn(READ)
   .handler(({ data, context }) => recordHistory(context.app, context.principal, data));
 
 /**
+ * A proposed change to a collection's columns, planned over every one of its records as the person
+ * asking reads them (`planColumnChange`): what the column panel says will happen, and asks on.
+ */
+export const getColumnPlan = createServerFn(READ)
+  .middleware([withPrincipal])
+  .validator(validate(ColumnPlanRequest))
+  .handler(({ data, context }) => planColumnChange(context.app, context.principal, data));
+
+/**
  * A change to a collection's columns, from the grid's column menu or its New column panel: the
- * collection's declaration edited by a `patch` run, the change it opened carrying the plan (`proposeColumnChange`).
+ * collection's declaration edited by a `patch` run, the change it opened carrying the plan
+ * (`proposeColumnChange`); a `clear` refused when the count it was shown is no longer so.
  */
 export const proposeColumnChangeFn = createServerFn(CHANGE)
   .middleware([withPrincipal])

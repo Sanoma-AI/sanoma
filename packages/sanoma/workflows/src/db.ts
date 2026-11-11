@@ -1,6 +1,6 @@
 import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { setTimeout as delay } from "node:timers/promises";
-import { and, eq, inArray, lte, ne, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { DrizzleQueryError } from "drizzle-orm/errors";
 import { drizzle, type NodePgClient, type NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
 import { type PgDatabase, PgPreparedQuery } from "drizzle-orm/pg-core";
@@ -96,11 +96,15 @@ export function openPool(databaseUrl: string, what: string): Pool {
  */
 export const DBOS_DATABASE_OPTIONS = { systemDatabaseIdleTransactionTimeoutMs: 0 } as const;
 
-/** The built-in runs that wait across a deploy, and so are carried onto the next version: an apply, a change, and a move between stores. */
+/**
+ * The built-in runs that wait across a deploy, and so are carried onto the next version: an apply, a
+ * change, and a move between stores; and a built-in's child run (a change's drift, which it waits
+ * for), started with the code that carries it.
+ */
 const CARRIED = [APPLY_WORKFLOW, "change", MIGRATE_STORE_WORKFLOW];
 
 /**
- * Stamps the apply, change and store-move runs `ids` still unfinished on another version with the application version
+ * Stamps the apply, change, store-move and child runs `ids` still unfinished on another version with the application version
  * `version`, so DBOS gives them to a worker of that version: those it stamped, each with its status
  * (a PENDING one is the caller's to queue again). DBOS has no call for it (a run's version is set at
  * its start, `forkWorkflow` makes a new id, `rewindWorkflow` takes only an ended run), so this is the
@@ -118,7 +122,7 @@ export async function stampVersion(
     .where(
       and(
         inArray(workflowStatus.workflowUuid, [...ids]),
-        inArray(workflowStatus.name, CARRIED),
+        or(inArray(workflowStatus.name, CARRIED), isNotNull(workflowStatus.parentWorkflowId)),
         inArray(workflowStatus.status, ["PENDING", "ENQUEUED"]),
         ne(workflowStatus.applicationVersion, version),
       ),

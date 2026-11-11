@@ -6,8 +6,17 @@ import type { OpEntry, WorkflowEntry } from "./describe.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Effect } from "./op.ts";
 import type { PreviewRequest } from "./policy.ts";
-import type { DeclaredResource, ResourceProblem } from "./description.ts";
+import type {
+  ColumnType,
+  DeclaredResource,
+  ReshapeChange,
+  ReshapeInput,
+  ReshapeOutput,
+  ResourceProblem,
+  TableChangePlan,
+} from "./description.ts";
 import type { OutlineNode } from "./outline.ts";
+import { isDate } from "./import.ts";
 
 // Types only: resource types as a UI reads them. Erased from the bundle.
 export type {
@@ -23,7 +32,15 @@ export type { At, DeclaredResource, ResourceProblem } from "./description.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
 export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";
-export type { ChangeDeploy, ChangeEvent, ChangeFacts, ChangeReport, ChangeState, ChangeVerified } from "./change.ts";
+export type {
+  ChangeDeploy,
+  ChangeEvent,
+  ChangeFacts,
+  ChangeReport,
+  ChangeReshaped,
+  ChangeState,
+  ChangeVerified,
+} from "./change.ts";
 export type { AvailableApp, AvailableApps } from "./apps-list.ts";
 
 // What a UI in the browser may use from the runtime, besides types: `sanoma/workflows/shared`.
@@ -271,7 +288,11 @@ export function checkCollection(declaration: { name?: unknown; key?: unknown; fi
   if (title !== undefined && typeof title !== "string") throw new Error(`${where}: the title must be a string`);
 }
 
-/** Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, or an enum of distinct strings. */
+/**
+ * Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, or an
+ * enum of distinct strings; an optional one may be marked `hidden: true` (removed by a person: its
+ * values kept, the app leaves it out of the grid and the forms; to the runtime an optional field).
+ */
 function checkField(where: string, field: string, kind: unknown): void {
   const refused = (why: string) => new Error(`${where}: the field "${field}" ${why}`);
   if (!FIELD_NAME.test(field)) throw refused("must be named with letters, digits and _, not a digit first");
@@ -282,9 +303,12 @@ function checkField(where: string, field: string, kind: unknown): void {
     return;
   }
   if (!isRecord(kind)) throw refused(kinds);
-  const { type, enum: values, optional, ...rest } = kind;
+  const { type, enum: values, optional, hidden, ...rest } = kind;
   if (Object.keys(rest).length || (type === undefined) === (values === undefined)) throw refused(kinds);
   if (optional !== undefined && optional !== true) throw refused("may only be marked `optional: true`");
+  if (hidden !== undefined && (hidden !== true || optional !== true)) {
+    throw refused("may only be marked `hidden: true`, and only when it is `optional: true`");
+  }
   if (type !== undefined && !types.includes(type)) throw refused(kinds);
   if (
     values !== undefined &&
@@ -295,6 +319,152 @@ function checkField(where: string, field: string, kind: unknown): void {
   ) {
     throw refused("needs an enum of distinct strings, at least one");
   }
+}
+
+const NUMBER = /^-?\d+(\.\d+)?$/;
+const BOOLEANS: Readonly<Record<string, boolean>> = { true: true, false: false, yes: true, no: false };
+
+/**
+ * `value` as a column of `type` holds it, or undefined when it does not read as one: a number from
+ * its digits ("12" is 12), yes or no (true, false, yes, no, any case), a date as a `date` field takes
+ * it, text and a person from a string, number or yes/no (a person not empty), a choice from one of
+ * its strings, a link from a string, anything as free-form. A value already of the type is itself.
+ */
+function asType(value: unknown, type: ColumnType): { value: unknown } | undefined {
+  const scalar = typeof value === "number" || typeof value === "boolean" ? String(value) : undefined;
+  if (typeof type === "object") {
+    if ("link" in type) return typeof value === "string" ? { value } : undefined;
+    const text = typeof value === "string" ? value : scalar;
+    return text !== undefined && type.enum.includes(text) ? { value: text } : undefined;
+  }
+  switch (type) {
+    case "json":
+      return { value };
+    case "number":
+      if (typeof value === "number") return Number.isFinite(value) ? { value } : undefined;
+      return typeof value === "string" && NUMBER.test(value.trim()) ? { value: Number(value.trim()) } : undefined;
+    case "boolean":
+      if (typeof value === "boolean") return { value };
+      return typeof value === "string" && Object.hasOwn(BOOLEANS, value.trim().toLowerCase())
+        ? { value: BOOLEANS[value.trim().toLowerCase()] }
+        : undefined;
+    case "date":
+      return typeof value === "string" && isDate(value) ? { value } : undefined;
+    case "text":
+      return typeof value === "string" ? { value } : scalar === undefined ? undefined : { value: scalar };
+    case "person": {
+      const text = typeof value === "string" ? value : scalar;
+      return text ? { value: text } : undefined;
+    }
+  }
+}
+
+/** Whether `value` reads as a column of `type` (`reshaped` stores it so): what a retype or a conversion keeps. */
+export const converts = (value: unknown, type: ColumnType): boolean => asType(value, type) !== undefined;
+
+/**
+ * What a reshape did to one record's value: moved to a new name, converted to the new type,
+ * cleared or kept as it was because it cannot convert; none when it left the record alone.
+ */
+type Reshaping = "moved" | "converted" | "cleared" | "kept";
+
+/** An empty value: `""` or `null`, which holds nothing to convert. */
+const isEmpty = (value: unknown) => value === "" || value === null;
+
+/** `from` without its `key`. */
+function without(from: Readonly<Record<string, unknown>>, key: string): Record<string, unknown> {
+  const { [key]: _, ...rest } = from;
+  return rest;
+}
+
+/**
+ * `record` with `change` brought along, and what became of its value (`did`); the very `record`
+ * when nothing changed. Idempotent: a rename moves the value only where `from` is present and `to`
+ * absent; a retype converts a value that reads as the new type (`converts`) and leaves one already
+ * of it, and one that cannot convert is cleared or left as it is, by `decision` (absent: keep); a
+ * conversion moves the key `key` out of the free-form object in `field` to a field of its own, only
+ * where that field is empty, converted, and one that cannot convert is cleared from the object or
+ * left in it. An empty value (`""`, `null`) the new type does not hold is no value to convert: it
+ * is dropped, with no `did`. Pure: the app's draft counts, the driver and its tests agree through it.
+ */
+export function reshaped(
+  record: Readonly<Record<string, unknown>>,
+  change: ReshapeChange,
+): { record: Readonly<Record<string, unknown>>; did?: Reshaping } {
+  switch (change.kind) {
+    case "rename":
+      if (!Object.hasOwn(record, change.from) || Object.hasOwn(record, change.to)) return { record };
+      return { record: { ...without(record, change.from), [change.to]: record[change.from] }, did: "moved" };
+    case "retype": {
+      const value = record[change.field];
+      if (value === undefined) return { record };
+      const as = asType(value, change.to);
+      if (as)
+        return as.value === value ? { record } : { record: { ...record, [change.field]: as.value }, did: "converted" };
+      if (isEmpty(value)) return { record: without(record, change.field) };
+      return change.decision === "clear"
+        ? { record: without(record, change.field), did: "cleared" }
+        : { record, did: "kept" };
+    }
+    case "convert": {
+      const inner = record[change.field];
+      if (!isRecord(inner) || inner[change.key] === undefined || record[change.key] !== undefined) return { record };
+      const value = inner[change.key];
+      const as = asType(value, change.type);
+      const rest = { ...record, [change.field]: without(inner, change.key) };
+      if (as) return { record: { ...rest, [change.key]: as.value }, did: "converted" };
+      if (isEmpty(value)) return { record: rest };
+      return change.decision === "clear" ? { record: rest, did: "cleared" } : { record, did: "kept" };
+    }
+  }
+}
+
+/**
+ * `changes` brought along in each of `records`, in order (`reshaped`): the records that changed,
+ * by their index in `records`, and the counts `sanoma.records.reshape` answers.
+ */
+export function reshape(
+  records: readonly Readonly<Record<string, unknown>>[],
+  changes: readonly ReshapeChange[],
+): { changed: Map<number, Record<string, unknown>>; counts: ReshapeOutput } {
+  const counts: ReshapeOutput = { rows: records.length, changed: 0, converted: 0, cleared: 0, kept: 0 };
+  const changed = new Map<number, Record<string, unknown>>();
+  records.forEach((before, i) => {
+    let record = before;
+    for (const change of changes) {
+      const next = reshaped(record, change);
+      record = next.record;
+      if (next.did === "converted" || next.did === "cleared" || next.did === "kept") counts[next.did]++;
+    }
+    if (record !== before) changed.set(i, record as Record<string, unknown>);
+  });
+  counts.changed = changed.size;
+  return { changed, counts };
+}
+
+/**
+ * What `sanoma.records.reshape` is called with for `plan`: its collection and its changes that bring
+ * the records along (renames, retypes and conversions), each by names, target type and decision;
+ * undefined for no plan or one with none (add, require, hide and link change the declaration alone).
+ */
+export function reshapeOf(plan: TableChangePlan | undefined): ReshapeInput | undefined {
+  const changes = (plan?.changes ?? []).flatMap((change): ReshapeChange[] => {
+    switch (change.kind) {
+      case "rename":
+        return [{ kind: "rename", from: change.from, to: change.to }];
+      case "retype": {
+        const { field, to, decision } = change;
+        return [{ kind: "retype", field, to, ...(decision && { decision }) }];
+      }
+      case "convert": {
+        const { field, key, type, decision } = change;
+        return [{ kind: "convert", field, key, type, ...(decision && { decision }) }];
+      }
+      default:
+        return [];
+    }
+  });
+  return plan && changes.length ? { collection: plan.collection, changes } : undefined;
 }
 
 /**

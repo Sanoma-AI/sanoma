@@ -14,4 +14,6 @@ export const workflowStatus = dbos.table("workflow_status", {
   applicationName: text(),
   applicationVersion: text(),
   queueName: text(),
+  /** The run that started this one as its child (`WorkerState.startRun`), when one did. */
+  parentWorkflowId: text(),
 });

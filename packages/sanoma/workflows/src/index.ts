@@ -129,6 +129,7 @@ export {
   ChangeInput,
   changeOps,
   type ChangeReport,
+  type ChangeReshaped,
   type ChangeState,
   type ChangeVerified,
   isRules,

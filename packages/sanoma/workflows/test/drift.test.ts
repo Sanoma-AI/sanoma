@@ -441,7 +441,8 @@ describe("the built-in drift workflow in a config", () => {
       { name: "follow", builtin: true, ops: [] },
       { name: "go-live", builtin: true, ops: [] },
       { name: "go-live-host", builtin: true, ops: [] },
-      { name: "patch", builtin: true, ops: [] },
+      // Built in, as a change's operations are: a column change written without a remote brings the records along.
+      { name: "patch", builtin: true, ops: ["sanoma.records.reshape"] },
       { name: "save-draft", builtin: true, ops: [] },
     ]);
   });

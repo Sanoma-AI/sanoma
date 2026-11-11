@@ -125,8 +125,9 @@ export interface WorkerOptions {
   /**
    * Loads the company's files again and runs them in a worker of their own, in place of this one, a
    * moment after it is asked: what a save without a remote asks once it merged into the checkout
-   * (`AppStepContext.reload`). `sanoma serve` passes it; without it, the saved code runs once the
-   * instance starts again.
+   * (`AppStepContext.reload`), a column change written without one (`patch`), and a follow of
+   * `main` that moved the checkout (`WorkerState.followMain`). `sanoma serve` passes it; without
+   * it, the saved code runs once the instance starts again.
    */
   reload?: () => void;
   /**
@@ -237,8 +238,13 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     serially,
     followMain: () =>
       serially(async () => {
+        const before = await Promise.resolve(options.source?.head()).catch(() => undefined);
         const moved = await followBase(resolved.remotes, storedSecrets, options.source);
-        if ("revision" in moved) refreshAppsBehind();
+        if ("revision" in moved) {
+          refreshAppsBehind();
+          // The checkout moved: the worker and the app start again on its files (a merged column change's declaration among them).
+          if (moved.revision !== before) options.reload?.();
+        }
         return moved;
       }),
     // The runtime's tables, on the secrets' pool: the same database.
@@ -259,7 +265,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       if (!fn) throw new Error(`The worker has no workflow "${name}" to start`);
       // A live apply waits its turn on the apply queue, as the client's do; anything else runs at once.
       const queueName = queueFor(resolved, name, args.sandbox);
-      // A built-in run's code, as the client's start sets it, so a worker on another version may carry it.
+      // A built-in run's code, as the client's start sets it, so a worker on another version may carry
+      // it: a child (a change's apply and drift, a follow's apply) with its parent, which waits for it.
       const builtInCode = resolved.builtInCodes[name];
       return DBOS.startWorkflow(fn, {
         workflowID: runId,

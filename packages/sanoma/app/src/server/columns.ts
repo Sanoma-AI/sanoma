@@ -1,14 +1,16 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import type { PatchOutput, Principal } from "sanoma/workflows";
+import type { TableChangePlan } from "sanoma/workflows/description";
 import { LIST_LIMIT, PATCH_WORKFLOW, type Saved } from "sanoma/workflows/shared";
 import { createApi, type UntypedApi } from "../api-client.ts";
-import { ApiError, type ProposeColumnChange } from "../api.ts";
+import { ApiError, type ColumnPlanRequest, type ProposeColumnChange } from "../api.ts";
 import { declarationEdit, planOf, problemOf } from "../components/grid/plan.ts";
 import type { AppContext } from "../context.ts";
 import { callApi } from "./core.ts";
 
-// A change to a collection's columns, proposed from the grid: the collection's declaration in
+// A change to a collection's columns, proposed from the grid: its plan over every record, which
+// the column panel shows and asks on (`planColumnChange`), then the collection's declaration in
 // `resources/data.ts` edited by the built-in `patch`, as a form's Save is, which opens a change
 // for review when the repository has a remote and carries the change's plan to it.
 
@@ -16,18 +18,12 @@ import { callApi } from "./core.ts";
 const refuse = (error: string) => new ApiError(400, { error, code: "invalid_input" });
 
 /**
- * Proposes `change` to the columns of the collection `collection`, as `actor`, through `createApi`
- * over `callApi` as the page's own `api` is: every one of its records read (by key,
- * `LIST_LIMIT.max` a page), its plan drafted over them (`planOf`), and `patch` called, which
- * starts its run and asks for its result until the run has ended: the change it opened (with the
- * plan), or the file it wrote. Refused (`invalid_input`) for a collection no data file declares
- * and a change the declaration cannot take (`problemOf`).
+ * The plan of `change` to the collection `name`, as `actor`, through `createApi` over `callApi`
+ * as the page's own `api` is (`api`, for what follows): every one of its records read (by key,
+ * `LIST_LIMIT.max` a page) and the plan drafted over them (`planOf`). Refused (`invalid_input`)
+ * for a collection no data file declares and a change the declaration cannot take (`problemOf`).
  */
-export async function proposeColumnChange(
-  app: AppContext,
-  actor: Principal,
-  { collection: name, change }: ProposeColumnChange,
-): Promise<PatchOutput> {
+async function planned(app: AppContext, actor: Principal, { collection: name, change }: ColumnPlanRequest) {
   const collection = app.snapshot.description.collections.find((c) => c.name === name);
   if (!collection) throw new ApiError(404, { error: `No collection ${name}` });
   const { declared } = collection;
@@ -43,10 +39,40 @@ export async function proposeColumnChange(
     rows.push(...page);
     if (page.length < LIST_LIMIT.max) break;
   }
-  const input = {
-    at: declared.at,
-    ...declarationEdit(collection.fields, change),
-    plan: planOf(collection, rows, change),
-  };
+  return { api, collection, at: declared.at, plan: planOf(collection, rows, change) };
+}
+
+/**
+ * The plan of a proposed column change over every record of its collection, as the column panel
+ * shows it and asks what becomes of the values that won't convert: the one `proposeColumnChange`
+ * sends, the records as they are then.
+ */
+export async function planColumnChange(
+  app: AppContext,
+  actor: Principal,
+  request: ColumnPlanRequest,
+): Promise<TableChangePlan> {
+  return (await planned(app, actor, request)).plan;
+}
+
+/**
+ * Proposes `change` to the columns of its collection, as `actor`: its plan over every record
+ * (`planned`), and `patch` called, which starts its run and asks for its result until the run has
+ * ended: the change it opened (with the plan), or the file it wrote. A `clear` decision is refused
+ * with nothing written when the values that won't convert are no longer the `clears` the person
+ * was shown: the answer is then the plan over the records as they are now (`recounted`), to
+ * choose again on.
+ */
+export async function proposeColumnChange(
+  app: AppContext,
+  actor: Principal,
+  { clears, ...request }: ProposeColumnChange,
+): Promise<PatchOutput | { recounted: TableChangePlan }> {
+  const { api, collection, at, plan } = await planned(app, actor, request);
+  const { change } = request;
+  const [one] = plan.changes;
+  const wont = one && "wontConvert" in one ? one.wontConvert.count : 0;
+  if ("decision" in change && change.decision === "clear" && clears !== wont) return { recounted: plan };
+  const input = { at, ...declarationEdit(collection.fields, change), plan };
   return (await api[PATCH_WORKFLOW](input)) as PatchOutput;
 }

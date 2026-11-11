@@ -4,7 +4,10 @@ import type { ChatTurnInput, ChatTurnOutput } from "./chat-workflow.ts";
 import type { ResolvedConfig, SanomaConfig } from "./config.ts";
 import type { SanomaClient } from "./client.ts";
 import { defineWorkflow, type Principal, type WorkflowDefinition } from "./define.ts";
-import { AtSchema } from "./description.ts";
+import { reported } from "./errors.ts";
+import type { recordsOps } from "./collection.ts";
+import type { ChangeReshaped } from "./change.ts";
+import { AtSchema, TableChangePlanSchema } from "./description.ts";
 import {
   type ADOPT_WORKFLOW,
   COMMIT_ID,
@@ -14,6 +17,7 @@ import {
   type GO_LIVE_HOST_WORKFLOW,
   type GO_LIVE_WORKFLOW,
   type PATCH_WORKFLOW,
+  reshapeOf,
   type SAVE_DRAFT_WORKFLOW,
   undoDraftOf,
   type WorkflowFn,
@@ -25,7 +29,7 @@ import type { Source } from "./source.ts";
 // worker has the checkout. What each does is the app's, given to the worker as `AppSteps`
 // (`WorkerOptions.app`, `sanoma/app/steps`), and each is called in a step of its own run
 // (`app-steps.ts`), its writes to the checkout one at a time per worker. Workflows like any other, held to
-// the same lint: no DBOS here, and no operation, so nothing goes through `ctx`.
+// the same lint: no DBOS here, and their one operation, `patch`'s `sanoma.records.reshape`, through `ctx`.
 
 /** Adopt's input: a drift run, a resource it found drifted, and the fields whose value at the vendor to write into the resource's data file. */
 export const AdoptInput = z.object({
@@ -40,14 +44,16 @@ export type AdoptInput = z.infer<typeof AdoptInput>;
  * app, by its `at`), and the fields to set in it, by dotted path as `setFields` takes them, each
  * to a JSON value; the fields to rename or remove (`rename`, as `renameFields` takes them: a path
  * to its new name, or null); and, for a change to a collection's columns, its plan as the app
- * drafted it (`plan`), which the change it opens carries for its review (`ChangeInput.plan`).
+ * drafted it (`plan`, of the collection at `at`, each change a field it edits), which the change it
+ * opens carries for its review and its merge (`ChangeInput.plan`), and which, written without a
+ * remote, brings the records along at once (`sanoma.records.reshape`).
  */
 export const PatchInput = z
   .object({
     at: AtSchema,
     fields: z.record(z.string().min(1), z.json()),
     rename: z.record(z.string().min(1), z.string().regex(FIELD_NAME).nullable()).optional(),
-    plan: z.json().optional(),
+    plan: TableChangePlanSchema.optional(),
   })
   .refine(({ fields, rename = {} }) => Object.keys(fields).length + Object.keys(rename).length > 0, {
     message: "Set a field",
@@ -140,8 +146,15 @@ export interface Written {
   revision?: string;
 }
 
-/** What a Save lands as: the change opened for review (its run id), when the repository has a remote; otherwise the file written. */
-export type PatchOutput = { change: string } | Written;
+/**
+ * What a Save lands as: the change opened for review (its run id), when the repository has a
+ * remote; otherwise the file written. Written with a column change's `plan`, also what became of the
+ * records (`reshaped`: `sanoma.records.reshape`'s counts, or why it failed, the file written all
+ * the same; none when the plan brings no record along) and whether the instance runs the new
+ * declaration now (`running`: its worker and app started again on it; false where nothing can,
+ * until the instance starts again).
+ */
+export type PatchOutput = { change: string } | (Written & { reshaped?: ChangeReshaped; running?: boolean });
 
 /** What going live's runs answer: the apply run each started (`<run>:apply`), which the page follows. */
 export interface GoLiveOutput {
@@ -244,6 +257,12 @@ export interface AppRunner {
   /** The app's step `name` with `input`, in a DBOS step of this run; refused when the worker runs no app steps. */
   step<K extends AppAction>(name: K, input: Parameters<AppSteps[K]>[1]): ReturnType<AppSteps[K]>;
   /**
+   * Starts the worker (and the app) again on the company's files, a moment later
+   * (`AppStepContext.reload`), in a step of its own (`app:reload`): whether it will, false on a
+   * worker that cannot (`reload` absent).
+   */
+  reload(): Promise<boolean>;
+  /**
    * The step, then the apply it answers started as a child run of this one (`<run>:apply`), as its
    * own actor, without waiting for it: what the step answered besides, with that run's id.
    */
@@ -263,8 +282,11 @@ export interface AppApi {
   saveDraft: WorkflowFn<SaveDraftInput, SaveDraftOutput>;
 }
 
-/** The built-in workflows of the app's actions, over `runner`: `resolveConfig` adds them to every config. */
-export function appWorkflows(runner: AppRunner): WorkflowDefinition<any, any>[] {
+/**
+ * The built-in workflows of the app's actions, over `runner` and `records` (`recordsOps`, whose
+ * reshape `patch` calls): `resolveConfig` adds them to every config.
+ */
+export function appWorkflows(runner: AppRunner, records: typeof recordsOps): WorkflowDefinition<any, any>[] {
   return [
     defineWorkflow({
       // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
@@ -280,8 +302,18 @@ export function appWorkflows(runner: AppRunner): WorkflowDefinition<any, any>[] 
       title: "Save a declaration",
       trigger: "manual",
       input: PatchInput,
-      uses: [],
-      run: async (_ctx, input) => runner.step("patch", input),
+      uses: [records.records.reshape],
+      // Written without a remote, a column change brings the records along at once, then the
+      // instance starts again on the new declaration, which saves are then checked against.
+      run: async (ctx, input): Promise<PatchOutput> => {
+        let output = await runner.step("patch", input);
+        if (!("change" in output) && input.plan !== undefined) {
+          const reshaping = reshapeOf(input.plan);
+          const reshaped = reshaping && (await ctx.sanoma.records.reshape(reshaping).catch(reported));
+          output = { ...output, ...(reshaped && { reshaped }), running: await runner.reload() };
+        }
+        return output;
+      },
     }),
     defineWorkflow({
       name: "go-live" satisfies typeof GO_LIVE_WORKFLOW,

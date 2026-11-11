@@ -1,7 +1,9 @@
 import { testDatabaseUrl } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { lazyDb } from "../src/db.ts";
+import { data } from "../src/db/company.ts";
 import {
   type AppStepContext,
   type AppSteps,
@@ -45,7 +47,9 @@ const INPUTS = {
 };
 const APP_WORKFLOWS = Object.keys(INPUTS) as (keyof typeof INPUTS)[];
 
-const root = rootWith({ "resources/people.ts": ALICE });
+// The archive's records are held as they are: a reshape of them is denied.
+const HELD = `forbid (principal, action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:archive");\n`;
+const root = rootWith({ "resources/people.ts": ALICE, "policies/held.cedar": HELD });
 /** A company with resource types, so apply is registered, and nothing declared. */
 const config = () => ({ workflows: [], connectors: companyFakes().connectors, root, ledger: memoryLedger() });
 
@@ -93,8 +97,9 @@ describe("on a worker given the app's steps", () => {
       await record(step);
       return { file: input.id.split("#")[0]! };
     },
-    patch: async (step) => {
+    patch: async (step, input) => {
       await record(step);
+      if (input.plan) return { file: "resources/data.ts" };
       throw new SanomaError("not_approver", "A change to the rules waits for an admin", {
         approver: { group: "admin" },
       });
@@ -120,7 +125,12 @@ describe("on a worker given the app's steps", () => {
       throw new Error("No chat turns here");
     },
   };
-  const app = useTestApp(config(), { databaseUrl: freshDatabase("app_workflows"), source, app: steps });
+  /** How many times the worker was asked to start again on the new declaration. */
+  let reloads = 0;
+  const databaseUrl = freshDatabase("app_workflows");
+  const app = useTestApp(config(), { databaseUrl, source, app: steps, reload: () => reloads++ });
+  const pool = lazyDb(databaseUrl, "app workflows test");
+  afterAll(() => pool.close());
 
   it("runs each in a step given the worker's client, repository, lock and config, and the run's actor and id, its writes one at a time", async () => {
     const inputs = [
@@ -161,6 +171,76 @@ describe("on a worker given the app's steps", () => {
       "Apply the repository, its deploy key and the database first",
     );
     expect((await app.client.run(pushed))?.error).toBe("Apply the repository, its deploy key and the database first");
+  });
+
+  it("brings the records along a column change written without a remote, then starts the worker again on it", async () => {
+    const db = await pool.db();
+    await db.insert(data).values([
+      { collection: "deals", key: "Acme", record: { company: "Acme", seats: "12" }, updatedBy: "leon" },
+      { collection: "deals", key: "Cedar", record: { company: "Cedar", seats: "about 40" }, updatedBy: "leon" },
+    ]);
+    const at = { file: "resources/data.ts", export: "deals" };
+    const wontConvert = { count: 1, sample: [{ key: "Cedar", value: "about 40" }] };
+    const plan = {
+      collection: "deals",
+      rows: 2,
+      changes: [{ kind: "retype", field: "seats", from: "text", to: "number", wontConvert, decision: "clear" }],
+    };
+    const patched = await app.client.start(
+      PATCH_WORKFLOW,
+      { at, fields: { "fields.seats": "number" }, plan },
+      { startedBy: "alice" },
+    );
+    expect(await app.client.result(patched)).toEqual({
+      file: "resources/data.ts",
+      reshaped: { rows: 2, changed: 2, converted: 1, cleared: 1, kept: 0 },
+      running: true,
+    });
+    expect(reloads).toBe(1);
+    const records = await db.select({ record: data.record }).from(data).orderBy(data.key);
+    expect(records.map((r) => r.record)).toEqual([{ company: "Acme", seats: 12 }, { company: "Cedar" }]);
+    // A plan that changes the declaration alone: nothing to bring along, the worker starts again all the same.
+    const hidden = await app.client.start(
+      PATCH_WORKFLOW,
+      {
+        at,
+        fields: { "fields.seats": { type: "number", optional: true, hidden: true } },
+        plan: { collection: "deals", rows: 2, changes: [{ kind: "hide", field: "seats", filled: 1 }] },
+      },
+      { startedBy: "alice" },
+    );
+    expect(await app.client.result(hidden)).toEqual({ file: "resources/data.ts", running: true });
+    expect(reloads).toBe(2);
+    const ops = async (runId: string) =>
+      (await app.client.ledger(runId)).flatMap((r) => (r.type === "op.called" ? [r.op] : []));
+    expect([await ops(patched), await ops(hidden)]).toEqual([["sanoma.records.reshape"], []]);
+  });
+
+  it("says a reshape that fails on the patch's output, the file written and the run not failed", async () => {
+    const at = { file: "resources/data.ts", export: "deals" };
+    // A rename of the archive's field: the plan carries it, the policy denies the reshape.
+    const plan = { collection: "archive", rows: 0, changes: [{ kind: "rename", from: "seats", to: "count" }] };
+    const runId = await app.client.start(
+      PATCH_WORKFLOW,
+      { at, fields: {}, rename: { "fields.seats": "count" }, plan },
+      { startedBy: "alice" },
+    );
+    expect(await app.client.result(runId)).toEqual({
+      file: "resources/data.ts",
+      reshaped: { error: expect.stringContaining("sanoma.records.reshape") },
+      running: true,
+    });
+    expect((await app.client.run(runId))?.status).toBe("finished");
+    // A rename to no name is no plan: refused at the start.
+    const unnamed = { ...plan, changes: [{ kind: "rename", from: "seats", to: "" }] };
+    const err = await failure(
+      app.client.start(
+        PATCH_WORKFLOW,
+        { at, fields: {}, rename: { "fields.seats": "count" }, plan: unnamed },
+        { startedBy: "alice" },
+      ),
+    );
+    expect(errorCode(err)).toBe("invalid_input");
   });
 
   it("saves a draft only by saveDraft, as save:<id>, then ~<n> once one ended, listing them newest first with their outputs", async () => {

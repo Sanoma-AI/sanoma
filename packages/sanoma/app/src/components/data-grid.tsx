@@ -25,6 +25,7 @@ import { issueText } from "../form/schema.ts";
 import { type DataSearch, enumFields, LIMIT_CHOICES } from "../queries.ts";
 import { plural, Tip, ToneBadge } from "./common.tsx";
 import { STAGED_FIRST } from "./grid/staged.tsx";
+import { shownFields } from "./grid/plan.ts";
 
 // A collection's grid's pieces around the cells (`grid/` draws the grid): its filters, sorted by
 // any field, filtered by key and by each enum field, at most `limit` of them, some fields hidden;
@@ -145,7 +146,7 @@ function HiddenFields({
   hide: string[] | undefined;
   set: (next: Partial<DataSearch>) => void;
 }) {
-  const fields = Object.keys(collection.fields).filter((field) => field !== collection.key);
+  const fields = shownFields(collection.fields).filter((field) => field !== collection.key);
   // A collection declared in code (no data file) changes its columns there.
   const changes = collection.declared !== undefined;
   if (fields.length === 0 && !changes) return null;

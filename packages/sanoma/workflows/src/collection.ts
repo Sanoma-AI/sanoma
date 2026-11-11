@@ -13,6 +13,7 @@ import {
   type OpSpec,
 } from "./op.ts";
 import { appOfFile, callerFile } from "./company-file.ts";
+import { ReshapeInputSchema, ReshapeOutputSchema } from "./description.ts";
 import {
   BATCH,
   BATCH_LIMIT,
@@ -35,11 +36,15 @@ import {
 
 export type FieldType = (typeof FIELD_TYPES)[number];
 
-/** A field of a collection: its type, the type marked optional, or one of a list of strings. */
+/**
+ * A field of a collection: its type, the type marked optional, or one of a list of strings. An
+ * optional one may be `hidden: true`: removed by a person, its values kept, left out of the app's
+ * grid and forms; to the runtime it is an optional field like any other.
+ */
 export type Field =
   | FieldType
-  | { type: FieldType; optional?: true }
-  | { enum: readonly [string, ...string[]]; optional?: true };
+  | { type: FieldType; optional?: true; hidden?: true }
+  | { enum: readonly [string, ...string[]]; optional?: true; hidden?: true };
 
 type ValueOfType<T> = T extends "number" ? number : T extends "boolean" ? boolean : string;
 type ValueOf<F> = F extends { enum: readonly (infer E)[] }
@@ -281,6 +286,28 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
     },
   };
 }
+
+/**
+ * `sanoma.records.reshape`, on the built-in connector `sanoma`: a collection's records brought
+ * along with a change to its columns (`reshaped` in `shared.ts`), from the change's own names and
+ * types, never the running declaration, which may still be the one before. `resolveConfig`
+ * registers it in every config, so a policy may name it; the built-ins `change` (after a merge) and
+ * `patch` (after a column change without a remote) call it. Its driver is `recordsDriver`
+ * (`collection-driver.ts`); a sandbox run has none, so it refuses a run that uses it.
+ */
+export const recordsOps = defineConnector("sanoma", {
+  records: {
+    reshape: {
+      effect: "write",
+      idempotent: true,
+      description:
+        "Bring a collection's records along with a change to its columns: values moved to a renamed field, converted to a new type, or cleared or kept where they cannot convert",
+      input: ReshapeInputSchema,
+      output: ReshapeOutputSchema,
+      target: ({ collection: name }: { collection: string }) => `${DATA_VENDOR}:${name}`,
+    },
+  },
+});
 
 /** True for a collection `collection()` made, in this copy of the package or another: read by its brand. */
 export const isCollection = (x: unknown): x is Collection =>

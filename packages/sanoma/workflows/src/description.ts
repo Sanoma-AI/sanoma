@@ -5,7 +5,7 @@ import { z } from "zod";
 import { LIFETIMES } from "./host.ts";
 import type { Outline } from "./outline.ts";
 import type { ResourceFields } from "./resource.ts";
-import { EFFECTS, FIELD_TYPES } from "./shared.ts";
+import { EFFECTS, FIELD_NAME, FIELD_TYPES } from "./shared.ts";
 
 /** A JSON Schema (draft 2020-12), as `jsonSchemaOf` writes one. */
 const JsonSchema = z.record(z.string(), z.unknown());
@@ -351,11 +351,23 @@ export const ResourceTypeEntrySchema = z.strictObject({
 });
 export type ResourceTypeEntry = z.infer<typeof ResourceTypeEntrySchema>;
 
-/** A collection's field as declared: its type, or `{ type, optional }`, or `{ enum, optional }`. */
+/**
+ * A collection's field as declared: its type, or `{ type, optional, hidden }`, or
+ * `{ enum, optional, hidden }`. A hidden field (`hidden: true`, always optional) is one a person
+ * removed: its values are kept, and the app leaves it out of the grid and the forms.
+ */
 const FieldSchema = z.union([
   z.enum(FIELD_TYPES),
-  z.strictObject({ type: z.enum(FIELD_TYPES), optional: z.literal(true).optional() }),
-  z.strictObject({ enum: z.tuple([z.string()], z.string()).readonly(), optional: z.literal(true).optional() }),
+  z.strictObject({
+    type: z.enum(FIELD_TYPES),
+    optional: z.literal(true).optional(),
+    hidden: z.literal(true).optional(),
+  }),
+  z.strictObject({
+    enum: z.tuple([z.string()], z.string()).readonly(),
+    optional: z.literal(true).optional(),
+    hidden: z.literal(true).optional(),
+  }),
 ]);
 
 /** A collection the config declares (`collection()`). */
@@ -377,6 +389,115 @@ export const CollectionEntrySchema = z.strictObject({
   declared: DeclaredCollectionSchema.optional(),
 });
 export type CollectionEntry = z.infer<typeof CollectionEntrySchema>;
+
+/**
+ * A column's type in a table change: a field type, free-form JSON, a choice, or a link to another
+ * collection. `json` and `link` are the plan's alone so far: `collection()` takes neither yet.
+ */
+export const ColumnTypeSchema = z.union([
+  z.enum([...FIELD_TYPES, "json"]),
+  z.strictObject({
+    enum: z
+      .array(z.string().trim().min(1))
+      .min(1, "Give it a choice")
+      .refine((values) => new Set(values).size === values.length, "Each choice once"),
+  }),
+  z.strictObject({ link: z.string().min(1) }),
+]);
+export type ColumnType = z.infer<typeof ColumnTypeSchema>;
+
+/**
+ * What becomes of the values a retype or a conversion cannot convert: `keep`, left as they are
+ * (each such record shows as needs fixing), or `clear`, left empty. Absent means keep.
+ */
+export const ConvertDecisionSchema = z.enum(["keep", "clear"]);
+export type ConvertDecision = z.infer<typeof ConvertDecisionSchema>;
+
+const COUNT = z.number().int();
+
+/** A field's name, as `collection()` takes it (`FIELD_NAME`). */
+export const FieldNameSchema = z.string().regex(FIELD_NAME, "Letters, digits and _, not a digit first");
+
+/** The records a change cannot convert: how many, and a sample of them by key. */
+const WontConvertSchema = z.object({
+  count: COUNT,
+  sample: z.array(z.object({ key: z.string(), value: z.unknown() })),
+});
+export type WontConvert = z.infer<typeof WontConvertSchema>;
+
+// The changes that bring the records along, by names and the target type alone: what
+// `sanoma.records.reshape` takes, and, with their counts, a plan's.
+const RenameSchema = z.object({ kind: z.literal("rename"), from: z.string().min(1), to: FieldNameSchema });
+const RetypeSchema = z.object({
+  kind: z.literal("retype"),
+  field: z.string().min(1),
+  to: ColumnTypeSchema,
+  decision: ConvertDecisionSchema.optional(),
+});
+const ConvertSchema = z.object({
+  kind: z.literal("convert"),
+  field: z.string().min(1),
+  key: FieldNameSchema,
+  type: ColumnTypeSchema,
+  decision: ConvertDecisionSchema.optional(),
+});
+
+/**
+ * One change to a collection's columns, with the records it touches counted (`empty`, `filled`,
+ * `unmatched`, `wontConvert.count`). Add, require and hide change the declaration alone (hide sets
+ * `hidden: true`, so the values stay); rename, retype and convert bring the records along
+ * (`reshaped` in `shared.ts`).
+ */
+const TableChangeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("add"), field: z.string(), type: ColumnTypeSchema, required: z.boolean(), empty: COUNT }),
+  RenameSchema,
+  RetypeSchema.extend({ from: ColumnTypeSchema, wontConvert: WontConvertSchema }),
+  z.object({ kind: z.literal("require"), field: z.string(), empty: COUNT }),
+  z.object({ kind: z.literal("hide"), field: z.string(), filled: COUNT }),
+  z.object({ kind: z.literal("link"), field: z.string(), to: z.string(), unmatched: COUNT }),
+  ConvertSchema.extend({ wontConvert: WontConvertSchema }),
+]);
+export type TableChange = z.infer<typeof TableChangeSchema>;
+
+/**
+ * A change to a collection's columns as a person reviews it and a change carries it
+ * (`ChangeInput.plan`, `PatchInput.plan`): the collection, its changes in order, and how many
+ * records it had when the plan was drafted (`rows`).
+ */
+export const TableChangePlanSchema = z.object({
+  collection: z.string(),
+  changes: z.array(TableChangeSchema).min(1),
+  rows: COUNT,
+});
+export type TableChangePlan = z.infer<typeof TableChangePlanSchema>;
+
+/**
+ * A change that brings the records along, as `sanoma.records.reshape` takes it: a rename, a retype
+ * or a conversion, by names and the target type alone (a `TableChange` of those kinds, its counts
+ * dropped).
+ */
+const ReshapeChangeSchema = z.discriminatedUnion("kind", [RenameSchema, RetypeSchema, ConvertSchema]);
+export type ReshapeChange = z.infer<typeof ReshapeChangeSchema>;
+
+/** What `sanoma.records.reshape` takes: a collection's name and the changes to bring its records along, in order. */
+export const ReshapeInputSchema = z.object({
+  collection: z.string().min(1),
+  changes: z.array(ReshapeChangeSchema).min(1),
+});
+export type ReshapeInput = z.infer<typeof ReshapeInputSchema>;
+
+/**
+ * What `sanoma.records.reshape` did: the records it read (`rows`) and wrote (`changed`), and the
+ * values it converted, cleared, or kept as they were because they cannot convert.
+ */
+export const ReshapeOutputSchema = z.object({
+  rows: COUNT,
+  changed: COUNT,
+  converted: COUNT,
+  cleared: COUNT,
+  kept: COUNT,
+});
+export type ReshapeOutput = z.infer<typeof ReshapeOutputSchema>;
 
 /**
  * A plain-JSON description of what a config can do: its workflows, the operations they call,

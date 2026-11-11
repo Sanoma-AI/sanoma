@@ -9,6 +9,7 @@ import {
   type Saved,
 } from "sanoma/workflows/shared";
 import { cellsOf } from "../grid/clipboard.ts";
+import { shownFields } from "../grid/plan.ts";
 
 // A sheet on its way into a collection, pure: the file read into a header and rows, each column
 // matched to a field by name, the values a field does not take as written, and what saving each
@@ -96,7 +97,7 @@ const plain = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""
 
 /** The field a column's name names, as `plain` reads both; undefined for none. */
 export const fieldNamed = (collection: Pick<CollectionEntry, "fields">, column: string): string | undefined =>
-  Object.keys(collection.fields).find((field) => plain(field) === plain(column));
+  shownFields(collection.fields).find((field) => plain(field) === plain(column));
 
 /** The column `at` filling `field`, its values those `valuesToMap` guesses. */
 export function columnOf(

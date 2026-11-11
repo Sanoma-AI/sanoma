@@ -49,6 +49,15 @@ export const isRunControlError = (err: unknown): boolean =>
     (e) => ownProperty<number>(e, "dbosErrorCode", "number") !== undefined || errorCode(e) === "run_ended",
   );
 
+/**
+ * A failed call a run reports and goes on past, as `{ error }` (`.catch(reported)` on the call,
+ * which stays where the run writes it); a failure of the run itself (`isRunControlError`) thrown again.
+ */
+export function reported(err: unknown): { error: string } {
+  if (isRunControlError(err)) throw err;
+  return { error: errorMessage(err) };
+}
+
 /** Thrown into the run when the policy denies an operation call. The run fails with it. */
 export class PolicyDeniedError extends SanomaError {
   /** `data` adds to the error's: a batch's `denied` keys and each one's reason (`deniedFor`). */

@@ -57,6 +57,16 @@ function step(run: Run, name: AppAction, input: unknown): Promise<any> {
 /** The runner the app's built-ins run their work through. */
 export const appRunner: AppRunner = {
   step: (name, input) => step(runNow("An app step"), name, input) as ReturnType<AppSteps[typeof name]>,
+  reload() {
+    const { reload } = runNow("An app step").state;
+    return DBOS.runStep(
+      async () => {
+        reload?.();
+        return reload !== undefined;
+      },
+      { name: "app:reload" },
+    );
+  },
   async stepThenApply(name, input) {
     const run = runNow("An app step");
     const { apply, ...rest } = await step(run, name, input);

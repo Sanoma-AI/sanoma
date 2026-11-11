@@ -27,8 +27,11 @@ import { ensureSanomaBuilt } from "../../test/fixture.ts";
 // in memory, `memorySource`) and the app's steps in the worker: each heading's column menu and New
 // column, the column panel as the server renders it, a proposal landed as a change of its own
 // (`proposeColumnChange`: a `patch` run's draft, its data file showing the new column, the change
-// carrying its plan) and that change's review in the table change's words; in Chrome, skipped
-// without it, the menu opening the Rename panel and its What will happen.
+// carrying its plan, a type change's decision for the values that won't convert among it) and
+// that change's review in the table change's words; in Chrome, skipped without it, the menu
+// opening the Rename panel and its What will happen, and the Change type panel, over a grid that
+// loaded fewer records than there are, asking what becomes of every value that won't convert
+// (the server's plan, not the rows on screen) before it sends the change.
 
 const root = mkdtempSync(join(tmpdir(), "sanoma-columns-"));
 cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
@@ -143,8 +146,6 @@ describe("a collection's columns", () => {
       collection: "outbound",
       changes: [{ ...change, empty: 2 }],
       rows: 2,
-      sql: [],
-      blocked: false,
     });
 
     // Its review: the table change's card, and its decision in the table change's words.
@@ -172,11 +173,29 @@ describe("a collection's columns", () => {
     await testApp.client.changeEvent(id, { kind: "close", by: "ada" }, { by: { id: "ada" } });
 
     await expect(
-      proposeColumnChange(context, ada, { collection: "outbound", change: { kind: "delete", field: "company" } }),
+      proposeColumnChange(context, ada, { collection: "outbound", change: { kind: "hide", field: "company" } }),
     ).rejects.toMatchObject({
       status: 400,
       body: { error: "company is the key, which names each record: it stays as it is" },
     });
+  });
+
+  it("carries a type change's decision for the values that won't convert on its plan, and its review says it", async () => {
+    const landed = await proposeColumnChange(
+      await contextOf(),
+      { id: "ada", groups: ["admin"] },
+      { collection: "outbound", change: { kind: "retype", field: "contact", to: "number", decision: "keep" } },
+    );
+    const runId = (landed as { change: string }).change;
+    const id = changeIdOf(runId)!;
+    expect((await testApp.client.change(id))?.state.plan).toMatchObject({
+      changes: [{ kind: "retype", field: "contact", wontConvert: { count: 2 }, decision: "keep" }],
+    });
+    await publishOf(testApp.client, runId);
+    const { html } = await pageOf(app, `/changes/${id}`);
+    expect(html).toContain("Keeps 2 for fixing");
+    expect(html).toContain("Chosen: keep them as they are.");
+    await testApp.client.changeEvent(id, { kind: "close", by: "ada" }, { by: { id: "ada" } });
   });
 
   it("opens the Rename panel from a heading's menu in Chrome, saying what will happen", async (ctx) => {
@@ -189,9 +208,9 @@ describe("a collection's columns", () => {
       await tab.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "ada"));
       await tab.goto(new URL("/data/outbound", app.url).href, { waitUntil: "networkidle0" });
       await (await tab.waitForSelector('button[aria-label="Change the column contact"]'))!.click();
-      // Rename, Change type, Hide column, Remove column: no free-form field's keys on a text field.
+      // Rename, Change type, Hide for me, Remove for everyone: no free-form field's keys on a text field.
       await tab.waitForFunction(
-        `[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((i) => i.textContent).join() === "Rename,Change type,Hide column,Remove column"`,
+        `[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((i) => i.firstChild.firstChild?.textContent ?? i.textContent).join() === "Rename,Change type,Hide for me,Remove for everyone…"`,
       );
       await (await tab.waitForSelector('[role="menuitem"]::-p-text(Rename)'))!.click();
       // The name as it is, to type over.
@@ -203,6 +222,39 @@ describe("a collection's columns", () => {
         `document.querySelector('[aria-label="Rename contact"] button[type="submit"]')?.disabled === false`,
       );
       expect(await tab.$('[aria-label="Rename contact"]')).not.toBeNull();
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it("asks in Chrome what becomes of every value a type change can't convert, not those on screen, then sends that choice", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const tab = await browser.newPage();
+      await tab.setViewport({ width: 1440, height: 900 });
+      await tab.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "ada"));
+      // The grid loads one record of the two.
+      await tab.goto(new URL("/data/outbound?limit=1", app.url).href, { waitUntil: "networkidle0" });
+      // Its heading and one row.
+      expect(await tab.evaluate(`document.querySelector('[role="grid"]').getAttribute("aria-rowcount")`)).toBe("2");
+      await (await tab.waitForSelector('button[aria-label="Change the column contact"]'))!.click();
+      await (await tab.waitForSelector('[role="menuitem"]::-p-text(Change type)'))!.click();
+      await (await tab.waitForSelector("button[aria-pressed]::-p-text(Number)"))!.click();
+      // Both emails can't be numbers, the one off screen too: the panel asks, and waits for the answer.
+      await tab.waitForSelector("legend::-p-text(These 2 values can't convert to a number)");
+      const submit = '[aria-label="Change the type of contact"] button[type="submit"]';
+      expect(await tab.$(`${submit}[disabled]`)).not.toBeNull();
+      await (await tab.waitForSelector("label::-p-text(Leave these 2 empty)"))!.click();
+      await tab.waitForSelector("[role=status]::-p-text(they're left empty, and lose what they hold now)");
+      await (await tab.waitForSelector(`${submit}:not([disabled])`))!.click();
+      await tab.waitForFunction(`location.pathname.startsWith("/changes/ui-")`, { timeout: 30_000 });
+      const id = new URL(tab.url()).pathname.slice("/changes/".length);
+      expect((await testApp.client.change(id))?.state.plan).toMatchObject({
+        changes: [{ kind: "retype", field: "contact", decision: "clear" }],
+      });
+      await testApp.client.changeEvent(id, { kind: "close", by: "ada" }, { by: { id: "ada" } });
     } finally {
       await browser.close();
     }
