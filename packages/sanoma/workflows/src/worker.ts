@@ -52,7 +52,7 @@ import {
 import type { DatabasePreparation } from "./op.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
-import { APPLY_WORKFLOW, approverLabel, errorMessage, oneAtATime, RENEWAL_AGENT, WORKFLOW_ACTION } from "./shared.ts";
+import { approverLabel, errorMessage, oneAtATime, RENEWAL_AGENT, WORKFLOW_ACTION } from "./shared.ts";
 import { renewWhenDue } from "./renewal.ts";
 
 export interface Worker {
@@ -259,7 +259,13 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       if (!fn) throw new Error(`The worker has no workflow "${name}" to start`);
       // A live apply waits its turn on the apply queue, as the client's do; anything else runs at once.
       const queueName = queueFor(resolved, name, args.sandbox);
-      return DBOS.startWorkflow(fn, { workflowID: runId, ...(queueName && { queueName }) })(args);
+      // A built-in run's code, as the client's start sets it, so a worker on another version may carry it.
+      const builtInCode = resolved.builtInCodes[name];
+      return DBOS.startWorkflow(fn, {
+        workflowID: runId,
+        ...(queueName && { queueName }),
+        ...(builtInCode && { workflowAttributes: { builtInCode } }),
+      })(args);
     },
     stopped: false,
     deadlines: deadlineRegistry(),
@@ -362,14 +368,11 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     const polling = pollMs ? { minPollingIntervalMs: Number(pollMs) } : {};
     await Promise.all([
       DBOS.registerQueue(resolved.queueName, polling),
-      // One live apply at a time across every worker on the database: the limit is counted in Postgres.
+      // One live apply at a time: DBOS counts the running ones in Postgres, of every version.
       DBOS.registerQueue(resolved.applyQueueName, { globalConcurrency: 1, ...polling }),
     ]);
     // Built-in runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
-    if (isLatest) {
-      await cancelStrandedApplies(resolved);
-      await carryBuiltInRuns(resolved, () => secrets.db());
-    }
+    if (isLatest) await carryBuiltInRuns(resolved, () => secrets.db());
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
       await applyScheduled(resolved, registered, () => secrets.db());
@@ -506,38 +509,57 @@ async function recordAppsBehind(
 }
 
 /**
- * Takes over the unfinished runs of the built-in workflows that wait across a deploy (a change, a
- * move between stores: `stampVersion`'s) started on other versions whose code is this worker's
- * (`builtInCodes`), keeping each run's id, history and unread messages: a deploy restarts the
- * worker on the merged code, a new version, which DBOS would never give the run to, and the change
- * run that made the deploy is one of them. An apply is not carried: `cancelStrandedApplies`. Each is stamped
- * with this version (`stampVersion`), and a PENDING one queued again on the app's queue
- * (`resumeWorkflows`); one stopped between the two is PENDING on this version, which DBOS's
- * recovery takes. Not `rewindWorkflow`, which takes only a cancelled run and deletes its unread
- * messages. It assumes one live worker per database, as a deploy does: an older one still running
- * such a run runs it on until it stops. A failure is warned about, and the worker starts.
+ * Takes over the unfinished runs of other versions that wait across a deploy (`stampVersion`'s),
+ * keeping each run's id, history and unread messages: those whose code is this worker's
+ * (`builtInCodes`), and an apply queued and never started, whatever its code. An apply started on
+ * other code is cancelled, since it would hold the apply queue's one place for good. Each carried
+ * PENDING run is queued again on its own queue (`resumeWorkflows`). Assumes one live worker per
+ * database; a failure is warned about, and the worker starts. See README.md, Versions.
  */
-async function carryBuiltInRuns({ appName, version, builtInCodes, queueName }: ResolvedConfig, db: () => Promise<Db>) {
+async function carryBuiltInRuns(
+  { appName, version, builtInCodes, queueName, applyQueueName }: ResolvedConfig,
+  db: () => Promise<Db>,
+) {
   try {
-    const runs = await DBOS.listWorkflows({
-      workflowName: Object.keys(builtInCodes),
-      status: ["PENDING", "ENQUEUED"],
-      applicationName: appName,
-      loadInput: false,
-      loadOutput: false,
-    });
-    const theirs = runs
-      .filter(
-        (r) =>
-          r.applicationVersion &&
-          r.applicationVersion !== version &&
-          r.attributes?.builtInCode === builtInCodes[r.workflowName],
-      )
-      .map((r) => r.workflowID);
-    if (!theirs.length) return;
-    const carried = await stampVersion(await db(), theirs, version);
-    const pending = carried.filter((r) => r.pending).map((r) => r.id);
-    if (pending.length) await DBOS.resumeWorkflows(pending, { queueName });
+    const theirs = (
+      await DBOS.listWorkflows({
+        workflowName: Object.keys(builtInCodes),
+        status: ["PENDING", "ENQUEUED"],
+        applicationName: appName,
+        loadInput: false,
+        loadOutput: false,
+      })
+    ).filter((r) => r.applicationVersion && r.applicationVersion !== version);
+    const onApplyQueue = (r: (typeof theirs)[number]) => r.queueName === applyQueueName;
+    const carries = (r: (typeof theirs)[number]) =>
+      r.attributes?.builtInCode === builtInCodes[r.workflowName] || (onApplyQueue(r) && r.status === "ENQUEUED");
+    const carry = theirs.filter(carries);
+    const stranded = theirs.filter((r) => onApplyQueue(r) && !carries(r)).map((r) => r.workflowID);
+    if (stranded.length) {
+      await DBOS.cancelWorkflows(stranded);
+      warn(
+        `cancelled ${stranded.length} apply run(s) started on other code, which no worker would run: ${stranded.join(", ")}. Apply again.`,
+      );
+    }
+    if (!carry.length) return;
+    const carried = await stampVersion(
+      await db(),
+      carry.map((r) => r.workflowID),
+      version,
+    );
+    const pending = new Set(carried.filter((r) => r.pending).map((r) => r.id));
+    const byQueue = Map.groupBy(
+      carry.filter((r) => pending.has(r.workflowID)),
+      (r) => (onApplyQueue(r) ? applyQueueName : queueName),
+    );
+    await Promise.all(
+      [...byQueue].map(([queue, runs]) =>
+        DBOS.resumeWorkflows(
+          runs.map((r) => r.workflowID),
+          { queueName: queue },
+        ),
+      ),
+    );
     if (carried.length) {
       info(`carried ${carried.length} built-in run(s) onto version ${version}: ${carried.map((r) => r.id).join(", ")}`);
     }
@@ -545,38 +567,6 @@ async function carryBuiltInRuns({ appName, version, builtInCodes, queueName }: R
     warn(
       `carrying the built-in runs of other versions onto ${version} failed, so they stay there: ${errorMessage(err)}`,
     );
-  }
-}
-
-/**
- * Cancels the unfinished applies of other versions on the apply queue, warning with their ids: no
- * worker would ever run one (DBOS gives a run only to its version), and one left PENDING would hold
- * the queue's one place for good, so no apply, a change's deploy or a push's, would run again.
- * Nothing is lost: an apply plans again from the files when it runs, so the next one does what
- * they would have. A change whose deploy this cancels reports it as the deploy's error (`child`
- * in change-steps.ts). A failure is warned about, and the worker starts.
- */
-async function cancelStrandedApplies({ appName, version, applyQueueName }: ResolvedConfig) {
-  try {
-    const stranded = (
-      await DBOS.listWorkflows({
-        workflowName: APPLY_WORKFLOW,
-        status: dbosStatusesOf("queued", "running"),
-        applicationName: appName,
-        queueName: applyQueueName,
-        loadInput: false,
-        loadOutput: false,
-      })
-    )
-      .filter((r) => r.applicationVersion && r.applicationVersion !== version)
-      .map((r) => r.workflowID);
-    if (!stranded.length) return;
-    await DBOS.cancelWorkflows(stranded);
-    warn(
-      `cancelled ${stranded.length} apply run(s) of another version, which no worker would run: ${stranded.join(", ")}. Apply again.`,
-    );
-  } catch (err) {
-    warn(`cancelling the apply runs of other versions failed, so they stay queued: ${errorMessage(err)}`);
   }
 }
 

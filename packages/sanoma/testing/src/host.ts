@@ -195,8 +195,9 @@ export async function credentialHeard(
  * `page`, the page answers while the host is stopped, and every ask of it answers 200 throughout a
  * deploy of a new commit. Two deploys of a new commit at once: one finishes, and the other
  * finishes too (a host that takes one after another) or fails at once as superseded, never by
- * waiting out its time, and the host is then clean in drift. Leaves the host applied, and its
- * check's credential cleared.
+ * waiting out its time, and the host is then clean in drift: it reaches the driver only when
+ * `apply` calls the type's operations itself (README.md says which hosts it exercises). Leaves the
+ * host applied, and its check's credential cleared.
  */
 export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   const { type, client, timeoutMs = 60_000 } = host;
@@ -693,7 +694,7 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived" }: FakeHost
     hosts.set(declared.name, { state, running });
     return { id: declared.name, state };
   };
-  // One put after another, as a platform deploys a host once at a time.
+  // One put after another: the fake models no race between two deploys (`checkHost` says what that leaves unchecked).
   const inTurn = oneAtATime();
   const run = (desired: Record<string, unknown>, secrets: Parameters<typeof resolveSecrets>[1]) =>
     inTurn(() => put(desired, secrets));

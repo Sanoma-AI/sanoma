@@ -107,7 +107,7 @@ async function drain(
  * Starts a run of the built-in `name` as a child of this one, with the id `<run>:<suffix>` (so a
  * replay finds it), as the run's own actor, and waits for its output, counted as a wait for
  * another run: undefined and the error's message when it failed, or was cancelled (a worker on a
- * new version cancels an apply of the old one, `cancelStrandedApplies`).
+ * new version cancels an apply started on other code, `carryBuiltInRuns`).
  */
 async function child(
   run: Run,

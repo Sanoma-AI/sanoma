@@ -22,12 +22,12 @@ import {
 } from "../src/index.ts";
 import { fakeMail, mailDataFile } from "./fakes/mail.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
-import { freshDatabase, pending, rootWith, testhostInfra, waitFor } from "./harness.ts";
+import { freshDatabase, pending, rootWith, setBuiltInCode, testhostInfra, waitFor } from "./harness.ts";
 
-// Needs Postgres: `pnpm db:up`. One live apply at a time across a database's workers: a second
-// waits on the apply queue, named by `applyAhead`, whoever starts it (a person, or a change's
-// deploy); a sandbox apply does not wait; a worker on a new version cancels the applies of the
-// old, which no worker would run, so the queue's one place is free again.
+// Needs Postgres: `pnpm db:up`. One live apply at a time on a database: a second waits on the
+// apply queue, named by `applyAhead`, whoever starts it (a person, or a change's deploy); a sandbox
+// apply does not wait; a worker on a new version carries the old one's applies of its own code and
+// those queued, in their places, and cancels one started on other code, so the queue's one place is free again.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const alice: Principal = { id: "alice" };
@@ -211,6 +211,7 @@ describe("one apply at a time across a deploy", () => {
   } satisfies SanomaConfig;
   const v1: SanomaConfig = { ...base, workflows: [] };
   const v2: SanomaConfig = { ...base, workflows: [added] };
+  const [one, two] = [resolveConfig(v1), resolveConfig(v2)];
   const workers: Worker[] = [];
   let client: SanomaClient;
   let raw: DBOSClient;
@@ -240,6 +241,10 @@ describe("one apply at a time across a deploy", () => {
     return worker;
   };
   const row = (runId: string) => raw.getWorkflow(runId);
+  const stop = async (worker: Worker) => {
+    workers.splice(workers.indexOf(worker), 1);
+    await worker.stop();
+  };
   /** A change of `id` opened and published by alice, who may decide her own. */
   const publish = async (id: string) => {
     repo.edit(id, { [`notes/${id}.md`]: "\n" });
@@ -267,7 +272,7 @@ describe("one apply at a time across a deploy", () => {
     expect(report.deploy!.apply).not.toHaveProperty("error");
   });
 
-  it("cancels the old version's applies at a new version's start, which frees the queue, and a carried change says its deploy was cancelled", async () => {
+  it("carries the old version's applies at a new version's start: the held one goes on, the deploy queued behind it runs next", async () => {
     // The mail domain made again, so careful's apply has a change to wait at.
     writeLockfile(root, { [hostId]: readLockfile(root).bindings[hostId]! });
     gated.reset();
@@ -277,25 +282,57 @@ describe("one apply at a time across a deploy", () => {
     const runId = await publish("carried");
     const deploy = `${runId}:deploy`;
     await waitFor(async () => (await row(deploy))?.status === "ENQUEUED");
-    workers.splice(workers.indexOf(old), 1);
-    await old.stop();
+    // Started by the change's own run, it carries its code as the client's starts do.
+    expect((await row(deploy))?.attributes).toMatchObject({ builtInCode: one.builtInCodes.apply });
+    await stop(old);
+
+    await start(v2);
+    expect(await row(held)).toMatchObject({ applicationVersion: two.version });
+    expect(await row(deploy)).toMatchObject({ status: "ENQUEUED", applicationVersion: two.version });
+    await waitFor(async () => (await row(held))?.status === "PENDING");
+    expect(await client.applyAhead(deploy)).toMatchObject({ runId: held, status: "waiting" });
+    await client.decide(held, { decision: "approve", by: { id: "lead" } });
+    expect((await client.applyReport(held)).results).toEqual([
+      expect.objectContaining({ id: sending, status: "done" }),
+    ]);
+    const report = (await client.result(runId, 60_000)) as ChangeReport;
+    expect(report).toMatchObject({ outcome: "merged", deploy: { apply: { runId: deploy, hosts: [hostId] } } });
+    expect(report.deploy!.apply).not.toHaveProperty("error");
+  });
+
+  it("cancels an apply started on other code at a new version's start, which frees the queue, and its change says its deploy was cancelled", async () => {
+    // A new commit for the host, so careful's deploy has a change to wait at.
+    await source.commit();
+    const old = await start(v1);
+    repo.edit("careful", { "notes/careful.md": "\n" });
+    const runId = await client.openChange({ id: "careful", title: "Change careful" }, { startedBy: "careful" });
+    const deploy = `${runId}:deploy`;
+    // Each of careful's writes waits for the lead: the change's are approved until its deploy waits at its own.
+    await waitFor(async () => {
+      const asked = (await client.approvals(runId)).find((a) => a.status === "pending");
+      // Every hold here is the lead's, a person.
+      if (asked) await client.decide(runId, { decision: "approve", by: { id: asked.approver as string } });
+      return pending(() => client, deploy)();
+    }, 30_000);
+    const behind = await client.apply({ only: [sending] }, { startedBy: alice });
+    expect(await client.applyAhead(behind)).toMatchObject({ runId: deploy });
+    await stop(old);
+    // Started by other apply code: the runtime's own, before an upgrade.
+    await setBuiltInCode(databaseUrl, deploy, "other");
 
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await start(v2);
-    const cancelled = warn.mock.calls.map(([m]) => String(m)).find((m) => m.includes("cancelled 2 apply run(s)"));
-    expect(cancelled).toContain(held);
-    expect(cancelled).toContain(deploy);
-    expect(cancelled).toMatch(/which no worker would run: .*\. Apply again\.$/);
-    expect(await row(held)).toMatchObject({ status: "CANCELLED" });
+    const cancelled = warn.mock.calls.map(([m]) => String(m)).find((m) => m.includes("cancelled 1 apply run(s)"));
+    expect(cancelled).toBe(
+      `sanoma: cancelled 1 apply run(s) started on other code, which no worker would run: ${deploy}. Apply again.`,
+    );
     expect(await row(deploy)).toMatchObject({ status: "CANCELLED" });
     // The change, carried onto the new version, ends saying so.
     const report = (await client.result(runId, 60_000)) as ChangeReport;
     expect(report).toMatchObject({ outcome: "merged", deploy: { apply: { runId: deploy } } });
     expect(report.deploy!.apply!.error).toMatch(/cancelled/);
-    // The queue's one place is free: the next apply runs.
-    const next = await client.apply({ only: [sending] }, { startedBy: alice });
-    expect((await client.applyReport(next)).results).toEqual([
-      expect.objectContaining({ id: sending, status: "done" }),
-    ]);
+    // The queue's one place is free: the apply queued behind, carried, runs.
+    expect(await row(behind)).toMatchObject({ applicationVersion: two.version });
+    expect((await client.applyReport(behind)).plan.steps.map((s) => s.action)).toEqual(["none"]);
   });
 });

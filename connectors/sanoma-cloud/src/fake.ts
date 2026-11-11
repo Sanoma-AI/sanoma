@@ -125,7 +125,7 @@ function address(slug: string, start: StartRuntime) {
     await up();
     return url!;
   };
-  // One run after another, as Sanoma Cloud deploys a host once at a time.
+  // One run after another: the fake does not model how Sanoma Cloud orders two deploys at once.
   const inTurn = oneAtATime();
   return {
     /** Runs the host at `revision`, after any run before it ends (`runAt`). */
