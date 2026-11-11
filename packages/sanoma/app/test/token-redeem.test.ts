@@ -110,10 +110,13 @@ describe("POST /api/token/redeem", () => {
     expect(statuses.toSorted()).toEqual([200, 410]);
   });
 
-  it("refuses a body that is not { code, verifier } with 400, and any method but POST with 405", async () => {
+  it("refuses a body that is not { code, verifier } with 400, one over 1 KiB with 413, and any method but POST with 405", async () => {
     expect((await redeem({ code: "sca_token" })).status).toBe(400);
     expect((await redeem({ code: `sch_${"x".repeat(43)}`, verifier: "short" })).status).toBe(400);
     expect((await redeem(undefined, { body: "not json" })).status).toBe(400);
+    const large = await redeem(undefined, { body: JSON.stringify({ code: "x".repeat(2048), verifier: "y" }) });
+    expect(large.status).toBe(413);
+    expect(large.headers.get("cache-control")).toBe("no-store");
     const get = await handler.fetch(new Request("https://www.sanoma.example/api/token/redeem"));
     expect(get.status).toBe(405);
   });

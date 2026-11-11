@@ -1,4 +1,5 @@
 import type { SanomaClient } from "sanoma/workflows";
+import { bodyText } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 // `POST /api/token/redeem`, a machine route on every host, before the login: the other half of
@@ -12,6 +13,18 @@ const Redeem = z.object({
   verifier: z.string().regex(/^[\w.~-]{43,128}$/),
 });
 
+/** The most a request's body may hold: a code and a verifier are under 300 bytes. */
+const MAX_BODY = 1024;
+
+/** A body's JSON, or undefined for one that is not JSON. */
+function parsed(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 const answer = (status: number, body: object) =>
   Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
@@ -19,10 +32,12 @@ const answer = (status: number, body: object) =>
  * Answers `{ token }` for a code and its verifier, once; 410 alike for a code unknown, expired or
  * redeemed, a verifier that is not its challenge's (which leaves the code to be redeemed), and a
  * secret no longer holding the live token it held at the handoff; 400 for a body that is not
- * `{ code, verifier }`.
+ * `{ code, verifier }`; 413 for one over `MAX_BODY`, read no further.
  */
 export async function redeemToken(client: SanomaClient, request: Request): Promise<Response> {
-  const asked = Redeem.safeParse(await request.json().catch(() => undefined));
+  const text = await bodyText(request, MAX_BODY);
+  if (text === undefined) return answer(413, { error: "The body is too large" });
+  const asked = Redeem.safeParse(parsed(text));
   if (!asked.success) return answer(400, { error: "Send { code, verifier }" });
   const handed = await client.tokens.redeem(asked.data);
   const token = handed && (await client.secrets([handed.store])).get(handed.store)?.value;

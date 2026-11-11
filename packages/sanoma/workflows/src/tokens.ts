@@ -74,6 +74,8 @@ export interface Tokens {
    * A one-time code, `sch_…`, for the token `tokenId` stored under the secret `store`: good for `ttlMs` (at
    * most `HANDOFF_MS`), once, and only with the verifier `challenge` was made from (PKCE S256).
    * Its table keeps only the code's hash; the database's store sweeps those expired at each handoff.
+   * It checks nothing about whose token it is: its caller does (`sanoma.token.handoff` refuses
+   * unless the stored token is live and acts for the run's starter).
    */
   handoff(input: { store: string; tokenId: string; challenge: string; ttlMs: number }): Promise<{ code: string }>;
   /**
