@@ -12,16 +12,17 @@ import {
   isLoopback,
   personOf,
   personsOf,
+  RUN_READS,
   UsageError,
 } from "sanoma/workflows/shared";
-import { APP_FILE, runningApp } from "./app-file.ts";
+import { APP_FILE, mainCheckout, runningApp } from "./app-file.ts";
 import { appAddress, loadDotEnv } from "./config.ts";
 
 // `sanoma describe` and `sanoma call`: thin clients of a running app's `POST /api/call`, which does
 // the dispatch (`callApi`). Only Node's modules, sanoma/workflows/shared, `./app-file.ts` and
 // `./config.ts` for its `.env`, so neither command loads the worker or the app; the company's root
-// and its people are read through sanoma/workflows/describe (`companyRootOf`, `readPeople`), imported
-// when the command runs.
+// and its people are read through sanoma/workflows/describe (`configDirOf`, `companyRootOf`,
+// `readPeople`), imported when the command runs.
 
 /** What the two commands take from the command line. */
 export interface CallOptions {
@@ -46,8 +47,8 @@ const RESULT_DEADLINE_MS = 10 * 60_000;
 /** The least time between two requests of a `.result` asked again: one with `waitMs: 0` answers at once. */
 const RETRY_MS = 1_000;
 
-/** The reads of a workflow's runs `callApi` answers (`<api>.<read>`), which start nothing and take no id. */
-const READS = new Set(["result", "latest", "runs", "approvals", "ledger"]);
+/** The reads of a workflow's runs (`RUN_READS`, as the app's `callApi` answers them), which start nothing and take no id. */
+const READS: ReadonlySet<string> = new Set(RUN_READS);
 
 /** `sanoma describe`: the app's description for an agent (`sanoma.describe`), as JSON on stdout. */
 export async function describeCommand(options: CallOptions): Promise<number> {
@@ -81,8 +82,8 @@ interface Target {
   app: URL;
   /** Where the address came from, for a message that nothing answers there: empty for `--url`. */
   from: string;
-  /** `SANOMA_APP_HOST`, when it names an address beyond this machine, whose app signs people in. */
-  host?: string;
+  /** What says the app listens beyond this machine, and so signs people in (the staff login), when something does. */
+  signIn?: string;
 }
 
 /** Sends the call, asking a `.result` again while its run is running, and prints the answer. */
@@ -96,14 +97,13 @@ async function request(name: string, input: unknown, options: CallOptions): Prom
     if (!CALL_ID.test(options.id)) throw new UsageError(`--id: "${options.id}" is not an id: letters, digits, _ and -`);
   }
   const cwd = process.cwd();
-  const { companyRootOf } = await import("sanoma/workflows/describe");
-  const root = companyRootOf(cwd);
+  const { root, running } = await companyOf(cwd);
   if (root === undefined && options.url === undefined) {
     throw new UsageError(`No sanoma.config.ts in ${cwd}: run sanoma from the directory that holds it`);
   }
   // The company's `.env`, as the app it runs reads it.
   if (root !== undefined) loadDotEnv(root);
-  const target = targetOf(options.url, root);
+  const target = targetOf(options.url, running);
   const person = await personAsking(options.as, root);
   // A start or an operation's call carries an id, so the app makes it once: `--id`'s, else a new one.
   const id = read ? undefined : (options.id ?? crypto.randomUUID());
@@ -168,8 +168,11 @@ interface Failed {
 
 type Answer = { ok: true; body: unknown } | Failed;
 
-/** Errors that mean the request never left: nothing listens there, or no such host. */
-const NOT_SENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH"]);
+/**
+ * Errors after which the app may have taken the request: its connection broken once open. Any
+ * other (nothing listens, no such host, a URL fetch refuses) is raised before anything is sent.
+ */
+const MAYBE_SENT = new Set(["UND_ERR_SOCKET", "UND_ERR_CLOSED", "ECONNRESET", "EPIPE", "ECONNABORTED", "ETIMEDOUT"]);
 
 /**
  * One `POST /api/call`: the answer, or an error naming the address (and where it came from) when
@@ -203,7 +206,7 @@ async function send(
   } catch (err) {
     if ((err as { name?: string } | null)?.name === "TimeoutError") throw timedOut();
     const cause = (err as { cause?: { code?: string; message?: string } } | null)?.cause;
-    const sentMaybe = !NOT_SENT.has(cause?.code ?? "");
+    const sentMaybe = MAYBE_SENT.has(cause?.code ?? "");
     throw new Error(
       `Nothing answers at ${app.origin} (${cause?.code ?? cause?.message ?? errorMessage(err)})${from}: ` +
         `start the app with sanoma, or name where it runs with --url${sentMaybe ? again : ""}`,
@@ -228,9 +231,9 @@ async function send(
   return { ok: false, status: res.status, ...(problem && { problem }), text };
 }
 
-/** The text of the server's that is printed, without control characters but newline and tab (a terminal's escapes). */
+/** The text of the server's that is printed, without control characters (C0 but newline and tab, DEL, C1: a terminal's escapes). */
 // oxlint-disable-next-line no-control-regex -- the control characters are what it removes
-const clean = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f]/g, "");
+const clean = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
 
 /** A string of the server's, cleaned (`clean`); undefined for anything else. */
 const str = (value: unknown) => (typeof value === "string" ? clean(value) : undefined);
@@ -267,34 +270,60 @@ function failure(target: Target, { status, problem, text }: Failed, result: bool
     lines.push(
       `${app.host} is not this machine: sanoma call and sanoma describe sign in only to an app on this machine, and a hosted app's sign-in refuses them`,
     );
-  } else if (target.host !== undefined && (refused || status === 400)) {
+  } else if (target.signIn !== undefined && (refused || status === 400)) {
     lines.push(
-      `SANOMA_APP_HOST is ${target.host}: an app that listens beyond this machine signs people in with the staff login, which sanoma call and sanoma describe do not; run it on 127.0.0.1 to call it from here`,
+      `The app at ${app.origin} listens beyond this machine (${target.signIn}), so it signs people in with the staff login, which sanoma call and sanoma describe do not; run it on 127.0.0.1 to call it from here`,
     );
   }
   return lines.join("\n");
 }
 
 /**
- * Where the app listens: `--url`; else the app the company's `.sanoma/app.json` names while its
- * process runs (`runningApp`: an http(s) URL on this machine, written by `sanoma`, `sanoma serve`
- * and `sanoma app` when they listen); else `SANOMA_APP_HOST` (default 127.0.0.1) and
+ * The company the commands work for, from `cwd`: the root whose running app they ask, and whose
+ * `.env` and people they read, as that app reads them. Its candidates are the nearest directory
+ * with a `sanoma.config.ts` (`configDirOf`: an app in `apps/<app>/` that kept its own config, run
+ * there on its own), then the company's root (`companyRootOf`), each as its main checkout has it
+ * (`mainCheckout`: a draft in `.sanoma/drafts/<id>` is its company's); the first with a live
+ * `.sanoma/app.json` (`runningApp`) is the one, else the company's root. Undefined outside any.
+ */
+async function companyOf(cwd: string) {
+  const { companyRootOf, configDirOf } = await import("sanoma/workflows/describe");
+  const found = [configDirOf(cwd), companyRootOf(cwd)].filter((dir) => dir !== undefined);
+  const roots = [...new Set(await Promise.all(found.map(mainCheckout)))];
+  for (const root of roots) {
+    const app = runningApp(root);
+    if (app) return { root, running: { ...app, file: join(root, APP_FILE) } };
+  }
+  return { root: roots.at(-1), running: undefined };
+}
+
+/**
+ * Where the app listens: `--url`; else the app a company's `.sanoma/app.json` names while its
+ * process runs (`running`, from `companyOf`: an http(s) URL on this machine, written by `sanoma`,
+ * `sanoma serve` and `sanoma app` when they listen, saying when the app signs people in); else `SANOMA_APP_HOST` (default 127.0.0.1) and
  * `SANOMA_APP_PORT` (default 3000; empty or 0, any free port, as the app reads it, says nothing of
  * where: a `UsageError` asking for `--url`), the `.env` loaded. 0.0.0.0 and :: are asked at this
  * machine's address, where such an app answers too, but an app on any address but this machine's
  * signs people in with the staff login, which refuses these commands: the failure says so.
  */
-function targetOf(url: string | undefined, root: string | undefined): Target {
+function targetOf(url: string | undefined, running: { url: string; file: string; signIn?: true } | undefined): Target {
   if (url !== undefined) {
     const parsed = URL.parse(url);
     if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
       throw new UsageError(`--url: "${url}" is not an http(s) URL, such as http://127.0.0.1:3000`);
     }
+    // Refused before fetch is, which would print them: these commands say who asks with --as.
+    if (parsed.username || parsed.password) {
+      throw new UsageError("--url names a user or a password: leave them out, and say who is asking with --as");
+    }
     return { app: parsed, from: "" };
   }
-  const running = root === undefined ? undefined : runningApp(root);
   if (running) {
-    return { app: new URL(running.url), from: `; the address is the one ${join(root!, APP_FILE)} names` };
+    return {
+      app: new URL(running.url),
+      from: `; the address is the one ${running.file} names`,
+      ...(running.signIn && { signIn: `${running.file} says so` }),
+    };
   }
   // As the app reads them (`appAddress`): an empty port is 0, any free port.
   const { host: named, port } = appAddress();
@@ -311,13 +340,13 @@ function targetOf(url: string | undefined, root: string | undefined): Target {
   return {
     app,
     from: "; the address is SANOMA_APP_HOST's and SANOMA_APP_PORT's",
-    ...(!isLoopback(named) && { host: named }),
+    ...(!isLoopback(named) && { signIn: `SANOMA_APP_HOST is ${named}` }),
   };
 }
 
 /**
- * Who is asking, by a declared person's id: `--as` (an id, an email or a GitHub login, matched with
- * `personOf` when people are declared; with none, taken as it is); else the one person declared, as
+ * Who is asking, by a declared person's id: `--as` (a declared id, else an email or a GitHub login,
+ * matched with `personOf`, when people are declared; with none, taken as it is); else the one person declared, as
  * the app's picker takes them; else the one git's `user.email` names. Otherwise a `UsageError`
  * listing the declared ids. The people are read from the company's `resources/` (`readPeople`,
  * imported only here); outside a company (`root` undefined), `--as` is needed.
@@ -342,7 +371,8 @@ async function personAsking(as: string | undefined, root: string | undefined): P
   const ids = people.map((p) => p.id).join(", ");
   if (named) {
     if (!people.length) return named;
-    const id = personOf({ email: named, github: named, id: named }, declared);
+    // A declared id is that person, before anyone's email or GitHub login that happens to read the same.
+    const id = people.find((p) => p.id === named)?.id ?? personOf({ email: named, github: named }, declared);
     if (id) return id;
     throw new UsageError(`--as: ${named} is no declared person; the people are ${ids}`);
   }

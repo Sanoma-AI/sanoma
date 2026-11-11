@@ -49,25 +49,43 @@ export function scriptPath(script: string | undefined): string | undefined {
 /** Each directory's company root (the nearest one with a `sanoma.config.ts`, short of a `node_modules`), once found. */
 const roots = new Map<string, string>();
 
+/** Whether `dir` is a company's root: it holds a `sanoma.config.ts`, or a bundle registered its snapshot (`useRootSnapshot`). */
+function isCompany(dir: string): boolean {
+  const { existsSync } = builtin("node:fs")!;
+  return rootSnapshot(dir) !== undefined || existsSync(builtin("node:path")!.join(dir, "sanoma.config.ts"));
+}
+
 /**
- * The root of the company `dir` is in: the nearest of it and its ancestors with a
- * `sanoma.config.ts` (or a bundle's snapshot, `useRootSnapshot`), where a `node_modules` ends the
- * search (what is under it is a package's, not a company's); an app merged from a company's repo
- * keeps that repo's config, so a root in `apps/<app>/` of a company is that company's. Undefined
- * outside any company. Where there is no Node (a page), undefined.
+ * The nearest of `dir` and its ancestors with a `sanoma.config.ts` (or a bundle's snapshot), where a
+ * `node_modules` ends the search (what is under it is a package's, not a company's): a company's
+ * root, or an app's in `apps/<app>/` that kept its own config. Undefined outside any, and where
+ * there is no Node (a page).
+ */
+export function configDirOf(dir: string): string | undefined {
+  const path = builtin("node:path");
+  if (!path) return undefined;
+  const { basename, resolve } = path;
+  return (
+    upFrom<string | null>(resolve(dir), (d) =>
+      basename(d) === "node_modules" ? null : isCompany(d) ? d : undefined,
+    ) ?? undefined
+  );
+}
+
+/**
+ * The root of the company `dir` is in: its `configDirOf`, unless that is an app merged from a
+ * company's repo, which keeps that repo's config: a root in `apps/<app>/` of a company is that
+ * company's. Undefined outside any company, and where there is no Node (a page).
  */
 export function companyRootOf(dir: string): string | undefined {
   const path = builtin("node:path");
   if (!path) return undefined;
-  const { existsSync } = builtin("node:fs")!;
-  const { basename, dirname, join, resolve } = path;
+  const { basename, dirname, resolve } = path;
   dir = resolve(dir);
-  /** Whether `d` is a company's root: it holds a `sanoma.config.ts`, or a bundle registered its snapshot (`useRootSnapshot`). */
-  const isCompany = (d: string) => rootSnapshot(d) !== undefined || existsSync(join(d, "sanoma.config.ts"));
   const known = roots.get(dir);
   if (known !== undefined) return known;
-  let root = upFrom<string | null>(dir, (d) => (basename(d) === "node_modules" ? null : isCompany(d) ? d : undefined));
-  if (root === undefined || root === null) return undefined;
+  let root = configDirOf(dir);
+  if (root === undefined) return undefined;
   // An app merged from a company's repo keeps that repo's config: the company is the one above.
   if (basename(dirname(root)) === APPS_DIR && isCompany(dirname(dirname(root)))) root = dirname(dirname(root));
   // Found roots only: a directory that is no company's yet may become one (`sanoma` in an empty folder).

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, parseEnv } from "node:util";
 import type { SanomaConfig } from "sanoma/workflows";
-import { errorMessage, UsageError } from "sanoma/workflows/shared";
+import { errorMessage, isLoopback, UsageError } from "sanoma/workflows/shared";
 import { appAddress, type Loaded, type LoadedConfig, loadConfig } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
 import { emit, eventsOn, stage } from "./events.ts";
@@ -90,15 +90,19 @@ const USAGE_EXIT = 2;
 
 const log = (line: string) => console.error(line);
 
-/** A failure to start or stop: its message on stderr, and as an `error` event. */
+/** Set by `describe` and `call`, whose stdout holds their answer alone: no `error` event there. */
+let answering = false;
+
+/** A failure to start or stop: its message on stderr, and as an `error` event (not for `describe` and `call`). */
 function fail(err: unknown): void {
   const message = errorMessage(err);
   log(message);
-  emit({ event: "error", message });
+  if (!answering) emit({ event: "error", message });
 }
 
 /** Runs the command line; returns the exit code, or never, for a command that serves until a signal. */
 export async function main(argv: string[]): Promise<number> {
+  answering = argv[0] === "describe" || argv[0] === "call";
   // Commands that read their own arguments.
   if (argv[0] === "dev") return (await import("sanoma/internal/dev")).dev(argv.slice(1));
   if (argv[0] === "tfschema") return (await import("sanoma/internal/bridge/tfschema/cli")).tfschema(argv.slice(1));
@@ -344,7 +348,8 @@ async function keep(
     for (const [name, url] of Object.entries(started.sites ?? {})) console.log(`${name}: ${url}`);
     // Where `sanoma call` finds it, until it stops: written before it says it is ready.
     const { recordApp } = await import("./app-file.ts");
-    forget = recordApp(process.cwd(), started.url, log);
+    // An app beyond this machine signs people in (`appOptions`), which `sanoma call` cannot.
+    forget = recordApp(process.cwd(), started.url, { log, signIn: !isLoopback(appAddress().host) });
     console.log(`${resolved.name} at ${started.url}; ctrl-c to stop`);
     emit({ event: "ready", url: started.url, sites: started.sites ?? {} });
   }

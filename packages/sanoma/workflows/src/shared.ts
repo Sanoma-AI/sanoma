@@ -647,6 +647,12 @@ export const builtInRefusal = (workflow: string): string =>
   `${workflow} is the runtime's own workflow: the runtime's own workflows are not started here`;
 
 /**
+ * The reads of a workflow's runs a site's `api` and `POST /api/call` answer (`<api>.<read>`, the
+ * app's `callApi`), beside `.start`: they start nothing, so `sanoma call` sends them no id.
+ */
+export const RUN_READS = ["result", "latest", "runs", "approvals", "ledger"] as const;
+
+/**
  * Every run status, in the order a run may pass through them: waiting on the queue, running,
  * waiting for an approval, or ended. `waiting` is `running` with an approval pending.
  */

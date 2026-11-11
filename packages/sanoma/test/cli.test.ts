@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -515,6 +516,47 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
     }
   });
 
+  it("from a draft, asks the company's running app as its people say", async () => {
+    const other = copyFixture();
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@acme.test", ...args], { cwd: other });
+    try {
+      writeFileSync(join(other, ".gitignore"), "node_modules/\n.sanoma/\n");
+      git("init", "-q", "-b", "main");
+      git("add", ".");
+      git("commit", "-q", "-m", "x");
+      git("worktree", "add", "-q", ".sanoma/drafts/d1", "-b", "draft/d1");
+      // The company's alone, uncommitted: the draft has none, the app reads these.
+      mkdirSync(join(other, "resources"));
+      writeFileSync(
+        join(other, "resources/people.ts"),
+        `import { sanoma } from "sanoma/resources";\n\nexport const founder = sanoma.person({ id: "founder" });\n`,
+      );
+      writeFileSync(join(other, ".sanoma/app.json"), JSON.stringify({ url: server!.url, pid: process.pid }));
+      const draft = join(other, ".sanoma/drafts/d1/workflows");
+      const started = await sanoma(["call", "hello", "--input", '{"title":"Draft"}'], { cwd: draft });
+      expect(started.code, started.stderr).toBe(0);
+      expect(await startedBy(started.json.runId)).toMatchObject({ id: "founder" });
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("finds an app folder's own running app before its company's", async () => {
+    const other = copyFixture();
+    try {
+      // `sanoma` run in apps/crm, which kept its own config: its discovery file is there, none above.
+      mkdirSync(join(other, "apps/crm/.sanoma"), { recursive: true });
+      mkdirSync(join(other, "apps/crm/workflows"));
+      writeFileSync(join(other, "apps/crm/sanoma.config.ts"), "");
+      writeFileSync(join(other, "apps/crm/.sanoma/app.json"), JSON.stringify({ url: server!.url, pid: process.pid }));
+      const inApp = await sanoma(["describe", "--as", "ada"], { cwd: join(other, "apps/crm/workflows") });
+      expect(inApp.code, inApp.stderr).toBe(0);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
   it("trusts .sanoma/app.json only for an address on this machine, and says so when nothing answers there", async () => {
     const other = copyFixture();
     try {
@@ -567,9 +609,12 @@ describe("sanoma call against a stand-in app", () => {
   /** What the stand-in answers every request: its status and body. */
   let answer = { status: 409, body: { error: "still running", code: "run_running", runId: "r1" } as object };
   let at = "";
+  /** Who the last request said was asking. */
+  let actor: string | undefined;
   beforeAll(async () => {
     stand = createServer((req, res) => {
       requests++;
+      actor = req.headers["x-sanoma-actor"] as string | undefined;
       req.resume().on("end", () => {
         res.writeHead(answer.status, { "content-type": "application/json" });
         res.end(JSON.stringify(answer.body));
@@ -600,10 +645,75 @@ describe("sanoma call against a stand-in app", () => {
 
   it("prints the server's words without a terminal's control characters, and a plain 400 without the host's hint", async () => {
     dir = copyFixture();
-    answer = { status: 400, body: { error: "bad \u001b[31mred\u0007 thing\tok", code: "invalid_input" } };
+    answer = {
+      status: 400,
+      body: { error: "bad \u001b[31mred\u0007 thing\tok\u007f\u0085\u009b2J", code: "invalid_input" },
+    };
     const done = await runCli(dir, ["call", "hello", "--url", at, "--as", "ada"], env);
     expect(done.code).toBe(1);
-    expect(done.stderr).toBe("bad [31mred thing\tok (invalid_input)\n");
+    expect(done.stderr).toBe("bad [31mred thing\tok2J (invalid_input)\n");
+    // With SANOMA_EVENTS=1 too, as a terminal under the desktop shell has it: stdout is the answer's alone.
+    const events = await runCli(dir, ["call", "hello", "--url", at, "--as", "ada"], { ...env, SANOMA_EVENTS: "1" });
+    expect([events.code, events.stdout]).toEqual([1, ""]);
+    const usage = await runCli(dir, ["describe", "--nope"], { ...env, SANOMA_EVENTS: "1" });
+    expect([usage.code, usage.stdout]).toEqual([2, ""]);
+  });
+
+  it("asks as the person whose id --as names, before one whose GitHub login reads the same", async () => {
+    dir = copyFixture();
+    mkdirSync(join(dir, "resources"));
+    writeFileSync(
+      join(dir, "resources/people.ts"),
+      `import { sanoma } from "sanoma/resources";
+
+export const sam = sanoma.person({ id: "sam", github: "samuel" });
+export const samantha = sanoma.person({ id: "samantha", github: "sam" });
+`,
+    );
+    answer = { status: 200, body: {} };
+    for (const [as, id] of [
+      ["sam", "sam"],
+      ["samuel", "sam"],
+      ["samantha", "samantha"],
+    ] as const) {
+      const done = await runCli(dir, ["describe", "--url", at, "--as", as], env);
+      expect([done.code, actor], as).toEqual([0, id]);
+    }
+  });
+
+  it("says when the app the discovery file names signs people in, which these commands do not", async () => {
+    dir = copyFixture();
+    mkdirSync(join(dir, ".sanoma"));
+    writeFileSync(join(dir, ".sanoma/app.json"), JSON.stringify({ url: at, pid: process.pid, signIn: true }));
+    answer = {
+      status: 400,
+      body: { error: "This request does not say who is making it: sign in", code: "invalid_input" },
+    };
+    const done = await runCli(dir, ["describe", "--as", "ada"], env);
+    expect(done.code).toBe(1);
+    expect(done.stderr).toMatch(
+      /\nThe app at http:\/\/127\.0\.0\.1:\d+ listens beyond this machine \(\S+\.sanoma\/app\.json says so\), so it signs people in with the staff login/,
+    );
+  });
+
+  it("names no id, and no password, for a call that was never sent", async () => {
+    dir = copyFixture();
+    const refused = await runCli(
+      dir,
+      ["call", "hello", "--id", "never-1", "--url", await closedAddress(), "--as", "ada"],
+      env,
+    );
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toMatch(/^Nothing answers at .* \(ECONNREFUSED\)/);
+    expect(refused.stderr).not.toContain("never-1");
+    const secret = await runCli(
+      dir,
+      ["call", "hello", "--id", "never-2", "--url", "http://u:secret@127.0.0.1:1", "--as", "ada"],
+      env,
+    );
+    expect(secret.code).toBe(2);
+    expect(secret.stderr).toMatch(/^--url names a user or a password/);
+    expect(secret.stderr).not.toMatch(/secret|never-2/);
   });
 
   it("names the call's id when the app may have taken it, so the same call can be made again", async () => {

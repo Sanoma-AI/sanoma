@@ -1,5 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
+import { promisify } from "node:util";
 import { errorMessage, isLoopback } from "sanoma/workflows/shared";
 
 // Only Node's modules and sanoma/workflows/shared: `sanoma` imports this when its app listens, and
@@ -8,10 +10,14 @@ import { errorMessage, isLoopback } from "sanoma/workflows/shared";
 /** Where a running app says where it listens, under the directory it runs in: `{ url, pid }`. */
 export const APP_FILE = ".sanoma/app.json";
 
-/** What `.sanoma/app.json` holds: the app's URL, and the process serving it. */
+/**
+ * What `.sanoma/app.json` holds: the app's URL, the process serving it, and `signIn` when the app
+ * listens beyond this machine and so signs people in (the staff login), not the loopback login.
+ */
 interface RunningApp {
   url: string;
   pid: number;
+  signIn?: true;
 }
 
 /**
@@ -22,9 +28,13 @@ interface RunningApp {
  * exit too. A file it cannot write is logged and left: the commands fall back to the address in
  * the environment.
  */
-export function recordApp(cwd: string, url: string, log: (line: string) => void): () => void {
+export function recordApp(
+  cwd: string,
+  url: string,
+  { log, signIn }: { log: (line: string) => void; signIn: boolean },
+): () => void {
   const file = join(cwd, APP_FILE);
-  const app: RunningApp = { url, pid: process.pid };
+  const app: RunningApp = { url, pid: process.pid, ...(signIn && { signIn: true }) };
   const partial = `${file}.${process.pid}`;
   try {
     mkdirSync(join(cwd, ".sanoma"), { recursive: true });
@@ -75,8 +85,9 @@ function readApp(file: string): RunningApp | undefined {
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null) return undefined;
-  const { url, pid } = parsed as Partial<RunningApp>;
-  return typeof url === "string" && typeof pid === "number" ? { url, pid } : undefined;
+  const { url, pid, signIn } = parsed as Partial<RunningApp>;
+  if (typeof url !== "string" || typeof pid !== "number") return undefined;
+  return { url, pid, ...(signIn === true && { signIn }) };
 }
 
 /** Whether a process runs as `pid` (another user's too): `postgres.ts` asks it of its postmaster too. */
@@ -88,4 +99,23 @@ export function alive(pid: number): boolean {
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "EPERM";
   }
+}
+
+/**
+ * The company's root as its main checkout has it: `root` itself, or, for a worktree of the repo (a
+ * draft in `.sanoma/drafts/<id>`), the same directory in the checkout git's common directory is
+ * beside; `root` itself outside git. Where the company's own Postgres lives (`postgres.ts`) and its
+ * app runs.
+ */
+export async function mainCheckout(root: string): Promise<string> {
+  const real = realpathSync(root);
+  const [common, top] = await promisify(execFile)(
+    "git",
+    ["rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"],
+    { cwd: real },
+  ).then(
+    ({ stdout }) => stdout.trim().split("\n"),
+    () => [],
+  );
+  return common && top && basename(common) === ".git" ? join(dirname(common), relative(top, real)) : real;
 }

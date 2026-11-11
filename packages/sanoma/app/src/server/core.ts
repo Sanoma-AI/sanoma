@@ -27,6 +27,7 @@ import {
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
   DESCRIBE_CALL,
+  RUN_READS,
   isDeclaredAgent,
   isVisitor,
   flatten,
@@ -781,6 +782,8 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
     throw new PolicyDeniedError(name, "a visitor reads only the result of a run it started");
   }
   const read = <T extends z.ZodType>(schema: T) => parse(schema, input ?? {}, "The input");
+  // A workflow's start, or a read of its runs (`RUN_READS`, which `sanoma call` sends no id), and nothing else.
+  if (method !== "start" && !(RUN_READS as readonly string[]).includes(method)) throw notCallable(name);
   switch (method) {
     case "start": {
       const options = { startedBy: actor, ...(id === undefined ? {} : { runId: id }) };
@@ -918,12 +921,15 @@ export async function postCall(request: Request, context: ActorContext): Promise
   }
 }
 
+/** What `callApi` answers of a workflow: `.start`, and the reads of its runs (`RUN_READS`). */
+const METHODS = [".start", ...RUN_READS.map((read) => `.${read}`)];
+
 /** The 400 for a name `callApi` does not know. */
 const notCallable = (name: string) =>
   new ApiError(400, {
     error:
       `api.${name} is neither an operation nor a workflow: call an operation by its id, a workflow by its ` +
-      "camelCase name, or its .start, .result, .latest, .runs, .approvals or .ledger",
+      `camelCase name, or its ${METHODS.slice(0, -1).join(", ")} or ${METHODS.at(-1)}`,
     code: "invalid_input",
   });
 
