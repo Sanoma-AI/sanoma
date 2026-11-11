@@ -360,7 +360,8 @@ describe.each(engines)("the agent catalog on %s", (engine, name, enabled) => {
       const boxName = "sanoma-harness%2Dtest-ada";
       draftRoot = join(sandbox.root, boxName, "repo");
       git("remote", "add", "origin", remote);
-      await testApp.client.setSecret("DECOY_SECRET", secret, { by: "ada" });
+      // A name of this run's: a database used before keeps another run's, sealed under its key.
+      await testApp.client.setSecret(`DECOY_${RUN.toUpperCase()}`, secret, { by: "ada" });
       script = "catalog";
       sent.length = 0;
       try {
