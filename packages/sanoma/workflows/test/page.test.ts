@@ -110,6 +110,13 @@ describe("pageRuntime", () => {
     await vi.advanceTimersByTimeAsync(10);
     expect(errorCode(await running)).toBe("run_running");
     expect(await running).toMatchObject({ data: { runId } });
+    // A wait longer than a timer takes is still a wait, not an answer at once.
+    let answered = false;
+    void transport({ name: "chaseInvoice.result", input: { runId, waitMs: 30 * DAY } })
+      .catch(() => {})
+      .finally(() => (answered = true));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(answered).toBe(false);
 
     // A day short of the week, it still rests; at the week, it goes on.
     await vi.advanceTimersByTimeAsync(6 * DAY);

@@ -60,9 +60,10 @@ export interface PageRuntime {
   reset(): Promise<void>;
   /**
    * Drops every run: a sleeping one's sleep fails with `run_ended`, its timer cleared, and any
-   * call a run makes after it never settles, so the run goes no further: a demo's unmount. A run
-   * awaiting an operation or `decide` stops at its next call. Until a `reset` seeds again, a run
-   * started after it stops at its first call.
+   * operation, approval, sleep or `ctx.all` a run calls after it never settles, so the run goes no
+   * further: a demo's unmount. A run awaiting an operation or `decide` stops at its next call. Until
+   * a `reset` seeds again, a run started after it stops at its first call. Only a run that was
+   * sleeping ends (failed); one stopped at a call stays `running`, its `.result` unanswered.
    */
   stop(): void;
 }
@@ -200,9 +201,12 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
   /** Aborted to drop the runs started under it (`stop`, `reset`): each sleep's timer cleared, each call after halted. */
   let dropping = new AbortController();
 
-  /** Appends a record to the run, now, with the next `seq` unless one is given, keyed as a worker keys it. */
-  const write = (run: PageRun, body: LedgerBody, { seq = run.seq++, key }: { seq?: number; key?: string } = {}) =>
-    run.records.push(recordOf(run, PAGE_APP, body, { seq, at: Date.now(), key, group: run.group }));
+  /** Appends a record to the run, now unless `at` says, with the next `seq` unless one is given, keyed as a worker keys it. */
+  const write = (
+    run: PageRun,
+    body: LedgerBody,
+    { seq = run.seq++, key, at = Date.now() }: { seq?: number; key?: string; at?: number } = {},
+  ) => run.records.push(recordOf(run, PAGE_APP, body, { seq, at, key, group: run.group }));
 
   /**
    * How the run's `ctx` members are made in the page: on the world's fakes, at once, but a sleep,
@@ -304,8 +308,10 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
     },
     async sleep(raw, at) {
       if (dropped.aborted) return halted();
-      const until = untilOf(checkSleep(raw), Date.now());
-      write(run, { type: "sleep.started", ...at, until });
+      // One start for the record and the end, as a worker's: `until` is its `at` plus the duration.
+      const begun = Date.now();
+      const until = untilOf(checkSleep(raw), begun);
+      write(run, { type: "sleep.started", ...at, until }, { at: begun });
       await waitUntil(until, dropped);
     },
     async all(list, at) {
