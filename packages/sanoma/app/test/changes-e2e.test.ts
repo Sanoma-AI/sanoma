@@ -365,8 +365,8 @@ describe("a column change from the grid, approved and applied", { timeout: 3 * R
         .where(and(eq(data.collection, "deals"), eq(data.key, key)))
     )[0]?.record;
   /** `change` proposed from the grid, approved and applied: its report and its page. */
-  async function applied(proposed: Parameters<typeof proposeColumnChange>[2]["change"]) {
-    const landed = await proposeColumnChange(await contextOf(), ada, { collection: "deals", change: proposed });
+  async function applied(proposed: Omit<Parameters<typeof proposeColumnChange>[2], "collection">) {
+    const landed = await proposeColumnChange(await contextOf(), ada, { collection: "deals", ...proposed });
     const runId = (landed as { change: string }).change;
     await publishOf(client, runId, ROUND_MS);
     await client.decide(runId, { decision: "approve", by: { id: "ada" } });
@@ -384,7 +384,7 @@ describe("a column change from the grid, approved and applied", { timeout: 3 * R
   });
 
   it("renames a column: once applied, each record holds its value under the new name, as the page says", async () => {
-    const { report, html } = await applied({ kind: "rename", from: "touched", to: "nextAction" });
+    const { report, html } = await applied({ change: { kind: "rename", from: "touched", to: "nextAction" } });
     expect(report).toMatchObject({
       outcome: "merged",
       reshaped: { rows: 2, changed: 1, converted: 0, cleared: 0, kept: 0 },
@@ -398,7 +398,10 @@ describe("a column change from the grid, approved and applied", { timeout: 3 * R
   });
 
   it("changes a column's type, the values that won't convert left empty as chosen, as the page says", async () => {
-    const { report, html } = await applied({ kind: "retype", field: "seats", to: "number", decision: "clear" });
+    const { report, html } = await applied({
+      change: { kind: "retype", field: "seats", to: "number", decision: "clear" },
+      clears: 1,
+    });
     expect(report).toMatchObject({
       outcome: "merged",
       reshaped: { rows: 2, changed: 2, converted: 1, cleared: 1, kept: 0 },

@@ -15,8 +15,9 @@ import { z } from "zod";
 
 // A change to a collection's columns, as a person proposes it from the grid (`ColumnChange`) and
 // reviews it on its change's page (`TableChangePlan`, the runtime's: `sanoma/workflows/description`).
-// The app drafts the plan here from the rows it read and the declaration (`planOf`); the records
-// follow it when it lands (`sanoma.records.reshape`, by `reshaped`, which the counts here use too).
+// The app's server drafts the plan here from every record and the declaration (`planOf`, in
+// `server/columns.ts`); the records follow it when it lands (`sanoma.records.reshape`, by
+// `reshaped`, which the counts here use too).
 
 /** How many of the rows that won't convert a plan names. */
 const SAMPLE = 20;

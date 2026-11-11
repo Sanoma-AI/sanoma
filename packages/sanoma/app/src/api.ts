@@ -574,8 +574,15 @@ export type CallRequest = z.infer<typeof CallRequest>;
 export const HistoryRequest = z.object({ name: z.string().min(1), key: z.string().min(1) });
 export type HistoryRequest = z.infer<typeof HistoryRequest>;
 
-/** What `proposeColumnChangeFn` takes: a change to the columns of the collection `collection`. */
-export const ProposeColumnChange = z.object({ collection: z.string().min(1), change: ColumnChange });
+/** What `getColumnPlan` takes: a change to the columns of the collection `collection`, to plan over its records. */
+export const ColumnPlanRequest = z.object({ collection: z.string().min(1), change: ColumnChange });
+export type ColumnPlanRequest = z.infer<typeof ColumnPlanRequest>;
+
+/**
+ * What `proposeColumnChangeFn` takes: the change, and with a `clear` decision `clears`, how many
+ * values the person was shown it leaves empty (`getColumnPlan`'s count of those that won't convert).
+ */
+export const ProposeColumnChange = ColumnPlanRequest.extend({ clears: z.number().int().min(0).optional() });
 export type ProposeColumnChange = z.infer<typeof ProposeColumnChange>;
 
 /** A field one write changed: its value before and after, each absent where the field was not set. */

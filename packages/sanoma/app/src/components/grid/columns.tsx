@@ -9,7 +9,7 @@ import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { type ColumnSizingState } from "@tanstack/react-table";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.tsx";
@@ -28,7 +28,14 @@ import { Input } from "#/components/ui/input.tsx";
 import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { proposeColumnChangeFn } from "../../functions.ts";
-import { closeRecord, type ColumnSearch, openColumn, refreshColumns, remoteQuery } from "../../queries.ts";
+import {
+  closeRecord,
+  columnPlanQuery,
+  type ColumnSearch,
+  openColumn,
+  refreshColumns,
+  remoteQuery,
+} from "../../queries.ts";
 import { ButtonLink, CardHeading, Notice, ToneBadge } from "../common.tsx";
 import { FROM } from "../data-grid.tsx";
 import {
@@ -38,7 +45,6 @@ import {
   happens,
   keysIn,
   landed,
-  planOf,
   problemOf,
   requiredOf,
   takenToday,
@@ -51,9 +57,9 @@ import { WontConvertSample } from "./review.tsx";
 // A collection's columns from its grid: each field's menu on its heading (Rename, Change type,
 // Hide for me, a free-form field's keys to make columns of, Remove for everyone), New column, and
 // the panel each opens beside the grid (`?column=`), which proposes the change
-// (`proposeColumnChangeFn`) after saying what will happen, drafted over the rows on screen
-// (`planOf`), and asks what becomes of the values a type change cannot convert. A column's width
-// is this browser's.
+// (`proposeColumnChangeFn`) after saying what will happen, planned by the server over every
+// record (`columnPlanQuery`), and asks what becomes of the values a type change cannot convert. A
+// column's width is this browser's.
 
 /** The columns after the fields, by ids no field can have. */
 export const UPDATED = "@updated";
@@ -218,22 +224,20 @@ function titleOf(collection: CollectionEntry, { change, field, key }: ColumnSear
   }
 }
 
+/** How long the form stays the same before its plan is read: typing a name reads the records once. */
+const SETTLE_MS = 400;
+
 /**
  * The column panel beside the grid: what `column` changes, with the fields it takes (a name, a
- * type of the chips, its choices, Optional), What will happen over `rows` (those on screen) in
- * plain words, for a type change with values that won't convert those values and what becomes of
- * them (the plan's `decision`, asked before it goes on), and Review the change, which proposes it:
- * a change to review, or, with no remote, the data file written and what became of the records.
+ * type of the chips, its choices, Optional), What will happen over every record (the server's
+ * plan, `columnPlanQuery`, read once the form settles) in plain words, for a type change with
+ * values that won't convert those values and what becomes of them (the plan's `decision`, asked
+ * before it goes on, for the count it was asked on), and Review the change, which proposes it: a
+ * change to review, or, with no remote, the data file written and what became of the records. A
+ * `clear` sent once the records changed is refused with the plan as it is now (`recounted`),
+ * which the panel shows, asking again.
  */
-export function ColumnPanel({
-  collection,
-  column,
-  rows,
-}: {
-  collection: CollectionEntry;
-  column: ColumnSearch;
-  rows: readonly Saved[];
-}) {
+export function ColumnPanel({ collection, column }: { collection: CollectionEntry; column: ColumnSearch }) {
   const navigate = useNavigate({ from: FROM });
   const queryClient = useQueryClient();
   const remote = useQuery(remoteQuery()).data;
@@ -242,7 +246,10 @@ export function ColumnPanel({
   const [type, setType] = useState<ColumnType>(declared && column.change === "retype" ? typeOf(declared) : "text");
   const [choices, setChoices] = useState(isChoice(type) ? type.enum.join("\n") : "");
   const [optional, setOptional] = useState(true);
-  const [decision, setDecision] = useState<ConvertDecision>();
+  // The choice for the values that won't convert, and how many there were when it was made.
+  const [decided, setDecided] = useState<{ choice: ConvertDecision; of: number }>();
+  // Whether a `clear` was refused since the records changed: the count is new, and asked again.
+  const [recounted, setRecounted] = useState(false);
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string>();
   const field = column.field ?? "";
@@ -252,27 +259,54 @@ export function ColumnPanel({
   const intent = {
     add: { kind: "add", field: name, type: typed, required: !optional },
     rename: { kind: "rename", from: field, to: name },
-    retype: { kind: "retype", field, to: typed, decision },
-    convert: { kind: "convert", field, key: column.key ?? "", type: typed, decision },
+    retype: { kind: "retype", field, to: typed },
+    convert: { kind: "convert", field, key: column.key ?? "", type: typed },
     hide: { kind: "hide", field },
   }[column.change];
   const parsed = ColumnChange.safeParse(intent);
   const problem = parsed.success ? problemOf(collection, parsed.data) : parsed.error.issues[0]?.message;
-  const plan = parsed.success && !problem ? planOf(collection, rows, parsed.data) : undefined;
   const unchanged =
     (column.change === "rename" && name === field) ||
     (column.change === "retype" && declared !== undefined && deepEquals(typed, typeOf(declared)));
-  // A retype's or a conversion's values that won't convert, among those on screen: what becomes of them is asked.
+  const wanted = parsed.success && !problem && !unchanged ? parsed.data : undefined;
+  // The change whose plan is read: the form's, once it has stayed the same for `SETTLE_MS`.
+  const wantedKey = JSON.stringify(wanted ?? null);
+  const [settledKey, setSettledKey] = useState(wantedKey);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettledKey(wantedKey), SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [wantedKey]);
+  const settled = settledKey === wantedKey ? wanted : undefined;
+  const planning = useQuery(columnPlanQuery(collection.name, settled));
+  const plan = settled ? planning.data : undefined;
+  // A retype's or a conversion's values that won't convert, among every record: what becomes of them is asked.
   const [planned] = plan?.changes ?? [];
-  const wont = planned && "wontConvert" in planned && !unchanged ? planned.wontConvert : undefined;
+  const wont = planned && "wontConvert" in planned ? planned.wontConvert : undefined;
   const asks = wont !== undefined && wont.count > 0;
+  // A choice made for another count holds no longer: the records changed, so it is asked again.
+  const decision = asks && decided?.of === wont.count ? decided.choice : undefined;
+  const shown =
+    plan && decision
+      ? { ...plan, changes: plan.changes.map((c) => ("wontConvert" in c ? { ...c, decision } : c)) }
+      : plan;
+  const ask = (choice?: ConvertDecision) => {
+    setDecided(choice && wont ? { choice, of: wont.count } : undefined);
+    setRecounted(false);
+  };
 
   async function propose() {
-    if (!parsed.success) return;
+    if (!settled) return;
     setSending(true);
     setFailed(undefined);
     try {
-      const answer = await proposeColumnChangeFn({ data: { collection: collection.name, change: parsed.data } });
+      const change = decision ? { ...settled, decision } : settled;
+      const clears = decision === "clear" ? wont?.count : undefined;
+      const answer = await proposeColumnChangeFn({ data: { collection: collection.name, change, clears } });
+      if ("recounted" in answer) {
+        queryClient.setQueryData(columnPlanQuery(collection.name, settled).queryKey, answer.recounted);
+        setRecounted(true);
+        return;
+      }
       if ("change" in answer) {
         await navigate({ to: "/changes/$id", params: { id: changeIdOf(answer.change) ?? answer.change } });
         return;
@@ -340,7 +374,7 @@ export function ColumnPanel({
                       onClick={() => {
                         setType(chip.type === CHOICES ? { enum: [] } : chip.type);
                         // Another type, other values that won't convert: what becomes of them is asked again.
-                        setDecision(undefined);
+                        ask();
                       }}
                     >
                       {chip.label}
@@ -361,7 +395,7 @@ export function ColumnPanel({
                 value={choices}
                 onChange={(e) => {
                   setChoices(e.target.value);
-                  setDecision(undefined);
+                  ask();
                 }}
               />
             </Field>
@@ -378,10 +412,13 @@ export function ColumnPanel({
             <p className="text-sm text-muted-foreground">It stays optional.</p>
           )}
           <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 px-3 py-2.5" role="status">
-            <span className="text-xs text-muted-foreground">
-              What will happen, over the records on screen (the review counts every one)
+            <span className="text-xs text-muted-foreground">What will happen</span>
+            <span className="text-sm">
+              {unchanged
+                ? "Nothing changes."
+                : (problem ??
+                  (shown ? happens(shown) : planning.isError ? errorMessage(planning.error) : "Counting the records…"))}
             </span>
-            <span className="text-sm">{unchanged ? "Nothing changes." : plan ? happens(plan) : problem}</span>
           </div>
           {asks && (
             <FieldSet>
@@ -390,7 +427,7 @@ export function ColumnPanel({
                 {typeWords(typed)}
               </FieldLegend>
               <WontConvertSample keyField={collection.key} field={column.key ?? field} wontConvert={wont} />
-              <RadioGroup value={decision ?? null} onValueChange={(value) => setDecision(value as ConvertDecision)}>
+              <RadioGroup value={decision ?? null} onValueChange={(value) => ask(value as ConvertDecision)}>
                 {(["clear", "keep"] as const).map((choice) => (
                   <Field key={choice} orientation="horizontal">
                     <RadioGroupItem value={choice} id={`column-decision-${choice}`} />
@@ -402,6 +439,12 @@ export function ColumnPanel({
                 ))}
               </RadioGroup>
             </FieldSet>
+          )}
+          {recounted && asks && !decision && (
+            <Notice>
+              The records changed since you chose: {wont.count === 1 ? "1 value" : `${wont.count} values`} can't convert
+              now. Choose again.
+            </Notice>
           )}
           {failed && <Notice variant="destructive">{failed}</Notice>}
           <div className="flex items-center gap-2">

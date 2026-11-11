@@ -29,8 +29,9 @@ import { ensureSanomaBuilt } from "../../test/fixture.ts";
 // (`proposeColumnChange`: a `patch` run's draft, its data file showing the new column, the change
 // carrying its plan, a type change's decision for the values that won't convert among it) and
 // that change's review in the table change's words; in Chrome, skipped without it, the menu
-// opening the Rename panel and its What will happen, and the Change type panel asking what
-// becomes of the values that won't convert before it sends the change.
+// opening the Rename panel and its What will happen, and the Change type panel, over a grid that
+// loaded fewer records than there are, asking what becomes of every value that won't convert
+// (the server's plan, not the rows on screen) before it sends the change.
 
 const root = mkdtempSync(join(tmpdir(), "sanoma-columns-"));
 cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
@@ -226,7 +227,7 @@ describe("a collection's columns", () => {
     }
   }, 60_000);
 
-  it("asks in Chrome what becomes of the values a type change can't convert, then sends that choice", async (ctx) => {
+  it("asks in Chrome what becomes of every value a type change can't convert, not those on screen, then sends that choice", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
     const browser = await launch({ executablePath: chrome, headless: true });
@@ -234,11 +235,14 @@ describe("a collection's columns", () => {
       const tab = await browser.newPage();
       await tab.setViewport({ width: 1440, height: 900 });
       await tab.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "ada"));
-      await tab.goto(new URL("/data/outbound", app.url).href, { waitUntil: "networkidle0" });
+      // The grid loads one record of the two.
+      await tab.goto(new URL("/data/outbound?limit=1", app.url).href, { waitUntil: "networkidle0" });
+      // Its heading and one row.
+      expect(await tab.evaluate(`document.querySelector('[role="grid"]').getAttribute("aria-rowcount")`)).toBe("2");
       await (await tab.waitForSelector('button[aria-label="Change the column contact"]'))!.click();
       await (await tab.waitForSelector('[role="menuitem"]::-p-text(Change type)'))!.click();
       await (await tab.waitForSelector("button[aria-pressed]::-p-text(Number)"))!.click();
-      // Both emails can't be numbers: the panel asks, and waits for the answer.
+      // Both emails can't be numbers, the one off screen too: the panel asks, and waits for the answer.
       await tab.waitForSelector("legend::-p-text(These 2 values can't convert to a number)");
       const submit = '[aria-label="Change the type of contact"] button[type="submit"]';
       expect(await tab.$(`${submit}[disabled]`)).not.toBeNull();

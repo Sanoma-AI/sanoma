@@ -16,7 +16,7 @@ import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
-import { proposeColumnChange } from "../src/server/columns.ts";
+import { planColumnChange, proposeColumnChange } from "../src/server/columns.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { pageOf, PEOPLE } from "./fixtures/change.ts";
@@ -25,8 +25,9 @@ import { ensureSanomaBuilt } from "../../test/fixture.ts";
 // Needs Postgres (`pnpm db:up`) and the built app, as data.test.ts does. A collection's columns
 // on a repository with no remote (a stub source that commits), so a column change is written in
 // the checkout and the records follow it at once: a rename moves their values, a type change
-// leaves empty the values that won't convert when that is the choice, and `patch`'s output says
-// what became of them. The outbound fixture's collection, with a hidden field (`notes`), which
+// leaves empty the values that won't convert when that is the choice (refused, nothing written,
+// once the records changed since the count the person was shown), and `patch`'s output says what
+// became of them. The outbound fixture's collection, with a hidden field (`notes`), which
 // the grid and the record form leave out and an edit keeps. The tests in a browser need Google
 // Chrome, or `CHROME_PATH`, and skip without either.
 
@@ -96,6 +97,10 @@ const contextOf = async (): Promise<AppContext> => ({
   login: admitting(loopbackLogin(), () => readPeople(root)),
 });
 const ada = { id: "ada", groups: ["admin"] };
+
+/** An operation called as ada. */
+const call = (name: string, input: object) =>
+  testApp.client.call(name, input, { actor: { id: "ada" }, id: crypto.randomUUID() });
 
 /** A record as stored, by its key. */
 async function stored(key: string) {
@@ -168,10 +173,45 @@ describe("a collection's columns with no remote", () => {
     expect(acme).not.toHaveProperty("lastTouched");
   });
 
+  it("refuses to leave empty another count of values than the person was shown, writing nothing", async () => {
+    const context = await contextOf();
+    const retype = { kind: "retype", field: "contact", to: "number" } as const;
+    // What the panel shows: the two emails won't convert.
+    const shown = await planColumnChange(context, ada, { collection: "outbound", change: retype });
+    expect(shown.changes[0]).toMatchObject({ wontConvert: { count: 2 } });
+    // Then someone adds a record whose contact won't convert either.
+    const dune = { company: "Dune Labs", contact: "kai@dune.test", stage: "researched", owner: "ada" };
+    await call("data.outbound.save", { record: dune });
+    const file = readFileSync(join(root, "resources/data.ts"), "utf8");
+    try {
+      const answer = await proposeColumnChange(context, ada, {
+        collection: "outbound",
+        change: { ...retype, decision: "clear" },
+        clears: 2,
+      });
+      // The plan as it is now, to choose again on; nothing written, no record changed.
+      expect(answer).toEqual({ recounted: expect.objectContaining({ rows: 4 }) });
+      expect((answer as { recounted: { changes: unknown[] } }).recounted.changes[0]).toMatchObject({
+        wontConvert: { count: 3 },
+      });
+      expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toBe(file);
+      expect(await stored("Dune Labs")).toMatchObject({ contact: "kai@dune.test" });
+      expect(await stored("Brightwater Dental")).toMatchObject({ contact: "sam@brightwater.test" });
+      // A clear that does not say how many it was shown is refused the same way.
+      expect(
+        await proposeColumnChange(context, ada, { collection: "outbound", change: { ...retype, decision: "clear" } }),
+      ).toHaveProperty("recounted");
+      expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toBe(file);
+    } finally {
+      await call("data.outbound.delete", { key: "Dune Labs" });
+    }
+  });
+
   it("changes a column's type, leaving empty the values that won't convert, as chosen", async () => {
     const landed = await proposeColumnChange(await contextOf(), ada, {
       collection: "outbound",
       change: { kind: "retype", field: "contact", to: "number", decision: "clear" },
+      clears: 2,
     });
     expect(landed).toMatchObject({
       file: "resources/data.ts",

@@ -10,7 +10,14 @@ import {
   type ListQuery,
   type Saved,
 } from "sanoma/workflows/shared";
-import { type QueryClient, queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  queryOptions,
+  skipToken,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -38,6 +45,7 @@ import {
   getChat,
   getChatModel,
   getChats,
+  getColumnPlan,
   getConfig,
   getCredentials,
   getConnections,
@@ -66,7 +74,7 @@ import {
   startRunFn,
 } from "./functions.ts";
 import { type Api, createApi, type UntypedApi } from "./api-client.ts";
-import { isHidden } from "./components/grid/plan.ts";
+import { type ColumnChange, isHidden } from "./components/grid/plan.ts";
 
 /**
  * The company's operations and workflows, called as the person on the page (`callFn`): a loader's
@@ -765,6 +773,18 @@ export const countQuery = (name: string, where: ListQuery<Record<string, unknown
     queryKey: [...DATA_KEY, name, "count", where ?? null],
     queryFn: async () =>
       ((await (api as UntypedApi).data[name].count(where ? { where } : {})) as { count: number }).count,
+    staleTime: 5_000,
+  });
+
+/**
+ * A proposed column change's plan over every record of its collection (`getColumnPlan`), as the
+ * person asking reads them: the column panel's What will happen and the count it asks on. Under
+ * the collection's key, so it is read again with its records; none for no change (`skipToken`).
+ */
+export const columnPlanQuery = (collection: string, change: ColumnChange | undefined) =>
+  queryOptions({
+    queryKey: [...DATA_KEY, collection, "column-plan", change ?? null],
+    queryFn: change ? () => getColumnPlan({ data: { collection, change } }) : skipToken,
     staleTime: 5_000,
   });
 
