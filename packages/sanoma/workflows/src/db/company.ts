@@ -157,12 +157,13 @@ export const apiTokens = pgTable("sanoma_api_tokens", {
 
 /**
  * The api tokens' one-time handoffs (`Tokens.handoff`): each code's SHA-256, never the code, the
- * secret whose token it hands off, its PKCE challenge, and when it expires or was redeemed. Swept
- * once expired.
+ * secret holding the token it hands off and that token's id, its PKCE challenge, and when it
+ * expires or was redeemed. Swept once expired.
  */
 export const tokenHandoffs = pgTable("sanoma_token_handoffs", {
   codeHash: text().primaryKey(),
   store: text().notNull(),
+  tokenId: text().notNull(),
   challenge: text().notNull(),
   expiresAt: when().notNull(),
   redeemedAt: when(),

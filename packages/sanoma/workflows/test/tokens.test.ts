@@ -28,47 +28,47 @@ describe.each([
 ] as [string, () => Tokens][])("a token's handoff, on %s", (_, make) => {
   const tokens = make();
 
-  it("answers a one-time code, redeemed once with the verifier for the secret's name", async () => {
+  it("answers a one-time code, redeemed once with the verifier for the secret's name and its token's id", async () => {
     const { verifier, challenge } = await pkce();
-    const { code } = await tokens.handoff({ store: "ACME_TOKEN", challenge, ttlMs: HANDOFF_MS });
+    const { code } = await tokens.handoff({ store: "ACME_TOKEN", tokenId: "t1", challenge, ttlMs: HANDOFF_MS });
     expect(code).toMatch(/^sch_[\w-]{43}$/);
-    expect(await tokens.redeem({ code, verifier })).toEqual({ store: "ACME_TOKEN" });
+    expect(await tokens.redeem({ code, verifier })).toEqual({ store: "ACME_TOKEN", tokenId: "t1" });
     expect(await tokens.redeem({ code, verifier })).toBeUndefined();
   });
 
   it("refuses a wrong verifier, leaving the code to be redeemed with the right one", async () => {
     const { verifier, challenge } = await pkce();
     const other = await pkce();
-    const { code } = await tokens.handoff({ store: "ACME_TOKEN", challenge, ttlMs: HANDOFF_MS });
+    const { code } = await tokens.handoff({ store: "ACME_TOKEN", tokenId: "t1", challenge, ttlMs: HANDOFF_MS });
     expect(await tokens.redeem({ code, verifier: other.verifier })).toBeUndefined();
     expect(await tokens.redeem({ code, verifier: challenge })).toBeUndefined();
-    expect(await tokens.redeem({ code, verifier })).toEqual({ store: "ACME_TOKEN" });
+    expect(await tokens.redeem({ code, verifier })).toEqual({ store: "ACME_TOKEN", tokenId: "t1" });
   });
 
   it("refuses a code unknown, or another's, alike", async () => {
     const { verifier, challenge } = await pkce();
-    await tokens.handoff({ store: "ACME_TOKEN", challenge, ttlMs: HANDOFF_MS });
+    await tokens.handoff({ store: "ACME_TOKEN", tokenId: "t1", challenge, ttlMs: HANDOFF_MS });
     expect(await tokens.redeem({ code: `sch_${"a".repeat(43)}`, verifier })).toBeUndefined();
   });
 
   it("refuses a code once it expired, even with the verifier", async () => {
     const { verifier, challenge } = await pkce();
-    const { code } = await tokens.handoff({ store: "ACME_TOKEN", challenge, ttlMs: 50 });
+    const { code } = await tokens.handoff({ store: "ACME_TOKEN", tokenId: "t1", challenge, ttlMs: 50 });
     await sleep(150);
     expect(await tokens.redeem({ code, verifier })).toBeUndefined();
   });
 
   it("gives the secret to one of several redeems at once", async () => {
     const { verifier, challenge } = await pkce();
-    const { code } = await tokens.handoff({ store: "ACME_TOKEN", challenge, ttlMs: HANDOFF_MS });
+    const { code } = await tokens.handoff({ store: "ACME_TOKEN", tokenId: "t1", challenge, ttlMs: HANDOFF_MS });
     const redeemed = await Promise.all(Array.from({ length: 8 }, () => tokens.redeem({ code, verifier })));
-    expect(redeemed.filter(Boolean)).toEqual([{ store: "ACME_TOKEN" }]);
+    expect(redeemed.filter(Boolean)).toEqual([{ store: "ACME_TOKEN", tokenId: "t1" }]);
   });
 
   it("lasts five minutes at most", async () => {
     const { challenge } = await pkce();
     for (const ttlMs of [0, -1, 1.5, HANDOFF_MS + 1])
-      await expect(tokens.handoff({ store: "ACME_TOKEN", challenge, ttlMs })).rejects.toThrow(
+      await expect(tokens.handoff({ store: "ACME_TOKEN", tokenId: "t1", challenge, ttlMs })).rejects.toThrow(
         "A handoff lasts 1 to 300000 ms",
       );
   });
@@ -79,7 +79,7 @@ describe("a token's handoff in the database", () => {
 
   it("keeps the code's hash alone, never the code or the verifier, and sweeps the expired", async () => {
     const { verifier, challenge } = await pkce();
-    const { code } = await tokens.handoff({ store: "SWEPT_TOKEN", challenge, ttlMs: 1 });
+    const { code } = await tokens.handoff({ store: "SWEPT_TOKEN", tokenId: "t2", challenge, ttlMs: 1 });
     const { rows } = await pool.query("SELECT * FROM sanoma_token_handoffs");
     const text = JSON.stringify(rows);
     expect(text).toContain(tokenHash(code));
@@ -87,14 +87,14 @@ describe("a token's handoff in the database", () => {
     expect(text).not.toContain(verifier);
     await sleep(20);
     // The next handoff sweeps it.
-    await tokens.handoff({ store: "ACME_TOKEN", challenge, ttlMs: HANDOFF_MS });
+    await tokens.handoff({ store: "ACME_TOKEN", tokenId: "t1", challenge, ttlMs: HANDOFF_MS });
     const left = await pool.query("SELECT 1 FROM sanoma_token_handoffs WHERE code_hash = $1", [tokenHash(code)]);
     expect(left.rowCount).toBe(0);
   });
 
   it("marks a code redeemed in its row", async () => {
     const { verifier, challenge } = await pkce();
-    const { code } = await tokens.handoff({ store: "ACME_TOKEN", challenge, ttlMs: HANDOFF_MS });
+    const { code } = await tokens.handoff({ store: "ACME_TOKEN", tokenId: "t1", challenge, ttlMs: HANDOFF_MS });
     await tokens.redeem({ code, verifier });
     const { rows } = await pool.query("SELECT redeemed_at FROM sanoma_token_handoffs WHERE code_hash = $1", [
       tokenHash(code),

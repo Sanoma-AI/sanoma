@@ -1,5 +1,5 @@
 {
-  "id": "d11ec47b-cb44-4e52-8760-533369afab85",
+  "id": "72c2d88c-6edc-4063-9365-2185a0cbb464",
   "prevId": "36e4aa82-9b88-4089-80f0-e7bc8a59bd53",
   "version": "7",
   "dialect": "postgresql",
@@ -1187,6 +1187,12 @@
         },
         "store": {
           "name": "store",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_id": {
+          "name": "token_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true

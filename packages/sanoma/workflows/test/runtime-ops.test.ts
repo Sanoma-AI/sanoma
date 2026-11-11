@@ -360,7 +360,7 @@ describe("the runtime's own operations", () => {
     expect(called).not.toContain(code);
     // The run's output is what its workflow returns (this one, the code): never the token.
     expect(JSON.stringify(records)).not.toContain(value);
-    expect(await app.client.tokens.redeem({ code, verifier })).toEqual({ store: "ACME_HANDED_TOKEN" });
+    expect(await app.client.tokens.redeem({ code, verifier })).toEqual({ store: "ACME_HANDED_TOKEN", tokenId: id });
     expect(await app.client.tokens.redeem({ code, verifier })).toBeUndefined();
     // Only a live token minted here for the run's starter: not another secret's value, nothing,
     // another account's token, or a token revoked.

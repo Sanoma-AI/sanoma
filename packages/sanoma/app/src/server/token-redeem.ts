@@ -18,14 +18,17 @@ const answer = (status: number, body: object) =>
 /**
  * Answers `{ token }` for a code and its verifier, once; 410 alike for a code unknown, expired or
  * redeemed, a verifier that is not its challenge's (which leaves the code to be redeemed), and a
- * token no longer stored or live; 400 for a body that is not `{ code, verifier }`.
+ * secret no longer holding the live token it held at the handoff; 400 for a body that is not
+ * `{ code, verifier }`.
  */
 export async function redeemToken(client: SanomaClient, request: Request): Promise<Response> {
   const asked = Redeem.safeParse(await request.json().catch(() => undefined));
   if (!asked.success) return answer(400, { error: "Send { code, verifier }" });
   const handed = await client.tokens.redeem(asked.data);
   const token = handed && (await client.secrets([handed.store])).get(handed.store)?.value;
-  if (!token || !(await client.tokens.resolve(token)))
+  // The very token handed off, still live: never another put under the same name since.
+  const live = token && (await client.tokens.resolve(token));
+  if (!handed || !live || live.principal.id !== `token:${handed.tokenId}`)
     return answer(410, { error: "This code is used, expired or not for this verifier: sign in again" });
   return answer(200, { token });
 }

@@ -398,7 +398,8 @@ export function runtimeDriver({
         const live = token === undefined ? undefined : await tokens.resolve(token);
         if (!live || live.subject !== call.principal?.id)
           throw refuse(`${store} holds no live api token acting for the run's starter`);
-        return tokens.handoff({ store, challenge, ttlMs: HANDOFF_MS }).catch(() => {
+        const tokenId = live.principal.id.slice("token:".length);
+        return tokens.handoff({ store, tokenId, challenge, ttlMs: HANDOFF_MS }).catch(() => {
           throw new DriverError("sanoma: token handoff unavailable", { retryable: true });
         });
       },

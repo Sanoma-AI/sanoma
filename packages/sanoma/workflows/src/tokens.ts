@@ -71,17 +71,17 @@ export interface Tokens {
   /** The subject the token `id` acts for (a workflow's `ctx.startedBy.subject`); undefined for one revoked or missing. */
   subjectOf(id: string): Promise<string | undefined>;
   /**
-   * A one-time code, `sch_…`, for the token stored under the secret `store`: good for `ttlMs` (at
+   * A one-time code, `sch_…`, for the token `tokenId` stored under the secret `store`: good for `ttlMs` (at
    * most `HANDOFF_MS`), once, and only with the verifier `challenge` was made from (PKCE S256).
    * Its table keeps only the code's hash; the database's store sweeps those expired at each handoff.
    */
-  handoff(input: { store: string; challenge: string; ttlMs: number }): Promise<{ code: string }>;
+  handoff(input: { store: string; tokenId: string; challenge: string; ttlMs: number }): Promise<{ code: string }>;
   /**
-   * The secret a code hands off, once: undefined for a code unknown, expired or redeemed, and for
+   * The secret a code hands off and the id of the token it held then, once: undefined for a code unknown, expired or redeemed, and for
    * a verifier that is not its challenge's, which leaves the code as it was. Of two at once, one
    * has it.
    */
-  redeem(input: { code: string; verifier: string }): Promise<{ store: string } | undefined>;
+  redeem(input: { code: string; verifier: string }): Promise<{ store: string; tokenId: string } | undefined>;
 }
 
 const active = (where: SQL | undefined) => and(where, isNull(apiTokens.revokedAt));
@@ -150,7 +150,7 @@ export function tokenStore(db: () => Promise<Db>): Tokens {
         .where(active(eq(apiTokens.id, id)));
       return row?.subject;
     },
-    async handoff({ store, challenge, ttlMs }) {
+    async handoff({ store, tokenId, challenge, ttlMs }) {
       const ttl = handoffTtl(ttlMs);
       const code = `${CODE_PREFIX}${generateSecret()}`;
       const conn = await db();
@@ -159,6 +159,7 @@ export function tokenStore(db: () => Promise<Db>): Tokens {
       await conn.insert(tokenHandoffs).values({
         codeHash: tokenHash(code),
         store,
+        tokenId,
         challenge,
         expiresAt: sql`now() + ${ttl}::integer * interval '1 millisecond'`,
       });
@@ -181,7 +182,7 @@ export function tokenStore(db: () => Promise<Db>): Tokens {
             gt(tokenHandoffs.expiresAt, sql`now()`),
           ),
         )
-        .returning({ store: tokenHandoffs.store });
+        .returning({ store: tokenHandoffs.store, tokenId: tokenHandoffs.tokenId });
       return row;
     },
   };
@@ -190,7 +191,10 @@ export function tokenStore(db: () => Promise<Db>): Tokens {
 /** The api tokens in memory, for a sandbox run's `sanoma.token.*`: the same contract, nothing kept past the process. */
 export function memoryTokens(): Tokens {
   const rows = new Map<string, { hash: string; subject: string; groups: string[]; revoked: boolean }>();
-  const handoffs = new Map<string, { store: string; challenge: string; expiresAt: number; redeemed: boolean }>();
+  const handoffs = new Map<
+    string,
+    { store: string; tokenId: string; challenge: string; expiresAt: number; redeemed: boolean }
+  >();
   return {
     async mint({ id = randomUUID(), subject, groups }) {
       if (rows.has(id)) throw new Error(`A token with the id ${id} exists`);
@@ -229,10 +233,10 @@ export function memoryTokens(): Tokens {
       const row = rows.get(id);
       return row && !row.revoked ? row.subject : undefined;
     },
-    async handoff({ store, challenge, ttlMs }) {
+    async handoff({ store, tokenId, challenge, ttlMs }) {
       const ttl = handoffTtl(ttlMs);
       const code = `${CODE_PREFIX}${generateSecret()}`;
-      handoffs.set(tokenHash(code), { store, challenge, expiresAt: Date.now() + ttl, redeemed: false });
+      handoffs.set(tokenHash(code), { store, tokenId, challenge, expiresAt: Date.now() + ttl, redeemed: false });
       return { code };
     },
     async redeem({ code, verifier }) {
@@ -242,7 +246,7 @@ export function memoryTokens(): Tokens {
       if (!handoff || handoff.redeemed || handoff.expiresAt <= Date.now() || handoff.challenge !== challenge)
         return undefined;
       handoff.redeemed = true;
-      return { store: handoff.store };
+      return { store: handoff.store, tokenId: handoff.tokenId };
     },
   };
 }

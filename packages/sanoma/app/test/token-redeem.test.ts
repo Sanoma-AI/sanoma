@@ -11,7 +11,7 @@ import { freshDatabase } from "../../workflows/test/harness.ts";
 // Needs Postgres (`pnpm db:up`); a fresh database each run, since the secrets key is new each run. `POST /api/token/redeem` on the portable handler, as the Worker's
 // bundle makes it, behind a login that lets nothing through: a handed-off token for its one-time
 // code and PKCE verifier, once, `no-store` and no cookie; one answer, 410, for a code reused,
-// expired, unknown or with a wrong verifier, or a token revoked since.
+// expired, unknown or with a wrong verifier, or a token revoked or replaced since.
 
 vi.stubEnv("SANOMA_SECRETS_KEY", randomBytes(32).toString("base64"));
 const testApp = useTestApp(
@@ -47,7 +47,7 @@ async function handedOff(store: string, ttlMs = 300_000) {
   await testApp.client.setSecret(store, token, { by: "sanoma" });
   const verifier = generateRandomCodeVerifier();
   const challenge = await calculatePKCECodeChallenge(verifier);
-  const { code } = await testApp.client.tokens.handoff({ store, challenge, ttlMs });
+  const { code } = await testApp.client.tokens.handoff({ store, tokenId: id, challenge, ttlMs });
   return { id, token, code, verifier };
 }
 
@@ -95,6 +95,13 @@ describe("POST /api/token/redeem", () => {
     const gone = await refusal(await redeem({ code: revoked.code, verifier: revoked.verifier }));
     expect(late.status).toBe(410);
     expect(gone).toEqual(late);
+  });
+
+  it("refuses a code whose secret holds another live token since the handoff", async () => {
+    const { code, verifier } = await handedOff("SWAPPED_TOKEN");
+    const other = await testApp.client.tokens.mint({ subject: "visitor:better-auth:someone-else", groups: [] });
+    await testApp.client.setSecret("SWAPPED_TOKEN", other.token, { by: "sanoma" });
+    expect((await redeem({ code, verifier })).status).toBe(410);
   });
 
   it("gives the token to one of two redeems at once", async () => {
