@@ -30,7 +30,8 @@ import { ANONYMOUS_PRINCIPAL, apiNameOf, DATA_VENDOR, errorMessage, isEnded, typ
 // A company's workflows run inside a browser page (`sanoma/workflows/page`): the base of a
 // static demo. Every vendor is its connector's fake and every collection is in memory, so
 // nothing leaves the page. A run's `ctx` is built as a worker's is (`ctxOf`), but there is no
-// DBOS, no policy and no store: a run is a promise, its records a list, its clock its own.
+// DBOS, no policy and no store: a run is a promise, its records a list, and a sleep a timer of
+// the page's, which `reset` and `stop` clear.
 
 /** What a page's `api` sends (`createApi`'s `Transport`): an operation's id or a workflow's api name, its input, and a start's id. */
 export interface PageRequest {
@@ -55,14 +56,19 @@ export interface PageRuntimeOptions {
 export interface PageRuntime {
   /** Answers what `callApi` answers for a site's `api`, in the page: hand it to `createApi`. */
   transport(request: PageRequest): Promise<unknown>;
-  /** Back to the world as it began: fresh fakes, seeded again, and no runs. */
+  /** Back to the world as it began: fresh fakes, seeded again, and no runs, each dropped as `stop` drops it. */
   reset(): Promise<void>;
+  /**
+   * Drops every run, a sleeping one's timer with it, so nothing a run would do next happens: a
+   * demo's unmount. A run started after it fails at its first call.
+   */
+  stop(): void;
 }
 
 /** The app name a page's records carry, as a worker's carry its config's. */
 const PAGE_APP = "page";
 
-/** One run in the page: its records, its approvals and its own clock, which a sleep moves on. */
+/** One run in the page: its records and its approvals. */
 interface PageRun {
   id: string;
   workflow: string;
@@ -72,7 +78,6 @@ interface PageRun {
   status: RunStatus;
   createdAt: number;
   updatedAt?: number;
-  clock: number;
   seq: number;
   records: LedgerRecord[];
   approvals: ApprovalState[];
@@ -109,6 +114,27 @@ const RunRef = z.object({ runId: z.string().min(1) });
 const ResultRef = RunRef.extend({ waitMs: z.number().int().min(0).optional() });
 const RunsLimit = z.object({ limit: z.number().int().positive().optional() });
 
+/** The longest delay a timer takes (2^31 - 1 ms, about 24.8 days): a longer one would fire at once. */
+const MAX_DELAY = 2 ** 31 - 1;
+
+/** Resolves at `until` (ms since the epoch) on the page's timers, or at once for a time past; rejects with `signal`'s reason, its timer cleared, once it aborts. */
+const waitUntil = (until: number, signal: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const drop = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const next = () => {
+      const left = until - Date.now();
+      if (left > 0) return void (timer = setTimeout(next, Math.min(left, MAX_DELAY)));
+      signal.removeEventListener("abort", drop);
+      resolve();
+    };
+    signal.addEventListener("abort", drop, { once: true });
+    next();
+  });
+
 /**
  * The page's runtime: `transport` takes what a site's `api` sends (`createApi`), as the app's
  * `callApi` does. An operation `isDirect` allows is called on its fake, as the actor; a
@@ -116,9 +142,9 @@ const RunsLimit = z.object({ limit: z.number().int().positive().optional() });
  * is its run's id, and the same id again is the same run); `.result` (`{ runId, waitMs? }`) waits for the
  * run's end, its output or its failure, or `run_running` once `waitMs` has passed; `.latest`, `.runs` (`{ limit? }`, 20 unless given), `.approvals` and
  * `.ledger` (`{ runId }`, the run's records in order: its run card) read the runs. Each
- * approval is decided at once (`decide`), `ctx.sleep` moves the run's clock on instead of
- * waiting, and `ctx.now()` reads that clock. Refuses a workflow that uses an operation no fake
- * implements, and a world its fakes cannot take.
+ * approval is decided at once (`decide`), and `ctx.sleep` waits its time, as a worker's does: the
+ * run rests at its `sleep.started`, `running`, until a timer of the page's wakes it. Refuses a
+ * workflow that uses an operation no fake implements, and a world its fakes cannot take.
  */
 export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRuntime> {
   const {
@@ -162,14 +188,20 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
   }
   let runs = new Map<string, PageRun>();
   let started = 0;
+  /** Aborted to drop the runs started under it (`stop`, `reset`): each sleep's timer cleared, each call after refused. */
+  let dropping = new AbortController();
 
-  /** Appends a record to the run, at its clock, with the next `seq` unless one is given, keyed as a worker keys it. */
+  /** Appends a record to the run, now, with the next `seq` unless one is given, keyed as a worker keys it. */
   const write = (run: PageRun, body: LedgerBody, { seq = run.seq++, key }: { seq?: number; key?: string } = {}) =>
-    run.records.push(recordOf(run, PAGE_APP, body, { seq, at: run.clock, key, group: run.group }));
+    run.records.push(recordOf(run, PAGE_APP, body, { seq, at: Date.now(), key, group: run.group }));
 
-  /** How the run's `ctx` members are made in the page: on the world's fakes, at once; none once the run has ended. */
-  const runnerOf = (run: PageRun, seeded: Seeded): CtxRunner => ({
+  /**
+   * How the run's `ctx` members are made in the page: on the world's fakes, at once, but a sleep,
+   * which waits; none once the run has ended or `dropped` has aborted.
+   */
+  const runnerOf = (run: PageRun, seeded: Seeded, dropped: AbortSignal): CtxRunner => ({
     place: () => {
+      dropped.throwIfAborted();
       if (isEnded(run.status)) {
         throw new SanomaError("run_ended", `run ${run.id} has ended; a call made after it was not`, { runId: run.id });
       }
@@ -215,7 +247,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       records((i) => ({ output: recorded(calls[i]!.op, outputs[i], run.workflow) }));
       return output;
     },
-    now: async () => run.clock,
+    now: async () => Date.now(),
     async approval(title, req, at) {
       const checked = checkApproval(title, req);
       const state: ApprovalState = {
@@ -227,7 +259,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
         requestedBy: "workflow",
         covers: checked.covers,
         status: "pending",
-        requestedAt: run.clock,
+        requestedAt: Date.now(),
         refused: [],
       };
       run.approvals.push(state);
@@ -254,19 +286,16 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       run.status = "running";
       // The approver decides: the person named, or for a group, the group's name.
       const by = typeof state.approver === "string" ? state.approver : state.approver.group;
-      Object.assign(state, {
-        status: decision === "approve" ? "approved" : "rejected",
-        decidedBy: by,
-        decidedAt: run.clock,
-      });
+      const decidedAt = Date.now();
+      Object.assign(state, { status: decision === "approve" ? "approved" : "rejected", decidedBy: by, decidedAt });
       write(run, { type: "approval.decided", approval: state.id, decision, by }, { key: state.id });
       if (decision === "reject") throw new RejectedError(title, { id: by }, undefined, state.id);
-      return { approvedBy: by, at: run.clock };
+      return { approvedBy: by, at: decidedAt };
     },
     async sleep(raw, at) {
-      const until = untilOf(checkSleep(raw), run.clock);
+      const until = untilOf(checkSleep(raw), Date.now());
       write(run, { type: "sleep.started", ...at, until });
-      run.clock = Math.max(run.clock, until);
+      await waitUntil(until, dropped);
     },
     async all(list, at) {
       // Nested, or two at once: either way the members' records would not read as one fan-out.
@@ -307,22 +336,20 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       );
     }
     if (seen) return id;
-    const now = Date.now();
     const run: PageRun = {
       id,
       workflow: wf.name,
       input,
       actor,
       status: "running",
-      createdAt: now,
-      clock: now,
+      createdAt: Date.now(),
       seq: 0,
       records: [],
       approvals: [],
       done: Promise.resolve(),
     };
     runs.set(id, run);
-    const runner = runnerOf(run, current);
+    const runner = runnerOf(run, current, dropping.signal);
     write(run, { type: "run.started", input });
     run.done = (async () => {
       try {
@@ -335,7 +362,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
         Object.assign(run, { status: "failed", error: errorMessage(err) });
         throw err;
       } finally {
-        run.updatedAt = run.clock;
+        run.updatedAt = Date.now();
       }
     })();
     // Its failure is the run's outcome, read by `.result`: never an unhandled rejection.
@@ -365,6 +392,10 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       throw new SanomaError("run_not_found", `No run ${runId} of ${workflow}`, { runId });
     return run;
   };
+
+  /** Drops the runs started so far: what `stop` does, and `reset` before it seeds again. */
+  const stop = () =>
+    dropping.abort(new SanomaError("run_ended", "The page's runs were dropped: it was reset, or its demo unmounted"));
 
   return {
     async transport({ name, input, id }) {
@@ -430,8 +461,12 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       }
     },
     async reset() {
+      stop();
       current = await make();
       runs = new Map();
+      // After the seeding: a run started while it seeds is dropped with the runs before it.
+      dropping = new AbortController();
     },
+    stop,
   };
 }

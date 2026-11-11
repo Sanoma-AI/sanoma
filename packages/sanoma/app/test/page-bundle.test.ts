@@ -59,12 +59,23 @@ it("builds a page's runtime for a browser without Node, DBOS or a database, and 
   for (const chunk of chunks.values()) writeFileSync(join(out, chunk.fileName), chunk.code);
   const entry = [...chunks.values()].find((c) => c.isEntry)!;
   const { page } = (await import(pathToFileURL(join(out, entry.fileName)).href)) as {
-    page: Promise<{ transport(request: { name: string; input?: unknown }): Promise<unknown> }>;
+    page: Promise<{ transport(request: { name: string; input?: unknown }): Promise<unknown>; stop(): void }>;
   };
-  const { transport } = await page;
+  const { transport, stop } = await page;
   const before = Date.now();
   const { runId } = (await transport({ name: "sendInvoice", input: { number: "INV-1" } })) as { runId: string };
-  const { id, at } = (await transport({ name: "sendInvoice.result", input: { runId } })) as { id: string; at: number };
-  expect(id).toEqual(expect.any(String));
-  expect(at).toBeGreaterThanOrEqual(before + 7 * 86_400_000);
+  const ledger = async () =>
+    (await transport({ name: "sendInvoice.ledger", input: { runId } })) as {
+      type: string;
+      output?: unknown;
+      until?: number;
+    }[];
+  // The run rests at its week's sleep, its email sent, as a worker's would.
+  await expect
+    .poll(async () => (await ledger()).map((r) => r.type))
+    .toEqual(["run.started", "op.called", "op.called", "sleep.started"]);
+  const [, , sent, sleep] = await ledger();
+  expect(sent!.output).toEqual({ id: expect.any(String) });
+  expect(sleep!.until).toBeGreaterThanOrEqual(before + 7 * 86_400_000);
+  stop();
 });
