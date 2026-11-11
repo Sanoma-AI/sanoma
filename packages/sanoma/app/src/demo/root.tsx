@@ -2,10 +2,11 @@ import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, notFound, Outlet } from "@tanstack/react-router";
 import { type PageLanguages, pageLanguages } from "#/lib/locales.ts";
 import { ActorContext, type ActorState } from "../actor.ts";
+import { Toaster } from "../components/ui/sonner.tsx";
 
 // A demo's root (`demo-build.ts`'s route tree, over the sites alone): what the app's root gives a
 // public site's page, its language, and who it is for, an anonymous visitor, with no document
-// around it, since the demo is inside the host's page.
+// around it, since the demo is inside the host's page; and the Toaster the app's chrome holds.
 
 /** The page runtime's caller, `anonymous`: nobody the page can name or change. */
 const VISITOR: ActorState = { actor: null, groups: [], fromServer: true, setActor: () => {} };
@@ -24,6 +25,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   component: () => (
     <ActorContext value={VISITOR}>
       <Outlet />
+      <Toaster theme="light" />
     </ActorContext>
   ),
 });
