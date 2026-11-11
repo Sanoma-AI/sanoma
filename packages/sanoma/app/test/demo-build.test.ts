@@ -69,6 +69,7 @@ describe("demoPlan", () => {
       workflows: [send],
       connectors: [resend],
       fakes: new Set(["resend"]),
+      collections: new Set(["invoices"]),
       ...extra,
     });
 
@@ -90,6 +91,11 @@ describe("demoPlan", () => {
     expect(refusals(() => plan([call("sanoma.apps.list", "op"), call("nothing")]))).toEqual([
       "sites/www/routes/index.tsx:3: sanoma.apps.list is the app's own, which a demo has none of",
       "sites/www/routes/index.tsx:3: calls nothing, which is no workflow of the config's",
+    ]);
+    expect(
+      refusals(() => plan([{ name: "www", calls: [{ ...call("clients").calls[0]!, kind: "collection" as const }] }])),
+    ).toEqual([
+      "sites/www/routes/index.tsx:3: reads clients, a collection no data file under resources/ exports, which a demo bundles its collections from",
     ]);
     expect(refusals(() => plan([call("invoiceSend")], { fakes: new Set() }))).toEqual([
       "workflows/invoice-send.ts: uses resend, whose connector attaches no fake, which a demo runs every vendor on",
@@ -140,7 +146,7 @@ describe("buildDemo", () => {
     expect(css).not.toMatch(/(^|[},])\s*(html|body|\*|:root)\s*[,{]/);
   });
 
-  it("refuses a world its fakes cannot take, with the world's own message, and a page that would load Node", async () => {
+  it("refuses a world its fakes cannot take, with the world's own message, a page that would load Node, and a folder of other files", async () => {
     const ghost = company((repo) =>
       writeFileSync(
         join(repo, "scenarios", "world.feature"),
@@ -156,6 +162,11 @@ describe("buildDemo", () => {
       ),
     );
     await expect(build(node)).rejects.toThrow(/only a server has: .*fs/);
+    // A folder holding what no demo writes is never emptied.
+    const busy = company();
+    mkdirSync(join(busy, "demo"));
+    writeFileSync(join(busy, "demo", "robots.txt"), "");
+    await expect(build(busy)).rejects.toThrow(/holds robots\.txt, which no demo writes/);
   }, 300_000);
 
   it("runs in a host's page: a workflow from the page, a failure said, a PDF rendered, a fresh world on remount, nothing leaving the page", async (ctx) => {

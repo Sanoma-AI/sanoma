@@ -99,7 +99,12 @@ function SitesPage() {
  * page runtime seeds them on each mount; or how to write one.
  */
 function World() {
-  const { data: world } = useQuery({ ...scenariosQuery(), select: (scenarios) => scenarios.world ?? null });
+  const { data: world } = useQuery({
+    ...scenariosQuery(),
+    // The world changes with the repo's snapshot, which reloads the page: no polling for it.
+    refetchInterval: false,
+    select: (scenarios) => scenarios.world ?? null,
+  });
   if (world === undefined) return null;
   return (
     <Card>

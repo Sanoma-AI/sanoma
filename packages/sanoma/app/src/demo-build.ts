@@ -11,6 +11,7 @@ import {
   declarationFiles,
   filesUnder,
   isCollection,
+  isOp,
   resolveConfig,
   type SanomaConfig,
   VENDOR,
@@ -38,11 +39,7 @@ import { companyFiles, optional, vendorInfos } from "./bundle-build.ts";
 const WORLD = "scenarios/world.feature";
 
 /** The vendor of an operation's id, `resend.emails.send`'s `resend`. */
-const vendorOf = (op: string) => op.slice(0, op.indexOf("."));
-
-/** The operations a workflow uses, by id: its `uses` that are operations, not `sleep` or `approval`. */
-const opsOf = (wf: Pick<WorkflowDefinition, "uses">): string[] =>
-  wf.uses.flatMap((use: unknown) => (typeof use === "object" && use !== null && "id" in use ? [String(use.id)] : []));
+const vendorOf = (op: string) => op.split(".")[0]!;
 
 /** What a demo is planned from: the config's sites (their calls), workflows, connectors with their fakes, and the world. */
 export interface DemoInput<W extends Pick<WorkflowDefinition, "name" | "file" | "uses">> {
@@ -54,6 +51,8 @@ export interface DemoInput<W extends Pick<WorkflowDefinition, "name" | "file" | 
   connectors: readonly Connector<any, any>[];
   /** The vendors whose connector attaches a fake (`ResolvedConfig.fakes`). */
   fakes: ReadonlySet<string>;
+  /** The collections the demo bundles, by name: those the data files under `resources/` export. */
+  collections: ReadonlySet<string>;
   world?: World;
 }
 
@@ -78,13 +77,13 @@ export class DemoRefused extends Error {
  * The demo's plan: every workflow a site calls (by `RunForm` or `api`), each from a file of its
  * own, and every vendor those workflows, the sites' direct calls and the world's Givens use, each
  * by a connector from a package with a fake. Refuses (`DemoRefused`) a workflow defined in the
- * config, an operation of `sanoma` (the repository's and the app's, which a page has none of), a
+ * config, a collection a site reads from no data file, an operation of `sanoma` (the repository's and the app's, which a page has none of), a
  * vendor with no connector, no fake, or no package to import it from in the page.
  */
 export function demoPlan<W extends Pick<WorkflowDefinition, "name" | "file" | "uses">>(
   input: DemoInput<W>,
 ): DemoPlan<W> {
-  const { root, configFile, sites, workflows, connectors, fakes, world } = input;
+  const { root, configFile, sites, workflows, connectors, fakes, collections, world } = input;
   const from = (file: string) => relative(root, file).split(sep).join("/");
   const reasons: string[] = [];
   const bundled = new Set<W>();
@@ -101,6 +100,10 @@ export function demoPlan<W extends Pick<WorkflowDefinition, "name" | "file" | "u
     for (const call of site.calls) {
       const where = `${call.file}:${call.line}`;
       if (call.kind === "op") use(call.target, where);
+      if (call.kind === "collection" && !collections.has(call.target))
+        reasons.push(
+          `${where}: reads ${call.target}, a collection no data file under resources/ exports, which a demo bundles its collections from`,
+        );
       if (call.kind !== "workflow") continue;
       const wf = workflows.find((w) => w.name === call.target || apiNameOf(w.name) === call.target);
       if (!wf) reasons.push(`${where}: calls ${call.target}, which is no workflow of the config's`);
@@ -113,7 +116,7 @@ export function demoPlan<W extends Pick<WorkflowDefinition, "name" | "file" | "u
       else bundled.add(wf);
     }
   }
-  for (const wf of bundled) for (const op of opsOf(wf)) use(op, from(wf.file));
+  for (const wf of bundled) for (const op of wf.uses.filter(isOp)) use(op.id, from(wf.file));
   for (const given of world?.given ?? []) {
     if ("op" in given) use(given.op, WORLD);
     else useVendor(given.vendor, WORLD);
@@ -144,6 +147,9 @@ export interface BuildDemoOptions {
   log?: (line: string) => void;
 }
 
+/** What a demo writes in its folder, each the only names a folder it is built into may hold. */
+const DEMO_FILES = new Set(["mount.js", "demo.css", "index.html", "chunks", "files"]);
+
 /** The most one file of a demo holds: a public file's, Cloudflare's limit on one of a Worker's assets. */
 const MAX_FILE = 25 * 1024 * 1024;
 
@@ -156,6 +162,8 @@ const SCOPE = "[data-sanoma-demo]";
 /** `selector` under the demo's element: the document's own (`:root`, `html`, `body`, `:host`) is the element. */
 const scopedSelector = (selector: string) => {
   if (selector.startsWith(SCOPE)) return selector;
+  const host = /^:host\(([^)]*)\)/.exec(selector);
+  if (host) return SCOPE + host[1] + selector.slice(host[0].length);
   const own = /^(:root|html|body|:host)(?![\w-])/.exec(selector);
   return own ? SCOPE + selector.slice(own[0].length) : `${SCOPE} ${selector}`;
 };
@@ -183,6 +191,10 @@ const scoped = () => ({
       rule.selectors = selectors;
   },
 });
+
+/** Whether `value` is a connector of `vendor`, as the page finds one among its package's exports. */
+const isConnectorOf = (value: unknown, vendor: string) =>
+  typeof value === "object" && value !== null && (value as Partial<Connector<any, any>>)[VENDOR]?.id === vendor;
 
 /** A module's exports `keep` keeps, by name, the module imported from its file. */
 const exportsOf = async (file: string, keep: (value: unknown) => boolean) =>
@@ -232,7 +244,8 @@ function demoModule(parts: {
  */
 function demoPlugins(root: string, text: string, conditions: string[], keep: string[]): PluginOption[] {
   const { src } = appSources();
-  const siteApi = join(src, "site-api.ts");
+  // Vite's module ids have forward slashes, on Windows too.
+  const siteApi = join(src, "site-api.ts").split(sep).join("/");
   const output = {
     entryFileNames: "mount.js",
     chunkFileNames: "chunks/[name]-[hash].js",
@@ -390,6 +403,10 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
   if (!description.sites.length) throw new DemoRefused([`${root} has no sites: a demo is of its sites/<name>/routes/`]);
   const resolved = resolveConfig(config);
   const world = await loadWorld(resolved);
+  const data = await Promise.all(
+    declarationFiles(root).data.map(async (file) => ({ file, found: await exportsOf(file, isCollection) })),
+  );
+  const collections = data.flatMap(({ found }) => found.map(([, value]) => value as Collection));
   const plan = demoPlan({
     root,
     configFile: config.file ?? join(root, "sanoma.config.ts"),
@@ -397,19 +414,21 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
     workflows: config.workflows ?? [],
     connectors: config.connectors,
     fakes: new Set(resolved.fakes.keys()),
+    collections: new Set(collections.map((c) => c.name)),
     world,
   });
-  const data = await Promise.all(
-    declarationFiles(root).data.map(async (file) => ({ file, found: await exportsOf(file, isCollection) })),
+  // The connectors as the page has them, each its package's export (the config's may be another
+  // instance, with another fake); the world seeded with them once in Node, as each mount seeds it.
+  const fromRoot = createRequire(join(root, "package.json"));
+  const exported = await Promise.all(
+    plan.connectors.map(async ({ connector, package: pkg }) => {
+      const vendor = connector[VENDOR].id;
+      const [found] = await exportsOf(fromRoot.resolve(pkg), (value) => isConnectorOf(value, vendor));
+      if (!found) throw new DemoRefused([`${pkg}: exports no connector of ${vendor}, which a demo imports`]);
+      return found[1] as Connector<any, any>;
+    }),
   );
-  const collections = data.flatMap(({ found }) => found.map(([, value]) => value as Collection));
-  // The world seeded once in Node, as each mount seeds it: one its fakes cannot take fails here.
-  await pageRuntime({
-    workflows: plan.workflows,
-    collections,
-    connectors: plan.connectors.map((c) => c.connector),
-    world,
-  });
+  await pageRuntime({ workflows: plan.workflows, collections, connectors: exported, world });
 
   const unexported: string[] = [];
   const workflows = await Promise.all(
@@ -423,10 +442,24 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
   if (unexported.length) throw new DemoRefused(unexported);
 
   const sites = description.sites.map((site) => site.name);
-  // What the app's `getConfig` answers (`appConfig`), of the workflows the sites call: a start form reads it.
+  // What the app's `getConfig` answers (`appConfig`), of what the demo runs alone, for a start
+  // form: the page is public, so never the policies, secrets, connections, resources or login.
+  const vendors = new Set([DATA_VENDOR, ...plan.connectors.map(({ connector }) => connector[VENDOR].id)]);
   const shown: AppConfig = {
-    ...description,
+    appName: description.appName,
+    name: description.name,
+    version: description.version,
     workflows: description.workflows.filter((wf) => plan.workflows.some((p) => p.name === wf.name)),
+    ops: description.ops.filter((op) => vendors.has(op.vendor)),
+    vendors: Object.fromEntries(Object.entries(description.vendors).filter(([vendor]) => vendors.has(vendor))),
+    agents: [],
+    resourceTypes: [],
+    collections: description.collections,
+    resources: [],
+    orphans: [],
+    problems: [],
+    apps: description.apps,
+    policy: { defined: false, files: [] },
     sites: [],
     place: "live",
     content: [],
@@ -446,8 +479,11 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
   const conditions = [...(fromCheckout() ? ["sanoma-source"] : []), "browser", "module", "import", "default"];
   const keep = installed("@react-pdf/renderer") ? ["@react-pdf/renderer"] : [];
 
-  if (existsSync(out) && readdirSync(out).length && !existsSync(join(out, "mount.js"))) {
-    throw new Error(`${out} holds files, and no demo's mount.js: a demo's folder is emptied when it is built`);
+  const others = existsSync(out) ? readdirSync(out).filter((name) => !DEMO_FILES.has(name)) : [];
+  if (others.length) {
+    throw new Error(
+      `${out} holds ${others.join(", ")}, which no demo writes: a demo's folder is emptied when it is built`,
+    );
   }
   const outDir = join(root, ".sanoma", "app", "demo", `build.${process.pid}`);
   const vite = await import("vite");

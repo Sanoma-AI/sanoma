@@ -52,20 +52,22 @@ export async function mount(element: Element, { path = `/sites/${sites[0]}`, exi
     defaultNotFoundComponent: SiteNotFound,
     defaultPendingComponent: PagePending,
   });
-  // A plain link of the sites' to this origin goes through the router too, never the host's page.
+  // A plain link of the sites' to this origin goes through the router too, never the host's page,
+  // its href read from the demo's page, not the host's. Listened to after `createRoot`, whose own
+  // listener on the element runs first: a handler's `preventDefault` (a `<Link>`'s) is seen here.
   const onClick = (event: Event) => {
     const link = (event.target as Element | null)?.closest("a[href]") as HTMLAnchorElement | null;
     const { button, metaKey, ctrlKey, shiftKey, altKey } = event as MouseEvent;
     if (!link || event.defaultPrevented || button !== 0 || metaKey || ctrlKey || shiftKey || altKey) return;
     if ((link.target && link.target !== "_self") || link.hasAttribute("download")) return;
-    const url = new URL(link.href);
+    const url = new URL(link.getAttribute("href")!, new URL(router.state.location.href, location.origin));
     if (url.origin !== location.origin) return;
     event.preventDefault();
     void router.navigate({ href: `${url.pathname}${url.search}${url.hash}` });
   };
-  element.addEventListener("click", onClick);
   element.setAttribute(SCOPE, "");
   const root = createRoot(element);
+  element.addEventListener("click", onClick);
   root.render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
