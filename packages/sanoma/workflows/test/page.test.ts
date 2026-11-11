@@ -73,17 +73,21 @@ type Read = {
 };
 
 /** A run started in the page, then the page's pending work done (no time passing): its id. */
-const begin = async (transport: PageRuntime["transport"], input: unknown = { number: "INV-1" }) => {
-  const { runId } = (await transport({ name: "chaseInvoice", input })) as { runId: string };
+const begin = async (transport: PageRuntime["transport"]) => {
+  const { runId } = (await transport({ name: "chaseInvoice", input: { number: "INV-1" } })) as { runId: string };
   await vi.advanceTimersByTimeAsync(0);
   return runId;
 };
 
+/** The run's records. */
+const ledger = async (transport: PageRuntime["transport"], runId: string) =>
+  (await transport({ name: "chaseInvoice.ledger", input: { runId } })) as Read[];
+
+/** The records, as `type` or `type op`. */
+const stepsOf = (records: Read[]) => records.map((r) => (r.op ? `${r.type} ${r.op}` : r.type));
+
 /** The run's records, as `type` or `type op`. */
-const steps = async (transport: PageRuntime["transport"], runId: string) =>
-  ((await transport({ name: "chaseInvoice.ledger", input: { runId } })) as Read[]).map((r) =>
-    r.op ? `${r.type} ${r.op}` : r.type,
-  );
+const steps = async (transport: PageRuntime["transport"], runId: string) => stepsOf(await ledger(transport, runId));
 
 /** Where `chase` rests: the invoice read and emailed, the week's sleep begun. */
 const RESTING = ["run.started", "op.called data.invoices.get", "op.called resend.emails.send", "sleep.started"];
@@ -144,8 +148,8 @@ describe("pageRuntime", () => {
       record: { status: "overdue" },
     });
 
-    const records = (await transport({ name: "chaseInvoice.ledger", input: { runId } })) as Read[];
-    expect(await steps(transport, runId)).toEqual([
+    const records = await ledger(transport, runId);
+    expect(stepsOf(records)).toEqual([
       ...RESTING,
       "approval.requested",
       "approval.decided",

@@ -45,6 +45,7 @@ export async function mount(element: Element, { path = `/sites/${sites[0]}`, exi
   const page = await seeding;
   if (latest.get(element) !== seeding) {
     release();
+    page.stop();
     return () => {};
   }
   const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 1_000 } } });

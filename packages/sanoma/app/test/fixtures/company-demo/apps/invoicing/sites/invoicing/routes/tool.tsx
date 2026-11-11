@@ -12,16 +12,18 @@ function Tool() {
     try {
       const { runId } = await api.invoicingInvoiceSend.start({ id });
       // Its records read until it rests at its sleep, as the app's run card reads them, or ends.
-      let ledger = await api.invoicingInvoiceSend.ledger(runId);
-      while (!["sleep.started", "run.finished", "run.failed"].includes(ledger.at(-1)?.type ?? "")) {
+      for (;;) {
+        const ledger = await api.invoicingInvoiceSend.ledger(runId);
+        const last = ledger.at(-1)?.type;
+        // A failed run's `.result` throws its error.
+        if (last === "run.failed") await api.invoicingInvoiceSend.result(runId);
+        if (last === "sleep.started" || last === "run.finished") {
+          const emails = ledger.filter((r) => r.type === "op.called" && r.op === "resend.emails.send").length;
+          const invoice = await api.data.invoicing.invoices.get({ key: id });
+          return say(`Sent ${invoice?.record.number}, ${emails} email, resting at ${last}`);
+        }
         await new Promise((done) => setTimeout(done, 20));
-        ledger = await api.invoicingInvoiceSend.ledger(runId);
       }
-      // A failed run's `.result` throws its error.
-      if (ledger.at(-1)?.type === "run.failed") await api.invoicingInvoiceSend.result(runId);
-      const emails = ledger.filter((r) => r.type === "op.called" && r.op === "resend.emails.send").length;
-      const invoice = await api.data.invoicing.invoices.get({ key: id });
-      say(`Sent ${invoice?.record.number}, ${emails} email, resting at ${ledger.at(-1)?.type}`);
     } catch (err) {
       say(`Refused: ${errorBodyOf(err)?.error ?? String(err)}`);
     }
