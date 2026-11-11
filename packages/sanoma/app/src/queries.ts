@@ -110,6 +110,35 @@ export const refreshWritten = (queryClient: QueryClient, file: string) =>
     [sourceQuery(file).queryKey, configQuery().queryKey].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
   );
 
+/** How long, at most, a page waits for the app to start again on what was written, a try each second. */
+const STARTING_TRIES = 120;
+
+/**
+ * After a column change of the collection `name` written in the checkout (`file`): its records read
+ * again (they were brought along), and the file and the description. When the app starts again on
+ * it (`running`, `PatchOutput.running`), the description it started with is the old one until it
+ * has: read again a second at a time until the collection's fields are no longer `before` (the app
+ * answering the old ones meanwhile, or none while it starts), then the file and the records once more.
+ */
+export async function refreshColumns(
+  queryClient: QueryClient,
+  { file, name, before, running }: { file: string; name: string; before: CollectionEntry["fields"]; running: boolean },
+): Promise<void> {
+  const records = () => queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] });
+  await records();
+  if (running) {
+    const was = JSON.stringify(before);
+    for (let tries = 0; tries < STARTING_TRIES; tries++) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const config = await queryClient.fetchQuery({ ...configQuery(), staleTime: 0 }).catch(() => undefined);
+      const fields = config && collectionNamed(name)(config)?.fields;
+      if (fields && JSON.stringify(fields) !== was) break;
+    }
+    await records();
+  }
+  await refreshWritten(queryClient, file);
+}
+
 /** The file a workflow's outline was read from; none when it was read from `run`'s text, or not at all. */
 export const workflowFile = (workflow: Pick<WorkflowEntry, "outline">): string | undefined =>
   "file" in workflow.outline ? workflow.outline.file : undefined;

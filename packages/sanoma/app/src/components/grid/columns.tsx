@@ -28,7 +28,7 @@ import { Input } from "#/components/ui/input.tsx";
 import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { proposeColumnChangeFn } from "../../functions.ts";
-import { closeRecord, type ColumnSearch, openColumn, refreshWritten, remoteQuery } from "../../queries.ts";
+import { closeRecord, type ColumnSearch, openColumn, refreshColumns, remoteQuery } from "../../queries.ts";
 import { ButtonLink, CardHeading, Notice, ToneBadge } from "../common.tsx";
 import { FROM } from "../data-grid.tsx";
 import {
@@ -278,7 +278,13 @@ export function ColumnPanel({
         return;
       }
       said(answer, plan);
-      await refreshWritten(queryClient, answer.file);
+      // Not awaited: an app started again on it answers the new columns only once it has.
+      void refreshColumns(queryClient, {
+        file: answer.file,
+        name: collection.name,
+        before: collection.fields,
+        running: answer.running === true,
+      });
       await navigate({ search: closeRecord, resetScroll: false });
     } catch (err) {
       setFailed(errorMessage(err));
@@ -331,7 +337,11 @@ export function ColumnPanel({
                       aria-pressed={on}
                       disabled={!offered}
                       title={offered ? undefined : UNAVAILABLE}
-                      onClick={() => setType(chip.type === CHOICES ? { enum: [] } : chip.type)}
+                      onClick={() => {
+                        setType(chip.type === CHOICES ? { enum: [] } : chip.type);
+                        // Another type, other values that won't convert: what becomes of them is asked again.
+                        setDecision(undefined);
+                      }}
                     >
                       {chip.label}
                     </Button>
@@ -345,7 +355,15 @@ export function ColumnPanel({
               <FieldLabel htmlFor="column-choices">
                 Choices <span className="font-normal text-muted-foreground">· one per line</span>
               </FieldLabel>
-              <Textarea id="column-choices" rows={3} value={choices} onChange={(e) => setChoices(e.target.value)} />
+              <Textarea
+                id="column-choices"
+                rows={3}
+                value={choices}
+                onChange={(e) => {
+                  setChoices(e.target.value);
+                  setDecision(undefined);
+                }}
+              />
             </Field>
           )}
           {column.change === "add" && (
