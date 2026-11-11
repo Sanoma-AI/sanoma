@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-opencode",
-  "version": "0.11.22",
+  "version": "0.11.23",
   "description": "OpenCode, the open-source coding agent, for Sanoma's chat on a person's own plan",
   "keywords": [
     "coding-agent",
