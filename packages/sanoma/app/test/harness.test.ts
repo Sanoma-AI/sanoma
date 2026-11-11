@@ -27,7 +27,7 @@ import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
-import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
+import { catalogCallId, type ChatMessage, chatTransport } from "../src/lib/chat.ts";
 import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's second engine, end to end: an existing
@@ -371,8 +371,9 @@ describe.each(engines)("the agent catalog on %s", (engine, name, enabled) => {
         // The agent was offered the catalog, and its call ran here, in the worker: the run is in this
         // instance's database, the chat's agent's for Ada, and its result reached the model.
         expect(sent[0]!.tools.some((t) => t === "start_run" || t.endsWith("__start_run"))).toBe(true);
-        const runId = `${id}:toolu_${RUN}_c0`;
-        const chatForAda = { id: "chat", groups: ["agents"], onBehalfOf: "ada" };
+        const asked = ((await testApp.client.chats.load(id)) as ChatMessage[]).find((m) => m.role === "user")!.id;
+        const runId = catalogCallId(id, asked, `toolu_${RUN}_c0`);
+        const chatForAda = { id: "sanoma-chat", groups: ["agents"], onBehalfOf: "ada" };
         expect((await testApp.client.run(runId))?.startedBy).toEqual(chatForAda);
         expect((await testApp.client.ledger(runId))[0]).toMatchObject({ type: "run.started", actor: chatForAda });
         const results = sent.flatMap((request) => request.results).join("\n");

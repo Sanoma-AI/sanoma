@@ -165,6 +165,17 @@ export interface HeldOutput {
   held: { runId: string };
 }
 
+/**
+ * The idempotency id of the agent catalog's call `toolCallId` in the chat `chat`'s turn for the
+ * person's message `message` (which names the turn's run): one call per tool call of one turn, a
+ * tool-call id a model uses again in a later turn being another call. Letters, digits, `_` and
+ * `-`, at most 200, as `CallRequest`'s id: a chat's and a message's ids are already (64 at most
+ * each), and the tool call's other characters are `-`. A start's run id is this; a held lookup's
+ * run is `call:<the chat's agent>:<this>`. `settle` makes it again from the transcript.
+ */
+export const catalogCallId = (chat: string, message: string, toolCallId: string): string =>
+  `${chat}_${message}_${toolCallId.replaceAll(/[^\w-]/g, "-")}`.slice(0, 200);
+
 /** The held call's or start's run, when a tool part's output is a held one's. */
 export const heldRunOf = (output: unknown): string | undefined => {
   const runId = (output as Partial<HeldOutput> | null | undefined)?.held?.runId;

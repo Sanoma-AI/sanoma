@@ -34,8 +34,8 @@ const COMMON_RULES = `- The person saves the draft from its card (Save), which p
 - When you introduce yourself, and after you make a change, suggest what the person could ask you next: end your reply with a line that says only "${ASKS_LINE}", then one ask to a line, each starting with "- " and worded as the person would type it (after a change, the two most useful). Otherwise suggest none.`;
 
 /** The agent catalog's tools (`catalogTools`), a line each, for either engine. */
-const CATALOG_RULES = `- The company's tools act on the live instance, as the chat's agent (${CHAT_AGENT}) acting for the person, through the company's policy, which may refuse a call or hold it for an approval: then the person sees the approval's card in the chat; say what waits and whose decision it waits for.
-- describe lists the company's own workflows (name, title, input), the operations you may look up and its collections.
+const CATALOG_RULES = `- The company's tools act on the live instance, as the chat's agent (${CHAT_AGENT}) acting for the person, through the company's policy, which may refuse a call or hold it for an approval: then the person sees the approval's card in the chat; say what waits and whose decision it waits for (a call still waiting answers with waitsFor).
+- describe lists the company's own workflows (name, api name, title, input), the operations that may be called directly, each with its effect (lookup calls the reads among them), and its collections.
 - lookup calls an operation whose effect is read and that may be called directly (a lookup, as describe lists it), with its input.
 - get_run reads a run by its id: its workflow, status, who started it and its approvals.
 - wait_run waits up to ${RESULT_WAIT_MS / 1000} seconds for a run to end and answers its output, or that it is still running.
@@ -88,7 +88,7 @@ function atAGlance(
   const { people } = readPeople(resolved.root);
   const named = (type: string) =>
     people.filter((r) => r.type === type).map((r) => (typeof r.desired.name === "string" ? r.desired.name : r.name));
-  return `The company at a glance: its workflows: ${namesOrNone((config.workflows ?? []).map((wf) => wf.title ?? wf.name))}; its connectors: ${namesOrNone([...titles.values()])}; its people: ${namesOrNone(named("person"))}; its groups: ${namesOrNone(named("group"))}.`;
+  return `The company at a glance: its workflows (each by its name, then its title): ${namesOrNone((config.workflows ?? []).map((wf) => (wf.title && wf.title !== wf.name ? `${wf.name} (${wf.title})` : wf.name)))}; its connectors: ${namesOrNone([...titles.values()])}; its people: ${namesOrNone(named("person"))}; its groups: ${namesOrNone(named("group"))}.`;
 }
 
 /**

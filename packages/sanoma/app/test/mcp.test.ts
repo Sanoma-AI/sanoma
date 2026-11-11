@@ -544,11 +544,13 @@ describe("a declared agent acting for the person, named in x-sanoma-agent", () =
   });
 
   it("refuses the in-app chat's own agent, which only a chat turn in the worker acts as", async () => {
-    expect(await mcp("tools/list", {}, { agent: "chat" })).toMatchObject({
+    expect(await mcp("tools/list", {}, { agent: "sanoma-chat" })).toMatchObject({
       status: 403,
       body: {
         code: "not_admitted",
-        error: expect.stringContaining("chat is the in-app chat's own agent, which acts only for the person chatting"),
+        error: expect.stringContaining(
+          "sanoma-chat is the in-app chat's own agent, which acts only for the person chatting",
+        ),
       },
     });
   });

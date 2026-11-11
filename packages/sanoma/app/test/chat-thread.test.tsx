@@ -7,6 +7,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { type ReactNode, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DECLARE_BOX } from "../src/api.ts";
+import { stepLabel, type ToolPart } from "../src/components/shell/chat-parts.tsx";
 import { Composer } from "../src/components/shell/composer.tsx";
 import { ConnectAgent } from "../src/components/shell/connect-agent.tsx";
 import sanoma from "../src/icon-small.svg?url";
@@ -309,6 +310,23 @@ function EnginePicker() {
   const [value, set] = useState("loop");
   return <Composer busy={false} onSend={() => {}} engine={{ value, set, options: enginesOf(AGENTS) }} />;
 }
+
+/** A `start_run` step in `state`, with `input`. */
+const step = (state: string, input: object, extra: object = {}) =>
+  ({ type: "tool-start_run", toolCallId: "t", state, input, ...extra }) as unknown as ToolPart;
+
+describe("the agent catalog's steps", () => {
+  it("says each in words, a start the policy refused as refused, not started", () => {
+    expect(stepLabel(step("output-available", { workflow: "memo" }, { output: { runId: "r" } }))).toBe("Started memo");
+    expect(stepLabel(step("output-error", { workflow: "memo" }, { errorText: "denied" }))).toBe(
+      "Refused to start memo",
+    );
+    expect(stepLabel({ ...step("output-available", {}), type: "tool-drift" } as ToolPart)).toBe("Checked for drift");
+    expect(stepLabel({ ...step("output-available", { runId: "r1" }), type: "tool-wait_run" } as ToolPart)).toBe(
+      "Waited for the run r1",
+    );
+  });
+});
 
 describe("the chat's composer", () => {
   it("sends on Enter, not on Shift+Enter, and not while busy", async () => {

@@ -26,7 +26,7 @@ import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
-import { type ChatMessage, chatTransport, isIntro } from "../src/lib/chat.ts";
+import { catalogCallId, type ChatMessage, chatTransport, isIntro } from "../src/lib/chat.ts";
 import { INTRO } from "../src/server/chat.ts";
 import { allowedPaths, here, realIn } from "../src/steps/agent/checkout.ts";
 import { suggestedAsks } from "../src/steps/agent/transcript.ts";
@@ -321,6 +321,10 @@ const said = (message: ChatMessage) => message.parts.flatMap((p) => (p.type === 
 
 const toolParts = (message: ChatMessage | undefined) => (message?.parts ?? []).filter(isToolUIPart);
 
+/** The id of the person's message `text` in the chat `id`: its turn's, which names the turn's catalog calls. */
+const askedIn = async (id: string, text: string) =>
+  ((await testApp.client.chats.load(id)) as ChatMessage[]).findLast((m) => m.role === "user" && said(m) === text)!.id;
+
 /** The reply's first tool part. */
 const firstTool = (reply: ChatMessage | undefined) => toolParts(reply)[0]!;
 
@@ -380,10 +384,10 @@ describe("the chat", () => {
       runId ??= output?.held?.runId;
     });
     await waitFor(() => runId, Boolean, 30_000);
-    // The chat's agent's held call, for Ada.
-    expect(runId).toBe(`call:chat:${id}:${RUN}-12-0`);
+    // The chat's agent's held call, for Ada, named by the chat, the turn's message and the tool call.
+    expect(runId).toBe(`call:sanoma-chat:${catalogCallId(id, await askedIn(id, "Look up Acme"), `${RUN}-12-0`)}`);
     expect((await testApp.client.run(runId!))?.startedBy).toEqual({
-      id: "chat",
+      id: "sanoma-chat",
       groups: ["agents"],
       onBehalfOf: "ada",
     });
@@ -540,7 +544,7 @@ describe("the chat", () => {
       data: { asks: ["Add a laptop step to offboarding", "Who can approve a refund?"] },
     });
     expect(systems.at(-1)).toMatch(
-      /The company at a glance: its workflows: Note something, payout, bonus; its connectors: crm, mock; its people: ada, lead; its groups: none\./,
+      /The company at a glance: its workflows \(each by its name, then its title\): memo \(Note something\), payout, bonus; its connectors: crm, mock; its people: ada, lead; its groups: none\./,
     );
     expect(systems.at(-1)).toContain('end your reply with a line that says only "Suggested asks:"');
     expect(systems.at(-1)).toContain("Otherwise suggest none.");
@@ -611,7 +615,7 @@ async function chatColumn(url: string, path = "/workflows", actor = "ada") {
 
 describe("the agent catalog in the chat", () => {
   /** The chat's agent acting for Ada, as the run and the ledger keep it. */
-  const chatForAda = { id: "chat", groups: ["agents"], onBehalfOf: "ada" };
+  const chatForAda = { id: "sanoma-chat", groups: ["agents"], onBehalfOf: "ada" };
 
   it("offers the catalog's six tools beside the loop's, and names each in the system prompt", async () => {
     const id = `catalog-${RUN}`;
@@ -633,11 +637,20 @@ describe("the agent catalog in the chat", () => {
     const reply = await send(id, [], "Note the visit");
     const part = firstTool(reply);
     expect([getToolName(part), part.state]).toEqual(["start_run", "output-available"]);
-    const runId = `${id}:${RUN}-14-0`;
+    const runId = catalogCallId(id, await askedIn(id, "Note the visit"), `${RUN}-14-0`);
+    expect(runId).toMatch(/^[\w-]{1,200}$/);
     expect(part.output).toEqual({ runId, status: "finished", output: { noted: "visited Acme" } });
     expect(reply!.parts.at(-1)).toMatchObject({ type: "text", text: "Noted." });
     expect((await testApp.client.run(runId))?.startedBy).toEqual(chatForAda);
     expect((await testApp.client.ledger(runId))[0]).toMatchObject({ type: "run.started", actor: chatForAda });
+
+    // The model uses the same tool-call id in the next turn (as some providers do): another call, another run.
+    const history = (await testApp.client.chats.load(id)) as ChatMessage[];
+    const again = firstTool(await send(id, history, "Note the visit"));
+    const second = (again.output as { runId: string }).runId;
+    expect(again.toolCallId).toBe(part.toolCallId);
+    expect(second).not.toBe(runId);
+    expect(again.output).toEqual({ runId: second, status: "finished", output: { noted: "visited Acme" } });
   }, 300_000);
 
   it("shows a start the policy holds for agents as its approval, which the person may give", async () => {
@@ -647,7 +660,7 @@ describe("the agent catalog in the chat", () => {
       held ??= (toolParts(reply)[0]?.output as { held?: { runId: string } } | undefined)?.held?.runId;
     });
     await waitFor(() => held, Boolean, 60_000);
-    const runId = `${id}:${RUN}-8-0`;
+    const runId = catalogCallId(id, await askedIn(id, "Pay Bo 5"), `${RUN}-8-0`);
     expect(held).toBe(runId);
     expect(await testApp.client.approvals(runId)).toEqual([
       expect.objectContaining({ approver: "ada", status: "pending" }),
@@ -673,7 +686,8 @@ describe("the agent catalog in the chat", () => {
       state: "output-error",
       errorText: expect.stringContaining("save-draft is the runtime's own workflow"),
     });
-    expect(await testApp.client.run(`builtin-${RUN}:${RUN}-21-0`)).toBeUndefined();
+    const asked = await askedIn(`builtin-${RUN}`, "Save the draft for me");
+    expect(await testApp.client.run(catalogCallId(`builtin-${RUN}`, asked, `${RUN}-21-0`))).toBeUndefined();
   }, 300_000);
 });
 

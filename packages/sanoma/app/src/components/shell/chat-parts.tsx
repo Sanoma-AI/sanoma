@@ -37,7 +37,7 @@ const Markdown = lazy(() => import("./markdown.tsx"));
 const HeldCard = lazy(() => import("./held-card.tsx"));
 
 type Part = ChatMessage["parts"][number];
-type ToolPart = Extract<Part, { toolCallId: string }>;
+export type ToolPart = Extract<Part, { toolCallId: string }>;
 type ReasoningPart = Extract<Part, { type: "reasoning" }>;
 type TracePart = ToolPart | ReasoningPart;
 
@@ -215,7 +215,7 @@ function stepState(step: ToolPart, live: boolean) {
 }
 
 /** A step in words: what the tool did, from its input; a coding agent's by its tool's name and the file it names. */
-function stepLabel(step: ToolPart): string {
+export function stepLabel(step: ToolPart): string {
   const input = (step.input ?? {}) as Record<string, unknown>;
   const path = typeof input.path === "string" ? input.path : "";
   switch (getToolName(step)) {
@@ -262,7 +262,9 @@ function stepLabel(step: ToolPart): string {
     case "drift":
       return "Checked for drift";
     case "start_run":
-      return `Started ${String(input.workflow ?? "")}`;
+      return step.state === "output-error"
+        ? `Refused to start ${String(input.workflow ?? "")}`
+        : `Started ${String(input.workflow ?? "")}`;
     default: {
       if (step.title) return step.title;
       const file = pathOf(input);

@@ -45,7 +45,7 @@ export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise
   // The rest is its history: a reply of the turn before may have been written after it.
   const next = stored.slice(at + 1).filter((m) => m.role === "user");
   const before = stored.filter((m) => m !== message && !next.includes(m));
-  const history = (await settle(step.client, before)) as ChatMessage[];
+  const history = (await settle(step.client, before, found.id)) as ChatMessage[];
   // The messages settle changed.
   await chats.upsert(
     found.id,
