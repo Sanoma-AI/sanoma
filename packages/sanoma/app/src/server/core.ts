@@ -767,8 +767,14 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
   const visitor = isVisitor(actor);
   if (!entry || (visitor && entry.builtin)) throw notCallable(name);
   const workflow = entry.name;
-  // As `SanomaClient.start` refuses it: a declared agent starts no built-in but those it may.
-  if (method === "start" && entry.builtin && isDeclaredAgent(actor) && !AGENT_BUILT_INS.has(workflow)) {
+  // As `SanomaClient.start` refuses it: a declared agent starts no built-in but `call` and those it may.
+  if (
+    method === "start" &&
+    entry.builtin &&
+    workflow !== CALL_WORKFLOW &&
+    isDeclaredAgent(actor) &&
+    !AGENT_BUILT_INS.has(workflow)
+  ) {
     throw new PolicyDeniedError(name, AGENT_BUILT_IN_REFUSAL);
   }
   if (visitor && method !== "start" && method !== "result") {
