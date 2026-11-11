@@ -171,7 +171,7 @@ describe("buildDemo", () => {
     await expect(build(busy)).rejects.toThrow(/holds robots\.txt, and no demo's alone/);
   }, 300_000);
 
-  it("runs in a dark host's page: a workflow from the page, a failure said, a PDF rendered, a toast, the light look, a fresh world on remount, nothing leaving the page", async (ctx) => {
+  it("runs in a dark host's page: a workflow from the page, a failure said, a PDF rendered, a toast, the light look, a fresh world on remount, an overtaken mount left out, nothing leaving the page", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
     const server = await host(out);
@@ -221,6 +221,10 @@ describe("buildDemo", () => {
       // Mounted again: the world as it began, so the number is the first again.
       await tab.evaluate("window.remount()");
       await said("Send draft-1", /Sent INV-0001/);
+      // Two mounts called on the element at once (an effect run twice): the later one shows, styled, and the earlier's unmount leaves it be.
+      await tab.evaluate("window.overlap()");
+      expect(await tab.evaluate(`document.querySelector("#demo").hasAttribute("data-sanoma-demo")`)).toBe(true);
+      await said("Send draft-1", /Sent INV-0001/);
       // A link out of the sites is the host's to follow: the host's URL never moved.
       await tab.locator("::-p-text(The app)").click();
       await tab.waitForFunction(`window.exited === "/workflows"`);
@@ -252,6 +256,12 @@ const HOST = `<!doctype html>
   const options = { path, exit: (path) => (window.exited = path) };
   let unmount = await mount(element, options);
   window.remount = async () => { unmount(); unmount = await mount(element, options); };
+  window.overlap = async () => {
+    unmount();
+    const earlier = mount(element, options);
+    unmount = await mount(element, options);
+    (await earlier)();
+  };
   window.mounted = true;
 </script></body></html>`;
 
