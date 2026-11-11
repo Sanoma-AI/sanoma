@@ -192,14 +192,15 @@ async function lint(root: string, log: (line: string) => void): Promise<string[]
  * workflows gives each its problems: one line each here.
  */
 function configProblems({ problems, workflows, sites }: ConfigDescription, root: string): string[] {
+  const people = readPeople(root);
   const lines = new Set([
     ...problems.map(problemLine),
     ...workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: relative(root, wf.file), ...p }))),
     ...sites.flatMap((site) => site.problems.map(problemLine)),
     // The people's own (an id two share, a reserved one), which admit nobody while they stand.
-    ...readPeople(root).problems.map(problemLine),
+    ...people.problems.map(problemLine),
     // A client two agents declare, which admits everyone still: no agent is that client's.
-    ...clientClashes(readPeople(root).people).map(problemLine),
+    ...clientClashes(people.people).map(problemLine),
   ]);
   return [...lines];
 }

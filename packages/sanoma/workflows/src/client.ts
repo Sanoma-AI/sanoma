@@ -679,10 +679,9 @@ export class SanomaClient {
     if (!made.length) return undefined;
     const same = (what: (record: (typeof made)[number], call: Call) => boolean) =>
       made.length <= calls.length && made.every((r, i) => what(r, calls[i]!));
-    // Made by someone else, as `mustMatch` tells a run's starter: one agent acts for several people.
-    const by = made[0]!.actor;
+    // Made by someone else, as `mustMatch` tells a run's starter (`sameActor`).
     const differs = [
-      ...(by?.id === actor.id && by.onBehalfOf === actor.onBehalfOf ? [] : ["actor"]),
+      ...(sameActor(made[0]!.actor, actor) ? [] : ["actor"]),
       ...(same((r, c) => r.op === c.op.id) ? [] : ["op"]),
       ...(same((r, c) => sameJson(r.input, recorded(c.op, c.input))) ? [] : ["input"]),
       ...(sameJson(made[0]!.connection ?? null, connection ?? null) ? [] : ["connection"]),
@@ -1803,14 +1802,11 @@ export class SanomaClient {
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
   private async mustMatch(runId: string, args: RunArgs) {
     const [stored] = ((await this.dbos.getWorkflow(runId))?.input ?? []) as [RunArgs?];
-    // Who started it by id, and for whom (one agent acts for several people), alone: their groups
-    // are the people files' at the time, which may change.
+    // Who started it by id and for whom alone (`sameActor`).
     const differs = (["input", "startedBy", "sandbox"] as const).filter(
       (key) =>
         !stored ||
-        (key === "startedBy"
-          ? stored.startedBy?.id !== args.startedBy.id || stored.startedBy.onBehalfOf !== args.startedBy.onBehalfOf
-          : !sameJson(stored[key], args[key])),
+        (key === "startedBy" ? !sameActor(stored.startedBy, args.startedBy) : !sameJson(stored[key], args[key])),
     );
     if (differs.length) {
       throw new SanomaError(
@@ -1913,6 +1909,13 @@ const asJson = (v: unknown): unknown => (v === undefined ? undefined : JSON.pars
 
 /** True when the two are the same JSON, whatever the order of their keys. */
 const sameJson = (a: unknown, b: unknown): boolean => isDeepStrictEqual(asJson(a), asJson(b));
+
+/**
+ * True when `stored` is `actor`: one id, acting for the same person (one agent acts for several
+ * people). Their groups aside: those are the people files' at the time, which may change.
+ */
+const sameActor = (stored: Pick<Principal, "id" | "onBehalfOf"> | undefined, actor: Principal): boolean =>
+  stored?.id === actor.id && stored.onBehalfOf === actor.onBehalfOf;
 
 /** A secret's value as `SanomaClient.secrets` reads it, and where from. */
 export interface StoredSecret {
