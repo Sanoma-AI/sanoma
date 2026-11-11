@@ -4,22 +4,25 @@ import type {
   ChangeEvent,
   ChangeFacts,
   ChangeReport,
+  ChangeReshaped,
   ChangeState,
   ChangeVerified,
   changeOps,
   MergeInput,
 } from "./change.ts";
 import { ADMIN, ChangeInput, initialChangeState } from "./change.ts";
+import type { recordsOps } from "./collection.ts";
 import { type Approver, defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { errorCode, isRunControlError, type SanomaError } from "./errors.ts";
-import { approverLabel, type CHANGE_WORKFLOW, errorMessage } from "./shared.ts";
+import { approverLabel, type CHANGE_WORKFLOW, errorMessage, reshapeOf } from "./shared.ts";
 import type { CheckResult } from "./source.ts";
 
 // The built-in `change` workflow: the life of a change to the company's repository, from its
 // draft to live. It opens the draft's branch as a pull request, checks and plans it, asks the
 // policy, reports Sanoma's review on the host, waits in the Inbox for Publish (the approval),
-// squash-merges, deploys and verifies. A workflow like any other, held to the same lint: every
-// operation goes through `ctx`, and what is no operation is a step of `change-steps.ts`.
+// squash-merges, brings the records along a column change's plan, deploys and verifies. A workflow
+// like any other, held to the same lint: every operation goes through `ctx`, and what is no
+// operation is a step of `change-steps.ts`.
 
 /** What the change workflow does that is no operation, each a step of its own (`change-steps.ts`). */
 export interface ChangeSteps {
@@ -51,8 +54,11 @@ export interface ChangeSteps {
   publish(state: ChangeState): Promise<void>;
 }
 
-/** What the change workflow uses: its four operations, and `approval`. */
-type ChangeUse = (typeof changeOps.change)[keyof typeof changeOps.change] | "approval";
+/** What the change workflow uses: its four operations, `sanoma.records.reshape`, and `approval`. */
+type ChangeUse =
+  | (typeof changeOps.change)[keyof typeof changeOps.change]
+  | typeof recordsOps.records.reshape
+  | "approval";
 
 /** The approval Publish is: the Inbox's title for it. */
 const PUBLISH = "Publish the change";
@@ -69,22 +75,27 @@ function reviewOf(decision: ChangeDecision, facts: ChangeFacts): { state: "pendi
 }
 
 /**
- * The change workflow over `ops` (`changeOps`, the built-in connector's) and `steps`:
- * `resolveConfig` adds it to every config. It `uses` the four operations and `approval`.
+ * The change workflow over `ops` (`changeOps`, the built-in connector's), `records`
+ * (`recordsOps`) and `steps`: `resolveConfig` adds it to every config. It `uses` the four
+ * operations, `sanoma.records.reshape` and `approval`.
  *
  * A run is the life of one change (run id `change:<draft>`): each round opens the draft's branch
  * as a pull request (`open`, which pushes it), checks it (`steps.check`), plans its facts
  * (`steps.plan`), asks the policy ahead (`steps.ahead`), and reports on the host (`review`). While
  * the policy denies it, the run waits for what happens next (`steps.next`). Otherwise it asks one
- * approval, Publish, of the hold's approver (else whoever drafted it), covering the merge, with the
- * change and its facts as its details; once approved, it merges (`merge`). An event that comes in
- * meanwhile (`SanomaClient.changeEvent`) withdraws the approval, and the run reads it:
+ * approval, Publish, of the hold's approver (else whoever drafted it), covering the merge and the
+ * reshape, with the change and its facts as its details; once approved, it merges (`merge`). An
+ * event that comes in meanwhile (`SanomaClient.changeEvent`) withdraws the approval, and the run
+ * reads it:
  * `commits` plans another round, after withdrawing every approval approved for the merge
  * (`steps.retire`), so none lifts a hold on the new head; `close` closes the pull request; the
  * pull request `closed` or `merged` on the host ends the change as it is. A rejected Publish
  * closes it too. A merge whose branch moved plans another round; one the host refuses waits.
  *
- * Once merged, the deploy (`steps.deploy`): the checkout follows `main`, then apply on the
+ * Once merged (here, or on the host), a change carrying a column change's plan brings the records
+ * along (`sanoma.records.reshape`, `reshapeOf` its plan: by its decisions, a missing one keeping the
+ * values), its counts or its failure reported on the change (`merged.reshaped`), never the run's.
+ * Then the deploy (`steps.deploy`): the checkout follows `main`, then apply on the
  * declared hosts, as a run this one waits for, then drift on them (`steps.verify`). A `merged` or
  * `closed` event someone told is checked on the host as it is read (`steps.next`, `steps.queued`); one it does not bear
  * out plans another round. A Publish withdrawn with no event waits, blocked, for the next one.
@@ -93,6 +104,7 @@ function reviewOf(decision: ChangeDecision, facts: ChangeFacts): { state: "pendi
  */
 export function changeWorkflow(
   ops: typeof changeOps,
+  records: typeof recordsOps,
   steps: ChangeSteps,
 ): WorkflowDefinition<readonly ChangeUse[], typeof ChangeInput> {
   return defineWorkflow({
@@ -101,7 +113,7 @@ export function changeWorkflow(
     title: "Publish a change",
     trigger: "manual",
     input: ChangeInput,
-    uses: [ops.change.open, ops.change.review, ops.change.merge, ops.change.close, "approval"],
+    uses: [ops.change.open, ops.change.review, ops.change.merge, ops.change.close, records.records.reshape, "approval"],
     run: async (ctx, input) => {
       const state = initialChangeState(input);
       /** Moves the change on, and publishes where it is. */
@@ -141,7 +153,7 @@ export function changeWorkflow(
             if (input.save === opened.head) await steps.publishOnSave(decision.approver!);
             await ctx.approval(PUBLISH, {
               approver: decision.approver!,
-              covers: [ops.change.merge],
+              covers: [ops.change.merge, records.records.reshape],
               details: JSON.stringify({ change: { id: input.id, title: input.title, branch: opened.branch }, facts }),
               links: [opened.url, ...(input.page === undefined ? [] : [input.page])],
             });
@@ -181,16 +193,34 @@ export function changeWorkflow(
         event ??= told!;
         if (event.kind === "merged") {
           await show({ phase: "deploying" });
+          // The records follow the merged declaration before the deploy: merged, a failure is the change's to report.
+          const reshaping = reshapeOf(input.plan);
+          let reshaped: ChangeReshaped | undefined;
+          if (reshaping) {
+            try {
+              reshaped = await ctx.sanoma.records.reshape(reshaping);
+            } catch (err) {
+              if (isRunControlError(err)) throw err;
+              reshaped = { error: errorMessage(err) };
+            }
+          }
           const deploy = await steps.deploy(event.sha);
           const verified = await steps.verify(deploy);
           await steps.closeDraft(input.id);
-          const merged = { sha: event.sha, at: await ctx.now(), deploy, ...(verified && { verified }) };
+          const merged = {
+            sha: event.sha,
+            at: await ctx.now(),
+            ...(reshaped && { reshaped }),
+            deploy,
+            ...(verified && { verified }),
+          };
           await show({ phase: "merged", merged });
           report = {
             outcome: "merged",
             head: opened.head,
             pullRequest,
             sha: merged.sha,
+            ...(reshaped && { reshaped }),
             deploy,
             ...(verified && { verified }),
           };

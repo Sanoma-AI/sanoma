@@ -40,8 +40,8 @@ import { importWorkflow } from "./import-workflow.ts";
 import { connectWorkflow } from "./connect-workflow.ts";
 import { storeMoveDriver, storeMoveOps } from "./store-move.ts";
 import { migrateStoreWorkflow } from "./store-move-workflow.ts";
-import { type Collection, collectionsConnector, collectionsFake, isCollection } from "./collection.ts";
-import { collectionsDriver } from "./collection-driver.ts";
+import { type Collection, collectionsConnector, collectionsFake, isCollection, recordsOps } from "./collection.ts";
+import { collectionsDriver, recordsDriver } from "./collection-driver.ts";
 import { lazyDb, type LazyDb } from "./db.ts";
 import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
 import { callerFile } from "./company-file.ts";
@@ -450,11 +450,13 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const declared = [...collections.values()];
   const dataStore = declared.length ? lazyDb(databaseUrl, "data") : undefined;
   // Built-in, in every config: a change's operations, which the template's policy names
-  // (`sanoma.change.merge`), the listing of apps a page may call (`sanoma.apps.list`), and what a
+  // (`sanoma.change.merge`), the records brought along with a column change
+  // (`sanoma.records.reshape`), the listing of apps a page may call (`sanoma.apps.list`), and what a
   // workflow asks the runtime to do for it (`sanoma`, runtime-ops.ts).
   const ops = indexConnectors([
     ...running,
     changeOps,
+    recordsOps,
     connectionOps,
     appsListOps,
     sanoma,
@@ -474,6 +476,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     [
       ...driversByVendor.values(),
       changeDriver(remotes),
+      recordsDriver(() => connectionStore.db()),
       connectionDriver(connections),
       appsListDriver,
       runtimeDriver({
@@ -548,11 +551,11 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     const { resources, bindings } = await declaredOf("host");
     return resources.filter((r) => r.id in bindings).map((r) => r.id);
   };
-  names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
+  names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, recordsOps, changeSteps({ remotes, hosts })));
   // Built-in, in every config: what a git host's webhook says happened, which the worker with the checkout follows.
   names.set(FOLLOW_WORKFLOW, followWorkflow(followSteps({ remotes, hosts })));
   // Built-in, in every config: the app's own actions on the repository, which a worker given the app's steps runs.
-  for (const wf of appWorkflows(appRunner)) names.set(wf.name, wf);
+  for (const wf of appWorkflows(appRunner, recordsOps)) names.set(wf.name, wf);
   // Built-in, in every config: a chat turn, which a worker given the app's steps runs.
   names.set(CHAT_WORKFLOW, chatWorkflow(chatSteps()));
   // Built-in: an OAuth connection's exchange, which the app's callback starts, when a declared

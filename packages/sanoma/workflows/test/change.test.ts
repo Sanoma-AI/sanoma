@@ -3,8 +3,12 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeHost, testRepository } from "sanoma/testing/host";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { lazyDb } from "../src/db.ts";
+import { data } from "../src/db/company.ts";
+import type { TableChangePlan } from "../src/description.ts";
 import { lintWorkflow } from "../src/lint.ts";
 import { CHANGE_MERGE, type ChangeReport, defineWorkflow, type LedgerRecord, memoryLedger } from "../src/index.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
@@ -49,11 +53,16 @@ describe("the change workflow", () => {
   const root = rootWith({ "resources/people.ts": PEOPLE, "policies/no-secrets.cedar": POLICY });
   const remote = fakeRemote();
   const repo = memorySource({ root: here, remote });
+  const databaseUrl = freshDatabase("change");
   const app = useTestApp(
     { workflows: [waits], connectors: [remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl: freshDatabase("change"), source: repo.source },
+    { databaseUrl, source: repo.source },
   );
-  afterAll(() => repo.remove());
+  const pool = lazyDb(databaseUrl, "change test");
+  afterAll(async () => {
+    repo.remove();
+    await pool.close();
+  });
 
   const open = (id: string, title = `Change ${id}`) =>
     app.client.openChange({ id, title, page: page(id) }, { startedBy: "alice" });
@@ -104,7 +113,7 @@ describe("the change workflow", () => {
     expect(publish).toMatchObject({
       title: "Publish the change",
       approver: { group: "admin" },
-      covers: [CHANGE_MERGE],
+      covers: [CHANGE_MERGE, "sanoma.records.reshape"],
       links: [pr.url, page("rules")],
       status: "pending",
     });
@@ -137,6 +146,8 @@ describe("the change workflow", () => {
     // The ledger's merge records the facts the policy decided on.
     const records = await app.client.ledger(runId);
     expect(merges(records)).toEqual([expect.objectContaining({ input: expect.objectContaining({ facts }) })]);
+    // No plan: no records to bring along.
+    expect(opsOf(records)).not.toContain("sanoma.records.reshape");
     const done = (await app.client.change("rules"))!;
     expect(done).toMatchObject({ status: "finished", state: { phase: "merged", merged: { sha } }, report });
     // Once it has ended, the draft's next change is a run of its own.
@@ -276,6 +287,49 @@ describe("the change workflow", () => {
     await waitFor(pending(() => app.client, moved));
     await app.client.changeEvent("moved-on", { kind: "close", by: "alice" }, { by: "alice" });
     expect(await app.client.result(moved)).toMatchObject({ outcome: "closed" });
+  });
+
+  it("brings a collection's records along its plan once it merges, before it deploys, and reports what became of them", async () => {
+    const db = await pool.db();
+    await db.insert(data).values([
+      {
+        collection: "deals",
+        key: "Acme",
+        record: { company: "Acme", seats: "12", touched: "2026-01-02" },
+        updatedBy: "leon",
+      },
+      { collection: "deals", key: "Cedar", record: { company: "Cedar", seats: "about 40" }, updatedBy: "leon" },
+    ]);
+    const plan: TableChangePlan = {
+      collection: "deals",
+      rows: 2,
+      changes: [
+        { kind: "add", field: "region", type: "text", required: false, empty: 2 },
+        { kind: "rename", from: "touched", to: "contacted" },
+        {
+          kind: "retype",
+          field: "seats",
+          from: "text",
+          to: "number",
+          wontConvert: { count: 1, sample: [{ key: "Cedar", value: "about 40" }] },
+        },
+      ],
+    };
+    const head = repo.edit("deals", { "notes/deals.md": "\n" });
+    const runId = await app.client.openChange(
+      { id: "deals", title: "Deal columns", page: page("deals"), save: head, plan },
+      { startedBy: "alice" },
+    );
+    const reshaped = { rows: 2, changed: 1, converted: 1, cleared: 0, kept: 1 };
+    expect(await app.client.result(runId)).toMatchObject({ outcome: "merged", reshaped, deploy: { follow: {} } });
+    expect((await app.client.change("deals"))!.state).toMatchObject({ plan, merged: { reshaped } });
+    // After the merge, under the run; a value that cannot convert is kept (no decision).
+    expect(opsOf(await app.client.ledger(runId)).slice(-2)).toEqual([CHANGE_MERGE, "sanoma.records.reshape"]);
+    const rows = await db.select().from(data).where(eq(data.collection, "deals")).orderBy(data.key);
+    expect(rows.map((r) => [r.record, r.updatedBy])).toEqual([
+      [{ company: "Acme", seats: 12, contacted: "2026-01-02" }, `run:${runId}`],
+      [{ company: "Cedar", seats: "about 40" }, "leon"],
+    ]);
   });
 
   it("closes the change when Publish is rejected", async () => {

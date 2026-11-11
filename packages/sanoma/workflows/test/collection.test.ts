@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { collection, collectionsFake, recordIssues } from "../src/collection.ts";
-import { isBatch, previewRequests } from "../src/shared.ts";
+import { converts, isBatch, previewRequests, reshape, reshaped, reshapeOf } from "../src/shared.ts";
 import { describeConfig } from "../src/describe.ts";
+import type { ColumnType } from "../src/description.ts";
 import { defineConnector, memorySecrets, type Op, resolveConfig } from "../src/index.ts";
 import { loadScenarios } from "../src/scenario.ts";
 import config from "./fixtures/outbound/sanoma.config.ts";
@@ -57,6 +58,15 @@ describe("collection()", () => {
       expect(refused(kind)).toThrow(`collection("leads"): the field "f" is ${JSON.stringify(kind)}; a field is one of`);
     }
     expect(refused({ type: "text", optional: false })).toThrow('the field "f" may only be marked `optional: true`');
+    for (const field of [
+      { type: "text", hidden: true },
+      { type: "text", optional: true, hidden: false },
+      { enum: ["a"], hidden: "yes", optional: true },
+    ]) {
+      expect(refused(field)).toThrow(
+        'the field "f" may only be marked `hidden: true`, and only when it is `optional: true`',
+      );
+    }
     expect(refused({ enum: [] })).toThrow('the field "f" needs an enum of distinct strings, at least one');
     expect(refused({ enum: ["a", "a"] })).toThrow("needs an enum of distinct strings");
     expect(refused({ enum: ["a", 1] })).toThrow("needs an enum of distinct strings");
@@ -64,6 +74,20 @@ describe("collection()", () => {
       'the field "-f" must be named with letters, digits and _, not a digit first',
     );
     expect(declared({ name: "leads", key: "id", fields: {} })).toThrow(`collection("leads"): it needs fields`);
+  });
+
+  it("keeps a removed column as a hidden field: optional, its values kept and still read", () => {
+    const deals = collection({
+      name: "deals",
+      key: "company",
+      fields: { company: "text", seats: { type: "number", optional: true, hidden: true } },
+    });
+    expect(deals.fields.seats).toEqual({ type: "number", optional: true, hidden: true });
+    expect(deals.save.input.safeParse({ record: { company: "Acme", seats: 12 } }).success).toBe(true);
+    expect(deals.save.input.safeParse({ record: { company: "Acme" } }).success).toBe(true);
+    expect(recordIssues(deals, { company: "Acme", seats: "12" })).toEqual([
+      { path: ["seats"], message: expect.any(String) },
+    ]);
   });
 
   it("makes six operations of the vendor data, each with its effect and target", () => {
@@ -166,6 +190,141 @@ describe("collection()", () => {
       { path: ["stage"], message: expect.any(String) },
       { path: [], message: expect.stringContaining("nickname") },
     ]);
+  });
+});
+
+/** That each of `values` converts to `type`. */
+const yes = (type: ColumnType, values: unknown[]) => expect(values.filter((v) => !converts(v, type))).toEqual([]);
+/** That none of `values` converts to `type`. */
+const no = (type: ColumnType, values: unknown[]) => expect(values.filter((v) => converts(v, type))).toEqual([]);
+
+describe("a column change's records", () => {
+  it("convert a value that reads as the new type, as a field of it accepts it", () => {
+    yes("number", [12, -1.5, "12", " 12 ", "-0.25"]);
+    no("number", ["about 40", "1e3", "", "12.", Number.NaN, true, null, {}]);
+    yes("boolean", [true, false, "yes", "No", " TRUE "]);
+    no("boolean", ["y", 1, "", null]);
+    yes("text", ["", "a", 1, false]);
+    no("text", [null, {}, []]);
+    yes("person", ["leon", 1]);
+    no("person", ["", null]);
+    yes({ enum: ["won", "1"] }, ["won", 1]);
+    no({ enum: ["won"] }, ["Won", "", null]);
+    yes({ link: "companies" }, ["Acme"]);
+    no({ link: "companies" }, [1, null]);
+    yes("json", [null, "", {}, [1]]);
+    // A date: what a `date` field's schema takes, no more, no less.
+    const field = collection({ name: "days", key: "id", fields: { id: "text", on: "date" } });
+    const dates = ["2026-11-10", "2024-02-29", "0000-02-29", "2026-11-10T09:30:00Z", "2026-11-10T09:30:00.123+02:00"];
+    const notDates = [
+      "2026-02-29",
+      "2026-02-30T00:00:00Z",
+      "2026-13-01",
+      "2026-11-10T09:30Z",
+      "2026-11-10T09:30:00",
+      "2026-11-10T09:30:00+0200",
+      "2026-11-10T24:00:00Z",
+      "2026-11-10 09:30:00Z",
+      "20261110",
+      20261110,
+    ];
+    for (const on of [...dates, ...notDates]) {
+      expect([on, converts(on, "date")]).toEqual([on, field.save.input.safeParse({ record: { id: "d", on } }).success]);
+    }
+    yes("date", dates);
+  });
+
+  it("bring a record along each change, the very record when nothing changes, and do it once", () => {
+    const record = {
+      company: "Acme",
+      seats: "12",
+      touched: "2026-01-02",
+      notes: "",
+      extra: { region: "EU", size: "big" },
+    };
+    expect(reshaped(record, { kind: "rename", from: "touched", to: "contacted" })).toEqual({
+      record: { company: "Acme", seats: "12", notes: "", extra: record.extra, contacted: "2026-01-02" },
+      did: "moved",
+    });
+    // Nothing to move, or the new name already holds a value: left alone.
+    for (const change of [
+      { kind: "rename", from: "gone", to: "here" },
+      { kind: "rename", from: "touched", to: "company" },
+    ] as const) {
+      expect(reshaped(record, change).record).toBe(record);
+    }
+    expect(reshaped(record, { kind: "retype", field: "seats", to: "number" })).toEqual({
+      record: { ...record, seats: 12 },
+      did: "converted",
+    });
+    expect(reshaped({ ...record, seats: 12 }, { kind: "retype", field: "seats", to: "number" })).toEqual({
+      record: { ...record, seats: 12 },
+    });
+    expect(reshaped(record, { kind: "retype", field: "missing", to: "number" }).record).toBe(record);
+    // One that cannot convert is kept by default, or cleared; an empty one is no value: dropped.
+    const big = { kind: "retype", field: "extra", to: "number" } as const;
+    expect(reshaped(record, big)).toEqual({ record, did: "kept" });
+    expect(reshaped(record, { ...big, decision: "keep" }).record).toBe(record);
+    const { extra: _, ...cleared } = record;
+    expect(reshaped(record, { ...big, decision: "clear" })).toEqual({ record: cleared, did: "cleared" });
+    const { notes: __, ...noNotes } = record;
+    expect(reshaped(record, { kind: "retype", field: "notes", to: "number" })).toEqual({ record: noNotes });
+    // A key of a free-form field to a field of its own; only where that field is empty.
+    expect(reshaped(record, { kind: "convert", field: "extra", key: "region", type: "text" })).toEqual({
+      record: { ...record, extra: { size: "big" }, region: "EU" },
+      did: "converted",
+    });
+    const size = { kind: "convert", field: "extra", key: "size", type: "number" } as const;
+    expect(reshaped(record, size)).toEqual({ record, did: "kept" });
+    expect(reshaped(record, { ...size, decision: "clear" })).toEqual({
+      record: { ...record, extra: { region: "EU" } },
+      did: "cleared",
+    });
+    expect(reshaped({ ...record, region: "US" }, { ...size, key: "region" }).did).toBeUndefined();
+    expect(reshaped(record, { ...size, field: "company" }).record).toBe(record);
+  });
+
+  it("count what became of the records, and plan the call from the changes that move values", () => {
+    const records = [{ seats: "12", a: 1 }, { seats: "about 40" }, { b: 2 }, { seats: "" }];
+    const changes = [
+      { kind: "rename", from: "a", to: "b" },
+      { kind: "retype", field: "seats", to: "number", decision: "clear" },
+    ] as const;
+    const { changed, counts } = reshape(records, changes);
+    expect(counts).toEqual({ rows: 4, changed: 3, converted: 1, cleared: 1, kept: 0 });
+    expect([...changed]).toEqual([
+      [0, { seats: 12, b: 1 }],
+      [1, {}],
+      [3, {}],
+    ]);
+    const changedAgain = reshape([...changed.values()], changes).counts.changed;
+    expect(changedAgain).toBe(0);
+
+    const wontConvert = { count: 0, sample: [] };
+    expect(
+      reshapeOf({
+        collection: "deals",
+        rows: 4,
+        changes: [
+          { kind: "add", field: "region", type: "text", required: false, empty: 4 },
+          { kind: "rename", from: "a", to: "b" },
+          { kind: "retype", field: "seats", from: "text", to: "number", wontConvert, decision: "clear" },
+          { kind: "convert", field: "extra", key: "size", type: "number", wontConvert },
+          { kind: "hide", field: "notes", filled: 2 },
+        ],
+      }),
+    ).toEqual({
+      collection: "deals",
+      changes: [
+        { kind: "rename", from: "a", to: "b" },
+        { kind: "retype", field: "seats", to: "number", decision: "clear" },
+        { kind: "convert", field: "extra", key: "size", type: "number" },
+      ],
+    });
+    expect(reshapeOf(undefined)).toBeUndefined();
+    expect(
+      reshapeOf({ collection: "deals", rows: 1, changes: [{ kind: "hide", field: "notes", filled: 1 }] }),
+    ).toBeUndefined();
   });
 });
 
@@ -387,6 +546,7 @@ describe("a config's collections", () => {
       "sanoma.change.review",
       "sanoma.change.merge",
       "sanoma.change.close",
+      "sanoma.records.reshape",
       "sanoma.connection.test",
       "sanoma.connection.refresh",
       "sanoma.connection.revoke",

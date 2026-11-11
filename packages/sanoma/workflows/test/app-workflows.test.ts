@@ -1,7 +1,9 @@
 import { testDatabaseUrl } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { lazyDb } from "../src/db.ts";
+import { data } from "../src/db/company.ts";
 import {
   type AppStepContext,
   type AppSteps,
@@ -93,8 +95,9 @@ describe("on a worker given the app's steps", () => {
       await record(step);
       return { file: input.id.split("#")[0]! };
     },
-    patch: async (step) => {
+    patch: async (step, input) => {
       await record(step);
+      if (input.plan) return { file: "resources/data.ts" };
       throw new SanomaError("not_approver", "A change to the rules waits for an admin", {
         approver: { group: "admin" },
       });
@@ -120,7 +123,12 @@ describe("on a worker given the app's steps", () => {
       throw new Error("No chat turns here");
     },
   };
-  const app = useTestApp(config(), { databaseUrl: freshDatabase("app_workflows"), source, app: steps });
+  /** How many times the worker was asked to start again on the new declaration. */
+  let reloads = 0;
+  const databaseUrl = freshDatabase("app_workflows");
+  const app = useTestApp(config(), { databaseUrl, source, app: steps, reload: () => reloads++ });
+  const pool = lazyDb(databaseUrl, "app workflows test");
+  afterAll(() => pool.close());
 
   it("runs each in a step given the worker's client, repository, lock and config, and the run's actor and id, its writes one at a time", async () => {
     const inputs = [
@@ -161,6 +169,49 @@ describe("on a worker given the app's steps", () => {
       "Apply the repository, its deploy key and the database first",
     );
     expect((await app.client.run(pushed))?.error).toBe("Apply the repository, its deploy key and the database first");
+  });
+
+  it("brings the records along a column change written without a remote, then starts the worker again on it", async () => {
+    const db = await pool.db();
+    await db.insert(data).values([
+      { collection: "deals", key: "Acme", record: { company: "Acme", seats: "12" }, updatedBy: "leon" },
+      { collection: "deals", key: "Cedar", record: { company: "Cedar", seats: "about 40" }, updatedBy: "leon" },
+    ]);
+    const at = { file: "resources/data.ts", export: "deals" };
+    const wontConvert = { count: 1, sample: [{ key: "Cedar", value: "about 40" }] };
+    const plan = {
+      collection: "deals",
+      rows: 2,
+      changes: [{ kind: "retype", field: "seats", from: "text", to: "number", wontConvert, decision: "clear" }],
+    };
+    const patched = await app.client.start(
+      PATCH_WORKFLOW,
+      { at, fields: { "fields.seats": "number" }, plan },
+      { startedBy: "alice" },
+    );
+    expect(await app.client.result(patched)).toEqual({
+      file: "resources/data.ts",
+      reshaped: { rows: 2, changed: 2, converted: 1, cleared: 1, kept: 0 },
+      running: true,
+    });
+    expect(reloads).toBe(1);
+    const records = await db.select({ record: data.record }).from(data).orderBy(data.key);
+    expect(records.map((r) => r.record)).toEqual([{ company: "Acme", seats: 12 }, { company: "Cedar" }]);
+    // A plan that changes the declaration alone: nothing to bring along, the worker starts again all the same.
+    const hidden = await app.client.start(
+      PATCH_WORKFLOW,
+      {
+        at,
+        fields: { "fields.seats": { type: "number", optional: true, hidden: true } },
+        plan: { collection: "deals", rows: 2, changes: [{ kind: "hide", field: "seats", filled: 1 }] },
+      },
+      { startedBy: "alice" },
+    );
+    expect(await app.client.result(hidden)).toEqual({ file: "resources/data.ts", running: true });
+    expect(reloads).toBe(2);
+    const ops = async (runId: string) =>
+      (await app.client.ledger(runId)).flatMap((r) => (r.type === "op.called" ? [r.op] : []));
+    expect([await ops(patched), await ops(hidden)]).toEqual([["sanoma.records.reshape"], []]);
   });
 
   it("saves a draft only by saveDraft, as save:<id>, then ~<n> once one ended, listing them newest first with their outputs", async () => {

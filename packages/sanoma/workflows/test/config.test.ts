@@ -181,6 +181,8 @@ describe("a change's operations, built in", () => {
     // Beside the listing of apps and the runtime's own operations, also built in.
     expect([...resolved.ops.keys()]).toEqual([
       ...ids,
+      // What brings a collection's records along a column change: after a merge, or a patch without a remote.
+      "sanoma.records.reshape",
       "sanoma.connection.test",
       "sanoma.connection.refresh",
       "sanoma.connection.revoke",
@@ -216,6 +218,13 @@ describe("a change's operations, built in", () => {
     await expect(resolved.drivers.get("sanoma.change.merge")!({}, { secrets: {} } as never)).rejects.toThrow(
       "This worker was given no repository",
     );
+    const reshape = resolved.ops.get("sanoma.records.reshape")!;
+    expect([reshape.effect, reshape.idempotent, reshape.target!({ collection: "deals" })]).toEqual([
+      "write",
+      true,
+      "data:deals",
+    ]);
+    expect(resolved.drivers.has("sanoma.records.reshape")).toBe(true);
     // Not a vendor with credentials to set.
     expect(resolved.driversByVendor.size).toBe(0);
   });

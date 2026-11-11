@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ApprovalState, Approver } from "./define.ts";
+import { type ReshapeOutput, TableChangePlanSchema } from "./description.ts";
 import { errorInfo } from "./errors.ts";
 import { type CallContext, defineConnector, defineDriver, type Driver, DriverError } from "./op.ts";
 import { approve, approvedFor, type Decision, deny } from "./policy.ts";
@@ -55,7 +56,8 @@ export type ChangeFacts = z.infer<typeof ChangeFacts>;
 /**
  * What opening a change takes: its draft's id, and the pull request's title, body and the change
  * page's link; for a change to a collection's columns, its plan as the app drafted it, which the
- * change's review shows (`ChangeState.plan`): JSON the runtime carries and does not read. `save`,
+ * change's review shows (`ChangeState.plan`) and, once it merges, brings the records along with
+ * (`sanoma.records.reshape`, by the decisions it carries). `save`,
  * the head the person who opens it saved: their Publish of a round planned at that head, given
  * once the policy lets them decide it (`ChangeSteps.publishOnSave`); a round at any other head asks
  * Publish as usual.
@@ -65,7 +67,7 @@ export const ChangeInput = z.object({
   title: z.string().min(1),
   body: z.string().optional(),
   page: z.string().url().optional(),
-  plan: z.json().optional(),
+  plan: TableChangePlanSchema.optional(),
   save: z.string().regex(COMMIT_ID).optional(),
 });
 export type ChangeInput = z.infer<typeof ChangeInput>;
@@ -417,6 +419,13 @@ export interface ChangeDeploy {
   apply?: { runId: string; hosts: string[]; error?: string };
 }
 
+/**
+ * What became of the records after a merge, or a patch written without a remote, whose plan brings
+ * them along (`sanoma.records.reshape`): its counts, or why it failed (the merge or the file written
+ * stands; the records are as they were, the call being one transaction).
+ */
+export type ChangeReshaped = ReshapeOutput | { error: string };
+
 /** The drift run that read the hosts back after their apply, and the hosts it found not as declared. */
 export interface ChangeVerified {
   runId: string;
@@ -456,7 +465,7 @@ export interface ChangeState {
   };
   /** The review card on the host: unavailable in this version. */
   card: { status: "unavailable"; reason: string };
-  merged?: { sha: string; at: number; deploy?: ChangeDeploy; verified?: ChangeVerified };
+  merged?: { sha: string; at: number; reshaped?: ChangeReshaped; deploy?: ChangeDeploy; verified?: ChangeVerified };
   /** Why the change cannot merge now: the policy denies it, or the host refuses the merge. */
   blocked?: string;
   /** Who closed it, when someone asked (a `close` event, or a rejection of the Publish approval). */
@@ -483,6 +492,7 @@ export interface ChangeReport {
   head: string;
   pullRequest: { number: number; url: string };
   sha?: string;
+  reshaped?: ChangeReshaped;
   deploy?: ChangeDeploy;
   verified?: ChangeVerified;
 }

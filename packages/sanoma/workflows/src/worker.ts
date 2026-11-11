@@ -118,8 +118,9 @@ export interface WorkerOptions {
   /**
    * Loads the company's files again and runs them in a worker of their own, in place of this one, a
    * moment after it is asked: what a save without a remote asks once it merged into the checkout
-   * (`AppStepContext.reload`). `sanoma serve` passes it; without it, the saved code runs once the
-   * instance starts again.
+   * (`AppStepContext.reload`), a column change written without one (`patch`), and a follow of
+   * `main` that moved the checkout (`WorkerState.followMain`). `sanoma serve` passes it; without
+   * it, the saved code runs once the instance starts again.
    */
   reload?: () => void;
   /**
@@ -229,8 +230,13 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     serially,
     followMain: () =>
       serially(async () => {
+        const before = await Promise.resolve(options.source?.head()).catch(() => undefined);
         const moved = await followBase(resolved.remotes, storedSecrets, options.source);
-        if ("revision" in moved) refreshAppsBehind();
+        if ("revision" in moved) {
+          refreshAppsBehind();
+          // The checkout moved: the worker and the app start again on its files (a merged column change's declaration among them).
+          if (moved.revision !== before) options.reload?.();
+        }
         return moved;
       }),
     // The runtime's tables, on the secrets' pool: the same database.

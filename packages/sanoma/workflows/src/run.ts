@@ -71,7 +71,8 @@ export interface WorkerState {
    * Fast-forwards the checkout to the host's `main` (`followBase`), one of the worker's writes
    * (`serially`), as a change's deploy and a push to `main` do first; on a new revision, how far
    * each app taken from a source is behind it is checked again, in the background, into the
-   * runtime's table (`recordAppsBehind` in worker.ts), as at the worker's start.
+   * runtime's table (`recordAppsBehind` in worker.ts), as at the worker's start, and, when the
+   * checkout moved, the worker asks to start again on its files (`reload`).
    */
   followMain(): Promise<{ revision: string } | { skipped: string } | { error: string }>;
   /** The runtime's tables (`db.ts`): what the worker writes for the app to read, such as a sandbox run's checks. */
