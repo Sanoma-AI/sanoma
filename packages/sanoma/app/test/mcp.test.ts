@@ -16,7 +16,7 @@ import {
   withSetup,
 } from "sanoma/workflows";
 import { defineFake } from "sanoma/workflows/fake";
-import { BUILT_IN_WORKFLOWS } from "sanoma/workflows/shared";
+import { AGENT_BUILT_IN_REFUSAL, BUILT_IN_WORKFLOWS } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { customers as crmCustomers } from "../../workflows/test/fixtures/company-apps/apps/crm/resources/data.ts";
@@ -517,6 +517,19 @@ describe("a declared agent acting for the person, named in x-sanoma-agent", () =
     });
   });
 
+  it("takes the agent's name URI-encoded or not, as the person's", async () => {
+    for (const named of ["claude%2Dcode", "claude-code", " claude-code "]) {
+      const started = await tool("start_run", { workflow: "greet-customer", input: { id: "c7" } }, { agent: named });
+      const { runId } = started.structuredContent;
+      expect((await tool("get_run", { runId })).structuredContent.startedBy, named).toEqual(startedBy);
+    }
+    // Not URI-encoded: taken as sent.
+    expect(await mcp("tools/list", {}, { agent: "claude%code" })).toMatchObject({
+      status: 403,
+      body: { code: "not_admitted", error: expect.stringContaining("claude%code is not an agent") },
+    });
+  });
+
   it("refuses an id that is no declared agent: nobody's, a person's, a runtime agent's", async () => {
     for (const named of ["nobody", "lead", "host-check"]) {
       expect(await mcp("tools/list", {}, { agent: named }), named).toMatchObject({
@@ -544,9 +557,10 @@ describe("a declared agent acting for the person, named in x-sanoma-agent", () =
   });
 
   it("refuses an agent any other of the runtime's own workflows through callApi too", async () => {
+    // In the client's words.
     await expect(callApi(appContext(), startedBy, { name: "goLiveHost.start", input: {} })).rejects.toMatchObject({
       code: "policy_denied",
-      message: expect.stringMatching(/an agent starts none of the runtime's own workflows but drift/),
+      message: `goLiveHost.start was denied by policy: ${AGENT_BUILT_IN_REFUSAL}`,
     });
   });
 });

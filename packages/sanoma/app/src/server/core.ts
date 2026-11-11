@@ -21,6 +21,7 @@ import {
   SanomaError,
 } from "sanoma/workflows";
 import {
+  AGENT_BUILT_IN_REFUSAL,
   AGENT_BUILT_INS,
   apiNameOf,
   APPLY_WORKFLOW,
@@ -75,7 +76,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { bearerOf } from "../login/public.ts";
-import { databaseHost, LOOPBACK } from "../loopback.ts";
+import { databaseHost, headerValue, LOOPBACK } from "../loopback.ts";
 import type { AppSnapshot } from "../snapshot.ts";
 import { secretValues } from "./secrets.ts";
 
@@ -122,14 +123,15 @@ export async function requireActor({ app, actor }: ActorContext): Promise<Princi
 
 /**
  * Who a call is made as: `actor`, the person the login admitted, or, when the request names a
- * declared agent in the `x-sanoma-agent` header (`AGENT_HEADER`), that agent acting on their
+ * declared agent in the `x-sanoma-agent` header (`AGENT_HEADER`, URI-encoded or not, as
+ * `x-sanoma-actor` is), that agent acting on their
  * behalf (`agentActing`, over the snapshot's people: an id that is not a declared agent, or one
  * that acts for someone else alone, is `not_admitted`). Only the loopback login takes the header;
  * on a host it is a 400, since the sign-in says who acts there.
  */
 export function actingFor(app: AppContext, request: Request, actor: Principal): Principal {
-  const named = request.headers.get(AGENT_HEADER);
-  if (named === null) return actor;
+  const named = headerValue(request, AGENT_HEADER);
+  if (named === undefined) return actor;
   if (saysWho(app)) {
     throw new ApiError(400, {
       error: `The ${AGENT_HEADER} header is taken on this machine alone: on a host, the sign-in says who is asking`,
@@ -767,10 +769,7 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
   const workflow = entry.name;
   // As `SanomaClient.start` refuses it: a declared agent starts no built-in but those it may.
   if (method === "start" && entry.builtin && isDeclaredAgent(actor) && !AGENT_BUILT_INS.has(workflow)) {
-    throw new PolicyDeniedError(
-      name,
-      `an agent starts none of the runtime's own workflows but ${[...AGENT_BUILT_INS].join(", ")}`,
-    );
+    throw new PolicyDeniedError(name, AGENT_BUILT_IN_REFUSAL);
   }
   if (visitor && method !== "start" && method !== "result") {
     throw new PolicyDeniedError(name, "a visitor reads only the result of a run it started");

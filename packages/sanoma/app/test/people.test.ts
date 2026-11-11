@@ -28,7 +28,7 @@ import { ensureSanomaBuilt } from "../../test/fixture.ts";
 const PEOPLE = "resources/people.ts";
 
 // A root of its own: three people (one admin, one whose name the file computes), an agent acting
-// for one with its client, two groups; and another file declaring one the type refuses, its problem People's.
+// for one with its client and one for whoever names it, two groups; and another file declaring one the type refuses, its problem People's.
 const root = mkdtempSync(join(tmpdir(), "sanoma-people-"));
 mkdirSync(join(root, "resources"));
 writeFileSync(
@@ -41,6 +41,7 @@ export const ada = sanoma.person({ id: "ada", name: "Ada Ortiz", email: "ada@exa
 export const bo = sanoma.person({ id: "bo", name: "Bo Lin", github: "bo-lin" });
 export const cy = sanoma.person({ id: "cy", name: CY });
 export const refundBot = sanoma.agent({ id: "refund-bot", onBehalfOf: bo, client: "refund-cli" });
+export const scout = sanoma.agent({ id: "scout" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 export const ops = sanoma.group({ name: "ops", members: [ada, bo, refundBot] });
 `,
@@ -143,7 +144,7 @@ describe("People", () => {
     // The tabs, each a link with how many it lists.
     expect(html).toMatch(/href="\/people\?show=people"[^>]*>People<span[^>]*>3<\/span>/);
     expect(html).toMatch(/href="\/people\?show=groups"[^>]*>Groups<span[^>]*>2<\/span>/);
-    expect(html).toMatch(/href="\/people\?show=agents"[^>]*>Agents<span[^>]*>1<\/span>/);
+    expect(html).toMatch(/href="\/people\?show=agents"[^>]*>Agents<span[^>]*>2<\/span>/);
     expect(rows(html)).toEqual([
       ["Ada Ortiz", "ada@example.test", "admin ops", "Email code · ada@…", "Never"],
       ["Bo Lin", "none", "ops", "GitHub · bo-lin", "Never"],
@@ -214,16 +215,18 @@ describe("People", () => {
       ["admin", "ada", "resources/people.ts#admin"],
       ["ops", "ada bo refund-bot", "resources/people.ts#ops"],
       // The group the runtime puts every agent in, declared nowhere.
-      ["agents (built in)", "refund-bot", "the runtime: every agent"],
+      ["agents (built in)", "refund-bot scout", "the runtime: every agent"],
     ]);
     // The tab counts the groups declared.
     expect(groups).toMatch(/href="\/people\?show=groups"[^>]*>Groups<span[^>]*>2<\/span>/);
     const agents = (await page("/people?show=agents&person=refund-bot")).html;
     expect(rows(agents)).toEqual([
       ["refund-bot", "bo", "refund-cli", "ops agents (built in)", "resources/people.ts#refundBot"],
+      // One fixed to no person acts for whoever names it.
+      ["scout", "whoever names it", "none", "agents (built in)", "resources/people.ts#scout"],
     ]);
-    // Muted, beside the declared ones, in the table and on the open card.
-    expect(agents.match(/title="The runtime puts every agent in it"/g)).toHaveLength(2);
+    // Muted, beside the declared ones, in each of the table's two rows and on the open card.
+    expect(agents.match(/title="The runtime puts every agent in it"/g)).toHaveLength(3);
   });
 
   it("opens a row's declaration form over the list: its fields as declared, its identity and references read-only", async () => {

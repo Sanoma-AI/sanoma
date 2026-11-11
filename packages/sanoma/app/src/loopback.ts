@@ -39,14 +39,19 @@ export function loopbackLogin(): LoginProvider {
 }
 
 /** The URI-encoded name in the `x-sanoma-actor` header, as `{ id }`: whom the loopback login takes first. */
-export function actorFromHeader(request: Request): Principal | undefined {
-  let id = request.headers.get(ACTOR_HEADER) ?? "";
+export const actorFromHeader = (request: Request): Principal | undefined =>
+  named(headerValue(request, ACTOR_HEADER) ?? "");
+
+/** A header's value, URI-decoded (taken as sent when it is not URI-encoded); undefined without it. */
+export function headerValue(request: Request, header: string): string | undefined {
+  const value = request.headers.get(header);
+  if (value === null) return undefined;
   try {
-    id = decodeURIComponent(id);
+    return decodeURIComponent(value);
   } catch {
     // Not URI-encoded: take it as sent.
+    return value;
   }
-  return named(id);
 }
 
 /** The name in the page's `sanoma_actor` cookie (decoded as it is parsed), as `{ id }`: whom the loopback login takes without a header. */
