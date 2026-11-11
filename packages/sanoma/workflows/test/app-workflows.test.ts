@@ -214,6 +214,23 @@ describe("on a worker given the app's steps", () => {
     expect([await ops(patched), await ops(hidden)]).toEqual([["sanoma.records.reshape"], []]);
   });
 
+  it("says a reshape that fails on the patch's output, the file written and the run not failed", async () => {
+    const at = { file: "resources/data.ts", export: "deals" };
+    // A rename to no name: the plan carries it, the operation refuses it.
+    const plan = { collection: "deals", rows: 0, changes: [{ kind: "rename", from: "seats", to: "" }] };
+    const runId = await app.client.start(
+      PATCH_WORKFLOW,
+      { at, fields: {}, rename: { "fields.seats": "count" }, plan },
+      { startedBy: "alice" },
+    );
+    expect(await app.client.result(runId)).toEqual({
+      file: "resources/data.ts",
+      reshaped: { error: expect.stringContaining("sanoma.records.reshape") },
+      running: true,
+    });
+    expect((await app.client.run(runId))?.status).toBe("finished");
+  });
+
   it("saves a draft only by saveDraft, as save:<id>, then ~<n> once one ended, listing them newest first with their outputs", async () => {
     const err = await failure(
       app.client.start(SAVE_DRAFT_WORKFLOW, { id: "d1", title: "Welcome" }, { startedBy: "alice" }),
