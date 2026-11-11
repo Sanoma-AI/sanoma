@@ -40,8 +40,7 @@ export interface Loaded extends LoadedConfig {
  * already loaded.
  */
 export async function loadConfig(cwd = process.cwd(), { fresh = false } = {}): Promise<LoadedConfig> {
-  const env = join(cwd, ".env");
-  if (existsSync(env)) process.loadEnvFile(env);
+  loadDotEnv(cwd);
   if (!existsSync(join(cwd, "sanoma.config.ts"))) {
     throw new UsageError(`No sanoma.config.ts in ${cwd}: run sanoma from the directory that holds it`);
   }
@@ -68,6 +67,12 @@ export async function loadConfig(cwd = process.cwd(), { fresh = false } = {}): P
     throw new UsageError(errorMessage(err));
   }
   return { config, root };
+}
+
+/** Loads `<cwd>/.env` into this process's environment, when there is one: a variable already set wins. */
+export function loadDotEnv(cwd = process.cwd()): void {
+  const env = join(cwd, ".env");
+  if (existsSync(env)) process.loadEnvFile(env);
 }
 
 /**
