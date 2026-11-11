@@ -17,6 +17,7 @@ import {
   ANONYMOUS,
   ANONYMOUS_PRINCIPAL,
   type At,
+  CHAT_AGENT,
   declaredAgentOf,
   declaresPeople,
   isToken,
@@ -163,6 +164,11 @@ export function admit(
     const { email, github } = asking;
     return { id: asking.id, groups: [VISITORS], ...(email && { email }), ...(github && { github }) };
   }
+  // The chat's agent acting for a person is checked as `chatAgentActing` checks it, and keeps them:
+  // never through a sign-in, which admits a person alone.
+  if (!signIn && asking.id === CHAT_AGENT && asking.onBehalfOf !== undefined) {
+    return chatAgentActing(asking.onBehalfOf, { people, problems });
+  }
   if (problems.length) {
     // The runtime's own agents are declared by no file, so a broken one does not stop them (`check`'s scenarios).
     if (!signIn && asking.id !== undefined && RUNTIME_AGENTS.includes(asking.id)) {
@@ -207,11 +213,14 @@ export function agentActing(
   if (problems.length) throw new NotAdmittedError(agent, problems.map(problemLine));
   const declared = declaredAgentOf(agent, people);
   if (!declared) {
-    const why = RUNTIME_AGENTS.includes(agent)
-      ? `${agent} is one of the runtime's own agents, which acts for no one`
-      : principalOf(agent, people)
-        ? `${agent} is a person, not an agent: declare the agent with sanoma.agent in resources/people.ts`
-        : `${agent} is not an agent resources/people.ts declares`;
+    const why =
+      agent === CHAT_AGENT
+        ? `${agent} is the in-app chat's own agent, which acts only for the person chatting in the app`
+        : RUNTIME_AGENTS.includes(agent)
+          ? `${agent} is one of the runtime's own agents, which acts for no one`
+          : principalOf(agent, people)
+            ? `${agent} is a person, not an agent: declare the agent with sanoma.agent in resources/people.ts`
+            : `${agent} is not an agent resources/people.ts declares`;
     throw new NotAdmittedError(agent, [], why);
   }
   if (!personsOf(people).some((p) => p.id === person)) {
@@ -225,6 +234,31 @@ export function agentActing(
     );
   }
   return { id: agent, groups: principalOf(agent, people)!.groups ?? [], onBehalfOf: person };
+}
+
+/**
+ * The principal of the in-app chat's agent (`CHAT_AGENT`) acting on behalf of `person`, the
+ * person whose chat turn it is: its id, its groups (`agents`, and any a declared group gives it,
+ * `principalOf`) and `onBehalfOf` the person, so the agent rules bind it (`isDeclaredAgent`) and
+ * the policy is asked as it and as the person. Made only by the worker's chat turn for the turn's
+ * own person (`step.by`), never from a request: `agentActing`, the `x-sanoma-agent` header's way
+ * in, refuses this id, and a sign-in admits a person alone. `admit` checks a principal naming it
+ * with an `onBehalfOf` here. Throws `NotAdmittedError` while the people's files have problems, for
+ * a visitor, and, once people are declared, for anyone who is not a declared `sanoma.person`.
+ */
+export function chatAgentActing(
+  person: string,
+  { people, problems }: { people: readonly PeopleResource[]; problems: readonly ResourceProblem[] },
+): Principal {
+  if (problems.length) throw new NotAdmittedError(CHAT_AGENT, problems.map(problemLine));
+  if (isVisitor({ id: person }) || (declaresPeople(people) && !personsOf(people).some((p) => p.id === person))) {
+    throw new NotAdmittedError(
+      CHAT_AGENT,
+      [],
+      `${CHAT_AGENT} acts for no one but a declared person, and ${person} is not one`,
+    );
+  }
+  return { id: CHAT_AGENT, groups: principalOf(CHAT_AGENT, people)!.groups ?? [], onBehalfOf: person };
 }
 
 /**

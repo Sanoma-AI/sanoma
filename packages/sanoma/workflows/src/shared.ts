@@ -775,7 +775,14 @@ export const HOST_CHECK_AGENT = "host-check";
 export const LOGIN_AGENT = "login";
 /** The runtime's agent that renews OAuth grants when they are due (`sanoma.connection.refresh`, called by the worker): the policy decides each. */
 export const RENEWAL_AGENT = "renewal";
-/** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration, sign-in codes, grant renewals), declared whether a data file names them or not. */
+/**
+ * The runtime's agent the in-app chat acts as, on behalf of the person chatting: what its tools
+ * call and start (the agent catalog, `/mcp`'s six) is the chat's, for them (`chatAgentActing`).
+ * Unlike the runtime's other agents it is held to the agent rules (`isDeclaredAgent`): the
+ * built-ins it may start (`AGENT_BUILT_INS`) and the policy asked as it and as the person.
+ */
+export const CHAT_AGENT = "chat";
+/** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration, sign-in codes, grant renewals, the in-app chat), declared whether a data file names them or not. */
 export const RUNTIME_AGENTS: readonly string[] = [
   "scenarios",
   HOST_CHECK_AGENT,
@@ -783,6 +790,7 @@ export const RUNTIME_AGENTS: readonly string[] = [
   WAKEUP_AGENT,
   LOGIN_AGENT,
   RENEWAL_AGENT,
+  CHAT_AGENT,
 ];
 
 /** The declared resources of one of the runtime's people types, by `desired`. */
@@ -819,12 +827,14 @@ export function agentOfClient(client: string, resources: readonly PeopleResource
 }
 
 /**
- * True for a declared agent's principal: in `agents`, and neither one of the runtime's own agents
- * (`RUNTIME_AGENTS`) nor a visitor. Such an agent starts no built-in workflow but those in
- * `AGENT_BUILT_INS` and `call`, and those through the start policy.
+ * True for a principal the agent rules bind: in `agents`, not a visitor, and either a declared
+ * agent or the in-app chat's (`CHAT_AGENT`), the one runtime agent they bind; the others
+ * (`RUNTIME_AGENTS`) are exempt. Such an agent starts no built-in workflow but those in
+ * `AGENT_BUILT_INS` and `call`, and those through the start policy; acting for a person, it is
+ * asked about as itself and as the person (`cedarPolicy`'s `authorize`).
  */
 export const isDeclaredAgent = (p: Pick<Principal, "id" | "groups">): boolean =>
-  !isVisitor(p) && (p.groups?.includes(AGENTS) ?? false) && !RUNTIME_AGENTS.includes(p.id);
+  !isVisitor(p) && (p.groups?.includes(AGENTS) ?? false) && (p.id === CHAT_AGENT || !RUNTIME_AGENTS.includes(p.id));
 
 /** The built-in workflows a declared agent (`isDeclaredAgent`) may start, its start decided by the policy: drift, which changes nothing. */
 export const AGENT_BUILT_INS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW]);

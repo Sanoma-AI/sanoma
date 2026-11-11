@@ -7,7 +7,15 @@ import { useTestApp } from "sanoma/testing/harness";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { sanoma } from "../src/constructors.ts";
-import { admit, agentActing, clientClashes, describeConfig, peopleWarnings, readPeople } from "../src/describe.ts";
+import {
+  admit,
+  agentActing,
+  chatAgentActing,
+  clientClashes,
+  describeConfig,
+  peopleWarnings,
+  readPeople,
+} from "../src/describe.ts";
 import {
   approverOf,
   declaresPeople,
@@ -19,7 +27,7 @@ import {
   type SanomaConfig,
   visitorPrincipal,
 } from "../src/index.ts";
-import { agentOfClient, problemLine } from "../src/shared.ts";
+import { agentOfClient, CHAT_AGENT, isDeclaredAgent, problemLine } from "../src/shared.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
 import { failure, waitFor } from "./harness.ts";
 
@@ -412,6 +420,79 @@ describe("agentActing, and admit for an agent acting for someone", () => {
   });
 });
 
+describe("chatAgentActing: the in-app chat's agent, for the person chatting", () => {
+  const read = { people, problems: [] };
+
+  it("is the runtime's agent chat, in agents, acting for the declared person, which admit keeps", () => {
+    expect(CHAT_AGENT).toBe("chat");
+    expect(chatAgentActing("ada", read)).toEqual({ id: "chat", groups: ["agents"], onBehalfOf: "ada" });
+    expect(admit({ id: "chat", onBehalfOf: "ada", groups: ["finance"] }, read)).toEqual({
+      id: "chat",
+      groups: ["agents"],
+      onBehalfOf: "ada",
+    });
+    // While no person is declared, for whoever the chat's person is, as the app takes them.
+    expect(chatAgentActing("anyone", { people: [], problems: [] })).toEqual({
+      id: "chat",
+      groups: ["agents"],
+      onBehalfOf: "anyone",
+    });
+  });
+
+  it.each([
+    ["the people's files have problems", "ada", "while the people's files have problems"],
+    ["the person is not declared", "cy", "chat acts for no one but a declared person, and cy is not one"],
+    ["the person is an agent", "refund-bot", "and refund-bot is not one"],
+    ["the person is a visitor", "anonymous", "and anonymous is not one"],
+  ])("refuses, not_admitted, when %s", (_, person, message) => {
+    const given = message.startsWith("while")
+      ? { people, problems: [{ file: "resources/people.ts", message: "x" }] }
+      : read;
+    expect(() => chatAgentActing(person, given)).toThrow(message);
+    expect(() => admit({ id: "chat", onBehalfOf: person }, given)).toThrow(
+      expect.objectContaining({ code: "not_admitted" }),
+    );
+  });
+
+  it("is never what agentActing (the x-sanoma-agent header's way in) or a sign-in makes", () => {
+    expect(() => agentActing("chat", "ada", read)).toThrow(
+      "chat is the in-app chat's own agent, which acts only for the person chatting in the app",
+    );
+    expect(() => agentActing("chat", "ada", read)).toThrow(expect.objectContaining({ code: "not_admitted" }));
+    expect(() => admit({ id: "chat", onBehalfOf: "ada" }, read, true)).toThrow("is not declared");
+    expect(() => admit({ id: "chat" }, read, true)).toThrow("is not declared");
+  });
+
+  it("is the one runtime agent the agent rules bind", () => {
+    expect(isDeclaredAgent({ id: "chat", groups: ["agents"] })).toBe(true);
+    expect(isDeclaredAgent({ id: "claude-code", groups: ["agents"] })).toBe(true);
+    for (const id of ["scenarios", "host-check", "schedule", "wakeup", "login", "renewal"]) {
+      expect(isDeclaredAgent({ id, groups: ["agents"] }), id).toBe(false);
+    }
+    // Not in agents, no agent: a person, as the files say.
+    expect(isDeclaredAgent({ id: "ada", groups: ["finance"] })).toBe(false);
+  });
+
+  it("takes an id no data file may give a person or an agent", () => {
+    const root = mkdtempSync(join(tmpdir(), "sanoma-people-chat-"));
+    mkdirSync(join(root, "resources"));
+    writeFileSync(
+      join(root, "resources", "people.ts"),
+      `import { sanoma } from "sanoma/resources";
+export const chat = sanoma.agent({ id: "chat" });
+export const ada = sanoma.person({ id: "ada" });
+`,
+    );
+    try {
+      expect(readPeople(root).problems.map((p) => p.message)).toEqual([
+        "resources/people.ts#chat has the id \"chat\", one of the runtime's own agents': give it another",
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("visitors and anonymous", () => {
   const read = { people, problems: [] };
   const visitor = visitorPrincipal("auth0", "u1");
@@ -565,6 +646,22 @@ describe("the client, with people declared", () => {
         app.client.call("data.outbound.save", { record }, { actor: { id: "claude-code", onBehalfOf: "bo" }, id }),
       ),
     ).toMatchObject({ code: "invalid_input", data: { differs: ["actor"] } });
+  });
+
+  it("starts a run as the in-app chat's agent acting for the person chatting, which its summary and ledger keep", async () => {
+    const runId = randomUUID();
+    expect(await app.client.start(held, {}, { startedBy: { id: "chat", onBehalfOf: "ada" }, runId })).toBe(runId);
+    const startedBy = { id: "chat", groups: ["agents"], onBehalfOf: "ada" };
+    expect((await app.client.run(runId))?.startedBy).toEqual(startedBy);
+    await waitFor(async () => (await app.client.ledger(runId)).length > 0);
+    expect((await app.client.ledger(runId))[0]).toMatchObject({ type: "run.started", actor: startedBy });
+    // For someone the files do not declare, refused.
+    expect(await failure(app.client.start(held, {}, { startedBy: { id: "chat", onBehalfOf: "cy" } }))).toMatchObject({
+      code: "not_admitted",
+    });
+    await waitFor(async () => (await app.client.approvals(runId)).some((a) => a.status === "pending"));
+    await app.client.decide(runId, { decision: "approve", by: { id: "ada" } });
+    expect(await app.client.result(runId)).toBe("done");
   });
 
   it("starts an agent's run as declared, which its summary keeps whole", async () => {
