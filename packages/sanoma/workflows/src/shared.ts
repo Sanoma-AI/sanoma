@@ -745,7 +745,7 @@ const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | 
   resources.flatMap((r) => (r.vendor === "sanoma" && r.type === type ? [r.desired as T] : []));
 
 type PersonFields = { id: string; name?: string; email?: string; github?: string };
-type AgentFields = { id: string; onBehalfOf?: string };
+type AgentFields = { id: string; onBehalfOf?: string; client?: string };
 type GroupFields = { name: string; members: string[] };
 
 /** The groups a policy may name and a principal may be in: the declared ones, `agents` and `visitors`, sorted. */
@@ -759,6 +759,33 @@ export const personsOf = (resources: readonly PeopleResource[]): PersonFields[] 
 /** The ids of the declared people and agents (not the runtime's own). */
 export const principalIdsOf = (resources: readonly PeopleResource[]): string[] =>
   [...personsOf(resources), ...peopleOfType<AgentFields>(resources, "agent")].map((p) => p.id);
+
+/** The declared agent (`sanoma.agent`) `id` names, as declared; undefined for anyone else, the runtime's own agents among them. */
+export const declaredAgentOf = (id: string, resources: readonly PeopleResource[]): AgentFields | undefined =>
+  peopleOfType<AgentFields>(resources, "agent").find((a) => a.id === id);
+
+/**
+ * The id of the declared agent that declares `client` (`sanoma.agent({ client })`), the OAuth
+ * client it stands for; undefined when none does, or when two do (`clientClashes`).
+ */
+export function agentOfClient(client: string, resources: readonly PeopleResource[]): string | undefined {
+  const declaring = peopleOfType<AgentFields>(resources, "agent").filter((a) => a.client === client);
+  return declaring.length === 1 ? declaring[0]!.id : undefined;
+}
+
+/**
+ * True for a declared agent's principal: in `agents`, and neither one of the runtime's own agents
+ * (`RUNTIME_AGENTS`) nor a visitor. Such an agent starts no built-in workflow but those in
+ * `AGENT_BUILT_INS` and `call`, and those through the start policy.
+ */
+export const isDeclaredAgent = (p: Pick<Principal, "id" | "groups">): boolean =>
+  !isVisitor(p) && (p.groups?.includes(AGENTS) ?? false) && !RUNTIME_AGENTS.includes(p.id);
+
+/** The built-in workflows a declared agent (`isDeclaredAgent`) may start, its start decided by the policy: drift, which changes nothing. */
+export const AGENT_BUILT_INS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW]);
+
+/** Why a declared agent's start of another built-in is refused (`policy_denied`), in the client and the app's `callApi` alike. */
+export const AGENT_BUILT_IN_REFUSAL = `an agent starts none of the runtime's own workflows but ${[...AGENT_BUILT_INS].join(", ")}`;
 
 /** True when the data files declare a person, agent or group: then only a declared principal is admitted. */
 export const declaresPeople = (resources: readonly PeopleResource[]): boolean =>

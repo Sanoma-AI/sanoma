@@ -162,8 +162,9 @@ const EMPTY: Record<PeopleView, ReactNode> = {
   ),
   agents: (
     <>
-      Declare an agent with <code>sanoma.agent({"{ id, onBehalfOf }"})</code>: it may do what the person it acts for
-      may.
+      Declare an agent with <code>sanoma.agent({"{ id, onBehalfOf, client }"})</code>: acting for someone, it may do no
+      more than they may, nor more than its own groups let it; its <code>client</code> names the OAuth client it stands
+      for.
     </>
   ),
 };
@@ -294,7 +295,7 @@ function PeopleTable({
   );
 }
 
-/** The agents' table: name, whom each acts for, groups, declaration. */
+/** The agents' table: name, whom each acts for, the client it stands for, groups, declaration. */
 function AgentsTable({
   agents,
   groupsOf,
@@ -310,6 +311,7 @@ function AgentsTable({
         <TableRow>
           <TableHead>Name</TableHead>
           <TableHead>Acts for</TableHead>
+          <TableHead>Client</TableHead>
           <TableHead>Groups</TableHead>
           <TableHead>Declared in</TableHead>
         </TableRow>
@@ -324,7 +326,14 @@ function AgentsTable({
               {typeof row.desired.onBehalfOf === "string" ? (
                 row.desired.onBehalfOf
               ) : (
-                <span className="text-muted-foreground">nobody: itself</span>
+                <span className="text-muted-foreground">whoever names it</span>
+              )}
+            </TableCell>
+            <TableCell>
+              {typeof row.desired.client === "string" ? (
+                <code>{row.desired.client}</code>
+              ) : (
+                <span className="text-muted-foreground">none</span>
               )}
             </TableCell>
             <TableCell>

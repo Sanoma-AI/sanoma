@@ -13,13 +13,21 @@ import {
 import { z } from "zod";
 import { ApiError, asApiError } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { type ActorContext, agentDescription, callApi, RESULT_WAIT_MS, requireActor, toApiError } from "./core.ts";
+import {
+  type ActorContext,
+  actingFor,
+  agentDescription,
+  callApi,
+  RESULT_WAIT_MS,
+  requireActor,
+  toApiError,
+} from "./core.ts";
 
 // `/mcp`: the company's agent surface, an MCP server over Streamable HTTP. Every tool that starts,
-// calls or waits is a call of `callApi` as the person asking, so the policy and the ledger see the
-// person; `get_run`, and finding a run's workflow for `wait_run`, read the run with
-// `SanomaClient.run`, as `callApi`'s own reads of a run do. A refusal is a tool error carrying
-// `callApi`'s error body.
+// calls or waits is a call of `callApi` as the person asking, or as the declared agent a loopback
+// request names acting for them (`actingFor`), so the policy and the ledger see who; `get_run`,
+// and finding a run's workflow for `wait_run`, read the run with `SanomaClient.run`, as
+// `callApi`'s own reads of a run do. A refusal is a tool error carrying `callApi`'s error body.
 
 /** How long `wait_run` and `drift` wait for a run at most: `callApi`'s `.result` wait. */
 const WaitMs = z
@@ -59,7 +67,9 @@ function logUnexpected(error: Error): void {
  * guards, then an MCP server built for it (`createMcpHandler`, at its default `legacy: 'stateless'`,
  * so a 2025-era client and a 2026-07-28 one are both served). A public site's host has no such
  * route (404); a request whose `Origin` is another site's is refused, so a page elsewhere cannot
- * drive it with the loopback cookie; nobody named is `requireActor`'s 400, a visitor a 403.
+ * drive it with the loopback cookie; nobody named is `requireActor`'s 400, a visitor a 403. On this
+ * machine, an `x-sanoma-agent` header makes every call the named declared agent's on the person's
+ * behalf (`actingFor`): an id that is no declared agent is `not_admitted`; on a host, a 400.
  */
 export async function postMcp(request: Request, context: ActorContext & { site?: string }): Promise<Response> {
   if (context.site !== undefined) return Response.json({ error: "Not found" }, { status: 404 });
@@ -70,10 +80,11 @@ export async function postMcp(request: Request, context: ActorContext & { site?:
     if (!fromOwnOrigin(request)) {
       throw new ApiError(403, { error: "The agent surface answers no other site's page", code: "policy_denied" });
     }
-    const actor = await requireActor(context);
-    if (isVisitor(actor)) {
+    const person = await requireActor(context);
+    if (isVisitor(person)) {
       throw new ApiError(403, { error: "A visitor may not use the agent surface", code: "policy_denied" });
     }
+    const actor = actingFor(context.app, request, person);
     // No `subscriptions/listen` (`maxSubscriptions: 0`, answered at once with JSON-RPC -32603): the
     // tools never change, and an open stream would hold the request, and on the Worker its
     // database connection, for nothing.
@@ -208,7 +219,7 @@ function mcpServer(app: AppContext, actor: Principal): McpServer {
       title: "Start a workflow",
       description:
         "Starts one of the company's own workflows, named as describe lists it, with its input, as the person " +
-        "asking. Answers the run's id, for get_run and wait_run. Retried with the same id, workflow and input, " +
+        "asking, or the agent acting for them. Answers the run's id, for get_run and wait_run. Retried with the same id, workflow and input, " +
         "it answers the run already started; the same id for anything else is refused. The runtime's own " +
         "workflows are not started here; drift has its own tool.",
       inputSchema: z.object({
