@@ -24,12 +24,15 @@ const chase = defineWorkflow({
     const found = await ctx.data.invoices.get({ key: number });
     if (!found) throw new Error(`No invoice ${number}`);
     const sentAt = await ctx.now();
-    await ctx.resend.emails.send({
-      to: found.record.customer,
-      from: "Acme <billing@acme.example>",
-      subject: `Invoice ${number}`,
-      text: "Your invoice is attached.",
-    });
+    await ctx.resend.emails.send(
+      {
+        to: found.record.customer,
+        from: "Acme <billing@acme.example>",
+        subject: `Invoice ${number}`,
+        text: "Your invoice is attached.",
+      },
+      { name: "Email the invoice" },
+    );
     await ctx.sleep({ days: 7 }, { name: "Wait a week" });
     const remindedAt = await ctx.now();
     await ctx.approval("Send a reminder", { approver: "owner" });
@@ -74,6 +77,7 @@ describe("pageRuntime", () => {
     const records = (await transport({ name: "chaseInvoice.ledger", input: { runId } })) as {
       type: string;
       at: number;
+      name?: string;
       op?: string;
       output?: unknown;
       until?: number;
@@ -91,6 +95,12 @@ describe("pageRuntime", () => {
     ]);
     const sleep = records.find((r) => r.type === "sleep.started")!;
     expect(sleep).toMatchObject({ name: "Wait a week", until: sleep.at + 7 * DAY });
+    // Each call under the name it gives, as a worker records it from the outline; one that gives none under its operation.
+    expect(records.filter((r) => r.op).map((r) => r.name)).toEqual([
+      "data.invoices.get",
+      "Email the invoice",
+      "data.invoices.save",
+    ]);
     expect(records.find((r) => r.op === "resend.emails.send")!.output).toEqual({ id: expect.any(String) });
     expect(records.find((r) => r.type === "approval.decided")).toMatchObject({ decision: "approve", by: "owner" });
 

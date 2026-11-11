@@ -5,7 +5,27 @@
  */
 @import "./tailwind.css";
 @import "../ui.css";
+/*
+ * The light theme, whatever the host's: the kit's `dark:` variant takes a `.dark` inside the demo
+ * only, never the host page's own (next-themes on its <html>).
+ */
+@custom-variant dark (&:where([data-sanoma-demo] .dark, [data-sanoma-demo] .dark *));
 /* What a site's page draws of the app's own: the start form, its notices and boundaries. */
 @source "../form";
 @source "../components/boundaries.tsx";
 @source "../components/common.tsx";
+
+@layer base {
+  /*
+   * The element is the demo's document (`:root` is scoped to it): what the app's style.css gives
+   * its html and body, so the sites draw on the light theme's background, in its type, whatever
+   * the host's page sets around them.
+   */
+  :root {
+    @apply bg-background font-sans text-base font-normal text-foreground;
+  }
+  /* A link with no classes of its own is a link in running text, as in the app. */
+  a:not([class]) {
+    @apply underline underline-offset-4 hover:text-primary;
+  }
+}

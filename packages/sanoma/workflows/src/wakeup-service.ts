@@ -6,7 +6,7 @@ import { wakeupAccounts, wakeupInstances } from "./db/wakeup.ts";
 import { info, warn } from "./log.ts";
 import { generateSecret } from "./secret.ts";
 import { tokenHash } from "./tokens.ts";
-import { errorMessage } from "./shared.ts";
+import { bodyText, errorMessage } from "./shared.ts";
 
 /*
  * `sanoma/workflows/wakeup-service`: the service that wakes stopped instances, server-side
@@ -104,26 +104,9 @@ function bearer(request: Request): string | undefined {
   return match?.[1];
 }
 
-/** The request's body as text, or undefined once it holds more than `MAX_BODY` bytes. */
-async function bodyText(request: Request): Promise<string | undefined> {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (let read = await reader.read(); !read.done; read = await reader.read()) {
-    size += read.value.length;
-    if (size > MAX_BODY) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(read.value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 /** The request's JSON object, undefined when its body is not one, or a 413 for one too large. */
 async function jsonBody(request: Request): Promise<Record<string, unknown> | undefined | Response> {
-  const text = await bodyText(request);
+  const text = await bodyText(request, MAX_BODY);
   if (text === undefined) return problem(413, "the body is too large");
   try {
     const parsed: unknown = JSON.parse(text);

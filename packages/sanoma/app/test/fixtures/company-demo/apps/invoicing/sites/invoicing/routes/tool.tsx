@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { api, errorBodyOf } from "sanoma/site";
+import { toast } from "sanoma/ui";
 
 export const Route = createFileRoute("/sites/invoicing/invoicing/tool")({ component: Tool });
 
@@ -37,6 +38,9 @@ function Tool() {
       </button>
       <button type="button" onClick={render}>
         Render a PDF
+      </button>
+      <button type="button" onClick={() => toast.success("Toasted")}>
+        Toast
       </button>
       <output>{said}</output>
     </section>

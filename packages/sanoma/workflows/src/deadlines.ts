@@ -89,22 +89,25 @@ export function deadlineRegistry(): DeadlineRegistry {
   };
 }
 
-/** The worker `idle` asks about: the app, the version it runs, and its queue. */
-export type IdleScope = Pick<ResolvedConfig, "appName" | "version" | "queueName">;
+/** The worker `idle` asks about: the app, the version it runs, and its queues. */
+export type IdleScope = Pick<ResolvedConfig, "appName" | "version" | "queueName" | "applyQueueName">;
 
 /**
  * True when a run on `queue` (none for a run started outside a queue) is this worker's to run: on
- * its own queue, or on one of DBOS's, where recovery puts runs.
+ * the app's queue or the apply queue, or on one of DBOS's, where recovery puts runs.
  */
-export const onOwnQueue = (queue: string | undefined, queueName: string): boolean =>
-  !queue || queue === queueName || queue.startsWith("_dbos_");
+export const onOwnQueue = (
+  queue: string | undefined,
+  { queueName, applyQueueName }: Pick<IdleScope, "queueName" | "applyQueueName">,
+): boolean => !queue || queue === queueName || queue === applyQueueName || queue.startsWith("_dbos_");
 
 /**
  * True when nothing this worker would run can run within `horizonMs`: no run of its is executing
  * or replaying; none of its version is queued (or queued without one, while it is the latest) on
- * its queue or DBOS's own (recovery queues there); each PENDING run of its version is blocked in
+ * its queues or DBOS's own (recovery queues there); each PENDING run of its version is blocked in
  * a wrapped wait; and the next deadline is past the horizon. A run of another version or queue
- * is not this worker's to run, so it never holds the worker up.
+ * is not this worker's to run, so it never holds the worker up; nor does an apply queued behind
+ * one PENDING, which cannot start until that one ends (an apply waiting for its plan's approval).
  */
 export async function idle(deadlines: Deadlines, scope: IdleScope, horizonMs: number): Promise<boolean> {
   if (deadlines.busy > 0) return false;
@@ -116,14 +119,15 @@ export async function idle(deadlines: Deadlines, scope: IdleScope, horizonMs: nu
     loadInput: false,
     loadOutput: false,
   });
-  const ours = runs.filter((r) => onOwnQueue(r.queueName, scope.queueName));
+  const ours = runs.filter((r) => onOwnQueue(r.queueName, scope));
   if (
     ours.some(
       (r) => r.status === "PENDING" && r.applicationVersion === scope.version && !deadlines.waitOf(r.workflowID),
     )
   )
     return false;
-  const queued = ours.filter((r) => r.status !== "PENDING");
+  const applying = ours.some((r) => r.queueName === scope.applyQueueName && r.status === "PENDING");
+  const queued = ours.filter((r) => r.status !== "PENDING" && !(applying && r.queueName === scope.applyQueueName));
   if (queued.some((r) => r.applicationVersion === scope.version)) return false;
   // DBOS gives a run queued without a version to the app's latest version.
   if (!queued.some((r) => !r.applicationVersion)) return true;

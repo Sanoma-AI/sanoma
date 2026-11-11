@@ -24,6 +24,7 @@ import {
   ASSETS_CONFIG,
   MAIN_MODULE,
   OBJECT_CLASS,
+  refuseIfSuperseded,
   uploadAssets,
   waitFor,
   type WorkerModule,
@@ -200,6 +201,11 @@ export interface CloudflareApi {
   /** Uploads the Worker and deploys it (`PUT …/scripts/{name}`). */
   /** The upload's version id, which its object's answers carry once it is live (`DEPLOYMENT_HEADER`). */
   upload(script: string, upload: Upload): Promise<string>;
+  /**
+   * The ids of the Worker's versions, newest deployment first (`GET …/scripts/{name}/deployments`),
+   * hyphenated as `upload` gives them: which of two versions was deployed after the other.
+   */
+  deployments(script: string): Promise<string[]>;
   /** Turns its workers.dev URL on (`POST …/scripts/{name}/subdomain { enabled }`). */
   enableSubdomain(script: string): Promise<void>;
   /** The account's id, which its registry's references name (`accountImage`). */
@@ -384,7 +390,10 @@ const health = async (
   url: string,
   token?: string,
 ): Promise<
-  { revision: string; configurationRevision?: string; deployment: string | null } | { error: string; exit: boolean }
+  { deployment: string | null } & (
+    | { revision: string; configurationRevision?: string }
+    | { error: string; exit: boolean }
+  )
 > => {
   let res: Response;
   try {
@@ -393,16 +402,17 @@ const health = async (
       ...(token !== undefined && { headers: { authorization: `Bearer ${token}` } }),
     });
   } catch (error) {
-    return { error: errorMessage(error), exit: false };
+    return { error: errorMessage(error), exit: false, deployment: null };
   }
   const body = (await res.json().catch(() => undefined)) as
     | { revision?: unknown; configurationRevision?: unknown; error?: unknown; exit?: unknown; last?: unknown }
     | undefined;
+  const deployment = res.headers.get(DEPLOYMENT_HEADER);
   if (res.status === 200 && typeof body?.revision === "string")
     return {
       revision: body.revision,
       ...(typeof body.configurationRevision === "string" && { configurationRevision: body.configurationRevision }),
-      deployment: res.headers.get(DEPLOYMENT_HEADER),
+      deployment,
     };
   const error =
     typeof body?.error === "string"
@@ -410,7 +420,7 @@ const health = async (
       : res.status === 202
         ? `its container is starting${typeof body?.last === "string" ? ` (${body.last})` : ""}`
         : `${HEALTH_PATH} answered ${res.status}`;
-  return { error, exit: typeof body?.exit === "string" };
+  return { error, exit: typeof body?.exit === "string", deployment };
 };
 
 /** Whether the full name `name` is in the zone `zone`: the zone's apex or a name under it. */
@@ -614,26 +624,29 @@ export function containerOps(
   /**
    * Waits until the Worker version uploaded answers, its id (`deployment`) on the object's health:
    * an upload takes a while to reach every location, and until then the version before answers,
-   * or none (a new Worker's workers.dev URL). Asks without `start`, so an earlier version starts
-   * nothing.
+   * or none (a new Worker's workers.dev URL). A version deployed after it ends the wait at once
+   * (`refuseIfSuperseded`). Asks without `start`, so an earlier version starts nothing.
    */
   const live = (cf: CloudflareApi, { script, url }: { script: string; url: string }, deployment: string) =>
     waitFor(`${script}: the upload is not live yet`, { startTimeoutMs, pollMs }, async () => {
       const seen = await health(cf, url);
-      if ("deployment" in seen && seen.deployment === deployment) return { value: undefined };
+      if ("revision" in seen && seen.deployment === deployment) return { value: undefined };
+      await refuseIfSuperseded(cf, script, deployment, seen.deployment);
       return { last: "error" in seen ? seen.error : `an earlier version answers (${seen.deployment ?? "unmarked"})` };
     });
 
   /**
    * Step 3: has the object restart the container at `revision` (its health with `start`, the worker
    * at another drained first) and waits until it answers there. Asking again is harmless: a
-   * container that runs at it is kept.
+   * container that runs at it is kept. Given the version this deploy uploaded (`deployment`), one
+   * deployed after it ends the wait at once (`refuseIfSuperseded`).
    */
   const restarted = async (
     cf: CloudflareApi,
     { script, url, token }: { script: string; url: string; token: string },
     revision: string,
     configurationRevision?: string | null,
+    deployment?: string,
   ) => {
     // Retryable once its time is up: the upload is made, so the next apply plans none, and waits for this step alone.
     await waitFor(`${script}: still starting at ${revision}`, { startTimeoutMs, pollMs }, async () => {
@@ -644,6 +657,8 @@ export function containerOps(
         (seen.configurationRevision ?? "") === (configurationRevision ?? "")
       )
         return { value: undefined };
+      // A newer deploy's version, its container ended or not, ends this one as superseded.
+      if (deployment) await refuseIfSuperseded(cf, script, deployment, seen.deployment);
       // Not a wait: the container started and ended, and asking again would only start it again.
       if ("exit" in seen && seen.exit) throw refused(`${script} did not start at ${revision}: ${seen.error}`);
       return {
@@ -845,7 +860,7 @@ export function containerOps(
     for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
     await live(cf, at, version);
     // 3. The restart confirmed last.
-    await restarted(cf, at, revision, configurationRevision);
+    await restarted(cf, at, revision, configurationRevision, version);
     const state: ContainerState = {
       id: app.id,
       name,

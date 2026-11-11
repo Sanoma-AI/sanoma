@@ -144,6 +144,8 @@ describe("buildDemo", () => {
     expect(css).toContain("[data-sanoma-demo]");
     expect(css).toContain("invoice-title");
     expect(css).not.toMatch(/(^|[},])\s*(html|body|\*|:root)\s*[,{]/);
+    // The light theme only: a `.dark` turns the kit's dark styles on inside the element, never the host's own.
+    expect(css).not.toMatch(/[(,]\.dark[ ),]/);
   });
 
   it("refuses a world its fakes cannot take, with the world's own message, a page that would load Node, and a folder of other files", async () => {
@@ -169,7 +171,7 @@ describe("buildDemo", () => {
     await expect(build(busy)).rejects.toThrow(/holds robots\.txt, and no demo's alone/);
   }, 300_000);
 
-  it("runs in a host's page: a workflow from the page, a failure said, a PDF rendered, a fresh world on remount, nothing leaving the page", async (ctx) => {
+  it("runs in a dark host's page: a workflow from the page, a failure said, a PDF rendered, a toast, the light look, a fresh world on remount, an overtaken mount left out, nothing leaving the page", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
     const server = await host(out);
@@ -196,8 +198,32 @@ describe("buildDemo", () => {
       await said("Send draft-1", /Sent INV-0001, reminded true after 7 days/);
       await said("Send nothing", /Refused: No invoice nothing/);
       await said("Render a PDF", /PDF invoice-INV-0001\.pdf rendered/);
+      // A toast shows, inside the demo's element.
+      await tab.locator("::-p-text(Toast)").click();
+      await tab.waitForFunction(`document.querySelector("#demo [data-sonner-toast]")?.textContent.includes("Toasted")`);
+      // The element has a bare demo element's look, not the dark serif host's.
+      const [bare, shown] = (await tab.evaluate(`(() => {
+        const probe = document.createElement("div");
+        probe.setAttribute("data-sanoma-demo", "");
+        document.documentElement.append(probe);
+        const looks = [probe, document.querySelector("#demo")].map((element) => {
+          const { backgroundColor, color, fontFamily } = getComputedStyle(element);
+          return { backgroundColor, color, fontFamily };
+        });
+        probe.remove();
+        return looks;
+      })()`)) as Record<string, string>[];
+      expect(bare).toMatchObject({
+        backgroundColor: expect.not.stringMatching(/^rgba\(0, 0, 0, 0\)$/),
+        fontFamily: expect.stringContaining("IBM Plex Sans"),
+      });
+      expect(shown).toEqual(bare);
       // Mounted again: the world as it began, so the number is the first again.
       await tab.evaluate("window.remount()");
+      await said("Send draft-1", /Sent INV-0001/);
+      // Two mounts called on the element at once (an effect run twice): the later one shows, styled, and the earlier's unmount leaves it be.
+      await tab.evaluate("window.overlap()");
+      expect(await tab.evaluate(`document.querySelector("#demo").hasAttribute("data-sanoma-demo")`)).toBe(true);
       await said("Send draft-1", /Sent INV-0001/);
       // A link out of the sites is the host's to follow: the host's URL never moved.
       await tab.locator("::-p-text(The app)").click();
@@ -222,7 +248,7 @@ describe("buildDemo", () => {
 /** A host's page at `/` that mounts the demo served from `/demo/` (as a site's public folder serves it), on the tool page unless `?path=` says. */
 const HOST = `<!doctype html>
 <html><head><link rel="stylesheet" href="/demo/demo.css"></head>
-<body><h1>Host</h1><div id="demo"></div>
+<body class="dark" style="background: #000; color: #fff; font-family: serif"><h1>Host</h1><div id="demo"></div>
 <script type="module">
   import { mount } from "/demo/mount.js";
   const element = document.getElementById("demo");
@@ -230,6 +256,12 @@ const HOST = `<!doctype html>
   const options = { path, exit: (path) => (window.exited = path) };
   let unmount = await mount(element, options);
   window.remount = async () => { unmount(); unmount = await mount(element, options); };
+  window.overlap = async () => {
+    unmount();
+    const earlier = mount(element, options);
+    unmount = await mount(element, options);
+    (await earlier)();
+  };
   window.mounted = true;
 </script></body></html>`;
 

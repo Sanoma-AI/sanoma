@@ -6,14 +6,21 @@ import { errorMessage } from "sanoma/workflows/shared";
 import { type Api, createApi } from "../api-client.ts";
 import { ApiError, asApiError, runFailure } from "../api.ts";
 
-/** The runtime of the demo mounted last: a page shows one demo at a time. */
-let served: PageRuntime | undefined;
+/** The demos still mounted, one per `mount` call, in the order they were called; `runtime` once seeded. */
+const served: { runtime?: PageRuntime }[] = [];
 
-/** From now on `api` is `runtime`'s, until the returned function (an unmount) lets it go. */
-export function serve(runtime: PageRuntime): () => void {
-  served = runtime;
+/**
+ * From now on `api` is `seeding`'s runtime once it seeds (no page of its demo calls before), until
+ * the returned function (an unmount) lets it go: the runtime of the demo whose `mount` was called
+ * last of those seeded and still mounted answers it.
+ */
+export function serve(seeding: Promise<PageRuntime>): () => void {
+  const entry: { runtime?: PageRuntime } = {};
+  served.push(entry);
+  seeding.then((runtime) => (entry.runtime = runtime)).catch(() => {});
   return () => {
-    if (served === runtime) served = undefined;
+    const at = served.indexOf(entry);
+    if (at !== -1) served.splice(at, 1);
   };
 }
 
@@ -22,7 +29,7 @@ export function serve(runtime: PageRuntime): () => void {
  * answer as the app gives it (`runFailure`: a 422 with the run's error); anything else `asApiError`.
  */
 export const api: Api = createApi(async (request) => {
-  const runtime = served;
+  const runtime = served.findLast((entry) => entry.runtime)?.runtime;
   if (!runtime) throw new ApiError(503, { error: "No demo is mounted on this page" });
   try {
     return await runtime.transport(request);

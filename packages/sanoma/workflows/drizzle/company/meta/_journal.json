@@ -50,6 +50,13 @@
       "when": 1794032805471,
       "tag": "0006_secret_moves",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794357400297,
+      "tag": "0007_token_handoffs",
+      "breakpoints": true
     }
   ]
 }

@@ -848,6 +848,19 @@ export function errorCode(e: unknown): ErrorCode | undefined {
   return code !== undefined && KNOWN.has(code) ? (code as ErrorCode) : undefined;
 }
 
+/**
+ * A runner that runs each piece of work it is given after the one before it settles, failed or
+ * not: one at a time, in the order given.
+ */
+export function oneAtATime(): <T>(work: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (work) => {
+    const done = tail.then(work);
+    tail = done.catch(() => undefined);
+    return done;
+  };
+}
+
 /** A `DriverError`'s `vendorCode` (`no_token`, `bad_signature`), read as a property: undefined for anything else. */
 export const vendorCodeOf = (e: unknown): string | undefined => ownProperty<string>(e, "vendorCode", "string");
 
@@ -864,6 +877,27 @@ export function ownProperty<T>(
 
 /** An error's message, or the value as text when it is not an Error. */
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/**
+ * A request's body as text, or undefined once it holds more than `max` bytes: read no further
+ * than that, so a machine route answered before any login never buffers a body of any size.
+ */
+export async function bodyText(request: Request, max: number): Promise<string | undefined> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let size = 0;
+  for (let read = await reader.read(); !read.done; read = await reader.read()) {
+    size += read.value.length;
+    if (size > max) {
+      await reader.cancel();
+      return undefined;
+    }
+    text += decoder.decode(read.value, { stream: true });
+  }
+  return text + decoder.decode();
+}
 
 /** A value as JSON, or as a string when it isn't JSON, cut to `max` characters, for a message. */
 export function shown(value: unknown, max = Number.POSITIVE_INFINITY): string {

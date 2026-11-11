@@ -202,6 +202,7 @@ describe.skipIf(!dockerAvailable() || !bin)("docker.container meets the Host con
       { name: "a queued run drains", ok: true },
       { name: "LISTEN hears a credential change", ok: true },
       { name: "a sleep survives a restart", ok: true },
+      { name: "two deploys at once leave one revision, the loser at once", ok: true },
       { name: "a new commit shows as drift that apply clears", ok: true },
       { name: "no secret is in the ledger", ok: true },
     ]);

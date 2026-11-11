@@ -22,17 +22,32 @@ export interface CloudDriverOptions {
 /** Where Sanoma Cloud's api answers when `SANOMA_CLOUD_URL` is not set. */
 const DEFAULT_URL = "https://www.sanoma.work";
 
-/** The environment variables the driver reads, on every call. */
+/** The secret holding the company's Cloud token, read from the call's secrets on each call. */
+const TOKEN = "SANOMA_CLOUD_TOKEN";
+/** What a Cloud token looks like: an api token of sanoma-ops's. */
+const TOKEN_PATTERN = /^sca_[\w-]+$/;
+
+/** The environment variable the driver reads, on every call. */
 const env = z.object({
-  SANOMA_CLOUD_TOKEN: z
-    .string()
-    .regex(/^sca_[\w-]+$/, "a Cloud token, `sca_…`")
-    .describe("The company's Sanoma Cloud token (`sca_…`), shown once when the Sanoma account made it"),
   SANOMA_CLOUD_URL: z
     .url({ protocol: /^https?$/ })
     .optional()
     .describe(`Where Sanoma Cloud's api answers, ${DEFAULT_URL} unless set`),
 });
+
+/**
+ * The company's Cloud token, from the call's secrets: stored on this computer when the person
+ * signed in to Sanoma, or the host's variable on a Cloud host (its `secrets.ts` binds it). A
+ * refusal for none, or a value that is no Cloud token, never saying the value.
+ */
+async function tokenOf(call: CallContext): Promise<string> {
+  const token = await call.secrets.get(TOKEN);
+  if (token && TOKEN_PATTERN.test(token)) return token;
+  throw new DriverError(
+    `Sanoma Cloud: ${TOKEN} ${token ? "is not a Cloud token (sca_…)" : "is not stored"}: sign in to Sanoma on the Hosting page, or paste a Cloud token there`,
+    { retryable: false, vendorCode: "no_token" },
+  );
+}
 
 /** An api refusal's body, as the app answers one: `{ error, code? }`. */
 const Problem = z.object({ error: z.string(), code: z.string().optional() });
@@ -51,21 +66,18 @@ const runIdOf = (call: CallContext, workflow: string) =>
  * token as a bearer.
  */
 function workflowsApi(call: CallContext, { timeoutMs, runTimeoutMs }: Required<CloudDriverOptions>): CloudApi {
-  const token = process.env.SANOMA_CLOUD_TOKEN;
-  if (!token) {
-    throw new DriverError(`Sanoma Cloud: SANOMA_CLOUD_TOKEN is not set (${env.shape.SANOMA_CLOUD_TOKEN.description})`, {
-      retryable: false,
-    });
-  }
+  /** Read once for the call, when its first request goes. */
+  let token: Promise<string> | undefined;
   const at = new URL("/api/call", process.env.SANOMA_CLOUD_URL || DEFAULT_URL);
 
   /** One request to the api: its answer, or a `DriverError` (`run_running` kept as its `vendorCode`). */
   const send = async (workflow: string, body: { name: string; input?: unknown; id?: string }) => {
+    const bearer = await (token ??= tokenOf(call));
     let res: Response;
     try {
       res = await fetch(at, {
         method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json" },
+        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(body),
         // A redirect is no answer of the api's, and would carry the token elsewhere.
         redirect: "manual",
@@ -90,7 +102,7 @@ function workflowsApi(call: CallContext, { timeoutMs, runTimeoutMs }: Required<C
     const problem = Problem.safeParse(parsed).data;
     const why =
       res.status === 401
-        ? "SANOMA_CLOUD_TOKEN was refused: it is unknown or revoked"
+        ? `${TOKEN} was refused: it is unknown or revoked`
         : (problem?.error ?? (res.ok ? "the answer is not JSON" : `HTTP ${res.status}`));
     throw new DriverError(`Sanoma Cloud: ${workflow}: ${why}`, {
       retryable: retryableStatus(res.status),
@@ -139,7 +151,8 @@ function workflowsApi(call: CallContext, { timeoutMs, runTimeoutMs }: Required<C
 
 /**
  * Sanoma Cloud through sanoma-ops's workflows, at `SANOMA_CLOUD_URL` (www.sanoma.work by default)
- * with the company's `SANOMA_CLOUD_TOKEN`, both read when an operation is called. See the README.
+ * with the company's `SANOMA_CLOUD_TOKEN` from its secrets, both read when an operation is called.
+ * See the README.
  */
 export function cloudDriver(options: CloudDriverOptions = {}) {
   const settings = { timeoutMs: options.timeoutMs ?? 30_000, runTimeoutMs: options.runTimeoutMs ?? 15 * 60_000 };

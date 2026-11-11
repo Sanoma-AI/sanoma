@@ -10,7 +10,7 @@ import { workflowStatus } from "./db/dbos.ts";
 import { applyMigrations, COMPANY_MIGRATIONS, migrationsApplied } from "./db/migrate.ts";
 import { warn } from "./log.ts";
 import type { RunChecks } from "./scenario.ts";
-import { errorMessage, MIGRATE_STORE_WORKFLOW } from "./shared.ts";
+import { APPLY_WORKFLOW, errorMessage, MIGRATE_STORE_WORKFLOW } from "./shared.ts";
 
 // The runtime's own tables live in the config's database, beside DBOS's (`db/company.ts`), among
 // them what the worker tells the app (how far each app is behind its source, a sandbox run's
@@ -97,14 +97,14 @@ export function openPool(databaseUrl: string, what: string): Pool {
 export const DBOS_DATABASE_OPTIONS = { systemDatabaseIdleTransactionTimeoutMs: 0 } as const;
 
 /**
- * The built-in runs that wait across a deploy, and so are carried onto the next version: a change,
- * and a move between stores; and a built-in's child run (a change's apply and drift, which it
- * waits for, a follow's apply), started with the code that carries it.
+ * The built-in runs that wait across a deploy, and so are carried onto the next version: an apply, a
+ * change, and a move between stores; and a built-in's child run (a change's drift, which it waits
+ * for), started with the code that carries it.
  */
-const CARRIED = ["change", MIGRATE_STORE_WORKFLOW];
+const CARRIED = [APPLY_WORKFLOW, "change", MIGRATE_STORE_WORKFLOW];
 
 /**
- * Stamps the change, store-move and child runs `ids` still unfinished on another version with the application version
+ * Stamps the apply, change, store-move and child runs `ids` still unfinished on another version with the application version
  * `version`, so DBOS gives them to a worker of that version: those it stamped, each with its status
  * (a PENDING one is the caller's to queue again). DBOS has no call for it (a run's version is set at
  * its start, `forkWorkflow` makes a new id, `rewindWorkflow` takes only an ended run), so this is the

@@ -139,6 +139,7 @@ describe.each<{ title: string; lifetime: HostLifetime; database: string; hostnam
             { name: "the host stops when its worker is idle", ok: true },
             { name: "a run queued while the worker is stopping still runs", ok: true },
           ]),
+      { name: "two deploys at once leave one revision, the loser at once", ok: true },
       { name: "a new commit shows as drift that apply clears", ok: true },
       { name: "no secret is in the ledger", ok: true },
     ]);

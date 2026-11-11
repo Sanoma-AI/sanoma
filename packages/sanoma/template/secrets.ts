@@ -6,8 +6,8 @@ export const secrets = {
     // Host deployment may deliver these bootstrap keys; they are never stored in the database.
     SANOMA_SIGNING_KEY: { bootstrap: "SANOMA_SIGNING_KEY" },
     SANOMA_SECRETS_KEY: { bootstrap: "SANOMA_SECRETS_KEY" },
-    // A host gives its Cloud token as a variable; on a laptop it is stored from the Sanoma Cloud
-    // connector page, so it is read from the environment only where the variable is set.
+    // A host gives its Cloud token as a variable; on a laptop it is stored from the Hosting page,
+    // so it is read from the environment only where the variable is set.
     ...(process.env.SANOMA_CLOUD_TOKEN ? { SANOMA_CLOUD_TOKEN: { env: "SANOMA_CLOUD_TOKEN" } } : {}),
   },
 } as const;

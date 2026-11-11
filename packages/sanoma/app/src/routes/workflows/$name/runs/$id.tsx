@@ -14,6 +14,7 @@ import {
   ToneBadge,
   When,
 } from "#/components/common.tsx";
+import { ApplyAhead } from "#/components/go-live.tsx";
 import { WorkflowView } from "#/components/workflow-view.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { runName, starterName } from "#/api.ts";
@@ -44,7 +45,7 @@ export const Route = createFileRoute("/workflows/$name/runs/$id")({
 /**
  * One run of the workflow: under the workflow's crumbs, its name, status and who started it when,
  * New run (on the workflow's page; a change's run has Review, its page, instead: only sending a
- * draft for review starts one), then its `WorkflowView`: the banner of a waiting or failed
+ * draft for review starts one), why an apply has not run (`ApplyAhead`), then its `WorkflowView`: the banner of a waiting or failed
  * run, the graph with the run's facts and approvals floating over it, then Ledger and Code.
  */
 function RunPage() {
@@ -91,6 +92,7 @@ function RunPage() {
         </span>
       </CrumbHeader>
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
+      <ApplyAhead workflow={run.workflow} status={run.status} ahead={data.ahead} />
       <WorkflowView key={run.runId} name={run.workflow} workflow={workflow} run={reading} />
     </>
   );

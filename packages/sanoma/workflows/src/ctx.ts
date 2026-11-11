@@ -80,7 +80,8 @@ export function ctxOf(wf: WorkflowDefinition<any, any>, run: { id: string; actor
       .reduce<Record<string, any>>((at, key) => (at[key] ??= {}), members);
     group[op.name] = placed(
       op.id,
-      () => op.id,
+      // Where no outline places the call (a page), the name it gives, which the outline holds to a literal.
+      (_input, options?: StepOptions) => options?.name ?? op.id,
       (at, input, options?: { connection?: ConnectionRef }) => runner.op(op, input, at, options?.connection),
     );
   }

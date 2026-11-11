@@ -2,6 +2,7 @@ import { createServer, request as forward, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { DriverError, errorMessage } from "sanoma/workflows";
 import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
+import { oneAtATime } from "sanoma/workflows/shared";
 import { REGIONS, cloudOps, SLUG } from "./connector.ts";
 import { type CloudApi, cloudOperations, type Company } from "./operations.ts";
 
@@ -91,40 +92,44 @@ function address(slug: string, start: StartRuntime) {
       () => undefined,
     );
   };
+  /** Runs the host at `revision`, now: a new revision stops the runtime that ran the old one. */
+  const runAt = async (at: string): Promise<string> => {
+    if (revision !== at) await suspend();
+    revision = at;
+    if (!server) {
+      server = createServer((req, res) => {
+        if (revision === undefined) return void res.writeHead(404).end("There is nothing here yet\n");
+        up().then(
+          (made) => {
+            const out = forward(
+              new URL(req.url ?? "/", made.url),
+              { method: req.method, headers: req.headers },
+              (answer) => {
+                res.writeHead(answer.statusCode ?? 502, answer.headers);
+                answer.pipe(res);
+              },
+            );
+            out.once("error", (err) =>
+              res.headersSent ? res.destroy() : res.writeHead(502).end(`${errorMessage(err)}\n`),
+            );
+            req.pipe(out);
+          },
+          (err: unknown) => res.writeHead(502).end(`${errorMessage(err)}\n`),
+        );
+      });
+      await new Promise<void>((done) => server!.listen(0, "127.0.0.1", done));
+      // A fake no one closes, as a sandbox run's, keeps no process up.
+      server.unref();
+      url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    }
+    await up();
+    return url!;
+  };
+  // One run after another: the fake does not model how Sanoma Cloud orders two deploys at once.
+  const inTurn = oneAtATime();
   return {
-    /** Runs the host at `revision`, now: a new revision stops the runtime that ran the old one. */
-    async run(at: string): Promise<string> {
-      if (revision !== at) await suspend();
-      revision = at;
-      if (!server) {
-        server = createServer((req, res) => {
-          if (revision === undefined) return void res.writeHead(404).end("There is nothing here yet\n");
-          up().then(
-            (made) => {
-              const out = forward(
-                new URL(req.url ?? "/", made.url),
-                { method: req.method, headers: req.headers },
-                (answer) => {
-                  res.writeHead(answer.statusCode ?? 502, answer.headers);
-                  answer.pipe(res);
-                },
-              );
-              out.once("error", (err) =>
-                res.headersSent ? res.destroy() : res.writeHead(502).end(`${errorMessage(err)}\n`),
-              );
-              req.pipe(out);
-            },
-            (err: unknown) => res.writeHead(502).end(`${errorMessage(err)}\n`),
-          );
-        });
-        await new Promise<void>((done) => server!.listen(0, "127.0.0.1", done));
-        // A fake no one closes, as a sandbox run's, keeps no process up.
-        server.unref();
-        url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-      }
-      await up();
-      return url!;
-    },
+    /** Runs the host at `revision`, after any run before it ends (`runAt`). */
+    run: (at: string) => inTurn(() => runAt(at)),
     suspend,
     /** The host is gone: the runtime stops, and the address answers 404. */
     async remove() {
