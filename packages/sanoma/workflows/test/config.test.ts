@@ -20,6 +20,7 @@ import {
   type SanomaConfig,
   withSetup,
 } from "../src/index.ts";
+import { recordsOps } from "../src/collection.ts";
 import { setupOf, VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
 import { tree } from "./tree.ts";
@@ -239,6 +240,17 @@ describe("a change's operations, built in", () => {
     });
     expect(() => resolveConfig(config({ workflows: [merging] }))).toThrow(
       'Workflow "merging": sanoma.change.merge changes the company\'s repository, which only change does: send a draft for review instead',
+    );
+    // Nor one that rewrites a collection's records, outside its own operations and their policy.
+    const reshaping = defineWorkflow({
+      name: "reshaping",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [recordsOps.records.reshape],
+      run: async () => 1,
+    });
+    expect(() => resolveConfig(config({ workflows: [reshaping] }))).toThrow(
+      "Workflow \"reshaping\": sanoma.records.reshape rewrites a collection's records, which only change and patch do: change the collection's columns from its grid instead",
     );
     const named = defineWorkflow({
       name: "change",

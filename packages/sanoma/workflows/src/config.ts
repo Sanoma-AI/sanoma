@@ -1177,7 +1177,7 @@ function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
  * The workflow normally imports the same connector object; a copy is accepted only if it
  * declares the same effect and retry setting, and the worker's declaration is used either way.
  * None may use an operation a built-in workflow alone calls (`reservedFor`): a change's step, which
- * only the change workflow takes. A resource type's change operations are allowed: the call
+ * only the change workflow takes, or a reshape of a collection's records. A resource type's change operations are allowed: the call
  * refuses one aimed at a declared object (`DeclaredObjects`), which only apply changes.
  */
 function checkUses(wf: WorkflowDefinition<any, any>, ops: Map<string, Op>, impls: Map<string, unknown>) {
@@ -1187,7 +1187,7 @@ function checkUses(wf: WorkflowDefinition<any, any>, ops: Map<string, Op>, impls
     const reserved = known && reservedFor(known);
     if (!known) problems.push(`${op.id} is not declared by any connector in \`connectors\``);
     else if (reserved) {
-      problems.push(`${op.id} ${reserved.does}, which only ${reserved.workflow} does: ${reserved.instead} instead`);
+      problems.push(`${op.id} ${reserved.does}, which ${reserved.by}: ${reserved.instead} instead`);
     } else if (known !== op && (known.effect !== op.effect || known.idempotent !== op.idempotent)) {
       problems.push(
         `${op.id} is declared with effect "${op.effect}"${op.idempotent ? " (idempotent)" : ""}, ` +

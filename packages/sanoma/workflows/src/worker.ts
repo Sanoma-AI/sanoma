@@ -255,7 +255,14 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     startRun: async (name, runId, args) => {
       const fn = registered.get(name) as unknown as ((args: RunArgs) => Promise<unknown>) | undefined;
       if (!fn) throw new Error(`The worker has no workflow "${name}" to start`);
-      return DBOS.startWorkflow(fn, { workflowID: runId })(args);
+      // A built-in child run (a change's apply and drift, a follow's apply) carries its code, as
+      // `SanomaClient.start` stamps it, so a worker started again on another version takes it over
+      // with its parent (`carryBuiltInRuns`), which waits for it.
+      const builtInCode = resolved.builtInCodes[name];
+      return DBOS.startWorkflow(fn, {
+        workflowID: runId,
+        ...(builtInCode !== undefined && { workflowAttributes: { builtInCode } }),
+      })(args);
     },
     stopped: false,
     deadlines: deadlineRegistry(),

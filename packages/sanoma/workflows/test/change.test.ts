@@ -507,7 +507,17 @@ describe("the change workflow's deploy on a declared host", () => {
 describe("a change whose deploy starts the worker again", () => {
   const source = testRepository();
   const root = rootWith({ "resources/infra.ts": testhostInfra(source.url) });
-  const host = fakeHost(async () => ({ url: "http://127.0.0.1:4100", stop: async () => {} }));
+  /** Once, the next start of the host: the worker starts again meanwhile, and that start never ends. */
+  let cut: (() => void) | undefined;
+  const host = fakeHost(async () => {
+    const now = cut;
+    cut = undefined;
+    if (now) {
+      now();
+      await new Promise(() => {});
+    }
+    return { url: "http://127.0.0.1:4100", stop: async () => {} };
+  });
   const remote = fakeRemote();
   const repo = memorySource({ root: here, remote });
   // The checkout as `localGitSource`'s: at the commit it last followed, so following a merge moves it.
@@ -523,10 +533,12 @@ describe("a change whose deploy starts the worker again", () => {
   };
   /** Each start again the worker was asked, as `sanoma serve`'s reload does it: this worker stopped, a new one started. */
   const restarts: Promise<void>[] = [];
+  /** What the worker's `reload` does: start again at once, unless a test says otherwise. */
+  let reload = () => void restarts.push(app.restart());
   const databaseUrl = freshDatabase("change-reload");
   const app = useTestApp(
     { workflows: [], connectors: [host.connector, remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl, source: moving, reload: () => void restarts.push(app.restart()) },
+    { databaseUrl, source: moving, reload: () => reload() },
   );
   const pool = lazyDb(databaseUrl, "change reload test");
   beforeAll(() => source.commit());
@@ -572,4 +584,39 @@ describe("a change whose deploy starts the worker again", () => {
     const [row] = await db.select().from(data).where(eq(data.collection, "deals"));
     expect(row!.record).toEqual({ company: "Acme", contacted: "2026-01-02" });
   });
+
+  it("finishes its deploy on another version when the worker starts again during the apply", async () => {
+    restarts.length = 0;
+    // The merge changes the company's code: the worker started again runs another version, and
+    // stops the old one while the apply it started (a child run) is still under way.
+    reload = () => {};
+    cut = () => {
+      process.env.DBOS__APPVERSION = "moved";
+      restarts.push(app.restart());
+    };
+    try {
+      // The host's source moved on, so the apply starts it again.
+      await source.commit();
+      repo.edit("moved", { "notes/moved.md": "\n" });
+      const runId = await app.client.openChange({ id: "moved", title: "Moved" }, { startedBy: "alice" });
+      await waitFor(pending(() => app.client, runId));
+      await app.client.decide(runId, { decision: "approve", by: { id: "alice" } });
+      const report = (await app.client.result(runId, 60_000)) as ChangeReport;
+      await Promise.all(restarts);
+      expect(restarts).toHaveLength(1);
+      expect(report).toMatchObject({
+        outcome: "merged",
+        deploy: { apply: { runId: `${runId}:deploy`, hosts: ["resources/infra.ts#app"] } },
+        verified: { runId: `${runId}:verify`, drifted: [] },
+      });
+      expect(report.deploy!.apply).not.toHaveProperty("error");
+      // Both carried onto the version started in their place.
+      for (const id of [runId, `${runId}:deploy`]) {
+        expect((await app.raw.getWorkflow(id))?.applicationVersion).toMatch(/@moved$/);
+      }
+    } finally {
+      delete process.env.DBOS__APPVERSION;
+      reload = () => void restarts.push(app.restart());
+    }
+  }, 90_000);
 });
