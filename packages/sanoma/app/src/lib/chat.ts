@@ -157,14 +157,15 @@ export type ChatData = { draft: DraftCard; signIn: SignInCard; suggestions: Sugg
 export type ChatMessage = UIMessage<unknown, ChatData, InferUITools<LoopTools>>;
 
 /**
- * The output a lookup the policy holds shows until it is decided, as any engine writes it: a tool
- * part whose output is `{ held: { runId } }`, which the chat draws as the approval's card.
+ * The output a call or a start the policy holds shows until it is decided (the agent catalog's
+ * `lookup`, `start_run` and `drift`, `catalogTools`), as any engine writes it: a tool part whose
+ * output is `{ held: { runId } }`, which the chat draws as the approval's card.
  */
 export interface HeldOutput {
   held: { runId: string };
 }
 
-/** The held call's run, when a tool part's output is a held lookup's. */
+/** The held call's or start's run, when a tool part's output is a held one's. */
 export const heldRunOf = (output: unknown): string | undefined => {
   const runId = (output as Partial<HeldOutput> | null | undefined)?.held?.runId;
   return typeof runId === "string" ? runId : undefined;
@@ -210,7 +211,7 @@ export const suggestionsOf = (message: ChatMessage): string[] =>
 
 /**
  * A part a turn left under way: text still streaming, a tool call without its result, or a held
- * lookup's preliminary output. The chat offers Continue after one; the server settles it (`settle`).
+ * call's or start's preliminary output. The chat offers Continue after one; the server settles it (`settle`).
  */
 export const unfinished = (part: UIMessage["parts"][number]): boolean =>
   isToolUIPart(part)

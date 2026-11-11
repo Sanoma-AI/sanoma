@@ -24,8 +24,8 @@ const WaitMs = z
 const RunId = z.string().min(1).describe("The run's id");
 
 /** One tool of the catalog. */
-export interface CatalogTool<Input extends z.ZodObject = z.ZodObject> {
-  name: string;
+export interface CatalogTool<Input extends z.ZodObject = z.ZodObject, Name extends string = string> {
+  name: Name;
   title: string;
   description: string;
   /** Its input, without the call's id, which `idempotencyId` says it takes. */
@@ -36,11 +36,11 @@ export interface CatalogTool<Input extends z.ZodObject = z.ZodObject> {
   idempotencyId?: string;
 }
 
-const tool = <Input extends z.ZodObject>(spec: CatalogTool<Input>) => spec;
+const tool = <const Name extends string, Input extends z.ZodObject>(spec: CatalogTool<Input, Name>) => spec;
 
-/** The six tools, in the order an agent is told them. */
-export const CATALOG = [
-  tool({
+/** The six tools by name, in the order an agent is told them. */
+export const CATALOG = {
+  describe: tool({
     name: "describe",
     title: "Describe the company",
     description:
@@ -50,7 +50,7 @@ export const CATALOG = [
     input: z.object({}),
     hint: "read",
   }),
-  tool({
+  lookup: tool({
     name: "lookup",
     title: "Look something up",
     description:
@@ -65,14 +65,14 @@ export const CATALOG = [
     hint: "read",
     idempotencyId: "A new id per lookup (a UUID, say), sent again on a retry so a held one files one approval",
   }),
-  tool({
+  get_run: tool({
     name: "get_run",
     title: "Read a run",
     description: "A run's workflow, status, who started it, when, its approvals and its error, by its id.",
     input: z.object({ runId: RunId }),
     hint: "read",
   }),
-  tool({
+  wait_run: tool({
     name: "wait_run",
     title: "Wait for a run",
     description:
@@ -81,7 +81,7 @@ export const CATALOG = [
     input: z.object({ runId: RunId, waitMs: WaitMs }),
     hint: "read",
   }),
-  tool({
+  drift: tool({
     name: "drift",
     title: "Check for drift",
     description:
@@ -93,7 +93,7 @@ export const CATALOG = [
     hint: "read",
     idempotencyId: "A new id per check (a UUID, say), the run's id, sent again on a retry so it starts once",
   }),
-  tool({
+  start_run: tool({
     name: "start_run",
     title: "Start a workflow",
     description:
@@ -108,10 +108,10 @@ export const CATALOG = [
     hint: "destructive",
     idempotencyId: "A new id per start (a UUID, say), the run's id, sent again on a retry so it starts once",
   }),
-] as const;
+} as const;
 
 /** A tool's name. */
-export type CatalogName = (typeof CATALOG)[number]["name"];
+export type CatalogName = keyof typeof CATALOG;
 
 /** Who a catalog call is made as, and its idempotency id where the tool takes one. */
 export interface CatalogCall {
@@ -131,15 +131,13 @@ export async function runCatalog(
   args: unknown,
   call: CatalogCall,
 ): Promise<unknown> {
-  const spec = CATALOG.find((t) => t.name === name);
-  if (!spec) throw new ApiError(400, { error: `No tool ${name as string}`, code: "invalid_input" });
   const { actor } = call;
-  const id = spec.idempotencyId !== undefined && call.id !== undefined ? { id: call.id } : {};
-  switch (spec.name) {
+  const id = CATALOG[name].idempotencyId !== undefined && call.id !== undefined ? { id: call.id } : {};
+  switch (name) {
     case "describe":
       return callApi(host, actor, { name: DESCRIBE_CALL });
     case "lookup": {
-      const { op, input } = parse(spec.input, args, "The input");
+      const { op, input } = parse(CATALOG.lookup.input, args, "The input");
       // The lookup rule: an operation the description lists as a read that may be called directly.
       const declared = host.snapshot.description.ops.find((entry) => entry.id === op);
       if (declared?.effect !== "read" || !declared.direct) {
@@ -151,13 +149,13 @@ export async function runCatalog(
       return callApi(host, actor, { name: op, input, ...id });
     }
     case "get_run":
-      return runNamed(host, parse(spec.input, args, "The input").runId);
+      return runNamed(host, parse(CATALOG.get_run.input, args, "The input").runId);
     case "wait_run": {
-      const { runId, waitMs } = parse(spec.input, args, "The input");
+      const { runId, waitMs } = parse(CATALOG.wait_run.input, args, "The input");
       return resultOf(host, actor, (await runNamed(host, runId)).workflow, runId, waitMs);
     }
     case "drift": {
-      const { waitMs } = parse(spec.input, args, "The input");
+      const { waitMs } = parse(CATALOG.drift.input, args, "The input");
       if (!host.snapshot.description.workflows.some((wf) => wf.name === DRIFT_WORKFLOW)) {
         throw new ApiError(400, {
           error: "This company declares no resources in its data files, so there is no drift to check",
@@ -168,7 +166,7 @@ export async function runCatalog(
       return resultOf(host, actor, DRIFT_WORKFLOW, (started as { runId: string }).runId, waitMs);
     }
     case "start_run": {
-      const { workflow, input } = parse(spec.input, args, "The input");
+      const { workflow, input } = parse(CATALOG.start_run.input, args, "The input");
       const named = startable(host, workflow);
       return callApi(host, actor, { name: `${named.apiName}.start`, input, ...id });
     }

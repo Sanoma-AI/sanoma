@@ -37,6 +37,15 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // Its permission requests, file reads and writes are answered by the checkout rule; the commands
 // it runs through our terminal are its own, in the box. A sign-in it asks for is shown in the chat
 // as the vendor's own flow.
+//
+// It gets none of the agent catalog (`catalogTools`, which our loop and HarnessAgent's engines
+// run on the host): `session/new` offers no MCP server (`mcpServers: []`). Stable ACP offers only
+// MCP servers the agent reaches itself, a process (stdio) or a URL with its credential (http, sse),
+// in the box, and the box holds no remote URL, git token or company secret, but the per-turn model
+// key (#599): a catalog served so would put one there. ACP's unstable MCP transport (`type:
+// "acp"`, the client serving the server over this connection, where the agent advertises
+// `mcpCapabilities.acp`) is the way to give it the catalog, a follow-up. A permission request for
+// any tool but an edit, delete, move or read is refused, as before (`#permit`).
 
 /** What this client says it can do: files and terminals (ours, by the checkout rule), terminal sign-in methods, and links to show. */
 const CAPABILITIES: acp.ClientCapabilities = {
@@ -163,7 +172,7 @@ async function runTurn(agent: TurnAgent<"own">, engineTurn: EngineTurn, writer: 
           shimsDir: shimmed.value,
           bins: join(installed.value, "node_modules", ".bin"),
         });
-        const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
+        const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1), { catalog: false });
         await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
       } catch (err) {
         // A dead or missing agent is said in the reply; a stopped turn says nothing.

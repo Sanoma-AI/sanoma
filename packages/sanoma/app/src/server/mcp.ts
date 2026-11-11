@@ -89,7 +89,7 @@ function mcpServer(app: AppContext, actor: Principal): McpServer {
     { name: app.snapshot.description.appName, version: RUNTIME_VERSION },
     { capabilities: { tools: { listChanged: false } } },
   );
-  for (const spec of CATALOG) {
+  for (const spec of Object.values(CATALOG)) {
     const inputSchema: z.ZodObject =
       spec.idempotencyId === undefined ? spec.input : spec.input.extend({ id: CallId.describe(spec.idempotencyId) });
     server.registerTool(

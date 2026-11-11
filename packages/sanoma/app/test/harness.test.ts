@@ -18,8 +18,10 @@ import { pi } from "@sanoma-ai/connector-pi";
 import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeSandbox } from "sanoma/testing/sandbox";
+import { defineWorkflow } from "sanoma/workflows";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { copyFixture, ensureBuilt } from "../../test/fixture.ts";
 import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
@@ -55,6 +57,8 @@ type Tool = { name: string; input_schema?: { properties?: Record<string, unknown
 
 /** The draft's clone in the person's box, where the agents work. */
 let draftRoot = "";
+/** Which script the stand-in follows: the edit's, or a catalog tool's call. */
+let script: "edit" | "catalog" = "edit";
 
 /**
  * The script for "Add a laptop step to offboarding", by the step (the assistant's messages since
@@ -62,6 +66,13 @@ let draftRoot = "";
  * the checkout rule), edit the workflow (allowed), then say so.
  */
 function stepFor(step: number, tools: Tool[]): Block {
+  if (script === "catalog") {
+    // Claude Code is offered the catalog as an MCP server's tools, its names prefixed.
+    const name = tools.find((t) => t.name === "start_run" || t.name.endsWith("__start_run"))?.name ?? "start_run";
+    return step === 0
+      ? { type: "tool_use", id: `toolu_${RUN}_c0`, name, input: { workflow: "memo", input: { note: "from the box" } } }
+      : { type: "text", text: "Noted." };
+  }
   const tool = (name: string) => tools.find((t) => t.name.toLowerCase() === name)!;
   const keys = (name: string) => Object.keys(tool(name).input_schema?.properties ?? {});
   const key = (name: string, pattern: RegExp) => keys(name).find((k) => pattern.test(k))!;
@@ -168,9 +179,19 @@ export const box = testsandbox.box({ name: "boxes", image: "local", size: 1 });
 );
 const sandbox = fakeSandbox(realpathSync(mkdtempSync(join(tmpdir(), "sanoma-harness-boxes-"))));
 
+/** A workflow of the company's own, which the catalog's start_run starts. */
+const memo = defineWorkflow({
+  name: "memo",
+  title: "Note something",
+  trigger: "manual",
+  input: z.object({ note: z.string() }),
+  uses: [],
+  run: async (_ctx, { note }) => ({ noted: note }),
+});
+
 const testApp = useTestApp(
   {
-    workflows: [],
+    workflows: [memo],
     connectors: [anthropic, pi, sandbox.connector],
     root,
     secrets: { bindings: { ANTHROPIC_API_KEY: { env: "ANTHROPIC_API_KEY" } } },
@@ -326,6 +347,76 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
     engine === "pi" ? 300_000 : 900_000,
   );
 });
+
+describe.each(engines)("the agent catalog on %s", (engine, name, enabled) => {
+  /** A remote URL with a token in it, and a company secret: neither may reach the box. */
+  const remote = `https://x-access-token:ghs_${RUN}decoyremote@git.example.invalid/acme/company.git`;
+  const secret = `decoy-secret-${randomUUID()}`;
+
+  it.runIf(enabled)(
+    "runs a catalog tool on the host, as the chat's agent for the person, its result reaching the agent, and nothing of the instance in the box",
+    async () => {
+      const id = `${engine}-catalog-${RUN}`;
+      const boxName = "sanoma-harness%2Dtest-ada";
+      draftRoot = join(sandbox.root, boxName, "repo");
+      git("remote", "add", "origin", remote);
+      await testApp.client.setSecret("DECOY_SECRET", secret, { by: "ada" });
+      script = "catalog";
+      sent.length = 0;
+      try {
+        const reply = await send(id, engine, "Note the visit");
+        expect(reply!.parts.at(-1)).toMatchObject({ type: "text", text: "Noted." });
+
+        // The agent was offered the catalog, and its call ran here, in the worker: the run is in this
+        // instance's database, the chat's agent's for Ada, and its result reached the model.
+        expect(sent[0]!.tools.some((t) => t === "start_run" || t.endsWith("__start_run"))).toBe(true);
+        const runId = `${id}:toolu_${RUN}_c0`;
+        const chatForAda = { id: "chat", groups: ["agents"], onBehalfOf: "ada" };
+        expect((await testApp.client.run(runId))?.startedBy).toEqual(chatForAda);
+        expect((await testApp.client.ledger(runId))[0]).toMatchObject({ type: "run.started", actor: chatForAda });
+        const results = sent.flatMap((request) => request.results).join("\n");
+        expect(results).toContain(runId);
+        expect(results).toContain("from the box");
+        // The chat shows it as the catalog's step.
+        const part = reply!.parts.filter(isToolUIPart).find((p) => getToolName(p).endsWith("start_run"));
+        expect(part).toMatchObject({
+          state: "output-available",
+          output: { runId, status: "finished", output: { noted: "from the box" } },
+        });
+
+        // Nothing in the box holds the database's URL, the remote's or a company secret: not its files,
+        // nor the environment its processes get.
+        const box = join(sandbox.root, boxName);
+        expect(filesUnder(join(box, "repo")).length).toBeGreaterThan(0);
+        const leaks = [testApp.config.databaseUrl!, remote, secret, `ghs_${RUN}decoyremote`];
+        for (const file of filesUnder(box)) {
+          const text = readFileSync(file, "latin1");
+          for (const leak of leaks) expect(text.includes(leak), `${file} holds ${leak}`).toBe(false);
+        }
+        const opened = await sandbox.backend.open({ name: boxName });
+        try {
+          const env = await opened.run("env");
+          const [said] = await Promise.all([new Response(env.stdout).text(), env.wait()]);
+          for (const leak of leaks) expect(said).not.toContain(leak);
+          expect(said).not.toMatch(/postgres(ql)?:\/\//);
+        } finally {
+          await opened.stop();
+        }
+      } finally {
+        script = "edit";
+        git("remote", "remove", "origin");
+      }
+    },
+    engine === "pi" ? 300_000 : 900_000,
+  );
+});
+
+/** Every file under `top`, its symlinks not followed. */
+function filesUnder(top: string): string[] {
+  return readdirSync(top, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name));
+}
 
 describe("the chat on a coding agent without its key", () => {
   it("says which key is missing, with its connector's page, as the reply's error", async () => {

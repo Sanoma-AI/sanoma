@@ -543,6 +543,16 @@ describe("a declared agent acting for the person, named in x-sanoma-agent", () =
     });
   });
 
+  it("refuses the in-app chat's own agent, which only a chat turn in the worker acts as", async () => {
+    expect(await mcp("tools/list", {}, { agent: "chat" })).toMatchObject({
+      status: 403,
+      body: {
+        code: "not_admitted",
+        error: expect.stringContaining("chat is the in-app chat's own agent, which acts only for the person chatting"),
+      },
+    });
+  });
+
   it("refuses the header on a host, whose sign-in says who is asking, and serves the person without it", async () => {
     const app = appContext();
     const hosted: AppContext = { ...app, login: { ...app.login, name: "staff" } };

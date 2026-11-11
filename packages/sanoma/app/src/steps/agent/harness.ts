@@ -28,6 +28,7 @@ import {
 } from "./checkout.ts";
 import { freePort } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
+import { catalogTools } from "./tools.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's second engine: an existing coding agent driven by the AI SDK's `HarnessAgent` in a
@@ -37,6 +38,13 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // and is one harness session: made, run to its end (its permission requests answered by the
 // checkout rule), destroyed (what it started killed). Then what the agent changed is committed in
 // the box and carried back to the draft (`carryOut`), the box is stopped, and the draft checked.
+
+/**
+ * How long a catalog tool waits on a held call or start for its decision in a coding agent's turn:
+ * with a start's own wait (`RESULT_WAIT_MS`, 20 s) and the 5 s after a decision, a call answers within 40 s, its run's id in the
+ * answer, well before an MCP client in the box gives up on it.
+ */
+const HARNESS_HELD_MS = 15_000;
 
 /** A bridge's first session in a box, by its runtime and the box's id: it installs the bridge there, so the next ones wait for it. */
 const installing = new Map<string, Promise<unknown>>();
@@ -117,11 +125,17 @@ async function converse(
   const harnessAgent = new HarnessAgent({
     harness,
     model,
-    instructions: harnessInstructions(step, principal, chat, messages.slice(0, -1)),
+    instructions: harnessInstructions(step, principal, chat, messages.slice(0, -1), { catalog: true }),
     // Edits and commands ask first, and the checkout rule answers.
     permissionMode: "allow-reads",
     // The draft's checkout itself, not a directory per session under it.
     sandboxConfig: { workDir: "." },
+    // The agent catalog, run here on the host (Pi's agent is in this process; Claude Code's bridge
+    // serves them to it in the box as an in-process MCP server and sends each call back over its
+    // socket), never in the box: nothing of the instance enters it. No `toolApproval`: the
+    // company's policy decides each call. Typed as the harness's own copy of the AI SDK's
+    // provider utilities cannot name ours: the tools are the same objects.
+    tools: catalogTools({ step, chat }, { heldMs: HARNESS_HELD_MS }) as {},
   });
   const said = messages.at(-1)!;
   const create = () =>

@@ -27,7 +27,7 @@ import { CardHeading, Notice, TipButton } from "../kit.tsx";
 import { DraftCardView } from "./draft-card.tsx";
 
 // What the chat draws of the agent's reply, per app.md's Chat: Markdown at the reply size, its
-// thinking and steps as one quiet trace (AI Elements' Reasoning and Tool), a held lookup as the
+// thinking and steps as one quiet trace (AI Elements' Reasoning and Tool), a held call or start as the
 // Inbox's approval card, the draft as a small card, a person's own agent's sign-in as its card,
 // and the last reply's suggested asks as buttons. Any engine's reply: a tool part of another
 // engine is a step by its title or name.
@@ -253,6 +253,16 @@ function stepLabel(step: ToolPart): string {
     }
     case "lookup":
       return `Looked up ${String(input.op ?? "")}`;
+    case "describe":
+      return "Read the company's description";
+    case "get_run":
+      return `Read the run ${String(input.runId ?? "")}`;
+    case "wait_run":
+      return `Waited for the run ${String(input.runId ?? "")}`;
+    case "drift":
+      return "Checked for drift";
+    case "start_run":
+      return `Started ${String(input.workflow ?? "")}`;
     default: {
       if (step.title) return step.title;
       const file = pathOf(input);

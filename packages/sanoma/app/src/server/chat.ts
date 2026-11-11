@@ -207,7 +207,7 @@ export async function postSignInCode(request: Request, context: ActorContext): P
 }
 
 /**
- * The transcript with what a turn left unfinished settled: in any reply, a held lookup's result
+ * The transcript with what a turn left unfinished settled: in any reply, a held call's or start's result
  * once its run has ended (still held while it waits); in the last, as a stop or a restart cut it
  * short, a tool call with no result failed as interrupted, and text and reasoning done. A message
  * it leaves as it was is the same object, so the caller writes back only those it changed.
