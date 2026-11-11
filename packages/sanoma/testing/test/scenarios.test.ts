@@ -63,8 +63,11 @@ describe("describeScenarios", () => {
     }
   });
 
-  it("registers a failing test for a file that does not load, naming its file and line", async ({ signal }) => {
-    // fixtures/broken.scenarios.ts, in a vitest of its own: its one test fails.
+  it("registers a failing test for a file that does not load, naming its file and line, and a test of a world alone", async ({
+    signal,
+  }) => {
+    // fixtures/broken.scenarios.ts, in a vitest of its own: its one test fails; and
+    // fixtures/world.scenarios.ts, whose world seeds the fakes.
     const vitest = fileURLToPath(new URL("../../../../node_modules/vitest/vitest.mjs", import.meta.url));
     const vitestConfig = fileURLToPath(new URL("./fixtures/vitest.config.ts", import.meta.url));
     const args = [vitest, "run", "--config", vitestConfig];
@@ -77,8 +80,11 @@ describe("describeScenarios", () => {
       testResults: { assertionResults: { fullName: string; status: string; failureMessages: string[] }[] }[];
     };
     const tests = testResults.flatMap((r) => r.assertionResults);
-    expect(tests.map((t) => [t.fullName, t.status])).toEqual([["scenarios/broken.feature", "failed"]]);
-    expect(tests[0]!.failureMessages[0]).toMatch(
+    expect(tests.map((t) => [t.fullName, t.status]).toSorted()).toEqual([
+      ["scenarios/broken.feature", "failed"],
+      ["scenarios/world.feature", "passed"],
+    ]);
+    expect(tests.find((t) => t.status === "failed")!.failureMessages[0]).toMatch(
       /^Error: scenarios\/broken\.feature:5: no step matches "the blog is on fire"\n/,
     );
   });

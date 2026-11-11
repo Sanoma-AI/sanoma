@@ -2,7 +2,8 @@
 /* oxlint-disable vitest/valid-title, vitest/expect-expect */
 import { fileURLToPath } from "node:url";
 import { memoryLedger, type Principal, resolveConfig, type SanomaConfig } from "sanoma/workflows";
-import { loadScenarios } from "sanoma/workflows/scenario";
+import { pageRuntime } from "sanoma/workflows/page";
+import { loadScenarios, WORLD_FILE } from "sanoma/workflows/scenario";
 import { runScenario } from "sanoma/workflows/scenarios";
 import { describe, expect, it } from "vitest";
 import { useTestApp } from "./harness.ts";
@@ -16,7 +17,8 @@ export { runScenario, type RunScenarioOptions } from "sanoma/workflows/scenarios
  * Registers a vitest test for each scenario in `scenarios/` in the config's root, in a
  * `describe` per feature file, that runs it (`runScenario`) and expects every check to pass; and
  * a failing test for each file that does not load. Starts one test app (`useTestApp`) for the
- * scenarios, before them, and stops it after. `config` and `options` are `startTestWorker`'s;
+ * scenarios, before them, and stops it after. The world (`scenarios/world.feature`), which seeds a
+ * demo, is a test of its own: its Givens taken by the connectors' fakes. `config` and `options` are `startTestWorker`'s;
  * `startedBy` (an id, or a principal) starts the runs whose scenario does not say who is acting,
  * and `timeoutMs` is how long each may take (`drive`'s). Cucumber compiles the feature files
  * first, so the test file awaits it at its top level:
@@ -35,9 +37,9 @@ export async function describeScenarios(
         : `describeScenarios found no \`scenarios/\` in ${resolved.root}, nor in an app of it`,
     );
   }
-  const { scenarios, errors } = await loadScenarios(resolved);
+  const { scenarios, errors, world } = await loadScenarios(resolved);
   // A mistyped directory loads nothing, and a test file that registers no tests would pass.
-  if (scenarios.length === 0 && errors.length === 0) {
+  if (scenarios.length === 0 && errors.length === 0 && !world) {
     throw new Error(
       `describeScenarios found no scenarios in ${fileURLToPath(resolved.scenarios)}'s scenarios/ or its apps'`,
     );
@@ -45,6 +47,14 @@ export async function describeScenarios(
   for (const { file, message } of errors) {
     it(file, () => {
       throw new Error(message);
+    });
+  }
+  // The world seeds a demo: its Givens taken by the connectors' fakes, as a demo's page takes them.
+  // oxlint-disable-next-line vitest/no-conditional-tests -- a repo's world is its own test, when it has one
+  if (world) {
+    it(WORLD_FILE, async () => {
+      const collections = [...resolved.collections.values()];
+      await pageRuntime({ workflows: [], collections, connectors: config.connectors, world });
     });
   }
   if (scenarios.length === 0) return;

@@ -137,6 +137,25 @@ describe("pageRuntime", () => {
     for (const run of runs) expect(run.createdAt).toBeLessThan(before + DAY);
   });
 
+  it("answers run_running for a run still going after waitMs, as the app does, and its output once it ends", async () => {
+    const decision = Promise.withResolvers<"approve">();
+    const { transport } = await pageRuntime({
+      workflows: [chase],
+      collections: [invoices],
+      connectors: [resend],
+      world,
+      decide: () => decision.promise,
+    });
+    const { runId } = (await transport({ name: "chaseInvoice", input: { number: "INV-1" } })) as { runId: string };
+    const running = await transport({ name: "chaseInvoice.result", input: { runId, waitMs: 10 } }).catch((err) => err);
+    expect(errorCode(running)).toBe("run_running");
+    expect(running).toMatchObject({ data: { runId } });
+    decision.resolve("approve");
+    expect(await transport({ name: "chaseInvoice.result", input: { runId, waitMs: 10_000 } })).toEqual({
+      waitedMs: 7 * DAY,
+    });
+  });
+
   it("goes back to the seeded world on reset", async () => {
     const { transport, reset } = await page();
     const { runId } = (await transport({ name: "chaseInvoice", input: { number: "INV-1" } })) as { runId: string };
