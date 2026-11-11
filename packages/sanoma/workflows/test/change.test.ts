@@ -507,14 +507,17 @@ describe("the change workflow's deploy on a declared host", () => {
 describe("a change whose deploy starts the worker again", () => {
   const source = testRepository();
   const root = rootWith({ "resources/infra.ts": testhostInfra(source.url) });
-  /** Once, the next start of the host: the worker starts again meanwhile, and that start never ends. */
+  /**
+   * Once, the next start of the host: the worker starts again meanwhile, and that start ends only
+   * once it has, its worker gone (the fake takes one start after another, so the next waits for it).
+   */
   let cut: (() => void) | undefined;
   const host = fakeHost(async () => {
     const now = cut;
     cut = undefined;
     if (now) {
       now();
-      await new Promise(() => {});
+      await Promise.all(restarts);
     }
     return { url: "http://127.0.0.1:4100", stop: async () => {} };
   });
