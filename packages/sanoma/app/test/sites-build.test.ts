@@ -281,9 +281,10 @@ describe("a company's app with its sites", () => {
     expect(html).toContain("The hello site");
     expect(html).toContain("Hello from the hello site");
     // The app's bar and chat column beside it: a tile per site, in one group (the root's: the
-    // fixture has no apps) between Inbox and Workflows and Setup, each to its home, this one's lit.
+    // fixture has no apps) between Home, Inbox and Workflows and Setup, each to its home, this one's lit.
     expect(barGroups(html)).toEqual([
       [
+        ["/", "Home"],
         ["/inbox", "Inbox"],
         ["/workflows", "Workflows"],
       ],

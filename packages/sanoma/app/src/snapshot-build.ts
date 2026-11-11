@@ -177,6 +177,7 @@ export async function scenariosOf(resolved: ResolvedConfig): Promise<ScenariosRe
         input,
       })),
       errors: loaded.errors,
+      ...(loaded.world && { world: { name: loaded.world.name, steps: loaded.world.given.map((g) => g.step) } }),
     };
   } catch (err) {
     return { scenarios: [], errors: [{ file: "", message: errorMessage(err) }] };

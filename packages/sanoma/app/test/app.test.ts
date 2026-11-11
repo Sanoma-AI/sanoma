@@ -39,6 +39,7 @@ import {
   ACTOR_KEY,
   ApiError,
   AppConfigSchema,
+  asApiError,
   ClearCredentialRequest,
   DecideCall,
   type ErrorResponse,
@@ -48,6 +49,7 @@ import {
 } from "../src/api.ts";
 import type { AppContext, LoginProvider } from "../src/context.ts";
 import { availableConnectors, JSDELIVR, NPM_REGISTRY } from "../src/server/available.ts";
+import { setupProgress } from "../src/server/setup-progress.ts";
 import { databaseHost, loopbackLogin, placeOf } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { barLabels, barLink } from "./bar-helpers.ts";
@@ -55,7 +57,6 @@ import {
   type ActorContext,
   actorOf,
   appConfig,
-  asApiError,
   clearCredential,
   credentials,
   decide,
@@ -960,18 +961,21 @@ describe("the page", () => {
     const html = await res.text();
     expect(html).toContain('<div id="app">');
     expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>14<\/span><\/h1>/);
-    // The bar: Chat, then Inbox and Workflows, no site tiles (the package's own build has no
+    // The bar: Chat, then Home, Inbox and Workflows, no site tiles (the package's own build has no
     // sites), then Setup (with Data and Permissions, as the config has collections and a policy),
     // the current lit.
     expect(barLabels(html)).toEqual([
-      ["Inbox", "Workflows"],
+      ["Home", "Inbox", "Workflows"],
       ["Data", "People", "Hosting", "Connectors", "Apps", "Permissions"],
     ]);
     expect(barLink(html, "/apps")).toBeDefined();
     expect(barLink(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
     expect(barLink(html, "/inbox")).not.toMatch(/data-active="true"|aria-current/);
-    // At its foot, what the window is, the test database being on this machine, its tip the host.
-    expect(html).toMatch(/>This computer<\/span><span [^>]*hidden="">Database on [^<@]+<\/span>/);
+    // Home is lit on its own page alone, not on every page under it.
+    expect(barLink(html, "/")).not.toMatch(/data-active="true"|aria-current/);
+    // At its foot, the company's state: Local, nothing bound to run it online and the test
+    // database on this machine, its tip the database's host.
+    expect(html).toMatch(/>Local<\/span><span [^>]*hidden="">Database on [^<@]+<\/span>/);
     // The config has a policy: Permissions says what it does, so the overview says nothing of it.
     expect(html).not.toContain("No policy");
     // The chat column, open with no cookie: a new chat, and the composer carrying the page as a
@@ -1009,10 +1013,38 @@ describe("the page", () => {
     expect(html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
-  it("redirects /, /runs, /start and a run's old URL to their pages under /workflows, and not-found for a run that does not exist", async () => {
+  it("opens on Home: the company's name, its setup card ticked from facts with Hide, and its own latest runs", async () => {
+    // Started, six people declared, no model connected and nothing online; an engine chosen
+    // connects the agent too.
+    expect(await setupProgress(ctx, undefined)).toMatchObject({
+      start: true,
+      agent: false,
+      teammate: true,
+      online: false,
+    });
+    expect((await setupProgress(ctx, "loop")).agent).toBe(true);
+    const home = await page("/");
+    expect(home.status).toBe(200);
+    expect(home.html).toContain("<title>Home · Sanoma</title>");
+    expect(barLink(home.html, "/")).toMatch(/data-active="true"[^>]*aria-current="page"/);
+    expect(home.text).toMatch(new RegExp(`<h1[^>]*>${ctx.snapshot.description.name}</h1>`));
+    expect(home.text).toContain(">Set up your company<");
+    expect(home.text).toMatch(/>[2-4] of 5 done</);
+    expect(home.text).toContain(">Connect your agent<");
+    expect(home.text).toContain('href="/hosting"');
+    // Its own runs only: none of the built-ins' (a chat turn, a drift check).
+    const recent = home.text.slice(home.text.indexOf(">Recent runs</h2>"));
+    expect(recent).toContain('href="/workflows/announce/runs/');
+    expect(recent).not.toMatch(/href="\/workflows\/(drift|apply|chat)\//);
+    // Hidden, its cookie keeps it so.
+    const hidden = await page("/", app.url, { headers: { cookie: "sanoma_home_setup=hidden" } });
+    expect(hidden.text).not.toContain(">Set up your company<");
+    expect(hidden.text).toContain(">Recent runs</h2>");
+  });
+
+  it("redirects /runs, /start and a run's old URL to their pages under /workflows, and not-found for a run that does not exist", async () => {
     // `/start?workflow=` goes to that workflow's page, which says when it does not exist.
     for (const [path, to] of [
-      ["/", /\/workflows$/],
       ["/runs", /\/workflows\?view=runs$/],
       ["/start", /\/workflows$/],
       ["/start?workflow=announce", /\/workflows\/announce\?new=true$/],

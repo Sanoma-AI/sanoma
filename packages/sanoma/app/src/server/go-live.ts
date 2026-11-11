@@ -4,10 +4,13 @@ import {
   APPLY_WORKFLOW,
   errorMessage,
   HOST_SIGNING_KEY,
+  type HostOutputs,
   isEnded,
   keyBytes,
   type Principal,
   postInvite,
+  type RunSummary,
+  type SanomaClient,
   sealInvite,
   sourceKeyId,
   type Resource,
@@ -338,20 +341,26 @@ function hostWakeup(
   };
 }
 
-/** The latest apply run, as the page follows it. */
-async function latestRun({ client }: AppContext): Promise<GoLiveRun | null> {
-  const [run] = await client.runs({ workflow: APPLY_WORKFLOW, limit: 1 });
-  if (!run) return null;
+/** A run as going live follows it: what it waits on (with an apply's plan), and once an apply finished, what it did. */
+export async function goLiveRunOf(client: SanomaClient, run: RunSummary): Promise<GoLiveRun> {
   const pending = run.approvals.find((a) => a.status === "pending");
   const plan = pending && asApplyPlan(pending.details);
-  const report = run.status === "finished" ? await client.applyReport(run.runId) : undefined;
+  const report =
+    run.workflow === APPLY_WORKFLOW && run.status === "finished" ? await client.applyReport(run.runId) : undefined;
   return {
     runId: run.runId,
+    workflow: run.workflow,
     status: run.status,
     ...(pending && { pending: { approvalId: pending.id, ...(plan && { plan }) } }),
     ...(report && { results: report.results }),
     ...(run.error && { error: run.error }),
   };
+}
+
+/** The latest apply run, as the page follows it. */
+async function latestRun({ client }: AppContext): Promise<GoLiveRun | null> {
+  const [run] = await client.runs({ workflow: APPLY_WORKFLOW, limit: 1 });
+  return run ? goLiveRunOf(client, run) : null;
 }
 
 /**
@@ -379,25 +388,26 @@ export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{
   }
 }
 
-/**
- * Where the host answers, from the latest finished apply runs that made or changed it, and
- * whether `/healthz` answers at its wake URL (`wakeUrlOf`), as the host kit asks: a new
- * hostname's DNS and certificate may not be ready while the app already answers there.
- */
-async function hostAnswer({ client }: AppContext): Promise<GoLiveProgress["host"]> {
+/** Where the host answers, as the latest of the last finished apply runs that made or changed it says. */
+export async function appliedHost(client: SanomaClient): Promise<HostOutputs | undefined> {
   const runs = await client.runs({ workflow: APPLY_WORKFLOW, status: "finished", limit: 10 });
   const reports = await Promise.all(runs.map((run) => client.applyReport(run.runId)));
-  for (const report of reports) {
-    const result = report.results.find((r) => r.id === KEYS.host && r.host);
-    if (result?.host) {
-      const { url, healthy } = result.host;
-      const answers = await fetch(new URL("/healthz", wakeUrlOf(result.host)), { signal: AbortSignal.timeout(2_000) })
-        .then((res) => res.ok)
-        .catch(() => false);
-      return { url, healthy: healthy && answers };
-    }
-  }
-  return null;
+  return reports.flatMap((report) => report.results).find((r) => r.id === KEYS.host && r.host)?.host;
+}
+
+/**
+ * Whether `/healthz` answers at the host's wake URL (`wakeUrlOf`), as the host kit asks: a new
+ * hostname's DNS and certificate may not be ready while the app already answers there.
+ */
+export const answers = (host: Pick<HostOutputs, "url" | "wakeUrl">): Promise<boolean> =>
+  fetch(new URL("/healthz", wakeUrlOf(host)), { signal: AbortSignal.timeout(2_000) })
+    .then((res) => res.ok)
+    .catch(() => false);
+
+/** Where the host answers, from the latest finished apply runs that made or changed it, and whether it does. */
+async function hostAnswer({ client }: AppContext): Promise<GoLiveProgress["host"]> {
+  const host = await appliedHost(client);
+  return host ? { url: host.url, healthy: host.healthy && (await answers(host)) } : null;
 }
 
 /** How far going live is: `infra.ts` and the lockfile's bindings as the snapshot read them, the latest apply run and the host. */

@@ -499,3 +499,44 @@ describe("a drift check of a wakeup whose host has a hostname", () => {
     ]);
   });
 });
+
+describe("a drift check of a host", () => {
+  it("says where a bound host answers, as its state says, and nothing of a resource that is no host", () => {
+    const types = resourceTypesOf([cloudflare, wakeupOps]);
+    const workerUrl = "https://sanoma-company.example.workers.dev";
+    const container = {
+      id: "resources/infra.ts#host",
+      name: "company",
+      vendor: "cloudflare",
+      type: "container",
+      binding: "company",
+      desired: { name: "company", hostname: "app.acme.example" },
+      refs: {},
+    };
+    const found = new Map<string, Found>([
+      [
+        container.id,
+        {
+          state: {
+            name: "company",
+            hostname: "app.acme.example",
+            url: "https://app.acme.example",
+            worker_url: workerUrl,
+            healthy: true,
+          },
+        },
+      ],
+      ["resources/infra.ts#alarm", { state: { host: workerUrl, at: null, rang: null, healthy: true } }],
+    ]);
+    const [host, alarm] = compare(types, [container, wakeupOf("alarm", workerUrl)], found);
+    expect(host).toMatchObject({
+      status: "clean",
+      host: { url: "https://app.acme.example", wakeUrl: workerUrl, healthy: true },
+    });
+    expect(alarm).not.toHaveProperty("host");
+    // Unbound, the vendor's object is none of its own yet: no address.
+    const [unbound] = compare(types, [{ ...container, binding: undefined }], found);
+    expect(unbound).toMatchObject({ status: "absent" });
+    expect(unbound).not.toHaveProperty("host");
+  });
+});

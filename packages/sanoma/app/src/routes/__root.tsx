@@ -5,11 +5,18 @@ import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
 import { lazy, type ReactNode } from "react";
 import { DENSITY_COOKIE } from "#/components/density.tsx";
-import { CHAT_COOKIE, chatPref, type ChatPref, ENGINE_COOKIE } from "#/components/shell/prefs.ts";
+import { CHAT_COOKIE, chatPref, type ChatPref, ENGINE_COOKIE, HOME_SETUP_COOKIE } from "#/components/shell/prefs.ts";
 import { defaultLocaleOf, type PageLanguages, pageLanguages, usePageLanguages } from "#/lib/locales.ts";
 import { alternatesOf } from "#/site-path.ts";
 import { ActorContext, useActorState } from "../actor.ts";
-import { actorQuery, chatModelQuery, configQuery, remoteQuery, waitingRunsQuery } from "../queries.ts";
+import {
+  actorQuery,
+  chatModelQuery,
+  companyStateQuery,
+  configQuery,
+  remoteQuery,
+  waitingRunsQuery,
+} from "../queries.ts";
 import { pageHost, siteOrigin } from "../site-url.ts";
 // Sanoma's mark, the desktop icon's small drawing.
 import favicon from "../icon-small.svg?url";
@@ -104,18 +111,20 @@ const APP_HEAD = {
 
 /**
  * What the app's root loader returns: whether the chat column was left open or folded (neither
- * until Chat is first used), the engine a new chat opens on (none until one is chosen), and the density.
+ * until Chat is first used), the engine a new chat opens on (none until one is chosen), whether
+ * Home's setup card was hidden, and the density.
  */
 interface Prefs {
   chat: ChatPref;
   engine?: string;
+  setupHidden: boolean;
   compact: boolean;
 }
 
 /**
  * Who the server says is asking, in the first render: a deployment's login shows at once. And
- * the config, which every page reads and which cannot change while the app runs, and whether the
- * repository has a remote, which the bar's Changes shows by. They stay in
+ * the config, which every page reads and which cannot change while the app runs, whether the
+ * repository has a remote, which the bar's Changes shows by, and the company's state, its badge. They stay in
  * the query client, where the page reads them: a loader returns only what no query holds (here,
  * the `Prefs`), since the page carries loader data too.
  */
@@ -130,6 +139,8 @@ async function appLoader(queryClient: QueryClient): Promise<Prefs> {
     // Whether the chat has a model, so its composer says so from the first render; read again by
     // the composer (a failed read here leaves it to the browser).
     queryClient.query({ ...chatModelQuery(), staleTime: "static" }).catch(() => {}),
+    // The bar's badge, the company's state; polled from there (a failed read leaves it out).
+    queryClient.query({ ...companyStateQuery(), staleTime: "static" }).catch(() => {}),
   ]);
   return readPrefs();
 }
@@ -158,7 +169,8 @@ function SiteActor({ children }: { children: ReactNode }) {
 
 /**
  * Whether the chat column was left open or folded (its cookie, unset until Chat is used), the engine
- * a new chat opens on (its cookie, unset until one is chosen) and whether the page is Compact (DensityProvider says why a cookie), from the request's cookies on the server
+ * a new chat opens on (its cookie, unset until one is chosen), whether Home's setup card was hidden
+ * and whether the page is Compact (DensityProvider says why a cookie), from the request's cookies on the server
  * and `document.cookie` in the browser. Each takes its value once, as it mounts: the first render
  * is hydration, which has the server's answer; reading it in the browser too keeps a later
  * remount (an error boundary's retry, say) on the cookie's side for both.
@@ -167,11 +179,13 @@ const readPrefs = createIsomorphicFn()
   .server(() => ({
     chat: chatPref(getCookie(CHAT_COOKIE)),
     engine: getCookie(ENGINE_COOKIE),
+    setupHidden: getCookie(HOME_SETUP_COOKIE) === "hidden",
     compact: getCookie(DENSITY_COOKIE) === "compact",
   }))
   .client(() => ({
     chat: chatPref(cookieValue(CHAT_COOKIE)),
     engine: cookieValue(ENGINE_COOKIE),
+    setupHidden: cookieValue(HOME_SETUP_COOKIE) === "hidden",
     compact: cookieValue(DENSITY_COOKIE) === "compact",
   }));
 

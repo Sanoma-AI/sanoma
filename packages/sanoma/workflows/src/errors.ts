@@ -1,31 +1,9 @@
 import type { z } from "zod";
 import type { Principal } from "./define.ts";
-import { CALL_WORKFLOW, errorMessage } from "./shared.ts";
+import { CALL_WORKFLOW, type ErrorCode, errorCode, errorMessage, ownProperty } from "./shared.ts";
 
-const CODES = [
-  "policy_denied",
-  "approval_rejected",
-  "approval_withdrawn",
-  "not_approver",
-  "no_pending_approval",
-  "already_decided",
-  "run_not_found",
-  "driver_failed",
-  "invalid_input",
-  "run_ended",
-  "run_running",
-  "call_not_in_outline",
-  "approval_pending",
-  "not_admitted",
-] as const;
-
-/**
- * Why something failed, as a stable string a caller can branch on. Messages are for people
- * and may change; codes are the contract.
- */
-export type ErrorCode = (typeof CODES)[number];
-
-const KNOWN = new Set<string>(CODES);
+// The codes, and reading them off an error, are `shared.ts`'s: a page reads them too.
+export { type ErrorCode, errorCode, vendorCodeOf } from "./shared.ts";
 
 /**
  * An error with a `code` and plain-JSON `data`, both own enumerable properties, so they survive
@@ -43,15 +21,6 @@ export class SanomaError extends Error {
     this.data = data;
   }
 }
-
-/** The error's code, read from its own `code` property, or undefined when it has none of ours. */
-export function errorCode(e: unknown): ErrorCode | undefined {
-  const code = own<string>(e, "code", "string");
-  return code !== undefined && KNOWN.has(code) ? (code as ErrorCode) : undefined;
-}
-
-/** A `DriverError`'s `vendorCode` (`no_token`, `bad_signature`), read as a property: undefined for anything else. */
-export const vendorCodeOf = (e: unknown): string | undefined => own<string>(e, "vendorCode", "string");
 
 /**
  * True when the error says trying again would only repeat it (`retryable: false`), as a
@@ -76,7 +45,9 @@ export function causes(err: unknown): Error[] {
  * module imports no DBOS, since a page's runtime (`page-run.ts`) uses it too.
  */
 export const isRunControlError = (err: unknown): boolean =>
-  causes(err).some((e) => own<number>(e, "dbosErrorCode", "number") !== undefined || errorCode(e) === "run_ended");
+  causes(err).some(
+    (e) => ownProperty<number>(e, "dbosErrorCode", "number") !== undefined || errorCode(e) === "run_ended",
+  );
 
 /** Thrown into the run when the policy denies an operation call. The run fails with it. */
 export class PolicyDeniedError extends SanomaError {
@@ -159,7 +130,7 @@ export class WithdrawnError extends SanomaError {
 export function keepCode<E extends Error>(wrapper: E, original: unknown): E {
   const code = errorCode(original);
   if (code === undefined) return wrapper;
-  const data = own<Record<string, unknown>>(original, "data", "object");
+  const data = ownProperty<Record<string, unknown>>(original, "data", "object");
   return Object.assign(wrapper, { code }, data === undefined ? {} : { data });
 }
 
@@ -216,13 +187,6 @@ export interface ErrorInfo {
   data?: Record<string, unknown>;
 }
 
-/** The error's own property `key`, when it is of the type given. Own: a copy from DBOS has no prototype to read. */
-function own<T>(err: unknown, key: string, type: "number" | "string" | "boolean" | "object"): T | undefined {
-  if (typeof err !== "object" || err === null || !Object.hasOwn(err, key)) return undefined;
-  const value = (err as Record<string, unknown>)[key];
-  return typeof value === type && value !== null ? (value as T) : undefined;
-}
-
 const fromDriver = (code: ErrorCode | undefined) => code === "driver_failed";
 const fromRuntime = (code: ErrorCode | undefined) => code !== undefined;
 const fromAny = () => true;
@@ -248,7 +212,7 @@ export function errorInfo(err: unknown): ErrorInfo {
     message: errorMessage(err),
   };
   for (const [key, type, keeps] of KEPT) {
-    const value = keeps(code) ? own(err, key, type) : undefined;
+    const value = keeps(code) ? ownProperty(err, key, type) : undefined;
     if (value !== undefined) Object.assign(info, { [key]: value });
   }
   if (info.data && Object.keys(info.data).length === 0) delete info.data;
