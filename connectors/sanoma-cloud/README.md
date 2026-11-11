@@ -70,14 +70,15 @@ Its state adds `revision`, `url` and `healthy`. It meets the [`Host` contract](h
 
 ### Environment
 
-| Variable             | What it is                                                                                                                                        |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SANOMA_CLOUD_TOKEN` | The company's Cloud token, `sca_…`, shown once when the Sanoma account made it. The instance has it as a host secret, so it applies its own file. |
-| `SANOMA_CLOUD_URL`   | Optional: where the api answers, `https://www.sanoma.work` unless set.                                                                            |
+The driver reads the company's Cloud token, `sca_…`, from the company's secrets as `SANOMA_CLOUD_TOKEN` on each call, never from the environment on its own. On a computer the app stores it there (Hosting's sign-in to Sanoma, or a Cloud token pasted there). On a Cloud host it is the host's variable, which the company's `secrets.ts` binds (`SANOMA_CLOUD_TOKEN: { env: "SANOMA_CLOUD_TOKEN" }`), so the instance applies its own file. A call without one, or with a value that is no Cloud token, is refused (`no_token`), and the refusal names Hosting.
+
+| Variable           | What it is                                                             |
+| ------------------ | ---------------------------------------------------------------------- |
+| `SANOMA_CLOUD_URL` | Optional: where the api answers, `https://www.sanoma.work` unless set. |
 
 ### Errors and retries
 
-A run that fails fails the call with its failure, which the api answers with a 422 (`DriverError`, its status and `code` as `vendorCode`). Only no reply, a 408, a 429 and a 5xx are retryable (`retryableStatus`); a workflow's refusal (a slug someone else holds, a region the Cloud has not) and a refused token (401, said without its value) are final. A run that has not ended in 15 minutes (`runTimeoutMs`) fails retryable, and the retry resumes it. The driver's own refusals have a `vendorCode`: `no_slug`, `immutable`, `plan_changed`, `no_repository`, `gone`, `not_made`.
+A run that fails fails the call with its failure, which the api answers with a 422 (`DriverError`, its status and `code` as `vendorCode`). Only no reply, a 408, a 429 and a 5xx are retryable (`retryableStatus`); a workflow's refusal (a slug someone else holds, a region the Cloud has not) and a refused token (401, said without its value) are final. A run that has not ended in 15 minutes (`runTimeoutMs`) fails retryable, and the retry resumes it. The driver's own refusals have a `vendorCode`: `no_token`, `no_slug`, `immutable`, `plan_changed`, `no_repository`, `gone`, `not_made`.
 
 ### Running it live
 

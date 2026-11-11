@@ -6,7 +6,7 @@ import { generateSecret, SECRET_NAME } from "./secret.ts";
 import { sealInvite } from "./seal.ts";
 import { errorMessage } from "./shared.ts";
 import { sourceKeyPair, sshPublicKey } from "./ssh-key.ts";
-import { memoryTokens, newApiToken, type Tokens } from "./tokens.ts";
+import { HANDOFF_MS, memoryTokens, newApiToken, type Tokens } from "./tokens.ts";
 import type { InspectRun } from "./run-status.ts";
 import {
   identityProvisioningCode,
@@ -212,6 +212,24 @@ export const sanoma = defineConnector("sanoma", {
       output: z.object({}),
       target: ({ id }: { id: string }) => `token:${id}`,
     },
+    handoff: {
+      effect: "access",
+      // Each try makes another code, good for five minutes and once, and only with the verifier.
+      idempotent: true,
+      description:
+        "Hand off the api token stored under a name, acting for whoever started the run, to whoever holds a PKCE verifier: a one-time code, good for five minutes, redeemed with the verifier at POST /api/token/redeem (never the token)",
+      input: z.object({
+        store: SecretName.describe("The secret the token is stored under, as sanoma.token.mint stored it"),
+        challenge: z
+          .string()
+          .regex(/^[\w-]{43}$/, "a PKCE S256 challenge: the verifier's SHA-256 in base64url")
+          .describe("The PKCE S256 challenge of the verifier the code will be redeemed with"),
+      }),
+      output: z.object({ code: z.string().describe("The one-time code, `sch_…`") }),
+      target: ({ store }: { store: string }) => store,
+      // A code that redeems the token: the ledger records that there was one, not what it was.
+      opaque: ["code"],
+    },
   },
 });
 
@@ -372,6 +390,17 @@ export function runtimeDriver({
       async revoke({ id }) {
         await tokens.revoke({ id });
         return {};
+      },
+      async handoff({ store, challenge }, call) {
+        // Only a live token minted here, acting for whoever started the run: never another
+        // secret's value, nor another account's token.
+        const token = await call.secrets.get(store);
+        const live = token === undefined ? undefined : await tokens.resolve(token);
+        if (!live || live.subject !== call.principal?.id)
+          throw refuse(`${store} holds no live api token acting for the run's starter`);
+        return tokens.handoff({ store, challenge, ttlMs: HANDOFF_MS }).catch(() => {
+          throw new DriverError("sanoma: token handoff unavailable", { retryable: true });
+        });
       },
     },
   });

@@ -1,4 +1,5 @@
 import { createPublicKey, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
+import { calculatePKCECodeChallenge, generateRandomCodeVerifier } from "oauth4webapi";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { testDatabaseUrl } from "sanoma/testing";
@@ -80,6 +81,16 @@ const revoke = defineWorkflow({
   },
 });
 
+const handoff = defineWorkflow({
+  name: "handoff",
+  trigger: "manual",
+  input: z.object({ store: z.string(), challenge: z.string() }),
+  uses: [sanoma.token.handoff],
+  run: async (ctx, input) => {
+    return await ctx.sanoma.token.handoff(input);
+  },
+});
+
 const whoami = defineWorkflow({
   name: "whoami",
   trigger: "manual",
@@ -113,7 +124,7 @@ describe("the runtime's own operations", () => {
   const store = memorySecretStore();
   const app = useTestApp(
     {
-      workflows: [keys, drop, invite, token, revoke, whoami],
+      workflows: [keys, drop, invite, token, revoke, handoff, whoami],
       connectors: [],
       secrets: {
         store,
@@ -332,6 +343,41 @@ describe("the runtime's own operations", () => {
     expect(await app.client.tokens.resolve(value)).toBeUndefined();
   });
 
+  it("hands off a stored token by a one-time code, the operation's record never holding the code or the token", async () => {
+    // Minted for ada, who starts the handoff: another's token is not hers to hand off.
+    const { id } = (await run("token", { subject: "ada", store: "ACME_HANDED_TOKEN" })) as { id: string };
+    await run("token", { subject: "visitor:better-auth:owner-2", store: "ACME_OTHERS_TOKEN" });
+    const value = (await stored("ACME_HANDED_TOKEN"))!;
+    const verifier = generateRandomCodeVerifier();
+    const challenge = await calculatePKCECodeChallenge(verifier);
+    const runId = await app.client.start("handoff", { store: "ACME_HANDED_TOKEN", challenge }, { startedBy: "ada" });
+    const { code } = (await app.client.result(runId)) as { code: string };
+    expect(code).toMatch(/^sch_/);
+    const records = await app.client.ledger(runId);
+    const called = JSON.stringify(records.filter((r) => r.type === "op.called"));
+    expect(called).toContain('"op":"sanoma.token.handoff"');
+    expect(called).toContain('"code":"<code>"');
+    expect(called).not.toContain(code);
+    // The run's output is what its workflow returns (this one, the code): never the token.
+    expect(JSON.stringify(records)).not.toContain(value);
+    expect(await app.client.tokens.redeem({ code, verifier })).toEqual({ store: "ACME_HANDED_TOKEN" });
+    expect(await app.client.tokens.redeem({ code, verifier })).toBeUndefined();
+    // Only a live token minted here for the run's starter: not another secret's value, nothing,
+    // another account's token, or a token revoked.
+    await run("keys", { name: "ACME_NOT_A_TOKEN", kind: "random" });
+    for (const name of ["ACME_NOT_A_TOKEN", "ACME_NOTHING_STORED"])
+      await expect(run("handoff", { store: name, challenge })).rejects.toThrow(
+        `sanoma: ${name} holds no live api token`,
+      );
+    await run("revoke", { id });
+    await expect(run("handoff", { store: "ACME_HANDED_TOKEN", challenge })).rejects.toThrow(
+      "sanoma: ACME_HANDED_TOKEN holds no live api token",
+    );
+    // A challenge that is no S256 one, and a SANOMA_ name, are refused before the driver.
+    await expect(run("handoff", { store: "ACME_HANDED_TOKEN", challenge: "plain" })).rejects.toThrow(/S256/);
+    await expect(run("handoff", { store: "SANOMA_CLOUD_TOKEN", challenge })).rejects.toThrow(/SANOMA_/);
+  });
+
   it("recovers a recorded token ID across workflow runs without changing authority or reviving revocation", async () => {
     const input = { id: randomUUID(), subject: "visitor:recovery:owner", store: "RECOVERED_CLOUD_TOKEN" };
     const first = await ledgerOf("token", input);
@@ -496,6 +542,7 @@ describe("the runtime's own operations in a config", () => {
       "sanoma.invite.mint",
       "sanoma.token.mint",
       "sanoma.token.revoke",
+      "sanoma.token.handoff",
     ]) {
       expect(resolved.ops.get(id)).toBeDefined();
       expect(resolved.drivers.get(id)).toBeDefined();

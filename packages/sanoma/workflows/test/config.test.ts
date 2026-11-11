@@ -203,6 +203,7 @@ describe("a change's operations, built in", () => {
       "sanoma.invite.mint",
       "sanoma.token.mint",
       "sanoma.token.revoke",
+      "sanoma.token.handoff",
       "sanoma.storeMigration.plan",
       "sanoma.storeMigration.prepare",
       "sanoma.storeMigration.transfer",

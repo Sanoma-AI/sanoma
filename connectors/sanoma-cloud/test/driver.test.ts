@@ -6,7 +6,8 @@ import { cloudDriver } from "../src/driver.ts";
 
 // The driver against a stand-in for sanoma-ops's public api (`POST /api/call`) in this process:
 // the requests it sends (a start with an id per call, then results until the run ends, the token
-// as a bearer), how it maps the workflows' answers to the resource operations, and its errors.
+// as a bearer, read from the call's secrets), how it maps the workflows' answers to the resource
+// operations, and its errors.
 
 const TOKEN = "sca_test-token";
 
@@ -31,6 +32,8 @@ let sent: Sent[] = [];
 let workflows: Record<string, (input: any) => Answer> = {};
 /** How many `run_running` answers a run's result gets before its own. */
 let running = 1;
+/** The company's secrets, which each call reads its token from. */
+let stored: Record<string, string> = {};
 
 beforeAll(async () => {
   const runs = new Map<string, { answer: Answer; waits: number }>();
@@ -61,8 +64,8 @@ beforeAll(async () => {
 afterAll(() => new Promise<void>((done) => server.close(() => done())));
 
 beforeEach(() => {
-  vi.stubEnv("SANOMA_CLOUD_TOKEN", TOKEN);
   vi.stubEnv("SANOMA_CLOUD_URL", url);
+  stored = { SANOMA_CLOUD_TOKEN: TOKEN };
   sent = [];
   running = 1;
   workflows = {};
@@ -76,7 +79,7 @@ const call = (opId: string, idempotencyKey = `${opId}:${++n}`): CallContext => (
   runId: "driver",
   opId,
   attempt: 1,
-  secrets: memorySecrets(),
+  secrets: memorySecrets(stored),
 });
 const driver = cloudDriver({ timeoutMs: 5_000 });
 const op = (name: string, input: object, key?: string) =>
@@ -361,15 +364,36 @@ describe("cloud's driver errors", () => {
     });
   });
 
-  it("says a refused token is unknown or revoked, never its value, and refuses a call without one", async () => {
-    vi.stubEnv("SANOMA_CLOUD_TOKEN", "sca_revoked");
+  it("says a refused token is unknown or revoked, never its value", async () => {
+    stored = { SANOMA_CLOUD_TOKEN: "sca_revoked" };
     const refused = op("host.read", { id: "acme" });
     await expect(refused).rejects.toMatchObject({ status: 401, retryable: false });
     await expect(refused).rejects.toThrow("SANOMA_CLOUD_TOKEN was refused: it is unknown or revoked");
     await expect(refused).rejects.not.toThrow("sca_revoked");
-    vi.stubEnv("SANOMA_CLOUD_TOKEN", "");
-    await expect(op("host.read", { id: "acme" })).rejects.toThrow("SANOMA_CLOUD_TOKEN is not set");
+  });
+
+  it("reads the token from the call's secrets, never the environment, and refuses none or one that is no Cloud token", async () => {
+    workflows = { cloudList: () => ({ output: [] }) };
+    vi.stubEnv("SANOMA_CLOUD_TOKEN", TOKEN);
+    stored = {};
+    const none = op("host.read", { id: "acme" });
+    await expect(none).rejects.toMatchObject({ retryable: false, vendorCode: "no_token" });
+    await expect(none).rejects.toThrow("SANOMA_CLOUD_TOKEN is not stored: sign in to Sanoma on the Hosting page");
+    stored = { SANOMA_CLOUD_TOKEN: "ghp_not-a-cloud-token" };
+    const wrong = op("host.read", { id: "acme" });
+    await expect(wrong).rejects.toMatchObject({ vendorCode: "no_token" });
+    await expect(wrong).rejects.toThrow("SANOMA_CLOUD_TOKEN is not a Cloud token (sca_…)");
+    await expect(wrong).rejects.not.toThrow("ghp_not-a-cloud-token");
+    expect(sent).toEqual([]);
+    stored = { SANOMA_CLOUD_TOKEN: TOKEN };
+    expect(await op("host.read", { id: "acme" })).toEqual({ id: "acme", gone: true });
+    expect(sent.length).toBeGreaterThan(0);
     expect(sent.filter((s) => s.headers.authorization !== `Bearer ${TOKEN}`)).toEqual([]);
+  });
+
+  it("declares only SANOMA_CLOUD_URL, optional, so a computer with the token stored is not refused", () => {
+    expect(Object.keys(driver.env!.shape)).toEqual(["SANOMA_CLOUD_URL"]);
+    expect(driver.env!.safeParse({}).success).toBe(true);
   });
 
   it("gives up on a run that has not ended in its time, retryable", async () => {

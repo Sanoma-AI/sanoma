@@ -178,6 +178,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "sanoma.storeMigration.retire",
       "sanoma.storeMigration.transfer",
       "sanoma.storeMigration.verify",
+      "sanoma.token.handoff",
       "sanoma.token.mint",
       "sanoma.token.revoke",
     ]);

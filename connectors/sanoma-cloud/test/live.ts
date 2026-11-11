@@ -45,7 +45,8 @@ const op = (name: string, input: object) =>
     runId: "live",
     opId: `cloud.${name}`,
     attempt: 1,
-    secrets: memorySecrets(),
+    // The token the driver reads from a call's secrets, as a company has it stored.
+    secrets: memorySecrets({ SANOMA_CLOUD_TOKEN: process.env.SANOMA_CLOUD_TOKEN! }),
   } satisfies CallContext) as Promise<any>;
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 /** The commit `ref` names on the repository now, as apply resolves it. */

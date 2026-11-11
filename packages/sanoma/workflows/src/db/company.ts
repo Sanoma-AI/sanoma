@@ -155,6 +155,19 @@ export const apiTokens = pgTable("sanoma_api_tokens", {
   revokedAt: when(),
 });
 
+/**
+ * The api tokens' one-time handoffs (`Tokens.handoff`): each code's SHA-256, never the code, the
+ * secret whose token it hands off, its PKCE challenge, and when it expires or was redeemed. Swept
+ * once expired.
+ */
+export const tokenHandoffs = pgTable("sanoma_token_handoffs", {
+  codeHash: text().primaryKey(),
+  store: text().notNull(),
+  challenge: text().notNull(),
+  expiresAt: when().notNull(),
+  redeemedAt: when(),
+});
+
 /** The nonces of sealed invite requests spent (`spendInviteRequest`), each until it expires. */
 export const inviteRequests = pgTable("sanoma_invite_requests", {
   nonce: text().primaryKey(),
