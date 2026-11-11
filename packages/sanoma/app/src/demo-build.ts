@@ -4,6 +4,7 @@
 // mounts a working demo with no server and no request leaving it. `sanoma/app/demo`.
 import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -36,7 +37,7 @@ import {
   specifier,
   writeSiteFiles,
 } from "./build.ts";
-import { companyFiles, optional, reachedChunks, vendorInfos } from "./bundle-build.ts";
+import { companyFiles, optional, pruneUnreached, vendorInfos } from "./bundle-build.ts";
 import { withoutSources } from "./snapshot.ts";
 
 /** Where the world is, from the root (`WORLD_FILE`). */
@@ -149,6 +150,16 @@ export interface BuildDemoOptions {
   out: string;
   /** See `BuildAppOptions.log`. */
   log?: (line: string) => void;
+}
+
+/** `description` with every path under `root` named from it; refused if a path of the machine's is left, since the page is public. */
+function publicDescription(description: AppConfig, root: string): AppConfig {
+  const text = JSON.stringify(description).replaceAll(JSON.stringify(`${root}${sep}`).slice(1, -1), "");
+  const left = [root, homedir()]
+    .filter((path) => path.length > 1)
+    .find((path) => text.includes(JSON.stringify(path).slice(1, -1)));
+  if (left !== undefined) throw new Error(`A demo's description would publish a path of this machine's: ${left}`);
+  return JSON.parse(text) as AppConfig;
 }
 
 /** What a demo writes in its folder, each the only names a folder it is built into may hold. */
@@ -313,7 +324,7 @@ function demoPlugins(root: string, src: string, text: string, conditions: string
       generateBundle: {
         order: "post",
         handler(_options, bundle) {
-          const reached = reachedChunks(bundle);
+          const reached = pruneUnreached(bundle);
           const found = [...reached]
             .flatMap((name) => (bundle[name] as { moduleIds: string[] }).moduleIds)
             .flatMap((id) => {
@@ -325,8 +336,6 @@ function demoPlugins(root: string, src: string, text: string, conditions: string
               `A demo runs in the browser, and its page would load what only a server has: ${[...new Set(found)].join(", ")}`,
             );
           }
-          for (const file of Object.values(bundle))
-            if (file.type === "chunk" && !reached.has(file.fileName)) delete bundle[file.fileName];
           const texts = Object.values(bundle).map((file) => (file.type === "chunk" ? file.code : String(file.source)));
           for (const file of Object.values(bundle)) {
             const name = file.fileName.slice(file.fileName.lastIndexOf("/") + 1);
@@ -378,6 +387,13 @@ const INDEX = `<!doctype html>
  */
 export async function buildDemo(repo: string, { config, out, log }: BuildDemoOptions): Promise<{ files: string[] }> {
   const root = realpathSync(repo);
+  const held = existsSync(out) ? readdirSync(out) : [];
+  const others = held.filter((name) => !DEMO_FILES.has(name));
+  if (others.length || (held.length && !held.includes("mount.js"))) {
+    throw new Error(
+      `${out} holds ${(others.length ? others : held).join(", ")}, and no demo's alone: a demo's folder is emptied when it is built`,
+    );
+  }
   const [{ describeConfig }, { loadWorld }, { pageRuntime }, vite] = await Promise.all([
     import("sanoma/workflows/describe"),
     import("sanoma/workflows/scenario"),
@@ -409,7 +425,9 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
   const exported = await Promise.all(
     plan.connectors.map(async ({ connector, package: pkg }) => {
       const vendor = connector[VENDOR].id;
-      const [found] = await exportsOf(fromRoot.resolve(pkg), (value) => isConnectorOf(value, vendor));
+      const matches = await exportsOf(fromRoot.resolve(pkg), (value) => isConnectorOf(value, vendor));
+      // The config's own export when the package has several of the vendor (one with a setup of its own).
+      const found = matches.find(([, value]) => value === connector) ?? matches[0];
       if (!found) throw new DemoRefused([`${pkg}: exports no connector of ${vendor}, which a demo imports`]);
       return { package: pkg, name: found[0], connector: found[1] as Connector<any, any> };
     }),
@@ -458,19 +476,13 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
     connectors: exported,
     world,
     // From the root, never the machine's paths: the page is public.
-    description: JSON.parse(JSON.stringify(shown).replaceAll(JSON.stringify(`${root}${sep}`).slice(1, -1), "")),
+    description: publicDescription(shown, root),
     sites,
   });
   const conditions = [...(fromCheckout() ? ["sanoma-source"] : []), "browser", "module", "import", "default"];
   // An optional peer, bundled when the company installed it.
   const keep = moduleDir("@react-pdf/renderer", pkgDir) ? ["@react-pdf/renderer"] : [];
 
-  const others = existsSync(out) ? readdirSync(out).filter((name) => !DEMO_FILES.has(name)) : [];
-  if (others.length) {
-    throw new Error(
-      `${out} holds ${others.join(", ")}, which no demo writes: a demo's folder is emptied when it is built`,
-    );
-  }
   const outDir = join(root, ".sanoma", "app", "demo", `build.${process.pid}`);
   const { src } = appSources();
   const base = repoConfig(root, { kind: "demo", plugins: demoPlugins(root, src, text, conditions, keep) });

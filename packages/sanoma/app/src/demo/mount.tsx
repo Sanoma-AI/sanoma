@@ -32,7 +32,7 @@ const SCOPE = "data-sanoma-demo";
  * empties the element. A page shows one demo at a time: mounting another moves `api` to it.
  */
 export async function mount(element: Element, { path = `/sites/${sites[0]}`, exit }: MountOptions = {}) {
-  const release = serve(await runtime());
+  const seeded = await runtime();
   const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 1_000 } } });
   // What a site's start form reads of the config, never asked of a server.
   queryClient.setQueryData(configQuery().queryKey, description);
@@ -68,6 +68,7 @@ export async function mount(element: Element, { path = `/sites/${sites[0]}`, exi
   element.setAttribute(SCOPE, "");
   const root = createRoot(element);
   element.addEventListener("click", onClick);
+  const release = serve(seeded);
   root.render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />

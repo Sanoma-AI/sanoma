@@ -262,10 +262,7 @@ async function bundlePlugins(
       name: "sanoma:reachable",
       applyToEnvironment: ssr,
       generateBundle(_options, bundle) {
-        const reached = reachedChunks(bundle);
-        for (const file of Object.values(bundle)) {
-          if (file.type === "chunk" && !reached.has(file.fileName)) delete bundle[file.fileName];
-        }
+        pruneUnreached(bundle);
       },
     },
     cloudflare({
@@ -713,8 +710,11 @@ function nodeOnlyOf(err: unknown): NodeOnlyImport | undefined {
   return undefined;
 }
 
-/** The chunks of `bundle` its entries reach, by static and dynamic imports, by file name. */
-export function reachedChunks(bundle: Rollup.OutputBundle): Set<string> {
+/**
+ * Deletes each chunk of `bundle` its entries do not reach by static and dynamic imports; returns
+ * those they do, by file name.
+ */
+export function pruneUnreached(bundle: Rollup.OutputBundle): Set<string> {
   const reached = new Set<string>();
   const reach = (name: string) => {
     const chunk = bundle[name];
@@ -723,5 +723,8 @@ export function reachedChunks(bundle: Rollup.OutputBundle): Set<string> {
     for (const next of [...chunk.imports, ...chunk.dynamicImports]) reach(next);
   };
   for (const file of Object.values(bundle)) if (file.type === "chunk" && file.isEntry) reach(file.fileName);
+  for (const file of Object.values(bundle)) {
+    if (file.type === "chunk" && !reached.has(file.fileName)) delete bundle[file.fileName];
+  }
   return reached;
 }

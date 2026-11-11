@@ -166,7 +166,7 @@ describe("buildDemo", () => {
     const busy = company();
     mkdirSync(join(busy, "demo"));
     writeFileSync(join(busy, "demo", "robots.txt"), "");
-    await expect(build(busy)).rejects.toThrow(/holds robots\.txt, which no demo writes/);
+    await expect(build(busy)).rejects.toThrow(/holds robots\.txt, and no demo's alone/);
   }, 300_000);
 
   it("runs in a host's page: a workflow from the page, a failure said, a PDF rendered, a fresh world on remount, nothing leaving the page", async (ctx) => {
