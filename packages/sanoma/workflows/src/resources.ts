@@ -164,9 +164,16 @@ export function admit(
     const { email, github } = asking;
     return { id: asking.id, groups: [VISITORS], ...(email && { email }), ...(github && { github }) };
   }
-  // The chat's agent acting for a person is checked as `chatAgentActing` checks it, and keeps them:
-  // never through a sign-in, which admits a person alone.
-  if (!signIn && asking.id === CHAT_AGENT && asking.onBehalfOf !== undefined) {
+  // The chat's agent acts only for a person, checked as `chatAgentActing` checks it, and keeps
+  // them: never bare, and never through a sign-in, which admits a person alone.
+  if (asking.id === CHAT_AGENT) {
+    if (signIn || asking.onBehalfOf === undefined) {
+      throw new NotAdmittedError(
+        CHAT_AGENT,
+        [],
+        `${CHAT_AGENT} is the in-app chat's own agent, which acts only for the person chatting in the app`,
+      );
+    }
     return chatAgentActing(asking.onBehalfOf, { people, problems });
   }
   if (problems.length) {

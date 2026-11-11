@@ -777,11 +777,13 @@ export const LOGIN_AGENT = "login";
 export const RENEWAL_AGENT = "renewal";
 /**
  * The runtime's agent the in-app chat acts as, on behalf of the person chatting: what its tools
- * call and start (the agent catalog, `/mcp`'s six) is the chat's, for them (`chatAgentActing`).
+ * call and start (the agent catalog, `/mcp`'s six) is the chat's, for them (`chatAgentActing`), and
+ * never anyone's acting for no one (`admit` refuses it bare). Named `sanoma-chat`, not `chat`, a
+ * word a company may well have given a person or an agent already.
  * Unlike the runtime's other agents it is held to the agent rules (`isDeclaredAgent`): the
  * built-ins it may start (`AGENT_BUILT_INS`) and the policy asked as it and as the person.
  */
-export const CHAT_AGENT = "chat";
+export const CHAT_AGENT = "sanoma-chat";
 /** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration, sign-in codes, grant renewals, the in-app chat), declared whether a data file names them or not. */
 export const RUNTIME_AGENTS: readonly string[] = [
   "scenarios",

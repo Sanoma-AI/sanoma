@@ -807,7 +807,7 @@ forbid (principal, action in Sanoma::Action::"effect:write", resource == Sanoma:
 /** Claude Code acting for `person`, as admitted. */
 const forOf = (person: string): Principal => ({ id: "claude-code", groups: ["agents"], onBehalfOf: person });
 /** The in-app chat's agent acting for `person`, as admitted. */
-const chatFor = (person: string): Principal => ({ id: "chat", groups: ["agents"], onBehalfOf: person });
+const chatFor = (person: string): Principal => ({ id: "sanoma-chat", groups: ["agents"], onBehalfOf: person });
 /** An approved approval addressed to `approver`, covering `op`. */
 const approvedBy = (op: string, approver: ApprovalState["approver"]): ApprovalState => ({
   ...approved(approver, typeof approver === "string" ? approver : "x"),
@@ -941,7 +941,7 @@ forbid (principal, action == Sanoma::Action::"shop.notes.add", resource);
         file: "policies/chat.cedar",
         text: `@id("chat-no-refund")
 @reason("The chat starts no refunds")
-forbid (principal == Sanoma::Principal::"chat", action == Sanoma::Action::"workflow:refund", resource);
+forbid (principal == Sanoma::Principal::"sanoma-chat", action == Sanoma::Action::"workflow:refund", resource);
 `,
       },
     ]);
@@ -1049,7 +1049,7 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
   );
   const forAda = { id: "claude-code", onBehalfOf: "ada" };
   /** The in-app chat's agent, for Ada, as her chat turn makes it. */
-  const chatForAda = { id: "chat", onBehalfOf: "ada" };
+  const chatForAda = { id: "sanoma-chat", onBehalfOf: "ada" };
 
   it("binds the in-app chat's agent to the agent rules, unlike the runtime's other agents", async () => {
     // Its drift is asked as an agent's: refused here, as Claude Code's is.
@@ -1070,21 +1070,25 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
       code: "policy_denied",
       message: "workflow:bonus was denied by policy: Contractors get no bonus",
     });
-    const forBo = { id: "chat", onBehalfOf: "bo" };
+    const forBo = { id: "sanoma-chat", onBehalfOf: "bo" };
     expect(await app.client.result(await app.client.start(bonus, { amount: 8 }, { startedBy: forBo }))).toEqual({
       bonus: 8,
     });
     // An agents' on-behalf-of hold waits for the person chatting, who may approve it; the run says who.
     const held = await app.client.start(payout, { amount: 9 }, { startedBy: chatForAda });
-    expect((await app.client.run(held))?.startedBy).toEqual({ id: "chat", groups: ["agents"], onBehalfOf: "ada" });
+    expect((await app.client.run(held))?.startedBy).toEqual({
+      id: "sanoma-chat",
+      groups: ["agents"],
+      onBehalfOf: "ada",
+    });
     await waitFor(async () => (await app.client.approvals(held)).some((a) => a.status === "pending"));
     expect(await app.client.approvals(held)).toEqual([
       expect.objectContaining({ approver: "ada", status: "pending", reasons: ["agent-payouts"] }),
     ]);
     await app.client.decide(held, { decision: "approve", by: { id: "ada" } });
     expect(await app.client.result(held)).toEqual({ paid: 9 });
-    // The chat's agent acting for no one, as a runtime agent is named, is still an agent the rules bind.
-    expect(await failure(app.client.drift({ startedBy: "chat" }))).toMatchObject({ code: "policy_denied" });
+    // The chat's agent acting for no one is nobody.
+    expect(await failure(app.client.drift({ startedBy: "sanoma-chat" }))).toMatchObject({ code: "not_admitted" });
   });
 
   it("refuses an agent's drift a forbid on workflow:drift names, and not a person's or a runtime agent's", async () => {

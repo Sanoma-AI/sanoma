@@ -55,6 +55,7 @@ import {
   principalIdsOf,
   problemLine,
   RUNTIME_AGENTS,
+  CHAT_AGENT,
   visitorPrincipal,
 } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
@@ -465,7 +466,9 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       return admit({ id: who }, declared).id;
     } catch (err) {
       if (errorCode(err) !== "not_admitted" || declared.problems.length) throw err;
-      const ids = [...principalIdsOf(declared.people), ...RUNTIME_AGENTS].join(", ");
+      // The chat's agent acts only for a person, as no step names one.
+      const runtime = RUNTIME_AGENTS.filter((id) => id !== CHAT_AGENT);
+      const ids = [...principalIdsOf(declared.people), ...runtime].join(", ");
       throw new Error(`${who} is not a declared person or agent; resources/ declares ${ids}`, { cause: err });
     }
   };
