@@ -23,6 +23,7 @@ import { errorsOf, FieldView, FormFoot, useSchemaForm } from "../form/start-form
 import { api } from "../queries.ts";
 import { Notice } from "./common.tsx";
 import { type RecordsView, savedIn } from "./grid/collection.ts";
+import { isHidden } from "./grid/plan.ts";
 import { STAGED_FIRST } from "./grid/staged.tsx";
 import { HistoryLink } from "./record-history.tsx";
 
@@ -32,7 +33,8 @@ import { HistoryLink } from "./record-history.tsx";
 // edits, after the grid's), whose handler calls the collection's operation, `data.<name>.save`
 // (`ifAbsent` for a new record, `ifRecord` for an edit) or `.delete`, through `api` as the
 // person; a held call's toast is the collection's. While the grid has a change staged, Save and
-// Delete wait for it: the grid's bar saves or discards it.
+// Delete wait for it: the grid's bar saves or discards it. A hidden field (removed from the
+// columns) has no field on it, and an edit keeps its value.
 
 /** An issue's path in a save's input (`record.<field>`), as the form's. */
 const inRecord = (path: (string | number)[]) => (path[0] === "record" ? path.slice(1) : path);
@@ -45,7 +47,7 @@ const inRecord = (path: (string | number)[]) => (path[0] === "record" ? path.sli
  * on the form.
  */
 export function RecordForm({
-  collection: { name, key, record },
+  collection: { name, key, record, fields: declared },
   view: { collection: records, edit },
   saved,
   staged,
@@ -60,7 +62,10 @@ export function RecordForm({
   actor: string | null | undefined;
   onDone: () => void;
 }) {
-  const fields = useMemo(() => fieldsOf(record) ?? [], [record]);
+  const fields = useMemo(
+    () => (fieldsOf(record) ?? []).filter((field) => !isHidden(declared[field.key])),
+    [record, declared],
+  );
   const defaultValues = useMemo(() => {
     if (saved) return initialValues(fields, saved.record);
     const people = actor ? fields.filter((f) => f.kind === "person").map((f) => [f.key, actor]) : [];
@@ -76,8 +81,10 @@ export function RecordForm({
       if (!saved && typed && (await (api as UntypedApi).data[name].get({ key: typed }))) {
         return { fields: { [key]: "A record has this key already: open it to change it" } };
       }
+      // The hidden fields' values, which the form does not show, kept.
+      const kept = Object.entries(saved?.record ?? {}).filter(([field]) => isHidden(declared[field]));
       const tx = saved
-        ? edit({ key: saved.key, record: input })
+        ? edit({ key: saved.key, record: { ...Object.fromEntries(kept), ...input } })
         : records.insert({ key: typed, record: input, updatedAt: new Date().toISOString(), updatedBy: actor ?? "" });
       await tx.when("settled");
       // None when the call is held for an approval: its toast said so.

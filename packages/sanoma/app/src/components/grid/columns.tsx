@@ -1,5 +1,6 @@
+import type { PatchOutput } from "sanoma/workflows";
 import type { CollectionEntry } from "sanoma/workflows/describe";
-import type { ColumnType } from "sanoma/workflows/description";
+import type { ColumnType, ConvertDecision, TableChangePlan } from "sanoma/workflows/description";
 import { changeIdOf, errorMessage, type Saved } from "sanoma/workflows/shared";
 import { deepEquals } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,20 +23,37 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
-import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "#/components/ui/field.tsx";
+import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
+import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { proposeColumnChangeFn } from "../../functions.ts";
 import { closeRecord, type ColumnSearch, openColumn, refreshWritten, remoteQuery } from "../../queries.ts";
 import { ButtonLink, CardHeading, Notice, ToneBadge } from "../common.tsx";
 import { FROM } from "../data-grid.tsx";
-import { ColumnChange, happens, keysIn, NOT_YET, planOf, problemOf, requiredOf, takenToday, typeOf } from "./plan.ts";
+import {
+  ColumnChange,
+  DECIDED,
+  DOES,
+  happens,
+  keysIn,
+  landed,
+  planOf,
+  problemOf,
+  requiredOf,
+  takenToday,
+  typeOf,
+  typeWords,
+  UNAVAILABLE,
+} from "./plan.ts";
+import { WontConvertSample } from "./review.tsx";
 
 // A collection's columns from its grid: each field's menu on its heading (Rename, Change type,
-// Hide column, a free-form field's keys to make columns of, Remove column), New column, and the
-// panel each opens beside the grid (`?column=`), which proposes the change (`proposeColumnChangeFn`)
-// after saying what will happen, drafted over the rows on screen (`planOf`). A column's width is
-// this browser's.
+// Hide for me, a free-form field's keys to make columns of, Remove for everyone), New column, and
+// the panel each opens beside the grid (`?column=`), which proposes the change
+// (`proposeColumnChangeFn`) after saying what will happen, drafted over the rows on screen
+// (`planOf`), and asks what becomes of the values a type change cannot convert. A column's width
+// is this browser's.
 
 /** The columns after the fields, by ids no field can have. */
 export const UPDATED = "@updated";
@@ -64,9 +82,10 @@ export function writeWidths(name: string, widths: ColumnSizingState) {
 const AT_HEAD_END = "absolute top-1/2 right-2 -translate-y-1/2";
 
 /**
- * A field's menu on its heading: Rename, Change type, Hide column (the page's `?hide=`), on a
- * free-form field the keys its records hold with how many (`rows`, those on screen) to make a
- * column of, and Remove column; none on the key, which names each record.
+ * A field's menu on its heading: Rename, Change type, Hide for me (the page's `?hide=`, this view
+ * alone), on a free-form field the keys its records hold with how many (`rows`, those on screen)
+ * to make a column of, and Remove for everyone (the `hide` change, its panel); none on the key,
+ * which names each record.
  */
 export function ColumnMenu({
   collection,
@@ -104,15 +123,25 @@ export function ColumnMenu({
             })
           }
         >
-          Hide column
+          <MenuChoice title="Hide for me" detail="Only in your view. Fields shows it again." />
         </DropdownMenuItem>
         {typeOf(declared) === "json" && <KeysIn field={field} rows={rows} open={open} />}
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={() => open({ change: "delete", field })}>
-          Remove column
+        <DropdownMenuItem variant="destructive" onClick={() => open({ change: "hide", field })}>
+          <MenuChoice title="Remove for everyone…" detail="Leaves the grid and the forms. Its values are kept." />
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** A menu item's name, with what it does under it. */
+function MenuChoice({ title, detail }: { title: string; detail: string }) {
+  return (
+    <span className="flex flex-col">
+      {title}
+      <span className="text-xs text-muted-foreground">{detail}</span>
+    </span>
   );
 }
 
@@ -184,16 +213,17 @@ function titleOf(collection: CollectionEntry, { change, field, key }: ColumnSear
       return `Change the type of ${field}`;
     case "convert":
       return `Make ${key} of ${field} a column`;
-    case "delete":
-      return `Remove ${field}`;
+    case "hide":
+      return `Remove ${field} for everyone`;
   }
 }
 
 /**
  * The column panel beside the grid: what `column` changes, with the fields it takes (a name, a
  * type of the chips, its choices, Optional), What will happen over `rows` (those on screen) in
- * plain words, and Review the change, which proposes it: a change to review, or, with no remote,
- * the data file written.
+ * plain words, for a type change with values that won't convert those values and what becomes of
+ * them (the plan's `decision`, asked before it goes on), and Review the change, which proposes it:
+ * a change to review, or, with no remote, the data file written and what became of the records.
  */
 export function ColumnPanel({
   collection,
@@ -212,6 +242,7 @@ export function ColumnPanel({
   const [type, setType] = useState<ColumnType>(declared && column.change === "retype" ? typeOf(declared) : "text");
   const [choices, setChoices] = useState(isChoice(type) ? type.enum.join("\n") : "");
   const [optional, setOptional] = useState(true);
+  const [decision, setDecision] = useState<ConvertDecision>();
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string>();
   const field = column.field ?? "";
@@ -221,9 +252,9 @@ export function ColumnPanel({
   const intent = {
     add: { kind: "add", field: name, type: typed, required: !optional },
     rename: { kind: "rename", from: field, to: name },
-    retype: { kind: "retype", field, to: typed },
-    convert: { kind: "convert", field, key: column.key ?? "", type: typed },
-    delete: { kind: "hide", field },
+    retype: { kind: "retype", field, to: typed, decision },
+    convert: { kind: "convert", field, key: column.key ?? "", type: typed, decision },
+    hide: { kind: "hide", field },
   }[column.change];
   const parsed = ColumnChange.safeParse(intent);
   const problem = parsed.success ? problemOf(collection, parsed.data) : parsed.error.issues[0]?.message;
@@ -231,19 +262,23 @@ export function ColumnPanel({
   const unchanged =
     (column.change === "rename" && name === field) ||
     (column.change === "retype" && declared !== undefined && deepEquals(typed, typeOf(declared)));
+  // A retype's or a conversion's values that won't convert, among those on screen: what becomes of them is asked.
+  const [planned] = plan?.changes ?? [];
+  const wont = planned && "wontConvert" in planned && !unchanged ? planned.wontConvert : undefined;
+  const asks = wont !== undefined && wont.count > 0;
 
   async function propose() {
     if (!parsed.success) return;
     setSending(true);
     setFailed(undefined);
     try {
-      const landed = await proposeColumnChangeFn({ data: { collection: collection.name, change: parsed.data } });
-      if ("change" in landed) {
-        await navigate({ to: "/changes/$id", params: { id: changeIdOf(landed.change) ?? landed.change } });
+      const answer = await proposeColumnChangeFn({ data: { collection: collection.name, change: parsed.data } });
+      if ("change" in answer) {
+        await navigate({ to: "/changes/$id", params: { id: changeIdOf(answer.change) ?? answer.change } });
         return;
       }
-      toast.success(`Written to ${landed.file}`);
-      await refreshWritten(queryClient, landed.file);
+      said(answer, plan);
+      await refreshWritten(queryClient, answer.file);
       await navigate({ search: closeRecord, resetScroll: false });
     } catch (err) {
       setFailed(errorMessage(err));
@@ -295,7 +330,7 @@ export function ColumnPanel({
                       variant={on ? "default" : "outline"}
                       aria-pressed={on}
                       disabled={!offered}
-                      title={offered ? undefined : NOT_YET}
+                      title={offered ? undefined : UNAVAILABLE}
                       onClick={() => setType(chip.type === CHOICES ? { enum: [] } : chip.type)}
                     >
                       {chip.label}
@@ -330,10 +365,30 @@ export function ColumnPanel({
             </span>
             <span className="text-sm">{unchanged ? "Nothing changes." : plan ? happens(plan) : problem}</span>
           </div>
+          {asks && (
+            <FieldSet>
+              <FieldLegend variant="label">
+                {wont.count === 1 ? "This value can't" : `These ${wont.count} values can't`} convert to{" "}
+                {typeWords(typed)}
+              </FieldLegend>
+              <WontConvertSample keyField={collection.key} field={column.key ?? field} wontConvert={wont} />
+              <RadioGroup value={decision ?? null} onValueChange={(value) => setDecision(value as ConvertDecision)}>
+                {(["clear", "keep"] as const).map((choice) => (
+                  <Field key={choice} orientation="horizontal">
+                    <RadioGroupItem value={choice} id={`column-decision-${choice}`} />
+                    <FieldContent>
+                      <FieldLabel htmlFor={`column-decision-${choice}`}>{DECIDED[choice](wont.count)}</FieldLabel>
+                      <FieldDescription>{DOES[choice]}</FieldDescription>
+                    </FieldContent>
+                  </Field>
+                ))}
+              </RadioGroup>
+            </FieldSet>
+          )}
           {failed && <Notice variant="destructive">{failed}</Notice>}
           <div className="flex items-center gap-2">
             {remote && <ToneBadge tone="waiting">Waits for admin</ToneBadge>}
-            <Button type="submit" className="ml-auto" disabled={!plan || unchanged || sending}>
+            <Button type="submit" className="ml-auto" disabled={!plan || unchanged || (asks && !decision) || sending}>
               {sending ? "Opening the change…" : "Review the change"}
             </Button>
           </div>
@@ -341,4 +396,23 @@ export function ColumnPanel({
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * A column change written without a remote, said in a toast: the file, then what became of the
+ * records (`landed`, over the panel's `plan`, whose names are the change's), and whether it shows
+ * once Sanoma starts again; when the records could not be brought along, that the file is written
+ * and they are as they were, and why.
+ */
+function said({ file, reshaped, running }: Exclude<PatchOutput, { change: string }>, plan?: TableChangePlan) {
+  const later = running === false ? ["It shows here once Sanoma starts again."] : [];
+  if (reshaped && "error" in reshaped) {
+    toast.error(`Saved in ${file}, but its records weren't brought along: ${reshaped.error}`, {
+      description: ["They hold what they held before.", ...later].join(" "),
+      duration: Infinity,
+    });
+    return;
+  }
+  const what = reshaped && plan ? [landed(plan, reshaped)] : [];
+  toast.success(`Saved in ${file}.`, { description: [...what, ...later].join(" ") || undefined });
 }

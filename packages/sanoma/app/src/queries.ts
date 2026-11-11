@@ -212,10 +212,12 @@ export function siteCallers(config: ConfigDescription, kind: SiteCall["kind"], t
   return [...byFile.values()];
 }
 
-/** A collection's enum fields, each with its values, in the collection's order. */
+/** A collection's enum fields the grid shows (none hidden), each with its values, in the collection's order. */
 export const enumFields = (fields: CollectionEntry["fields"]) =>
   Object.entries(fields).flatMap(([name, kind]) =>
-    typeof kind === "object" && "enum" in kind ? [{ name, values: kind.enum as readonly string[] }] : [],
+    typeof kind === "object" && "enum" in kind && !kind.hidden
+      ? [{ name, values: kind.enum as readonly string[] }]
+      : [],
   );
 
 /** Each workflow's title (its name when it has none), by name: for `select`. */
@@ -786,7 +788,7 @@ export const DataSearch = z.object({
   hide: z.array(z.string().min(1)).min(1).optional().catch(undefined),
   column: z
     .object({
-      change: z.enum(["add", "rename", "retype", "convert", "delete"]),
+      change: z.enum(["add", "rename", "retype", "convert", "hide"]),
       field: z.string().min(1).optional(),
       key: z.string().min(1).optional(),
     })

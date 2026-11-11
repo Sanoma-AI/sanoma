@@ -1,5 +1,6 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
-import type { ConvertDecision, TableChange, TableChangePlan } from "sanoma/workflows/description";
+import type { TableChange, TableChangePlan } from "sanoma/workflows/description";
+import type { ChangeReshaped } from "sanoma/workflows/shared";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
@@ -10,15 +11,16 @@ import { cn, plural } from "#/lib/utils.ts";
 import type { ChangeDetail } from "../../api.ts";
 import type { Verbs } from "../approval.tsx";
 import { CardHeading, ToneBadge } from "../kit.tsx";
-import { allRecords, renamed, diffLines, typeWords } from "./plan.ts";
+import { allRecords, DECIDED, diffLines, DOES, landed, renamed, typeWords } from "./plan.ts";
 
 // A table change's review on its change's page (`routes/changes/$id.tsx`), from the plan the
-// change carries (`ChangeState.plan`): a card per change in its kind's words and tone (Safe, Needs
-// a decision with the rows that won't convert, Keeps the data), Try it first, The details (the
-// data file's lines), and Couldn't apply this change over a run
-// that failed. Its decision is the change's own, in the table change's words (`TABLE_VERBS`). It
-// reads nothing of the app itself (the page gives it the collection as main declares it), so a
-// test renders it on its own.
+// change carries (`ChangeState.plan`): once it merged, what became of the records
+// (`ChangeState.merged.reshaped`); a card per change in its kind's words and tone (Safe, Clears or
+// Keeps the values that won't convert, with a sample of them and the choice made where the change
+// was proposed, Keeps the data), Try it first, The details (the data file's lines), and Couldn't
+// apply this change over a run that failed before merging. Its decision is the change's own, in
+// the table change's words (`TABLE_VERBS`). It reads nothing of the app itself (the page gives it
+// the collection as main declares it), so a test renders it on its own.
 
 /** A table change's Publish and Reject, as its review calls them. */
 export const TABLE_VERBS: Verbs = { approve: "Approve and apply", reject: "Send back" };
@@ -56,71 +58,44 @@ function ChangeCard({
   );
 }
 
-/** The rows a retype or a conversion cannot convert, a sample by key, and the two choices for them. */
-function WontConvert({
+/** The values a retype or a conversion cannot convert: a sample by key, and how many more. */
+export function WontConvertSample({
   keyField,
   field,
-  change,
+  wontConvert: { count, sample },
 }: {
   keyField: string;
   field: string;
-  change: Extract<TableChange, { kind: "retype" | "convert" }>;
+  wontConvert: Extract<TableChange, { kind: "retype" }>["wontConvert"];
 }) {
-  const [decision, setDecision] = useState<ConvertDecision | undefined>(change.decision);
-  const { count, sample } = change.wontConvert;
-  const choices: [ConvertDecision, string][] = [
-    ["clear", `Convert the rest and leave these ${count} empty`],
-    ["keep", `Keep ${field} as text while someone fixes them in the grid`],
-  ];
   return (
-    <>
-      <div className="overflow-auto rounded-lg border">
-        <table aria-label="Records that can't convert" className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left text-muted-foreground">
-              <th scope="col" className="px-3 py-1.5 font-medium">
-                {keyField}
-              </th>
-              <th scope="col" className="px-3 py-1.5 font-medium">
-                {field} now
-              </th>
+    <div className="overflow-auto rounded-lg border">
+      <table aria-label="Records that can't convert" className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-muted-foreground">
+            <th scope="col" className="px-3 py-1.5 font-medium">
+              {keyField}
+            </th>
+            <th scope="col" className="px-3 py-1.5 font-medium">
+              {field} now
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {sample.map(({ key, value }) => (
+            <tr key={key} className="border-b last:border-0">
+              <td className="px-3 py-1.5 font-medium">{key}</td>
+              <td className="px-3 py-1.5">{typeof value === "string" ? value : JSON.stringify(value)}</td>
             </tr>
-          </thead>
-          <tbody>
-            {sample.map(({ key, value }) => (
-              <tr key={key} className="border-b last:border-0">
-                <td className="px-3 py-1.5 font-medium">{key}</td>
-                <td className="px-3 py-1.5">{typeof value === "string" ? value : JSON.stringify(value)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {count > sample.length && (
-          <p className="border-t px-3 py-1.5 text-xs text-muted-foreground">
-            and {plural(count - sample.length, "record")} more
-          </p>
-        )}
-      </div>
-      <fieldset className="flex flex-col gap-2">
-        <legend className="mb-2 font-medium">What should happen to these {count}?</legend>
-        {choices.map(([value, label]) => (
-          <label key={value} className="flex items-center gap-2">
-            <input
-              type="radio"
-              name={`unconverted-${field}`}
-              value={value}
-              checked={decision === value}
-              onChange={() => setDecision(value)}
-            />
-            {label}
-          </label>
-        ))}
-      </fieldset>
-      <p className="text-xs text-muted-foreground">
-        Your choice isn't sent yet: it goes with Approve and apply once the table change lands. Until then these keep
-        the text they hold.
-      </p>
-    </>
+          ))}
+        </tbody>
+      </table>
+      {count > sample.length && (
+        <p className="border-t px-3 py-1.5 text-xs text-muted-foreground">
+          and {plural(count - sample.length, "record")} more
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -158,20 +133,33 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
           ? `Change ${change.field} from ${typeWords(change.from)} to ${typeWords(to)}`
           : `Make ${change.key} of ${change.field} a column, ${typeWords(to)}`;
       const wont = change.wontConvert.count;
-      return wont === 0 ? (
-        <ChangeCard title={title} tone="ok" said="Safe">
-          <p>Every value converts.</p>
-        </ChangeCard>
-      ) : (
-        <ChangeCard title={title} tone="waiting" said="Needs a decision">
+      if (wont === 0) {
+        return (
+          <ChangeCard title={title} tone="ok" said="Safe">
+            <p>Every value converts.</p>
+          </ChangeCard>
+        );
+      }
+      // Chosen where the change was proposed; none (a plan drafted without one) keeps them.
+      const decision = change.decision ?? "keep";
+      return (
+        <ChangeCard
+          title={title}
+          tone={decision === "clear" ? "waiting" : "idle"}
+          said={decision === "clear" ? `Clears ${plural(wont, "value")}` : `Keeps ${wont} for fixing`}
+        >
           <p>
             {plural(plan.rows - wont, "record")} convert. {wont} can't, because what's in them isn't {typeWords(to)}.
           </p>
-          <WontConvert
+          <WontConvertSample
             keyField={keyField}
             field={change.kind === "retype" ? change.field : change.key}
-            change={change}
+            wontConvert={change.wontConvert}
           />
+          <p>
+            <span className="font-medium">Chosen: {DECIDED[decision](wont).toLowerCase()}.</span> {DOES[decision]}
+          </p>
+          <p className="text-muted-foreground">To choose the other way, send the change back.</p>
         </ChangeCard>
       );
     }
@@ -218,9 +206,44 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
 }
 
 /**
- * A table change's review: how many changes over how many records, a card per change, Try it
- * first, The details (`collection` as main declares it, the data file's lines; none once main no
- * longer declares it), and, over a run that failed before merging, Couldn't apply this change.
+ * What became of the records once the change merged (`reshaped`): the counts in words, or, when
+ * bringing them along failed, that the change is published and the records are as they were,
+ * with the run to see why.
+ */
+function Reshaped({ runId, plan, reshaped }: { runId: string; plan: TableChangePlan; reshaped: ChangeReshaped }) {
+  if ("error" in reshaped) {
+    return (
+      <Card size="sm" role="status" aria-label="The records" className="ring-tone-bad-foreground/40">
+        <CardHeader className="flex flex-wrap items-center gap-x-2.5">
+          <CardHeading>The records weren't updated</CardHeading>
+          <ToneBadge tone="bad">Published without them</ToneBadge>
+        </CardHeader>
+        <CardContent className="text-sm">
+          The change is published, but its records weren't brought along: {reshaped.error}. They hold what they held
+          before.{" "}
+          <Link to="/runs/$id" params={{ id: runId }} className="underline underline-offset-4">
+            See the run
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card size="sm" role="status" aria-label="The records">
+      <CardHeader className="flex flex-wrap items-center gap-x-2.5">
+        <CardHeading>The records</CardHeading>
+        <ToneBadge tone="ok">Updated</ToneBadge>
+      </CardHeader>
+      <CardContent className="text-sm">{landed(plan, reshaped)}</CardContent>
+    </Card>
+  );
+}
+
+/**
+ * A table change's review: once it merged, what became of the records; how many changes over how
+ * many records, a card per change, Try it first, The details (`collection` as main declares it,
+ * the data file's lines; none once main no longer declares it), and, over a run that failed
+ * before merging, Couldn't apply this change.
  */
 export function TableChangeReview({
   change,
@@ -234,8 +257,10 @@ export function TableChangeReview({
   const [details, setDetails] = useState(false);
   const keyField = collection?.key ?? "key";
   const many = plan.changes.length > 1;
+  const reshaped = change.state.merged?.reshaped;
   return (
     <section aria-label="The table change" className="flex flex-col gap-3">
+      {reshaped && <Reshaped runId={change.runId} plan={plan} reshaped={reshaped} />}
       {change.status === "failed" && !change.state.merged && (
         <Card size="sm" role="status" aria-label="Couldn't apply this change" className="ring-tone-bad-foreground/40">
           <CardHeader className="flex flex-wrap items-center gap-x-2.5">

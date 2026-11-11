@@ -11,16 +11,19 @@ import {
   diffLines,
   happens,
   keysIn,
+  landed,
   planOf,
   problemOf,
+  shownFields,
 } from "../src/components/grid/plan.ts";
 import { TABLE_CHANGE_PLAN } from "./fixtures/table-change-plan.ts";
 
 // A column change's draft plan (`components/grid/plan.ts`), without a database: `planOf` over
 // rows for each kind of change, what it may not change (`problemOf`), what it writes into the
-// declaration (`declarationEdit`) and its lines in the review's diff, in words (`happens`); a
-// free-form field's keys; and the review of a table change (`components/grid/review.tsx`) over
-// the plan fixture, rendered on the server in a memory router, with all four of its cards.
+// declaration (`declarationEdit`) and its lines in the review's diff, in words (`happens`), and
+// what became of the records once it landed (`landed`); a free-form field's keys; the fields shown
+// (`shownFields`); and the review of a table change (`components/grid/review.tsx`) over the plan
+// fixture, rendered on the server in a memory router, with all four of its cards.
 
 /** The outbound fixture's collection, as the description has it, with a free-form `details` field the runtime does not take yet. */
 const outbound = {
@@ -98,9 +101,20 @@ describe("planOf", () => {
         },
       },
     ]);
-    expect(happens(plan)).toBe(
-      "contact becomes a number. 2 records can't convert, and the review asks what to do with them.",
+    expect(happens(plan)).toBe("contact becomes a number. 2 records can't convert. Choose below what happens to them.");
+    // The person's choice for them goes in the plan, and in what will happen.
+    const cleared = planOf(outbound, rows, { kind: "retype", field: "contact", to: "number", decision: "clear" });
+    expect(cleared.changes[0]).toMatchObject({ wontConvert: { count: 2 }, decision: "clear" });
+    expect(happens(cleared)).toBe(
+      "contact becomes a number. 2 records can't convert: they're left empty, and lose what they hold now.",
     );
+    expect(happens(planOf(outbound, rows, { kind: "retype", field: "contact", to: "number", decision: "keep" }))).toBe(
+      "contact becomes a number. 2 records can't convert: they keep what they hold and show as needs fixing.",
+    );
+    // None to decide for when every value converts.
+    expect(
+      planOf(outbound, rows, { kind: "retype", field: "seats", to: "text", decision: "clear" }).changes[0],
+    ).not.toHaveProperty("decision");
     // To text, everything converts.
     expect(happens(planOf(outbound, rows, { kind: "retype", field: "seats", to: "text" }))).toBe(
       "seats becomes text. Every value converts.",
@@ -110,13 +124,21 @@ describe("planOf", () => {
   it("removes a column, counting the values it keeps", () => {
     const plan = planOf(outbound, rows, { kind: "hide", field: "seats" });
     expect(plan.changes).toEqual([{ kind: "hide", field: "seats", filled: 2 }]);
-    expect(happens(plan)).toBe("seats leaves the grid and the forms. Its values in 2 records are kept.");
+    expect(happens(plan)).toBe("seats leaves the grid and the forms for everyone. Its values in 2 records are kept.");
+    // Hidden once it lands: the grid and the forms leave it out.
+    const fields = {
+      ...outbound.fields,
+      seats: edit({ kind: "hide", field: "seats" }).fields["fields.seats"],
+    } as CollectionEntry["fields"];
+    expect(shownFields(fields)).toEqual(["company", "contact", "stage", "owner", "lastTouched"]);
   });
 
   it("renames a column as its own change, never a removal and an addition", () => {
     const plan = planOf(outbound, rows, { kind: "rename", from: "lastTouched", to: "lastContact" });
     expect(plan.changes).toEqual([{ kind: "rename", from: "lastTouched", to: "lastContact" }]);
-    expect(happens(plan)).toBe("lastTouched is called lastContact from now on. All 4 records keep their values.");
+    expect(happens(plan)).toBe(
+      "lastTouched is called lastContact from now on. All 4 records keep their values under the new name.",
+    );
     expect(declarationEdit(outbound.fields, { kind: "rename", from: "lastTouched", to: "lastContact" })).toEqual({
       fields: {},
       rename: { "fields.lastTouched": "lastContact" },
@@ -133,7 +155,7 @@ describe("a column change", () => {
       "company is the key, which names each record: it stays as it is",
     );
     expect(refused({ kind: "add", field: "notes", type: "json", required: false })).toBe(
-      "Links and free-form columns arrive with real tables",
+      "Links and free-form columns aren't available yet",
     );
     expect(refused({ kind: "add", field: "priority", type: "number", required: true })).toBeUndefined();
   });
@@ -173,6 +195,36 @@ describe("a column change", () => {
   });
 });
 
+/** A plan of `change` alone, over outbound's 312 records. */
+const one = (change: TableChangePlan["changes"][number]): TableChangePlan => ({
+  collection: "outbound",
+  rows: 312,
+  changes: [change],
+});
+
+describe("landed", () => {
+  const counts = { rows: 312, changed: 0, converted: 0, cleared: 0, kept: 0 };
+  const retype = TABLE_CHANGE_PLAN.changes[2]!;
+
+  it("says what became of the records in plain words, by the change that brought them along", () => {
+    const rename = one({ kind: "rename", from: "lastTouched", to: "nextAction" });
+    expect(landed(rename, { ...counts, changed: 312 })).toBe("312 records now hold nextAction.");
+    expect(landed(rename, { ...counts, changed: 1 })).toBe("1 record now holds nextAction.");
+    expect(landed(rename, counts)).toBe("No record had a value in lastTouched.");
+    expect(landed(one(retype), { ...counts, changed: 312, converted: 297, cleared: 15 })).toBe(
+      "297 contact values converted, 15 left empty.",
+    );
+    expect(landed(one(retype), { ...counts, changed: 297, converted: 297, kept: 15 })).toBe(
+      "297 contact values converted, 15 kept as they were, to fix in the grid.",
+    );
+    expect(landed(one(retype), counts)).toBe("No contact value needed converting.");
+    // Several together: each rename by name, the values counted together.
+    expect(landed(TABLE_CHANGE_PLAN, { ...counts, changed: 312, converted: 297, cleared: 15 })).toBe(
+      "The values of lastTouched are under lastContact now. 297 values converted, 15 left empty.",
+    );
+  });
+});
+
 describe("TableChangeReview", () => {
   // By a path TypeScript does not follow: the components are JSX and DOM, checked by typecheck:ui.
   type Review = (props: {
@@ -182,13 +234,13 @@ describe("TableChangeReview", () => {
   }) => ReactNode;
   const load = (path: string) => import(new URL(path, import.meta.url).href) as Promise<{ TableChangeReview: Review }>;
 
-  /** The review of the plan fixture as the server renders it, in a router, as the app's pages are. */
-  const render = async (status: string, state: { merged?: object } = {}) => {
+  /** The review of `plan` (the plan fixture's) as the server renders it, in a router, as the app's pages are. */
+  const render = async (status: string, state: { merged?: object } = {}, plan = TABLE_CHANGE_PLAN) => {
     const { TableChangeReview } = await load("../src/components/grid/review.tsx");
     const change = { runId: "change:ui-1234abcd", status, state };
     const router = createRouter({
       routeTree: createRootRoute({
-        component: () => createElement(TableChangeReview, { change, plan: TABLE_CHANGE_PLAN, collection: outbound }),
+        component: () => createElement(TableChangeReview, { change, plan, collection: outbound }),
       }),
       history: createMemoryHistory({ initialEntries: ["/"] }),
     });
@@ -197,23 +249,26 @@ describe("TableChangeReview", () => {
       .replaceAll("<!-- -->", "")
       .replaceAll("&#x27;", "'");
   };
-  it("draws a card per change in its kind's words, the rows that won't convert with their two choices, and Couldn't apply over a failed run", async () => {
+  it("draws a card per change in its kind's words, the rows that won't convert with the choice made for them, and Couldn't apply over a failed run", async () => {
     const html = await render("failed");
     expect(cards(html)).toEqual([
       ["Couldn't apply this change", "Nothing changed"],
       ["Add priority", "Safe"],
       ["Rename lastTouched to lastContact", "Safe"],
-      ["Change contact from text to a number", "Needs a decision"],
+      ["Change contact from text to a number", "Clears 15 values"],
       ["Remove seats", "Keeps the data"],
     ]);
+    expect(html).toContain("All 312 records keep their values under the new name.");
     expect(html).toContain("4 changes to outbound · 312 records. They apply together");
     // The plan a change carries reads back as one, as the change's page reads it.
     expect(TableChangePlanSchema.parse(TABLE_CHANGE_PLAN)).toEqual(TABLE_CHANGE_PLAN);
     expect(html).toContain("297 records convert. 15 can't, because what's in them isn't a number.");
     expect(html).toContain('<td class="px-3 py-1.5">about 40k</td>');
     expect(html).toContain("and 12 records more");
-    expect(html).toContain("Convert the rest and leave these 15 empty");
-    expect(html).toContain("Keep contact as text while someone fixes them in the grid");
+    // The choice made where it was proposed, read-only: no control to change it here.
+    expect(html).toContain("Chosen: leave these 15 empty.</span> This removes what they hold now.");
+    expect(html).toContain("To choose the other way, send the change back.");
+    expect(html).not.toMatch(/type="radio"|role="radio"/);
     expect(html).toContain("The values in 288 records are kept.");
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Try on a copy<\/button>/);
     expect(html).toContain('href="/runs/change%3Aui-1234abcd"');
@@ -222,5 +277,36 @@ describe("TableChangeReview", () => {
     // Nor one that merged and failed after: what merged is applied.
     const merged = await render("failed", { merged: { sha: "abc", at: 0 } });
     expect(cards(merged).map(([title]) => title)).not.toContain("Couldn't apply this change");
+  });
+
+  it("says Keeps for fixing for values chosen to stay, and none decided keeps them", async () => {
+    const [add, rename, retype, hide] = TABLE_CHANGE_PLAN.changes;
+    const kept = { ...TABLE_CHANGE_PLAN, changes: [add!, rename!, { ...retype!, decision: "keep" as const }, hide!] };
+    for (const plan of [
+      kept,
+      { ...TABLE_CHANGE_PLAN, changes: [add!, rename!, { ...retype!, decision: undefined }, hide!] },
+    ]) {
+      const html = await render("waiting", {}, plan);
+      expect(cards(html)[2]).toEqual(["Change contact from text to a number", "Keeps 15 for fixing"]);
+      expect(html).toContain(
+        "Chosen: keep them as they are.</span> They show as needs fixing in the grid until someone edits them.",
+      );
+    }
+  });
+
+  it("says what became of the records once merged, or that they weren't brought along, never that nothing changed", async () => {
+    const reshaped = { rows: 312, changed: 312, converted: 297, cleared: 15, kept: 0 };
+    const html = await render("finished", { merged: { sha: "abc", at: 0, reshaped } });
+    expect(cards(html)[0]).toEqual(["The records", "Updated"]);
+    expect(html).toContain("The values of lastTouched are under lastContact now. 297 values converted, 15 left empty.");
+    const failed = await render("finished", {
+      merged: { sha: "abc", at: 0, reshaped: { error: "the database said no" } },
+    });
+    expect(cards(failed)[0]).toEqual(["The records weren't updated", "Published without them"]);
+    expect(failed).toContain(
+      "The change is published, but its records weren't brought along: the database said no. They hold what they held before.",
+    );
+    expect(failed).toContain('href="/runs/change%3Aui-1234abcd"');
+    expect(failed).not.toContain("Nothing changed");
   });
 });
