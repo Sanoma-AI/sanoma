@@ -225,7 +225,7 @@ export default defineWorkflow({
     }
   }, 180_000);
 
-  it("reports two agents declaring one client, and warns of an agent with a client in a declared group", async () => {
+  it("reports two agents declaring one client, and warns of an agent acting for whoever names it in a declared group", async () => {
     const own = copyFixture();
     const people = join(own, "resources/people.ts");
     try {
@@ -241,7 +241,7 @@ export const finance = sanoma.group({ name: "finance", members: [ada, claudeCode
 `,
       );
       const warning =
-        'resources/people.ts#claudeCode: warning: resources/people.ts#claudeCode declares the client "claude-code" and is in the group finance: whoever acts as it through that client is in them too';
+        "resources/people.ts#claudeCode: warning: resources/people.ts#claudeCode acts for whoever names it and is in the group finance: through it, whoever that is acts in that group too";
       expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toMatchObject({
         ok: false,
         problems: [

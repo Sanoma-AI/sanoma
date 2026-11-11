@@ -83,6 +83,7 @@ import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
 import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
 import {
+  AGENT_BUILT_IN_REFUSAL,
   AGENT_BUILT_INS,
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
@@ -469,10 +470,7 @@ export class SanomaClient {
     }
     const agent = builtIn && workflow !== CALL_WORKFLOW && isDeclaredAgent(startedBy);
     if (agent && !AGENT_BUILT_INS.has(workflow)) {
-      throw new PolicyDeniedError(
-        `${WORKFLOW_ACTION}${workflow}`,
-        `An agent starts none of the runtime's own workflows but ${[...AGENT_BUILT_INS].join(", ")}`,
-      );
+      throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, AGENT_BUILT_IN_REFUSAL);
     }
     if ((builtIn && !agent) || (policy === allowAll && !visitor)) return undefined;
     // A visitor's start is decided whatever run its id names: a visitor shares an id (`anonymous`) with others.
@@ -528,7 +526,7 @@ export class SanomaClient {
     // One made and partly recorded is made again, as a retry (the store keeps the records it has).
     let attempt = 1;
     if (write && options.id !== undefined) {
-      const made = await this.recordedCall(runId, op, calls, connection);
+      const made = await this.recordedCall(runId, op, calls, actor, connection);
       if (made && "partial" in made) attempt = 2;
       else {
         const first = made ?? (await this.heldCall(op.id, heldId, held));
@@ -657,7 +655,7 @@ export class SanomaClient {
       });
     } catch (err) {
       if (!is(err, TransactionRollbackError)) throw err;
-      const first = await this.recordedCall(runId, op, calls, context.connection);
+      const first = await this.recordedCall(runId, op, calls, actor, context.connection);
       if (!first || "partial" in first) throw err;
       return first.output;
     }
@@ -665,7 +663,8 @@ export class SanomaClient {
 
   /**
    * What the direct write recorded as `runId` returned, when one did (a batch's output from its
-   * entries' records): refused (`invalid_input`) when it was of another operation or input, its
+   * entries' records): refused (`invalid_input`) when another actor made it (another id, or the
+   * same agent for another person), or it was of another operation or input, its
    * failure again (`driver_failed`) when it failed, and `partial` when fewer records than its
    * calls are there (a batch's, appended one by one outside a transaction, cut short).
    */
@@ -673,13 +672,17 @@ export class SanomaClient {
     runId: string,
     op: Op,
     calls: readonly Call[],
+    actor: Principal,
     connection?: ConnectionSnapshot,
   ): Promise<{ output: unknown } | { partial: true } | undefined> {
     const made = (await this.audit.store.read(runId)).filter((r) => r.type === "op.called");
     if (!made.length) return undefined;
     const same = (what: (record: (typeof made)[number], call: Call) => boolean) =>
       made.length <= calls.length && made.every((r, i) => what(r, calls[i]!));
+    // Made by someone else, as `mustMatch` tells a run's starter: one agent acts for several people.
+    const by = made[0]!.actor;
     const differs = [
+      ...(by?.id === actor.id && by.onBehalfOf === actor.onBehalfOf ? [] : ["actor"]),
       ...(same((r, c) => r.op === c.op.id) ? [] : ["op"]),
       ...(same((r, c) => sameJson(r.input, recorded(c.op, c.input))) ? [] : ["input"]),
       ...(sameJson(made[0]!.connection ?? null, connection ?? null) ? [] : ["connection"]),

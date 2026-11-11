@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { type CheckResult, errorMessage } from "sanoma/workflows";
 import {
+  clientClashes,
   type ConfigDescription,
   crossAppImports,
   describeConfig,
@@ -43,7 +44,7 @@ const LINTED = ["workflows", "resources", "sites", "apps"];
  * problems in the order tsc, the sites' tsc, oxlint, the policies, the config, the folders refused
  * as sites, the content's problems, the sites' build, the app bundle's. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
  * problem. `ok` when there are no problems; the warnings beside them (the sites', an import
- * from one app's folder into another's, and an agent with a `client` in a declared group,
+ * from one app's folder into another's, and an agent with no fixed person in a declared group,
  * `peopleWarnings`) never make it not.
  * With them, the repo's Permissions grid (`permissionsGrid`, as the app's Permissions page has
  * it), from the same config and description, which a change is reviewed by: none when the
@@ -101,7 +102,7 @@ export async function check(
   const warnings = [
     ...description.sites.flatMap((site) => site.warnings),
     ...crossAppImports(root, description.apps),
-    // An agent with a client in a declared group: its groups reach whoever acts as it.
+    // An agent that acts for whoever names it, in a declared group: its groups reach them.
     ...peopleWarnings(readPeople(root).people),
   ].map(warningLine);
   const grid = policies.length ? undefined : permissionsGrid(resolved, description);
@@ -197,6 +198,8 @@ function configProblems({ problems, workflows, sites }: ConfigDescription, root:
     ...sites.flatMap((site) => site.problems.map(problemLine)),
     // The people's own (an id two share, a reserved one), which admit nobody while they stand.
     ...readPeople(root).problems.map(problemLine),
+    // A client two agents declare, which admits everyone still: no agent is that client's.
+    ...clientClashes(readPeople(root).people).map(problemLine),
   ]);
   return [...lines];
 }

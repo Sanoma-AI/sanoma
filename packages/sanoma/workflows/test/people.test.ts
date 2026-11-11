@@ -7,7 +7,7 @@ import { useTestApp } from "sanoma/testing/harness";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { sanoma } from "../src/constructors.ts";
-import { admit, agentActing, describeConfig, peopleWarnings, readPeople } from "../src/describe.ts";
+import { admit, agentActing, clientClashes, describeConfig, peopleWarnings, readPeople } from "../src/describe.ts";
 import {
   approverOf,
   declaresPeople,
@@ -20,6 +20,7 @@ import {
   visitorPrincipal,
 } from "../src/index.ts";
 import { agentOfClient, problemLine } from "../src/shared.ts";
+import { outbound } from "./fixtures/outbound/resources/data.ts";
 import { failure, waitFor } from "./harness.ts";
 
 // People, agents and groups: vendorless resource types of the runtime's own vendor, declared in
@@ -310,7 +311,7 @@ describe("people in a data file", () => {
 });
 
 describe("an agent's client", () => {
-  it("is one agent's: two agents declaring one client is a problem, as two with one id are", () => {
+  it("is one agent's: two agents declaring one client is a check's problem, which admits everyone still", () => {
     const root = mkdtempSync(join(tmpdir(), "sanoma-people-clients-"));
     mkdirSync(join(root, "resources"));
     writeFileSync(
@@ -320,22 +321,29 @@ export const ada = sanoma.person({ id: "ada" });
 export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
 export const twin = sanoma.agent({ id: "claude-twin", client: "claude-code" });
 export const chatgpt = sanoma.agent({ id: "chatgpt", client: "chatgpt" });
-export const tools = sanoma.group({ name: "tools", members: [ada, chatgpt] });
+export const refundBot = sanoma.agent({ id: "refund-bot", onBehalfOf: ada });
+export const scout = sanoma.agent({ id: "scout" });
+export const tools = sanoma.group({ name: "tools", members: [ada, chatgpt, refundBot] });
+export const sales = sanoma.group({ name: "sales", members: [scout] });
 `,
     );
     try {
       const read = readPeople(root);
-      expect(read.problems.map(problemLine)).toEqual([
+      // Nothing reads a client at run time yet: the clash locks nobody out.
+      expect(read.problems).toEqual([]);
+      expect(admit({ id: "ada" }, read)).toEqual({ id: "ada", groups: ["tools"] });
+      expect(clientClashes(read.people).map(problemLine)).toEqual([
         'resources/people.ts#twin: resources/people.ts#twin declares the client "claude-code", which resources/people.ts#claudeCode declares: give each agent its own',
       ]);
-      // Which, like any people problem, admits nobody while it stands.
-      expect(() => admit({ id: "ada" }, read)).toThrow("cannot be admitted while the people's files have problems");
-      expect(agentOfClient("claude-code", read.people)).toBe("claude-code");
+      // A client two agents declare is no agent's.
+      expect(agentOfClient("claude-code", read.people)).toBeUndefined();
       expect(agentOfClient("chatgpt", read.people)).toBe("chatgpt");
       expect(agentOfClient("cursor", read.people)).toBeUndefined();
-      // An agent with a client in a declared group gives that group to whoever acts as it: a warning.
+      // An agent with no fixed person in a declared group, client or not, gives it to whoever names it: a
+      // warning. One fixed to a person (refund-bot) acts for no one else.
       expect(peopleWarnings(read.people).map(problemLine)).toEqual([
-        'resources/people.ts#chatgpt: resources/people.ts#chatgpt declares the client "chatgpt" and is in the group tools: whoever acts as it through that client is in them too',
+        "resources/people.ts#chatgpt: resources/people.ts#chatgpt acts for whoever names it and is in the group tools: through it, whoever that is acts in that group too",
+        "resources/people.ts#scout: resources/people.ts#scout acts for whoever names it and is in the group sales: through it, whoever that is acts in that group too",
       ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -467,7 +475,7 @@ describe("the client, with people declared", () => {
       return "done";
     },
   });
-  const config: SanomaConfig = { workflows: [held], connectors: [], root };
+  const config: SanomaConfig = { workflows: [held], connectors: [], collections: [outbound], root };
   const app = useTestApp(config, { databaseUrl });
 
   it("refuses to start, call, decide or set a credential as anyone not declared, and takes the id alone", async () => {
@@ -541,6 +549,21 @@ describe("the client, with people declared", () => {
       decidedBy: "ada",
     });
     expect(await app.client.result(runId)).toBe("done");
+  });
+
+  it("keeps one person's direct call from another's through the same agent and id", async () => {
+    const id = randomUUID();
+    const record = { company: "Acme", contact: "x@acme.test", stage: "researched", owner: "ada" };
+    const forAda = { id: "claude-code", onBehalfOf: "ada" };
+    const first = await app.client.call("data.outbound.save", { record }, { actor: forAda, id });
+    // A retry is the same call.
+    expect(await app.client.call("data.outbound.save", { record }, { actor: forAda, id })).toEqual(first);
+    // Bo, through the same agent with Ada's id, is not answered with Ada's write.
+    expect(
+      await failure(
+        app.client.call("data.outbound.save", { record }, { actor: { id: "claude-code", onBehalfOf: "bo" }, id }),
+      ),
+    ).toMatchObject({ code: "invalid_input", data: { differs: ["actor"] } });
   });
 
   it("starts an agent's run as declared, which its summary keeps whole", async () => {

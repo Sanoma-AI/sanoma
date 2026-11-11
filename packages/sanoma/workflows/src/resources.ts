@@ -113,7 +113,6 @@ export function readPeople(root: string | undefined): DeclaredPeople {
     });
   }
   const ids = new Map<string, DeclaredResource>();
-  const clients = new Map<string, DeclaredResource>();
   for (const r of people) {
     if (r.type === "group") {
       const reserved = RESERVED_GROUPS.get(r.name);
@@ -133,16 +132,6 @@ export function readPeople(root: string | undefined): DeclaredPeople {
       });
     }
     ids.set(id, r);
-    // One agent per client: a hosted sign-in by a client acts as the agent that declares it.
-    const client = r.type === "agent" ? (r.desired as { client?: string }).client : undefined;
-    if (client === undefined) continue;
-    const declaring = clients.get(client);
-    if (declaring) {
-      own.push({
-        ...r.at,
-        message: `${r.id} declares the client "${client}", which ${declaring.id} declares: give each agent its own`,
-      });
-    } else clients.set(client, r);
   }
   const declared = { people, problems: own };
   peopleRead.set(loaded, declared);
@@ -239,21 +228,46 @@ export function agentActing(
 }
 
 /**
+ * Two agents declaring one `client` (`readPeople`'s people): a problem `sanoma check` reports,
+ * but not one of `readPeople`'s, which would admit nobody, since nothing reads a client at run time
+ * yet; `agentOfClient` answers no agent for such a client.
+ */
+export function clientClashes(people: readonly DeclaredResource[]): ResourceProblem[] {
+  const clients = new Map<string, DeclaredResource>();
+  return people.flatMap((r) => {
+    const { client } = r.desired as { client?: string };
+    if (r.vendor !== "sanoma" || r.type !== "agent" || client === undefined) return [];
+    const declaring = clients.get(client);
+    if (!declaring) {
+      clients.set(client, r);
+      return [];
+    }
+    return [
+      {
+        ...r.at,
+        message: `${r.id} declares the client "${client}", which ${declaring.id} declares: give each agent its own`,
+      },
+    ];
+  });
+}
+
+/**
  * What is worth fixing in the people the data files declare (`readPeople`), but not wrong: an
- * agent that declares a `client` and is in a declared group, whose groups reach whoever acts as it.
+ * agent with no fixed `onBehalfOf`, which acts for whoever names it (`agentActing`), in a declared
+ * group, whose groups then reach whoever that is.
  */
 export function peopleWarnings(people: readonly DeclaredResource[]): ResourceProblem[] {
   const groups = people.filter((r) => r.vendor === "sanoma" && r.type === "group");
   return people.flatMap((r) => {
-    const { id, client } = r.desired as { id?: string; client?: string };
-    if (r.vendor !== "sanoma" || r.type !== "agent" || client === undefined || id === undefined) return [];
+    const { id, onBehalfOf } = r.desired as { id?: string; onBehalfOf?: string };
+    if (r.vendor !== "sanoma" || r.type !== "agent" || onBehalfOf !== undefined || id === undefined) return [];
     const of = groups.filter((g) => (g.desired as { members?: string[] }).members?.includes(id)).map((g) => g.name);
     if (!of.length) return [];
     const named = of.length === 1 ? `the group ${of[0]}` : `the groups ${of.join(", ")}`;
     return [
       {
         ...r.at,
-        message: `${r.id} declares the client "${client}" and is in ${named}: whoever acts as it through that client is in them too`,
+        message: `${r.id} acts for whoever names it and is in ${named}: through it, whoever that is acts in ${of.length === 1 ? "that group" : "those groups"} too`,
       },
     ];
   });

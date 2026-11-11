@@ -53,6 +53,7 @@ export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./ou
 export {
   admit,
   agentActing,
+  clientClashes,
   loadDataFiles,
   peopleWarnings,
   readPeople,
