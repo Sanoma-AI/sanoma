@@ -28,7 +28,7 @@ import { ensureSanomaBuilt } from "../../test/fixture.ts";
 const PEOPLE = "resources/people.ts";
 
 // A root of its own: three people (one admin, one whose name the file computes), an agent acting
-// for one, two groups; and another file declaring one the type refuses, its problem People's.
+// for one with its client, two groups; and another file declaring one the type refuses, its problem People's.
 const root = mkdtempSync(join(tmpdir(), "sanoma-people-"));
 mkdirSync(join(root, "resources"));
 writeFileSync(
@@ -40,7 +40,7 @@ const CY = "Cy Chen";
 export const ada = sanoma.person({ id: "ada", name: "Ada Ortiz", email: "ada@example.test" });
 export const bo = sanoma.person({ id: "bo", name: "Bo Lin", github: "bo-lin" });
 export const cy = sanoma.person({ id: "cy", name: CY });
-export const refundBot = sanoma.agent({ id: "refund-bot", onBehalfOf: bo });
+export const refundBot = sanoma.agent({ id: "refund-bot", onBehalfOf: bo, client: "refund-cli" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 export const ops = sanoma.group({ name: "ops", members: [ada, bo, refundBot] });
 `,
@@ -208,7 +208,7 @@ describe("People", () => {
     });
   });
 
-  it("lists the groups with their members, and the agents with whom they act for, agents built in", async () => {
+  it("lists the groups with their members, and the agents with whom they act for and their client, agents built in", async () => {
     const groups = (await page("/people?show=groups")).html;
     expect(rows(groups)).toEqual([
       ["admin", "ada", "resources/people.ts#admin"],
@@ -219,7 +219,9 @@ describe("People", () => {
     // The tab counts the groups declared.
     expect(groups).toMatch(/href="\/people\?show=groups"[^>]*>Groups<span[^>]*>2<\/span>/);
     const agents = (await page("/people?show=agents&person=refund-bot")).html;
-    expect(rows(agents)).toEqual([["refund-bot", "bo", "ops agents (built in)", "resources/people.ts#refundBot"]]);
+    expect(rows(agents)).toEqual([
+      ["refund-bot", "bo", "refund-cli", "ops agents (built in)", "resources/people.ts#refundBot"],
+    ]);
     // Muted, beside the declared ones, in the table and on the open card.
     expect(agents.match(/title="The runtime puts every agent in it"/g)).toHaveLength(2);
   });

@@ -21,10 +21,12 @@ import {
   SanomaError,
 } from "sanoma/workflows";
 import {
+  AGENT_BUILT_INS,
   apiNameOf,
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
   DESCRIBE_CALL,
+  isDeclaredAgent,
   isVisitor,
   flatten,
   LOGIN_CODE_WORKFLOW,
@@ -32,11 +34,12 @@ import {
   type Saved,
   undoDraftOf,
 } from "sanoma/workflows/shared";
-import { type ConfigDescription, permissionsGrid } from "sanoma/workflows/describe";
+import { agentActing, type ConfigDescription, permissionsGrid } from "sanoma/workflows/describe";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import { z } from "zod";
 import {
   ACTOR_HEADER,
+  AGENT_HEADER,
   ApiError,
   asApiError,
   type AppConfig,
@@ -115,6 +118,29 @@ export async function requireActor({ app, actor }: ActorContext): Promise<Princi
     ? "This request does not say who is making it: sign in"
     : `Say who you are in the ${ACTOR_HEADER} header`;
   throw new ApiError(400, { error, code: "invalid_input" });
+}
+
+/**
+ * Who a call is made as: `actor`, the person the login admitted, or, when the request names a
+ * declared agent in the `x-sanoma-agent` header (`AGENT_HEADER`), that agent acting on their
+ * behalf (`agentActing`, over the snapshot's people: an id that is not a declared agent, or one
+ * that acts for someone else alone, is `not_admitted`). Only the loopback login takes the header;
+ * on a host it is a 400, since the sign-in says who acts there.
+ */
+export function actingFor(app: AppContext, request: Request, actor: Principal): Principal {
+  const named = request.headers.get(AGENT_HEADER);
+  if (named === null) return actor;
+  if (saysWho(app)) {
+    throw new ApiError(400, {
+      error: `The ${AGENT_HEADER} header is taken on this machine alone: on a host, the sign-in says who is asking`,
+      code: "invalid_input",
+    });
+  }
+  const agent = named.trim();
+  if (!agent) {
+    throw new ApiError(400, { error: `The ${AGENT_HEADER} header names no agent`, code: "invalid_input" });
+  }
+  return agentActing(agent, actor.id, app.snapshot.people);
 }
 
 /** True when the login says who is asking; false for the loopback login, which takes the name the page sends. */
@@ -720,7 +746,8 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * `sanoma.describe` (`DESCRIBE_CALL`, a name of the runtime's vendor, so none of the company's)
  * answers `agentDescription`. Anything else is `invalid_input`. A visitor (`isVisitor`) calls no
  * built-in workflow, reads no description and reads only the result of a run it started: its other
- * reads are `policy_denied`.
+ * reads are `policy_denied`. A declared agent (`isDeclaredAgent`) starts no built-in workflow but
+ * those in `AGENT_BUILT_INS` (`policy_denied`), as the client refuses it too.
  */
 export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
   const { client, resolved } = app;
@@ -738,6 +765,13 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
   const visitor = isVisitor(actor);
   if (!entry || (visitor && entry.builtin)) throw notCallable(name);
   const workflow = entry.name;
+  // As `SanomaClient.start` refuses it: a declared agent starts no built-in but those it may.
+  if (method === "start" && entry.builtin && isDeclaredAgent(actor) && !AGENT_BUILT_INS.has(workflow)) {
+    throw new PolicyDeniedError(
+      name,
+      `an agent starts none of the runtime's own workflows but ${[...AGENT_BUILT_INS].join(", ")}`,
+    );
+  }
   if (visitor && method !== "start" && method !== "result") {
     throw new PolicyDeniedError(name, "a visitor reads only the result of a run it started");
   }
