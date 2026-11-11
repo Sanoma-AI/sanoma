@@ -50,7 +50,15 @@ import { sourceKeyIds } from "./host.ts";
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
 export * from "./description.ts";
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
-export { admit, loadDataFiles, readPeople, type DataFiles, type DeclaredPeople } from "./resources.ts";
+export {
+  admit,
+  agentActing,
+  loadDataFiles,
+  peopleWarnings,
+  readPeople,
+  type DataFiles,
+  type DeclaredPeople,
+} from "./resources.ts";
 // The writer: setting, renaming and removing a declaration's fields in its data file, and rendering a new one.
 export {
   type DataFileContent,

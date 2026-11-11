@@ -83,6 +83,7 @@ import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
 import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
 import {
+  AGENT_BUILT_INS,
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
   CHANGE_EVENT,
@@ -104,6 +105,7 @@ import {
   FOLLOW_WORKFLOW,
   HOST_CHECK_AGENT,
   isBatch,
+  isDeclaredAgent,
   isEnded,
   isToken,
   isVisitor,
@@ -445,7 +447,10 @@ export class SanomaClient {
    * before its body. A run `runId` names already is returned as it is, whatever the policy says now, but to a visitor.
    * A visitor (`isVisitor`, an api token's principal too) starts no built-in but `call`, whose calls
    * the policy decides as direct ones: the app's own actions on the repository (`app-workflows.ts`)
-   * are staff's, as their server functions were, which no site's host answered.
+   * are staff's, as their server functions were, which no site's host answered. A declared agent
+   * (`isDeclaredAgent`, not one of the runtime's own) starts none but `call` and those in
+   * `AGENT_BUILT_INS`, whose start the policy decides as a company workflow's; a person's start of
+   * a built-in, and the runtime's agents', are not asked.
    */
   private async startHold(
     workflow: string,
@@ -462,7 +467,14 @@ export class SanomaClient {
         "A visitor may not start the runtime's own workflows",
       );
     }
-    if (builtIn || (policy === allowAll && !visitor)) return undefined;
+    const agent = builtIn && workflow !== CALL_WORKFLOW && isDeclaredAgent(startedBy);
+    if (agent && !AGENT_BUILT_INS.has(workflow)) {
+      throw new PolicyDeniedError(
+        `${WORKFLOW_ACTION}${workflow}`,
+        `An agent starts none of the runtime's own workflows but ${[...AGENT_BUILT_INS].join(", ")}`,
+      );
+    }
+    if ((builtIn && !agent) || (policy === allowAll && !visitor)) return undefined;
     // A visitor's start is decided whatever run its id names: a visitor shares an id (`anonymous`) with others.
     if (!visitor && runId !== undefined && (await this.row(runId))) return undefined;
     const decision = decideStart(policy, workflow, input, startedBy);
@@ -1788,11 +1800,14 @@ export class SanomaClient {
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
   private async mustMatch(runId: string, args: RunArgs) {
     const [stored] = ((await this.dbos.getWorkflow(runId))?.input ?? []) as [RunArgs?];
-    // Who started it by id alone: their groups are the people files' at the time, which may change.
+    // Who started it by id, and for whom (one agent acts for several people), alone: their groups
+    // are the people files' at the time, which may change.
     const differs = (["input", "startedBy", "sandbox"] as const).filter(
       (key) =>
         !stored ||
-        (key === "startedBy" ? stored.startedBy?.id !== args.startedBy.id : !sameJson(stored[key], args[key])),
+        (key === "startedBy"
+          ? stored.startedBy?.id !== args.startedBy.id || stored.startedBy.onBehalfOf !== args.startedBy.onBehalfOf
+          : !sameJson(stored[key], args[key])),
     );
     if (differs.length) {
       throw new SanomaError(

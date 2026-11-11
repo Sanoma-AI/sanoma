@@ -225,6 +225,48 @@ export default defineWorkflow({
     }
   }, 180_000);
 
+  it("reports two agents declaring one client, and warns of an agent with a client in a declared group", async () => {
+    const own = copyFixture();
+    const people = join(own, "resources/people.ts");
+    try {
+      mkdirSync(join(own, "resources"), { recursive: true });
+      writeFileSync(
+        people,
+        `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada" });
+export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
+export const twin = sanoma.agent({ id: "claude-twin", client: "claude-code" });
+export const finance = sanoma.group({ name: "finance", members: [ada, claudeCode] });
+`,
+      );
+      const warning =
+        'resources/people.ts#claudeCode: warning: resources/people.ts#claudeCode declares the client "claude-code" and is in the group finance: whoever acts as it through that client is in them too';
+      expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toMatchObject({
+        ok: false,
+        problems: [
+          'resources/people.ts#twin: resources/people.ts#twin declares the client "claude-code", which resources/people.ts#claudeCode declares: give each agent its own',
+        ],
+        warnings: [warning],
+      });
+      // One client each: a warning alone, which does not fail the check.
+      writeFileSync(
+        people,
+        readFileSync(people, "utf8").replace(
+          ', client: "claude-code" });\nexport const finance',
+          " });\nexport const finance",
+        ),
+      );
+      expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toMatchObject({
+        ok: true,
+        problems: [],
+        warnings: [warning],
+      });
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it("reports a scenario step that does not hold, and a world that is not one", async () => {
     const feature = join(dir, "scenarios/hello/hello.feature");
     writeFileSync(feature, readFileSync(feature, "utf8").replace("And the run succeeds", "And the run fails"));

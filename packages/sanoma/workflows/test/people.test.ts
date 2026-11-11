@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,7 @@ import { useTestApp } from "sanoma/testing/harness";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { sanoma } from "../src/constructors.ts";
-import { admit, describeConfig, readPeople } from "../src/describe.ts";
+import { admit, agentActing, describeConfig, peopleWarnings, readPeople } from "../src/describe.ts";
 import {
   approverOf,
   declaresPeople,
@@ -18,7 +19,7 @@ import {
   type SanomaConfig,
   visitorPrincipal,
 } from "../src/index.ts";
-import { problemLine } from "../src/shared.ts";
+import { agentOfClient, problemLine } from "../src/shared.ts";
 import { failure, waitFor } from "./harness.ts";
 
 // People, agents and groups: vendorless resource types of the runtime's own vendor, declared in
@@ -36,6 +37,14 @@ describe("the people types", () => {
   it("declare plain values, a group's members and an agent's person by reference", () => {
     expect(sales.desired).toEqual({ name: "sales", members: ["bo", "refund-bot"] });
     expect(refundBot.desired).toEqual({ id: "refund-bot", onBehalfOf: "bo" });
+    expect(sanoma.agent({ id: "claude-code", client: "claude-code" }).desired).toEqual({
+      id: "claude-code",
+      client: "claude-code",
+    });
+    // A client's id need not be a URL.
+    expect(sanoma.agent({ id: "chatgpt", client: "https://chatgpt.com/connector" }).desired.client).toBe(
+      "https://chatgpt.com/connector",
+    );
   });
 
   it.each([
@@ -43,6 +52,7 @@ describe("the people types", () => {
     [() => sanoma.person({ id: "ada", groups: ["admin"] } as never), "no field groups"],
     [() => sanoma.person({ id: "ada", github: "not a login" }), "is a GitHub login"],
     [() => sanoma.agent({ id: "bot", onBehalfOf: refundBot as never }), "names a resource of type sanoma.person"],
+    [() => sanoma.agent({ id: "bot", client: "claude code" }), 'is one word, such as "claude-code"'],
     [() => sanoma.group({ name: "finance", members: [finance as never] }), "sanoma.person or sanoma.agent"],
   ])("refuse what is not well formed: %#", (make, message) => {
     expect(make).toThrow(message);
@@ -299,6 +309,100 @@ describe("people in a data file", () => {
   });
 });
 
+describe("an agent's client", () => {
+  it("is one agent's: two agents declaring one client is a problem, as two with one id are", () => {
+    const root = mkdtempSync(join(tmpdir(), "sanoma-people-clients-"));
+    mkdirSync(join(root, "resources"));
+    writeFileSync(
+      join(root, "resources", "people.ts"),
+      `import { sanoma } from "sanoma/resources";
+export const ada = sanoma.person({ id: "ada" });
+export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
+export const twin = sanoma.agent({ id: "claude-twin", client: "claude-code" });
+export const chatgpt = sanoma.agent({ id: "chatgpt", client: "chatgpt" });
+export const tools = sanoma.group({ name: "tools", members: [ada, chatgpt] });
+`,
+    );
+    try {
+      const read = readPeople(root);
+      expect(read.problems.map(problemLine)).toEqual([
+        'resources/people.ts#twin: resources/people.ts#twin declares the client "claude-code", which resources/people.ts#claudeCode declares: give each agent its own',
+      ]);
+      // Which, like any people problem, admits nobody while it stands.
+      expect(() => admit({ id: "ada" }, read)).toThrow("cannot be admitted while the people's files have problems");
+      expect(agentOfClient("claude-code", read.people)).toBe("claude-code");
+      expect(agentOfClient("chatgpt", read.people)).toBe("chatgpt");
+      expect(agentOfClient("cursor", read.people)).toBeUndefined();
+      // An agent with a client in a declared group gives that group to whoever acts as it: a warning.
+      expect(peopleWarnings(read.people).map(problemLine)).toEqual([
+        'resources/people.ts#chatgpt: resources/people.ts#chatgpt declares the client "chatgpt" and is in the group tools: whoever acts as it through that client is in them too',
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("agentActing, and admit for an agent acting for someone", () => {
+  const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
+  const tools = sanoma.group({ name: "tools", members: [claudeCode] });
+  const read = { people: [...people, claudeCode, tools], problems: [] };
+
+  it("is the declared agent with its groups, acting for the declared person", () => {
+    expect(agentActing("claude-code", "ada", read)).toEqual({
+      id: "claude-code",
+      groups: ["agents", "tools"],
+      onBehalfOf: "ada",
+    });
+    // An agent whose declaration fixes whom it acts for, for that person.
+    expect(agentActing("refund-bot", "bo", read)).toEqual({
+      id: "refund-bot",
+      groups: ["agents", "sales"],
+      onBehalfOf: "bo",
+    });
+  });
+
+  it.each([
+    ["the people's files have problems", "claude-code", "ada", "while the people's files have problems"],
+    ["the id is nobody's", "cursor", "ada", "cursor is not an agent resources/people.ts declares"],
+    ["the id is a person's", "bo", "ada", "bo is a person, not an agent"],
+    ["the id is one of the runtime's own agents", "host-check", "ada", "host-check is one of the runtime's own agents"],
+    ["the person is not declared", "claude-code", "cy", "acts for no one but a declared person, and cy is not one"],
+    ["the person is an agent", "claude-code", "refund-bot", "and refund-bot is not one"],
+    ["the agent acts for someone else alone", "refund-bot", "ada", "refund-bot acts for bo alone"],
+  ])("refuses, not_admitted, when %s", (_, agent, person, message) => {
+    const given = message.startsWith("while")
+      ? { people: read.people, problems: [{ file: "resources/people.ts", message: "x" }] }
+      : read;
+    expect(() => agentActing(agent, person, given)).toThrow(message);
+    expect(() => agentActing(agent, person, given)).toThrow(expect.objectContaining({ code: "not_admitted" }));
+  });
+
+  it("is what admit keeps of an agent named with whom it acts for, and refuses a forged one", () => {
+    expect(admit({ id: "claude-code", onBehalfOf: "ada", groups: ["admin"] }, read)).toEqual({
+      id: "claude-code",
+      groups: ["agents", "tools"],
+      onBehalfOf: "ada",
+    });
+    expect(admit({ id: "refund-bot", onBehalfOf: "bo" }, read)).toEqual(principalOf("refund-bot", read.people));
+    for (const [id, onBehalfOf] of [
+      ["claude-code", "cy"],
+      ["claude-code", "refund-bot"],
+      ["refund-bot", "ada"],
+    ] as const) {
+      expect(() => admit({ id, onBehalfOf }, read), `${id} for ${onBehalfOf}`).toThrow(
+        expect.objectContaining({ code: "not_admitted" }),
+      );
+    }
+    // With no onBehalfOf, an agent is admitted as today; a person's and a runtime agent's onBehalfOf is dropped.
+    expect(admit({ id: "claude-code" }, read)).toEqual({ id: "claude-code", groups: ["agents", "tools"] });
+    expect(admit({ id: "ada", onBehalfOf: "bo" }, read)).toEqual({ id: "ada", groups: ["finance"] });
+    expect(admit({ id: "scenarios", onBehalfOf: "ada" }, read)).toEqual({ id: "scenarios", groups: ["agents"] });
+    // An agent never signs in, acting for someone or not.
+    expect(() => admit({ id: "claude-code", onBehalfOf: "ada" }, read, true)).toThrow("is not declared");
+  });
+});
+
 describe("visitors and anonymous", () => {
   const read = { people, problems: [] };
   const visitor = visitorPrincipal("auth0", "u1");
@@ -347,7 +451,10 @@ describe("the client, with people declared", () => {
   const databaseUrl = testDatabaseUrl("people");
   const root = mkdtempSync(join(tmpdir(), "sanoma-people-client-"));
   mkdirSync(join(root, "resources"));
-  writeFileSync(join(root, "resources", "people.ts"), PEOPLE);
+  writeFileSync(
+    join(root, "resources", "people.ts"),
+    `${PEOPLE}export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });\n`,
+  );
   afterAll(() => rmSync(root, { recursive: true, force: true }));
   /** Waits for someone in finance to approve. */
   const held = defineWorkflow({
@@ -400,6 +507,35 @@ describe("the client, with people declared", () => {
     expect(await failure(app.client.start(held, {}, { startedBy: visitor }))).toMatchObject({
       code: "policy_denied",
     });
+    expect(await app.client.decide(runId, { decision: "approve", by: { id: "ada" } })).toMatchObject({
+      status: "approved",
+      decidedBy: "ada",
+    });
+    expect(await app.client.result(runId)).toBe("done");
+  });
+
+  it("starts a run as an agent acting for a person, which its summary and ledger keep, and the person may approve", async () => {
+    const runId = randomUUID();
+    const acting = { id: "claude-code", onBehalfOf: "ada" };
+    expect(await app.client.start(held, {}, { startedBy: acting, runId })).toBe(runId);
+    const startedBy = { id: "claude-code", groups: ["agents"], onBehalfOf: "ada" };
+    expect((await app.client.run(runId))?.startedBy).toEqual(startedBy);
+    await waitFor(async () => (await app.client.ledger(runId)).length > 0);
+    expect((await app.client.ledger(runId))[0]).toMatchObject({ type: "run.started", actor: startedBy });
+    // The same id is the same run for the same agent and person, and another person's is refused.
+    expect(await app.client.start(held, {}, { startedBy: acting, runId })).toBe(runId);
+    expect(
+      await failure(app.client.start(held, {}, { startedBy: { id: "claude-code", onBehalfOf: "bo" }, runId })),
+    ).toMatchObject({ code: "invalid_input", data: { differs: ["startedBy"] } });
+    // Someone neither the people's files declare nor whom the agent may act for.
+    expect(
+      await failure(app.client.start(held, {}, { startedBy: { id: "claude-code", onBehalfOf: "cy" } })),
+    ).toMatchObject({ code: "not_admitted" });
+    expect(
+      await failure(app.client.start(held, {}, { startedBy: { id: "refund-bot", onBehalfOf: "ada" } })),
+    ).toMatchObject({ code: "not_admitted", message: expect.stringContaining("refund-bot acts for bo alone") });
+    // Ada, in finance, decides the hold on the run her agent started for her: it is not her own run.
+    await waitFor(async () => (await app.client.approvals(runId)).some((a) => a.status === "pending"));
     expect(await app.client.decide(runId, { decision: "approve", by: { id: "ada" } })).toMatchObject({
       status: "approved",
       decidedBy: "ada",

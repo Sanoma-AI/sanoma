@@ -8,6 +8,7 @@ import {
   type ConfigDescription,
   crossAppImports,
   describeConfig,
+  peopleWarnings,
   permissionsGrid,
   readPeople,
   schemaOf,
@@ -41,8 +42,9 @@ const LINTED = ["workflows", "resources", "sites", "apps"];
  * Worker built (`checkBundle`), so a company file importing what the Worker lacks is named. Their
  * problems in the order tsc, the sites' tsc, oxlint, the policies, the config, the folders refused
  * as sites, the content's problems, the sites' build, the app bundle's. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
- * problem. `ok` when there are no problems; the warnings beside them (the sites', and an import
- * from one app's folder into another's) never make it not.
+ * problem. `ok` when there are no problems; the warnings beside them (the sites', an import
+ * from one app's folder into another's, and an agent with a `client` in a declared group,
+ * `peopleWarnings`) never make it not.
  * With them, the repo's Permissions grid (`permissionsGrid`, as the app's Permissions page has
  * it), from the same config and description, which a change is reviewed by: none when the
  * policies do not hold, since every cell would be the refusing policy's deny.
@@ -99,6 +101,8 @@ export async function check(
   const warnings = [
     ...description.sites.flatMap((site) => site.warnings),
     ...crossAppImports(root, description.apps),
+    // An agent with a client in a declared group: its groups reach whoever acts as it.
+    ...peopleWarnings(readPeople(root).people),
   ].map(warningLine);
   const grid = policies.length ? undefined : permissionsGrid(resolved, description);
   return { ok: problems.length === 0, problems, warnings, ...(grid && { grid }) };

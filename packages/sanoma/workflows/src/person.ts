@@ -39,7 +39,16 @@ const agent = defineResource({
   type: "agent",
   title: "Agent",
   identity: "id",
-  schema: z.object({ id: WORD, name: z.string().optional(), onBehalfOf: WORD.optional() }),
+  schema: z.object({
+    id: WORD,
+    name: z.string().optional(),
+    onBehalfOf: WORD.optional(),
+    /**
+     * The OAuth client it stands for, one word (a client's id, not necessarily a URL): one agent
+     * per client (`readPeople`), which a hosted sign-in maps to its agent (`agentOfClient`).
+     */
+    client: z.string().regex(/^\S+$/, 'is one word, such as "claude-code"').optional(),
+  }),
   fields: { ...NONE, references: { onBehalfOf: { type: "sanoma.person" } } },
   find: ({ id }) => id,
   vendorless: true,
@@ -63,7 +72,7 @@ const group = defineResource({
 /**
  * What a data file declares the company's people with, imported from "sanoma/resources":
  * `export const ada = sanoma.person({ id: "ada", name: "Ada Ortiz", github: "ada-ortiz" })`,
- * `sanoma.agent({ id: "refund-bot", onBehalfOf: bo })` and
+ * `sanoma.agent({ id: "refund-bot", onBehalfOf: bo })`, `sanoma.agent({ id: "claude-code", client: "claude-code" })` and
  * `sanoma.group({ name: "finance", members: [ada, refundBot] })`.
  */
 export const sanoma = { person, agent, group };
