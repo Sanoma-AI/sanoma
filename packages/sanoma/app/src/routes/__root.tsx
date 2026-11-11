@@ -124,7 +124,7 @@ interface Prefs {
 /**
  * Who the server says is asking, in the first render: a deployment's login shows at once. And
  * the config, which every page reads and which cannot change while the app runs, whether the
- * repository has a remote, which the bar's Changes shows by. They stay in
+ * repository has a remote, which the bar's Changes shows by, and the company's state, its badge. They stay in
  * the query client, where the page reads them: a loader returns only what no query holds (here,
  * the `Prefs`), since the page carries loader data too.
  */
@@ -132,8 +132,6 @@ async function appLoader(queryClient: QueryClient): Promise<Prefs> {
   // The inbox badge's count, started here and not awaited: it streams in with the page, and a
   // slow or failed read never holds the page up (the badge shows nothing until it comes).
   void queryClient.query(waitingRunsQuery()).catch(() => {});
-  // The bar's state badge, the same way; polled from there (a failed read leaves it out).
-  void queryClient.query(companyStateQuery()).catch(() => {});
   await Promise.all([
     queryClient.query({ ...actorQuery(), staleTime: "static" }),
     queryClient.query({ ...configQuery(), staleTime: "static" }),
@@ -141,6 +139,8 @@ async function appLoader(queryClient: QueryClient): Promise<Prefs> {
     // Whether the chat has a model, so its composer says so from the first render; read again by
     // the composer (a failed read here leaves it to the browser).
     queryClient.query({ ...chatModelQuery(), staleTime: "static" }).catch(() => {}),
+    // The bar's badge, the company's state; polled from there (a failed read leaves it out).
+    queryClient.query({ ...companyStateQuery(), staleTime: "static" }).catch(() => {}),
   ]);
   return readPrefs();
 }
