@@ -161,13 +161,12 @@ export const appConfig = ({ snapshot, place, resolved }: AppContext): AppConfig 
 export interface AgentDescription {
   /** The company's name as people read it. */
   name: string;
-  /** Every workflow, the runtime's own marked `builtin`: started by `name`, or `apiName` through `callApi`. */
+  /** The company's own workflows (none of the runtime's): started by `name`, or `apiName` through `callApi`. */
   workflows: {
     name: string;
     apiName: string;
     title?: string;
     trigger: ConfigDescription["workflows"][number]["trigger"];
-    builtin?: true;
     input: Record<string, unknown>;
   }[];
   /** The operations that may be called directly (`OpEntry.direct`), outside a run: a lookup is one whose effect is read. */
@@ -189,21 +188,24 @@ export interface AgentDescription {
 }
 
 /**
- * The snapshot's description narrowed for an agent (`DESCRIBE_CALL`): each workflow's name, api
- * name, title, trigger and input; each direct operation's contract; each collection's fields.
- * Left out on purpose: the policy and its text, files and source, the resources' desired values,
- * secret bindings, connections, sites and the database's host.
+ * The snapshot's description narrowed for an agent (`DESCRIBE_CALL`): each of the company's own
+ * workflows' name, api name, title, trigger and input; each direct operation's contract; each
+ * collection's fields. One projection for `/mcp` and a site or script alike. Left out on purpose:
+ * the runtime's own workflows (`builtin`: an agent starts none; drift is `/mcp`'s own tool), the
+ * policy and its text, files and source, the resources' desired values, secret bindings,
+ * connections, sites and the database's host.
  */
 export const agentDescription = (description: ConfigDescription): AgentDescription => ({
   name: description.name,
-  workflows: description.workflows.map((wf) => ({
-    name: wf.name,
-    apiName: apiNameOf(wf.name),
-    ...(wf.title !== undefined && { title: wf.title }),
-    trigger: wf.trigger,
-    ...(wf.builtin && { builtin: wf.builtin }),
-    input: wf.input,
-  })),
+  workflows: description.workflows
+    .filter((wf) => !wf.builtin)
+    .map((wf) => ({
+      name: wf.name,
+      apiName: apiNameOf(wf.name),
+      ...(wf.title !== undefined && { title: wf.title }),
+      trigger: wf.trigger,
+      input: wf.input,
+    })),
   ops: description.ops
     .filter((op) => op.direct)
     .map((op) => ({

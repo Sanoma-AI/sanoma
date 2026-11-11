@@ -396,6 +396,8 @@ describe("buildAppBundle", () => {
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
       });
     expect((await listTools({})).status).toBe(401);
+    // The loopback login's header is no sign-in on a host.
+    expect((await listTools({ "x-sanoma-actor": "ada" })).status).toBe(401);
     const listed = await listTools({ cookie: cookie! });
     expect(listed.status).toBe(200);
     expect(await listed.text()).toContain('"name":"start_run"');

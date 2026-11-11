@@ -16,8 +16,11 @@ import {
   withSetup,
 } from "sanoma/workflows";
 import { defineFake } from "sanoma/workflows/fake";
+import { BUILT_IN_WORKFLOWS } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { customers as crmCustomers } from "../../workflows/test/fixtures/company-apps/apps/crm/resources/data.ts";
+import followUp from "../../workflows/test/fixtures/company-apps/apps/crm/workflows/follow-up.ts";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
@@ -116,10 +119,11 @@ const greet = defineWorkflow({
   run: async (ctx, { id }) => (await ctx.acme.customer.get({ id })).name,
 });
 
+// With an app's workflow (`crm.follow-up`, from the company-apps fixture), named with its app.
 const config: SanomaConfig = {
-  workflows: [greet],
+  workflows: [greet, followUp],
   connectors: [withSetup(acme, { driver: () => acmeDriver }), withFake(hooks, hooksFake)],
-  collections: [outbound],
+  collections: [outbound, crmCustomers],
   root,
 };
 const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("mcp") });
@@ -227,6 +231,15 @@ describe("tools/list", () => {
     });
   }
 
+  it("answers a 2026-07-28 client's subscriptions/listen at once, and ends the response: nothing is ever published", async () => {
+    const listening = mcp("subscriptions/listen", { notifications: { toolsListChanged: true } });
+    const answered = await Promise.race([
+      listening,
+      new Promise<"still open">((resolve) => setTimeout(() => resolve("still open"), 5000)),
+    ]);
+    expect(answered).toMatchObject({ status: 200, body: { error: { code: -32603 } } });
+  });
+
   it("answers a 2025-era client's initialize, which it may still send first", async () => {
     const { status, body } = await mcp(
       "initialize",
@@ -235,6 +248,8 @@ describe("tools/list", () => {
     );
     expect(status).toBe(200);
     expect(body.result).toMatchObject({ protocolVersion: "2025-11-25", capabilities: { tools: expect.anything() } });
+    // The tools never change, so a client is not invited to listen for a change.
+    expect(body.result.capabilities.tools.listChanged).not.toBe(true);
   });
 });
 
@@ -250,7 +265,12 @@ describe("the describe tool", () => {
       trigger: "manual",
       input: expect.objectContaining({ properties: { id: { type: "string" } } }),
     });
-    expect(described.workflows).toContainEqual(expect.objectContaining({ name: "drift", builtin: true }));
+    // Only the company's own: no workflow of the runtime's, which start_run does not start.
+    expect(described.workflows.map((wf: { name: string }) => wf.name).toSorted()).toEqual([
+      "crm.follow-up",
+      "greet-customer",
+    ]);
+    expect(described.workflows.filter((wf: { name: string }) => BUILT_IN_WORKFLOWS.has(wf.name))).toEqual([]);
     const ops = described.ops.map((op: { id: string }) => op.id);
     expect(ops).toEqual(expect.arrayContaining(["acme.customer.get", "data.outbound.list"]));
     // A write a workflow calls is not called directly, so it is not listed.
@@ -262,6 +282,7 @@ describe("the describe tool", () => {
       output: expect.any(Object),
     });
     expect(described.collections).toEqual([
+      expect.objectContaining({ name: "crm.customers", key: "email" }),
       expect.objectContaining({ name: "outbound", key: expect.any(String), fields: expect.any(Object) }),
     ]);
   });
@@ -278,7 +299,7 @@ describe("the describe tool", () => {
     }
     expect(text).not.toContain(root);
     // Each entry has these fields alone: no file, source, outline or declaration (an input schema may name any field).
-    fieldsOf(described.workflows, ["name", "apiName", "title", "trigger", "builtin", "input"]);
+    fieldsOf(described.workflows, ["name", "apiName", "title", "trigger", "input"]);
     fieldsOf(described.ops, ["id", "effect", "description", "input", "output"]);
     fieldsOf(described.collections, ["name", "title", "key", "fields", "ops"]);
   });
@@ -326,6 +347,14 @@ describe("lookup", () => {
     expect(waited.isError).toBeFalsy();
     expect(waited.structuredContent).toEqual({ runId, status: "running" });
   });
+
+  it("files one approval for a held lookup retried with its id", async () => {
+    const id = crypto.randomUUID();
+    const asked = () => tool("lookup", { op: "acme.customer.get", input: { id: "held" }, id });
+    const [first, again] = [await asked(), await asked()];
+    expect(first.structuredContent).toMatchObject({ code: "approval_pending", runId: `call:ada:${id}` });
+    expect(again.structuredContent).toMatchObject({ code: "approval_pending", runId: `call:ada:${id}` });
+  });
 });
 
 describe("start_run, get_run and wait_run", () => {
@@ -347,16 +376,36 @@ describe("start_run, get_run and wait_run", () => {
     }
   });
 
-  it("refuses the runtime's own workflows, a workflow the config does not have and a bad input", async () => {
-    for (const workflow of ["apply", "drift"]) {
-      expect((await tool("start_run", { workflow })).structuredContent, workflow).toMatchObject({
-        code: "invalid_input",
-        error: expect.stringMatching(/runtime's own workflow/),
+  it("starts an app's workflow by its name with its app, or its api name", async () => {
+    for (const workflow of ["crm.follow-up", "crmFollowUp"]) {
+      const { runId } = (await tool("start_run", { workflow, input: { email: "nobody@acme.test" } })).structuredContent;
+      expect(await tool("wait_run", { runId }), workflow).toMatchObject({
+        structuredContent: { status: "finished", output: { followedUp: false } },
       });
     }
-    expect((await tool("start_run", { workflow: "nothing" })).structuredContent).toMatchObject({
-      code: "invalid_input",
-    });
+  });
+
+  it("makes one run of a start retried with its id, and refuses that id for another input", async () => {
+    const id = crypto.randomUUID();
+    const start = (input: object) => tool("start_run", { workflow: "greet-customer", input, id });
+    expect((await start({ id: "c3" })).structuredContent).toEqual({ runId: id });
+    expect((await start({ id: "c3" })).structuredContent).toEqual({ runId: id });
+    expect((await start({ id: "c4" })).structuredContent).toMatchObject({ code: "invalid_input" });
+  });
+
+  it("refuses the runtime's own workflows, however written, a workflow the config does not have and a bad input", async () => {
+    for (const workflow of ["apply", "drift", "call", "go-live", "goLive", "login-code", "loginCode"]) {
+      expect((await tool("start_run", { workflow })).structuredContent, workflow).toMatchObject({
+        code: "invalid_input",
+        error: expect.stringMatching(/runtime's own workflows are not started here.*drift tool/),
+      });
+    }
+    for (const workflow of ["nothing", "Call", " drift", "drift.start", "greetCustomer.start"]) {
+      expect((await tool("start_run", { workflow })).structuredContent, workflow).toMatchObject({
+        code: "invalid_input",
+        error: expect.stringMatching(/^No workflow .* to start/),
+      });
+    }
     expect((await tool("start_run", { workflow: "greet-customer", input: {} })).structuredContent).toMatchObject({
       code: "invalid_input",
     });
@@ -387,6 +436,28 @@ describe("drift", () => {
       startedBy: { id: "ada" },
     });
   });
+
+  it("makes one drift run when retried with its id", async () => {
+    const id = crypto.randomUUID();
+    expect((await tool("drift", { waitMs: 0, id })).structuredContent).toMatchObject({ runId: id });
+    expect((await tool("drift", { waitMs: 0, id })).structuredContent).toMatchObject({ runId: id });
+  });
+
+  it("says plainly that a company declaring no resources has nothing to check", async () => {
+    const app = appContext();
+    const workflows = snapshot.description.workflows.filter((wf) => wf.name !== "drift");
+    const bare: AppContext = { ...app, snapshot: { ...snapshot, description: { ...snapshot.description, workflows } } };
+    const request = new Request("http://127.0.0.1/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "drift", arguments: {} } }),
+    });
+    const res = await postMcp(request, { app: bare, actor: async () => ({ id: "ada" }) });
+    expect((await messageOf(res)).result).toMatchObject({
+      isError: true,
+      structuredContent: { code: "invalid_input", error: expect.stringMatching(/declares no resources/) },
+    });
+  });
 });
 
 describe("the guards", () => {
@@ -399,17 +470,21 @@ describe("the guards", () => {
       status: 400,
       body: { code: "invalid_input" },
     });
-    expect(await mcp("tools/list", {}, { as: visitorPrincipal("auth0", "u1") })).toMatchObject({
-      status: 403,
-      body: { code: "policy_denied" },
-    });
+    for (const as of [visitorPrincipal("auth0", "u1"), { id: "token:t1", groups: [] }]) {
+      expect(await mcp("tools/list", {}, { as }), as.id).toMatchObject({
+        status: 403,
+        body: { code: "policy_denied" },
+      });
+    }
   });
 
   it("refuses another site's Origin, and takes the app's own", async () => {
-    expect(await mcp("tools/list", {}, { headers: { origin: "https://attacker.example" } })).toMatchObject({
-      status: 403,
-      body: { code: "policy_denied" },
-    });
+    for (const origin of ["https://attacker.example", "null"]) {
+      expect(await mcp("tools/list", {}, { headers: { origin } }), origin).toMatchObject({
+        status: 403,
+        body: { code: "policy_denied" },
+      });
+    }
     expect((await mcp("tools/list", {}, { headers: { origin: "http://127.0.0.1" } })).status).toBe(200);
   });
 });
@@ -436,8 +511,12 @@ describe("POST /mcp through the app", () => {
     expect((await messageOf(res)).result.tools.map((t: { name: string }) => t.name).toSorted()).toEqual(TOOLS);
   });
 
-  it("refuses a browser's request from another site, by Sec-Fetch-Site or by Origin", async () => {
-    expect((await post({ [ACTOR_HEADER]: "ada", "sec-fetch-site": "cross-site" })).status).toBe(403);
-    expect((await post({ [ACTOR_HEADER]: "ada", origin: "https://attacker.example" })).status).toBe(403);
+  it("refuses a browser's request from another site or origin, by Sec-Fetch-Site or by Origin", async () => {
+    for (const site of ["cross-site", "same-site"]) {
+      expect((await post({ [ACTOR_HEADER]: "ada", "sec-fetch-site": site })).status, site).toBe(403);
+    }
+    for (const origin of ["https://attacker.example", "null"]) {
+      expect((await post({ [ACTOR_HEADER]: "ada", origin })).status, origin).toBe(403);
+    }
   });
 });

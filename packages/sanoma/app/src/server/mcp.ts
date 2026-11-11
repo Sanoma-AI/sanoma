@@ -2,15 +2,17 @@
 import "@tanstack/react-start/server-only";
 import { type CallToolResult, createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { type Principal, RUNTIME_VERSION } from "sanoma/workflows";
-import { apiNameOf, DESCRIBE_CALL, DRIFT_WORKFLOW, isVisitor } from "sanoma/workflows/shared";
+import { apiNameOf, BUILT_IN_WORKFLOWS, DESCRIBE_CALL, DRIFT_WORKFLOW, isVisitor } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { ApiError, asApiError } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { type ActorContext, callApi, RESULT_WAIT_MS, requireActor, toApiError } from "./core.ts";
+import { type ActorContext, agentDescription, callApi, RESULT_WAIT_MS, requireActor, toApiError } from "./core.ts";
 
-// `/mcp`: the company's agent surface, an MCP server over Streamable HTTP. Every tool is a call of
-// `callApi` (or of the client functions it reads runs with) as the person asking, so the policy
-// and the ledger see the person; a refusal is a tool error carrying `callApi`'s error body.
+// `/mcp`: the company's agent surface, an MCP server over Streamable HTTP. Every tool that starts,
+// calls or waits is a call of `callApi` as the person asking, so the policy and the ledger see the
+// person; `get_run`, and finding a run's workflow for `wait_run`, read the run with
+// `SanomaClient.run`, as `callApi`'s own reads of a run do. A refusal is a tool error carrying
+// `callApi`'s error body.
 
 /** How long `wait_run` and `drift` wait for a run at most: `callApi`'s `.result` wait. */
 const WaitMs = z
@@ -23,6 +25,22 @@ const WaitMs = z
 
 const RunId = z.string().min(1).describe("The run's id");
 
+/** A call's id, as `CallRequest` takes it: a retry with the same id is the same call. */
+const CallId = z
+  .string()
+  .regex(/^[\w-]{1,200}$/, "An id is letters, digits, _ and -, at most 200")
+  .optional();
+
+/**
+ * What the handler reports that is not a client's own mistake (a rejected request, or the
+ * refused `subscriptions/listen`, which are answered to the client): logged, as `toApiError`
+ * logs what it did not expect.
+ */
+function logUnexpected(error: Error): void {
+  if (/^(Rejected |Unsupported Media Type|subscriptions\/listen refused)/.test(error.message)) return;
+  console.error("sanoma app: an MCP request failed:", error);
+}
+
 /**
  * `POST /mcp` (and its GET and DELETE, which the stateless server answers 405): the request's
  * guards, then an MCP server built for it (`createMcpHandler`, at its default `legacy: 'stateless'`,
@@ -33,6 +51,9 @@ const RunId = z.string().min(1).describe("The run's id");
 export async function postMcp(request: Request, context: ActorContext & { site?: string }): Promise<Response> {
   if (context.site !== undefined) return Response.json({ error: "Not found" }, { status: 404 });
   try {
+    // Defence in depth behind the route's CSRF middleware, which already refuses another site's
+    // `Sec-Fetch-Site` (anything but `same-origin`) or `Origin` (`null` too): this holds for a
+    // caller of `postMcp` without the route, and compares hosts, so a proxy's scheme does not matter.
     if (!fromOwnOrigin(request)) {
       throw new ApiError(403, { error: "The agent surface answers no other site's page", code: "policy_denied" });
     }
@@ -40,7 +61,14 @@ export async function postMcp(request: Request, context: ActorContext & { site?:
     if (isVisitor(actor)) {
       throw new ApiError(403, { error: "A visitor may not use the agent surface", code: "policy_denied" });
     }
-    return await createMcpHandler(() => mcpServer(context.app, actor)).fetch(request);
+    // No `subscriptions/listen` (`maxSubscriptions: 0`, answered at once with JSON-RPC -32603): the
+    // tools never change, and an open stream would hold the request, and on the Worker its
+    // database connection, for nothing.
+    const handler = createMcpHandler(() => mcpServer(context.app, actor), {
+      maxSubscriptions: 0,
+      onerror: logUnexpected,
+    });
+    return await handler.fetch(request);
   } catch (err) {
     const { status, body } = toApiError(err, "an MCP request");
     return Response.json(body, { status });
@@ -54,16 +82,20 @@ function fromOwnOrigin(request: Request): boolean {
   return URL.parse(origin)?.host === new URL(request.url).host;
 }
 
-/** The six tools, each a call of `callApi` as `actor`: read ones marked `readOnlyHint`, the start `destructiveHint`. */
+/** The six tools, as `actor`: read ones marked `readOnlyHint`, the start `destructiveHint`. */
 function mcpServer(app: AppContext, actor: Principal): McpServer {
-  const server = new McpServer({ name: app.snapshot.description.appName, version: RUNTIME_VERSION });
+  // `listChanged: false`: the catalog is the same for every request, so nothing invites a listen.
+  const server = new McpServer(
+    { name: app.snapshot.description.appName, version: RUNTIME_VERSION },
+    { capabilities: { tools: { listChanged: false } } },
+  );
 
   server.registerTool(
     "describe",
     {
       title: "Describe the company",
       description:
-        "The company's workflows (name, api name, title, trigger, whether built in, input as JSON Schema), " +
+        "The company's own workflows (name, api name, title, trigger, input as JSON Schema), " +
         "the operations that may be called directly (id, effect, description, input and output as JSON Schema) " +
         "and its collections.",
       inputSchema: z.object({}),
@@ -79,14 +111,18 @@ function mcpServer(app: AppContext, actor: Principal): McpServer {
       description:
         "Calls an operation whose effect is read and that may be called directly, as listed by describe, " +
         "with its input. The company's policy may refuse it, or hold it for an approval: then the error " +
-        "names the held run, which wait_run reads.",
+        "names the held run, which wait_run reads. Retried with the same id and input, a held lookup is the " +
+        "same held run; the same id with another input is refused.",
       inputSchema: z.object({
         op: z.string().min(1).describe("The operation's id, such as ghost.post.list"),
         input: z.record(z.string(), z.unknown()).default({}).describe("Its input"),
+        id: CallId.describe(
+          "A new id per lookup (a UUID, say), sent again on a retry so a held one files one approval",
+        ),
       }),
       annotations: { readOnlyHint: true },
     },
-    ({ op, input }) =>
+    ({ op, input, id }) =>
       answer("lookup", () => {
         const declared = app.snapshot.description.ops.find((entry) => entry.id === op);
         if (declared?.effect !== "read" || !declared.direct) {
@@ -95,7 +131,7 @@ function mcpServer(app: AppContext, actor: Principal): McpServer {
             code: "invalid_input",
           });
         }
-        return callApi(app, actor, { name: op, input });
+        return callApi(app, actor, { name: op, input, ...(id !== undefined && { id }) });
       }),
   );
 
@@ -131,16 +167,25 @@ function mcpServer(app: AppContext, actor: Principal): McpServer {
       description:
         "Starts the built-in drift workflow, which reads each declared resource from its vendor and compares it " +
         'with the data files, changing nothing. Answers its report when it ends within the wait, else status "running" ' +
-        "and the run's id, for wait_run.",
-      inputSchema: z.object({ waitMs: WaitMs }),
+        "and the run's id, for wait_run. Retried with the same id, it is the same run. A company that declares no " +
+        "resources has nothing to check, and says so.",
+      inputSchema: z.object({
+        waitMs: WaitMs,
+        id: CallId.describe("A new id per check (a UUID, say), the run's id, sent again on a retry so it starts once"),
+      }),
       annotations: { readOnlyHint: true },
     },
-    ({ waitMs }) =>
+    ({ waitMs, id }) =>
       answer("drift", async () => {
-        const { runId } = (await callApi(app, actor, { name: `${apiNameOf(DRIFT_WORKFLOW)}.start`, input: {} })) as {
-          runId: string;
-        };
-        return resultOf(app, actor, DRIFT_WORKFLOW, runId, waitMs);
+        if (!app.snapshot.description.workflows.some((wf) => wf.name === DRIFT_WORKFLOW)) {
+          throw new ApiError(400, {
+            error: "This company declares no resources in its data files, so there is no drift to check",
+            code: "invalid_input",
+          });
+        }
+        const name = `${apiNameOf(DRIFT_WORKFLOW)}.start`;
+        const started = await callApi(app, actor, { name, input: {}, ...(id !== undefined && { id }) });
+        return resultOf(app, actor, DRIFT_WORKFLOW, (started as { runId: string }).runId, waitMs);
       }),
   );
 
@@ -149,29 +194,44 @@ function mcpServer(app: AppContext, actor: Principal): McpServer {
     {
       title: "Start a workflow",
       description:
-        "Starts one of the company's workflows, named as describe lists it, with its input, as the person " +
-        "asking. Answers the run's id, for get_run and wait_run. The runtime's own workflows are not started here.",
+        "Starts one of the company's own workflows, named as describe lists it, with its input, as the person " +
+        "asking. Answers the run's id, for get_run and wait_run. Retried with the same id, workflow and input, " +
+        "it answers the run already started; the same id for anything else is refused. The runtime's own " +
+        "workflows are not started here; drift has its own tool.",
       inputSchema: z.object({
-        workflow: z.string().min(1).describe("The workflow's name or api name"),
+        workflow: z.string().min(1).describe("The workflow's name or api name, as describe lists it"),
         input: z.record(z.string(), z.unknown()).default({}).describe("Its input, as its JSON Schema says"),
+        id: CallId.describe("A new id per start (a UUID, say), the run's id, sent again on a retry so it starts once"),
       }),
       annotations: { destructiveHint: true },
     },
-    ({ workflow, input }) =>
+    ({ workflow, input, id }) =>
       answer("start_run", () => {
-        const api = apiNameOf(workflow);
-        const named = app.snapshot.description.workflows.find((wf) => apiNameOf(wf.name) === api);
-        if (named?.builtin) {
-          throw new ApiError(400, {
-            error: `${named.name} is the runtime's own workflow, which start_run does not start`,
-            code: "invalid_input",
-          });
-        }
-        return callApi(app, actor, { name: `${api}.start`, input });
+        const named = startable(app, workflow);
+        return callApi(app, actor, { name: `${named.apiName}.start`, input, ...(id !== undefined && { id }) });
       }),
   );
 
   return server;
+}
+
+/**
+ * The company's own workflow `workflow` names, by its name or api name exactly, as `describe`
+ * lists it (`agentDescription`); a 400 `invalid_input` for anything else, saying when it is one of
+ * the runtime's own, which no tool starts but `drift`.
+ */
+function startable(app: AppContext, workflow: string) {
+  const named = agentDescription(app.snapshot.description).workflows.find(
+    (wf) => wf.name === workflow || wf.apiName === workflow,
+  );
+  if (named) return named;
+  const builtIn = [...BUILT_IN_WORKFLOWS].find((name) => name === workflow || apiNameOf(name) === workflow);
+  throw new ApiError(400, {
+    error: builtIn
+      ? `${builtIn} is the runtime's own workflow: the runtime's own workflows are not started here (drift has the drift tool)`
+      : `No workflow "${workflow}" to start: start_run starts one of the company's own workflows, by the name or api name describe lists (the runtime's own workflows are not started here; drift has the drift tool)`,
+    code: "invalid_input",
+  });
 }
 
 /** The run `runId` (`SanomaClient.run`, as `callApi` reads a run), or a 404 `run_not_found`. */
