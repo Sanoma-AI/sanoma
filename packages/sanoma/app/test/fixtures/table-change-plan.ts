@@ -1,9 +1,9 @@
-import type { TableChangePlan } from "../../src/components/grid/plan.ts";
+import type { TableChangePlan } from "sanoma/workflows/description";
 
 // A table change over the outbound fixture's collection with a change of each card's kind, as the
 // review board ("Review a table change") draws it: a choice added (Safe), a field renamed (Safe),
 // contact retyped to a number with rows that won't convert and no decision yet (Needs a decision),
-// and seats removed (Keeps the data). The runtime's plan, once it lands, has this shape (#630).
+// and seats removed, so hidden (Keeps the data).
 export const TABLE_CHANGE_PLAN: TableChangePlan = {
   collection: "outbound",
   rows: 312,
@@ -24,8 +24,6 @@ export const TABLE_CHANGE_PLAN: TableChangePlan = {
         ],
       },
     },
-    { kind: "delete", field: "seats", filled: 288 },
+    { kind: "hide", field: "seats", filled: 288 },
   ],
-  sql: [],
-  blocked: true,
 };

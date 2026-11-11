@@ -1,4 +1,5 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
+import { TableChangePlanSchema, type TableChangePlan } from "sanoma/workflows/description";
 import type { Saved } from "sanoma/workflows/shared";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { createElement, type ReactNode } from "react";
@@ -8,12 +9,10 @@ import {
   type ColumnChange,
   declarationEdit,
   diffLines,
-  FILE_ONLY,
   happens,
   keysIn,
   planOf,
   problemOf,
-  TableChangePlan,
 } from "../src/components/grid/plan.ts";
 import { TABLE_CHANGE_PLAN } from "./fixtures/table-change-plan.ts";
 
@@ -71,8 +70,6 @@ describe("planOf", () => {
       collection: "outbound",
       changes: [{ ...change, empty: 4 }],
       rows: 4,
-      sql: [],
-      blocked: false,
     });
     expect(happens(plan)).toBe(
       "outbound gains a priority column. All 4 records show it empty, and nothing else changes.",
@@ -83,7 +80,7 @@ describe("planOf", () => {
     );
   });
 
-  it("retypes a column, counting and sampling the filled values that won't convert, blocked until decided", () => {
+  it("retypes a column, counting and sampling the filled values that won't convert", () => {
     const plan = planOf(outbound, rows, { kind: "retype", field: "contact", to: "number" });
     expect(plan.changes).toEqual([
       {
@@ -101,27 +98,25 @@ describe("planOf", () => {
         },
       },
     ]);
-    expect(plan.blocked).toBe(true);
     expect(happens(plan)).toBe(
       "contact becomes a number. 2 records can't convert, and the review asks what to do with them.",
     );
     // To text, everything converts.
-    expect(planOf(outbound, rows, { kind: "retype", field: "seats", to: "text" }).blocked).toBe(false);
+    expect(happens(planOf(outbound, rows, { kind: "retype", field: "seats", to: "text" }))).toBe(
+      "seats becomes text. Every value converts.",
+    );
   });
 
   it("removes a column, counting the values it keeps", () => {
-    const plan = planOf(outbound, rows, { kind: "delete", field: "seats" });
-    expect(plan.changes).toEqual([{ kind: "delete", field: "seats", filled: 2 }]);
-    expect(plan.blocked).toBe(false);
+    const plan = planOf(outbound, rows, { kind: "hide", field: "seats" });
+    expect(plan.changes).toEqual([{ kind: "hide", field: "seats", filled: 2 }]);
     expect(happens(plan)).toBe("seats leaves the grid and the forms. Its values in 2 records are kept.");
   });
 
   it("renames a column as its own change, never a removal and an addition", () => {
     const plan = planOf(outbound, rows, { kind: "rename", from: "lastTouched", to: "lastContact" });
     expect(plan.changes).toEqual([{ kind: "rename", from: "lastTouched", to: "lastContact" }]);
-    expect(happens(plan)).toBe(
-      "lastTouched is called lastContact from now on. All 4 records keep their values under lastTouched until the table change lands, so lastContact shows empty in them.",
-    );
+    expect(happens(plan)).toBe("lastTouched is called lastContact from now on. All 4 records keep their values.");
     expect(declarationEdit(outbound.fields, { kind: "rename", from: "lastTouched", to: "lastContact" })).toEqual({
       fields: {},
       rename: { "fields.lastTouched": "lastContact" },
@@ -131,7 +126,7 @@ describe("planOf", () => {
 
 describe("a column change", () => {
   it("refuses a field the collection lacks, a name taken, the key, and a type the runtime does not take yet", () => {
-    expect(refused({ kind: "delete", field: "nope" })).toBe("nope is not a field of this collection");
+    expect(refused({ kind: "hide", field: "nope" })).toBe("nope is not a field of this collection");
     expect(refused({ kind: "add", field: "stage", type: "text", required: false })).toBe("stage is a field already");
     expect(refused({ kind: "rename", from: "stage", to: "owner" })).toBe("owner is a field already");
     expect(refused({ kind: "retype", field: "company", to: "number" })).toBe(
@@ -143,7 +138,7 @@ describe("a column change", () => {
     expect(refused({ kind: "add", field: "priority", type: "number", required: true })).toBeUndefined();
   });
 
-  it("sets the declaration's field for an add, a retype and a requirement, keeping whether it was optional; removes it for a delete", () => {
+  it("sets the declaration's field for an add, a retype and a requirement, keeping whether it was optional; hides it, optional, for a removal", () => {
     expect(edit({ kind: "add", field: "priority", type: { enum: ["High"] }, required: false }).fields).toEqual({
       "fields.priority": { enum: ["High"], optional: true },
     });
@@ -152,7 +147,10 @@ describe("a column change", () => {
     });
     expect(edit({ kind: "retype", field: "contact", to: "number" }).fields).toEqual({ "fields.contact": "number" });
     expect(edit({ kind: "require", field: "lastTouched" }).fields).toEqual({ "fields.lastTouched": "date" });
-    expect(edit({ kind: "delete", field: "seats" })).toEqual({ fields: {}, rename: { "fields.seats": null } });
+    expect(edit({ kind: "hide", field: "contact" })).toEqual({
+      fields: { "fields.contact": { type: "text", optional: true, hidden: true } },
+      rename: {},
+    });
   });
 
   it("lists the declaration's lines a plan removes and adds, as the review's diff shows them", () => {
@@ -163,6 +161,7 @@ describe("a column change", () => {
       { sign: "-", text: 'contact: "text",' },
       { sign: "+", text: 'contact: "number",' },
       { sign: "-", text: 'seats: { type: "number", optional: true },' },
+      { sign: "+", text: 'seats: { type: "number", optional: true, hidden: true },' },
     ]);
   });
 
@@ -203,15 +202,13 @@ describe("TableChangeReview", () => {
     expect(cards(html)).toEqual([
       ["Couldn't apply this change", "Nothing changed"],
       ["Add priority", "Safe"],
-      ["Rename lastTouched to lastContact", "Needs the data moved"],
+      ["Rename lastTouched to lastContact", "Safe"],
       ["Change contact from text to a number", "Needs a decision"],
       ["Remove seats", "Keeps the data"],
     ]);
     expect(html).toContain("4 changes to outbound · 312 records. They apply together");
     // The plan a change carries reads back as one, as the change's page reads it.
-    expect(TableChangePlan.parse(TABLE_CHANGE_PLAN)).toEqual(TABLE_CHANGE_PLAN);
-    // No SQL yet: only the data file changes, and the review says so.
-    expect(html).toContain(FILE_ONLY);
+    expect(TableChangePlanSchema.parse(TABLE_CHANGE_PLAN)).toEqual(TABLE_CHANGE_PLAN);
     expect(html).toContain("297 records convert. 15 can't, because what's in them isn't a number.");
     expect(html).toContain('<td class="px-3 py-1.5">about 40k</td>');
     expect(html).toContain("and 12 records more");

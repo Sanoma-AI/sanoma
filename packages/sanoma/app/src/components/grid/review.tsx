@@ -1,4 +1,5 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
+import type { ConvertDecision, TableChange, TableChangePlan } from "sanoma/workflows/description";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
@@ -9,23 +10,12 @@ import { cn, plural } from "#/lib/utils.ts";
 import type { ChangeDetail } from "../../api.ts";
 import type { Verbs } from "../approval.tsx";
 import { CardHeading, ToneBadge } from "../kit.tsx";
-import {
-  allRecords,
-  renamed,
-  diffLines,
-  FILE_ONLY,
-  fileOnly,
-  NO_SQL,
-  type RetypeDecision,
-  type TableChange,
-  type TableChangePlan,
-  typeWords,
-} from "./plan.ts";
+import { allRecords, renamed, diffLines, typeWords } from "./plan.ts";
 
 // A table change's review on its change's page (`routes/changes/$id.tsx`), from the plan the
 // change carries (`ChangeState.plan`): a card per change in its kind's words and tone (Safe, Needs
 // a decision with the rows that won't convert, Keeps the data), Try it first, The details (the
-// data file's lines and what runs on the database), and Couldn't apply this change over a run
+// data file's lines), and Couldn't apply this change over a run
 // that failed. Its decision is the change's own, in the table change's words (`TABLE_VERBS`). It
 // reads nothing of the app itself (the page gives it the collection as main declares it), so a
 // test renders it on its own.
@@ -76,13 +66,11 @@ function WontConvert({
   field: string;
   change: Extract<TableChange, { kind: "retype" | "convert" }>;
 }) {
-  const [decision, setDecision] = useState<RetypeDecision | undefined>(
-    change.kind === "retype" ? change.decision : undefined,
-  );
+  const [decision, setDecision] = useState<ConvertDecision | undefined>(change.decision);
   const { count, sample } = change.wontConvert;
-  const choices: [RetypeDecision, string][] = [
-    ["clear-unconvertible", `Convert the rest and leave these ${count} empty`],
-    ["keep-text", `Keep ${field} as text while someone fixes them in the grid`],
+  const choices: [ConvertDecision, string][] = [
+    ["clear", `Convert the rest and leave these ${count} empty`],
+    ["keep", `Keep ${field} as text while someone fixes them in the grid`],
   ];
   return (
     <>
@@ -156,19 +144,12 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
         </ChangeCard>
       );
     }
-    case "rename": {
-      // Until the table change lands, the records' values stay under the old name.
-      const moves = !plan.sql.length && plan.rows > 0;
+    case "rename":
       return (
-        <ChangeCard
-          title={`Rename ${change.from} to ${change.to}`}
-          tone={moves ? "waiting" : "ok"}
-          said={moves ? "Needs the data moved" : "Safe"}
-        >
-          <p>{renamed(plan, change)}</p>
+        <ChangeCard title={`Rename ${change.from} to ${change.to}`} tone="ok" said="Safe">
+          <p>{renamed(plan)}</p>
         </ChangeCard>
       );
-    }
     case "retype":
     case "convert": {
       const to = change.kind === "retype" ? change.to : change.type;
@@ -208,7 +189,7 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
           </p>
         </ChangeCard>
       );
-    case "delete":
+    case "hide":
       return (
         <ChangeCard title={`Remove ${change.field}`} tone="ok" said="Keeps the data">
           <p>
@@ -240,7 +221,6 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
  * A table change's review: how many changes over how many records, a card per change, Try it
  * first, The details (`collection` as main declares it, the data file's lines; none once main no
  * longer declares it), and, over a run that failed before merging, Couldn't apply this change.
- * A plan with no SQL yet says so when it touches the records (`FILE_ONLY`): only the file changes.
  */
 export function TableChangeReview({
   change,
@@ -274,11 +254,6 @@ export function TableChangeReview({
         {plural(plan.changes.length, "change")} to {plan.collection} · {plural(plan.rows, "record")}
         {many && ". They apply together: either every one lands, or none does."}
       </p>
-      {fileOnly(plan) && (
-        <p role="note" className="rounded-lg border px-3 py-2 text-sm text-muted-foreground">
-          {FILE_ONLY}
-        </p>
-      )}
       {plan.changes.map((planned, i) => (
         <Planned key={i} change={planned} plan={plan} keyField={keyField} />
       ))}
@@ -306,8 +281,8 @@ export function TableChangeReview({
           </CollapsibleTrigger>
         </CardHeader>
         <CollapsibleContent render={<CardContent />}>
-          <div className="flex flex-col gap-3">
-            {collection && (
+          {collection && (
+            <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground">
                   The company's file · <code>{collection.declared?.file ?? "resources/data.ts"}</code>
@@ -321,18 +296,8 @@ export function TableChangeReview({
                   ))}
                 </pre>
               </div>
-            )}
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">What runs on the database</span>
-              {plan.sql.length ? (
-                <pre className="overflow-auto rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-relaxed">
-                  {plan.sql.join("\n")}
-                </pre>
-              ) : (
-                <p className="text-sm text-muted-foreground">{NO_SQL}.</p>
-              )}
             </div>
-          </div>
+          )}
         </CollapsibleContent>
       </Collapsible>
     </section>

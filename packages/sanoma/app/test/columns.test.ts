@@ -143,8 +143,6 @@ describe("a collection's columns", () => {
       collection: "outbound",
       changes: [{ ...change, empty: 2 }],
       rows: 2,
-      sql: [],
-      blocked: false,
     });
 
     // Its review: the table change's card, and its decision in the table change's words.
@@ -172,7 +170,7 @@ describe("a collection's columns", () => {
     await testApp.client.changeEvent(id, { kind: "close", by: "ada" }, { by: { id: "ada" } });
 
     await expect(
-      proposeColumnChange(context, ada, { collection: "outbound", change: { kind: "delete", field: "company" } }),
+      proposeColumnChange(context, ada, { collection: "outbound", change: { kind: "hide", field: "company" } }),
     ).rejects.toMatchObject({
       status: 400,
       body: { error: "company is the key, which names each record: it stays as it is" },

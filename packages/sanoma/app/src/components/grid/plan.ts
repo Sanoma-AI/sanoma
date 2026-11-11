@@ -1,82 +1,24 @@
-import type { CollectionEntry } from "sanoma/workflows/describe";
-import { FIELD_NAME, FIELD_TYPES, isRecord, type Saved } from "sanoma/workflows/shared";
+import {
+  type CollectionEntry,
+  type ColumnType,
+  ColumnTypeSchema,
+  type ReshapeChange,
+  type TableChange,
+  type TableChangePlan,
+} from "sanoma/workflows/description";
+import { FIELD_NAME, isRecord, reshaped, type Saved } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 // A change to a collection's columns, as a person proposes it from the grid (`ColumnChange`) and
-// reviews it on its change's page (`TableChangePlan`, the runtime session's provisional shape,
-// #630). Until the runtime plans a table change itself (its SQL, its rows counted in the table),
-// the app drafts the plan here from the rows it read and the declaration: `planOf` is that one
-// seam, which the runtime's plan replaces.
+// reviews it on its change's page (`TableChangePlan`, the runtime's: `sanoma/workflows/description`).
+// The app drafts the plan here from the rows it read and the declaration (`planOf`); the records
+// follow it when it lands (`sanoma.records.reshape`, by `reshaped`, which the counts here use too).
 
 /** A new field's name, as `collection()` takes it. */
 const NAME = z.string().regex(FIELD_NAME, "Letters, digits and _, not a digit first");
 
-/** A column's type: the runtime's field types, a choice, a link to another collection, or free-form JSON. */
-const FieldTypeSchema = z.union([
-  z.enum([...FIELD_TYPES, "json"]),
-  z.strictObject({
-    enum: z
-      .array(z.string().trim().min(1))
-      .min(1, "Give it a choice")
-      .refine((values) => new Set(values).size === values.length, "Each choice once"),
-  }),
-  z.strictObject({ link: z.string().min(1) }),
-]);
-export type FieldType = z.infer<typeof FieldTypeSchema>;
-
-const COUNT = z.number().int();
-
-/** The rows a change cannot convert: how many, and at most `SAMPLE` of them by key. */
-const WontConvertSchema = z.object({
-  count: COUNT,
-  sample: z.array(z.object({ key: z.string(), value: z.unknown() })),
-});
-type WontConvert = z.infer<typeof WontConvertSchema>;
-
-/** What becomes of the rows a retype cannot convert: kept as text, cleared, or the change called off. */
-const RetypeDecisionSchema = z.enum(["keep-text", "clear-unconvertible", "cancel"]);
-export type RetypeDecision = z.infer<typeof RetypeDecisionSchema>;
-
-/** One change to a table, with the rows it touches counted (`empty`, `filled`, `unmatched`, `wontConvert.count`). */
-const TableChangeSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("add"), field: z.string(), type: FieldTypeSchema, required: z.boolean(), empty: COUNT }),
-  z.object({ kind: z.literal("rename"), from: z.string(), to: z.string() }),
-  z.object({
-    kind: z.literal("retype"),
-    field: z.string(),
-    from: FieldTypeSchema,
-    to: FieldTypeSchema,
-    wontConvert: WontConvertSchema,
-    decision: RetypeDecisionSchema.optional(),
-  }),
-  z.object({ kind: z.literal("require"), field: z.string(), empty: COUNT }),
-  z.object({ kind: z.literal("delete"), field: z.string(), filled: COUNT }),
-  z.object({ kind: z.literal("link"), field: z.string(), to: z.string(), unmatched: COUNT }),
-  z.object({
-    kind: z.literal("convert"),
-    field: z.string(),
-    key: z.string(),
-    type: FieldTypeSchema,
-    wontConvert: WontConvertSchema,
-  }),
-]);
-export type TableChange = z.infer<typeof TableChangeSchema>;
-
-/**
- * A table change as the person reviews it: what the declarations before and after differ in, the
- * records in the table now (`rows`), "Show SQL" (`sql`, the statements in order, informational,
- * empty until the runtime plans the change), and `blocked` while a change has rows that won't
- * convert and no decision. A change's page reads the plan it carries through this, as anything
- * else starting a `patch` could have written it.
- */
-export const TableChangePlan = z.object({
-  collection: z.string(),
-  changes: z.array(TableChangeSchema).min(1),
-  rows: COUNT,
-  sql: z.array(z.string()),
-  blocked: z.boolean(),
-});
-export type TableChangePlan = z.infer<typeof TableChangePlan>;
+/** The records a change cannot convert: how many, and at most `SAMPLE` of them by key. */
+type WontConvert = Extract<TableChange, { kind: "retype" }>["wontConvert"];
 
 /** How many of the rows that won't convert a plan names. */
 const SAMPLE = 20;
@@ -84,32 +26,15 @@ const SAMPLE = 20;
 /** Why a link or a free-form column cannot be proposed yet. */
 export const NOT_YET = "Links and free-form columns arrive with real tables";
 
-/** What the review says in place of the SQL until the runtime plans a table change. */
-export const NO_SQL = "SQL is shown once the table change lands";
-
-/**
- * What a draft plan (no SQL) changes, said beside it: only the data file, so the records keep
- * what they hold until the runtime plans and applies a table change.
- */
-export const FILE_ONLY =
-  "Until real tables land, this changes resources/data.ts only: each record keeps what it holds, and one the new declaration no longer fits shows as needs fixing.";
-
-/**
- * Whether `FILE_ONLY` goes beside a plan: a draft (no SQL) whose change touches what the records
- * hold, anything but an optional new column.
- */
-export const fileOnly = (plan: TableChangePlan) =>
-  plan.sql.length === 0 && plan.rows > 0 && plan.changes.some((change) => change.kind !== "add" || change.required);
-
 /** A change to a collection's columns, as the grid proposes it: a `TableChange` before its rows are counted. */
 export const ColumnChange = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("add"), field: NAME, type: FieldTypeSchema, required: z.boolean() }),
+  z.strictObject({ kind: z.literal("add"), field: NAME, type: ColumnTypeSchema, required: z.boolean() }),
   z.strictObject({ kind: z.literal("rename"), from: z.string().min(1), to: NAME }),
-  z.strictObject({ kind: z.literal("retype"), field: z.string().min(1), to: FieldTypeSchema }),
+  z.strictObject({ kind: z.literal("retype"), field: z.string().min(1), to: ColumnTypeSchema }),
   z.strictObject({ kind: z.literal("require"), field: z.string().min(1) }),
-  z.strictObject({ kind: z.literal("delete"), field: z.string().min(1) }),
+  z.strictObject({ kind: z.literal("hide"), field: z.string().min(1) }),
   z.strictObject({ kind: z.literal("link"), field: z.string().min(1), to: z.string().min(1) }),
-  z.strictObject({ kind: z.literal("convert"), field: z.string().min(1), key: NAME, type: FieldTypeSchema }),
+  z.strictObject({ kind: z.literal("convert"), field: z.string().min(1), key: NAME, type: ColumnTypeSchema }),
 ]);
 export type ColumnChange = z.infer<typeof ColumnChange>;
 
@@ -117,50 +42,35 @@ export type ColumnChange = z.infer<typeof ColumnChange>;
 type Field = CollectionEntry["fields"][string];
 
 /** A declared field's type. */
-export const typeOf = (field: Field): FieldType =>
+export const typeOf = (field: Field): ColumnType =>
   typeof field === "string" ? field : "enum" in field ? { enum: [...field.enum] } : field.type;
 
 /** Whether a declared field is required: not marked `optional`. */
 export const requiredOf = (field: Field): boolean => typeof field === "string" || field.optional !== true;
 
 /** A field's declaration of `type`, required or `optional: true`, as the data file writes it. */
-function fieldOf(type: FieldType, required: boolean): string | Record<string, unknown> {
+function fieldOf(type: ColumnType, required: boolean): string | Record<string, unknown> {
   if (typeof type === "string") return required ? type : { type, optional: true };
   return required ? type : { ...type, optional: true };
 }
 
 /** Whether the runtime takes a field of `type` today: a link and free-form arrive with real tables. */
-export const takenToday = (type: FieldType): boolean =>
+export const takenToday = (type: ColumnType): boolean =>
   type !== "json" && !(typeof type === "object" && "link" in type);
 
 const filled = (value: unknown) => value !== undefined && value !== null && value !== "";
-const NUMBER = /^-?\d+(\.\d+)?$/;
-const DATE = /^\d{4}-\d{2}-\d{2}/;
 
-/** Whether `value`, filled, reads as `type`: what a retype keeps. */
-function converts(value: unknown, type: FieldType): boolean {
-  if (typeof type === "object") {
-    return "enum" in type ? type.enum.includes(String(value)) : typeof value === "string";
-  }
-  switch (type) {
-    case "number":
-      return typeof value === "number" || (typeof value === "string" && NUMBER.test(value.trim()));
-    case "boolean":
-      return typeof value === "boolean" || ["true", "false", "yes", "no"].includes(String(value).toLowerCase());
-    case "date":
-      return typeof value === "string" && DATE.test(value) && !Number.isNaN(Date.parse(value));
-    case "text":
-    case "person":
-      return typeof value !== "object";
-    case "json":
-      return true;
-  }
-}
-
-/** The filled values among `values` that do not read as `type`. */
-function wontConvert(values: { key: string; value: unknown }[], type: FieldType): WontConvert {
-  const wont = values.filter(({ value }) => filled(value) && !converts(value, type));
-  return { count: wont.length, sample: wont.slice(0, SAMPLE) };
+/** The records of `rows` whose value `change` cannot convert (`reshaped`'s `kept`), counted and sampled by key. */
+function wontConvert(
+  rows: readonly Saved[],
+  change: ReshapeChange,
+  valueOf: (record: Saved["record"]) => unknown,
+): WontConvert {
+  const wont = rows.filter(({ record }) => reshaped(record, change).did === "kept");
+  return {
+    count: wont.length,
+    sample: wont.slice(0, SAMPLE).map(({ key, record }) => ({ key, value: valueOf(record) })),
+  };
 }
 
 /** The value under `key` of a free-form field's object; none for anything else. */
@@ -200,9 +110,8 @@ export function problemOf({ key, fields }: Pick<CollectionEntry, "key" | "fields
 }
 
 /**
- * The draft plan of `change` to `collection`, over `rows`, the records read for it: each row's
- * value counted, a retype's or a conversion's values that do not read as the new type sampled,
- * no SQL. The runtime's own plan replaces this one (`NO_SQL`).
+ * The plan of `change` to `collection`, over `rows`, the records read for it: each row's value
+ * counted, a retype's or a conversion's values that will not convert (`reshaped`) sampled.
  */
 export function planOf(collection: CollectionEntry, rows: readonly Saved[], change: ColumnChange): TableChangePlan {
   const values = (field: string) => rows.map(({ key, record }) => ({ key, value: record[field] }));
@@ -217,13 +126,13 @@ export function planOf(collection: CollectionEntry, rows: readonly Saved[], chan
       break;
     case "retype": {
       const from = typeOf(collection.fields[change.field]!);
-      planned = { ...change, from, wontConvert: wontConvert(values(change.field), change.to) };
+      planned = { ...change, from, wontConvert: wontConvert(rows, change, (record) => record[change.field]) };
       break;
     }
     case "require":
       planned = { ...change, empty: rows.length - count(change.field) };
       break;
-    case "delete":
+    case "hide":
       planned = { ...change, filled: count(change.field) };
       break;
     case "link":
@@ -231,13 +140,12 @@ export function planOf(collection: CollectionEntry, rows: readonly Saved[], chan
       planned = { ...change, unmatched: count(change.field) };
       break;
     case "convert": {
-      const inner = rows.map(({ key, record }) => ({ key, value: valueAt(record[change.field], change.key) }));
-      planned = { ...change, wontConvert: wontConvert(inner, change.type) };
+      const inner = (record: Saved["record"]) => valueAt(record[change.field], change.key);
+      planned = { ...change, wontConvert: wontConvert(rows, change, inner) };
       break;
     }
   }
-  const blocked = "wontConvert" in planned && planned.wontConvert.count > 0;
-  return { collection: collection.name, changes: [planned], rows: rows.length, sql: [], blocked };
+  return { collection: collection.name, changes: [planned], rows: rows.length };
 }
 
 /** What `patch` takes: the fields to set, and those to rename or remove. */
@@ -245,13 +153,24 @@ interface DeclarationEdit {
   fields: Record<string, ReturnType<typeof fieldOf>>;
   rename: Record<string, string | null>;
 }
-const set = (field: string, type: FieldType, required: boolean): DeclarationEdit => ({
+const set = (field: string, type: ColumnType, required: boolean): DeclarationEdit => ({
   fields: { [`fields.${field}`]: fieldOf(type, required) },
   rename: {},
 });
 const rename = (field: string, to: string | null): DeclarationEdit => ({
   fields: {},
   rename: { [`fields.${field}`]: to },
+});
+/** A field kept with its values, `hidden: true` (and so optional): what removing a column is. */
+const hidden = (field: string, declared: Field): DeclarationEdit => ({
+  fields: {
+    [`fields.${field}`]: {
+      ...(typeof declared === "string" ? { type: declared } : declared),
+      optional: true,
+      hidden: true,
+    },
+  },
+  rename: {},
 });
 
 /**
@@ -270,8 +189,8 @@ export function declarationEdit(fields: CollectionEntry["fields"], change: Colum
       return set(change.field, change.to, requiredOf(declared!));
     case "require":
       return set(change.field, typeOf(declared!), true);
-    case "delete":
-      return rename(change.field, null);
+    case "hide":
+      return hidden(change.field, declared!);
     case "link":
       return set(change.field, { link: change.to }, requiredOf(declared!));
     case "convert":
@@ -280,7 +199,7 @@ export function declarationEdit(fields: CollectionEntry["fields"], change: Colum
 }
 
 /** A type in words: "text", "a number", "a choice: High, Normal or Low". */
-export function typeWords(type: FieldType): string {
+export function typeWords(type: ColumnType): string {
   if (typeof type === "object") {
     return "enum" in type ? `a choice: ${OR.format(type.enum)}` : `a link to ${type.link}`;
   }
@@ -300,14 +219,8 @@ const OR = new Intl.ListFormat("en", { type: "disjunction" });
 export const allRecords = ({ rows }: TableChangePlan) =>
   rows === 0 ? "No records" : rows === 1 ? "The record" : `All ${rows} records`;
 
-/**
- * A rename's records, said: until the runtime plans the table change (no SQL), each keeps its
- * value under the old name, so the new one shows empty.
- */
-export const renamed = (plan: TableChangePlan, { from, to }: { from: string; to: string }) =>
-  plan.sql.length || plan.rows === 0
-    ? `${allRecords(plan)} keep their values.`
-    : `${allRecords(plan)} keep their values under ${from} until the table change lands, so ${to} shows empty in them.`;
+/** A rename's records, said: each value moves to the new name when the change lands. */
+export const renamed = (plan: TableChangePlan) => `${allRecords(plan)} keep their values.`;
 
 /**
  * How many records, in words: `lib/utils.ts`'s `plural`, which this file cannot import, since
@@ -325,7 +238,7 @@ export function happens(plan: TableChangePlan): string {
         ? `${plan.collection} gains a required ${change.field} column. ${all} show it empty, and each needs a value before it saves again.`
         : `${plan.collection} gains a ${change.field} column. ${all} show it empty, and nothing else changes.`;
     case "rename":
-      return `${change.from} is called ${change.to} from now on. ${renamed(plan, change)}`;
+      return `${change.from} is called ${change.to} from now on. ${renamed(plan)}`;
     case "retype":
     case "convert": {
       const to = change.kind === "retype" ? change.to : change.type;
@@ -339,7 +252,7 @@ export function happens(plan: TableChangePlan): string {
       return change.empty === 0
         ? `${change.field} is required from now on. Every record has it.`
         : `${change.field} is required from now on. ${records(change.empty)} have it empty, and need one before they save again.`;
-    case "delete":
+    case "hide":
       return change.filled === 0
         ? `${change.field} leaves the grid and the forms. No record has a value in it.`
         : `${change.field} leaves the grid and the forms. Its values in ${records(change.filled)} are kept.`;
@@ -377,7 +290,7 @@ export function diffLines(fields: CollectionEntry["fields"], changes: readonly T
       // No longer declared on main (merged since): the change by name alone.
       if (declared === undefined) {
         if (change.kind === "rename") line("+", change.to, undefined);
-        else if (change.kind !== "delete") line("+", name, undefined);
+        else if (change.kind !== "hide") line("+", name, undefined);
         continue;
       }
     }

@@ -1,4 +1,5 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
+import type { ColumnType } from "sanoma/workflows/description";
 import { changeIdOf, errorMessage, type Saved } from "sanoma/workflows/shared";
 import { deepEquals } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,20 +29,7 @@ import { proposeColumnChangeFn } from "../../functions.ts";
 import { closeRecord, type ColumnSearch, openColumn, refreshWritten, remoteQuery } from "../../queries.ts";
 import { ButtonLink, CardHeading, Notice, ToneBadge } from "../common.tsx";
 import { FROM } from "../data-grid.tsx";
-import {
-  ColumnChange,
-  type FieldType,
-  FILE_ONLY,
-  fileOnly,
-  happens,
-  keysIn,
-  NOT_YET,
-  planOf,
-  problemOf,
-  requiredOf,
-  takenToday,
-  typeOf,
-} from "./plan.ts";
+import { ColumnChange, happens, keysIn, NOT_YET, planOf, problemOf, requiredOf, takenToday, typeOf } from "./plan.ts";
 
 // A collection's columns from its grid: each field's menu on its heading (Rename, Change type,
 // Hide column, a free-form field's keys to make columns of, Remove column), New column, and the
@@ -171,7 +159,7 @@ export function NewColumnLink() {
 
 /** The type chips, in the order the panel offers them. */
 const CHOICES = "choice";
-const TYPES: { label: string; type: FieldType | typeof CHOICES }[] = [
+const TYPES: { label: string; type: ColumnType | typeof CHOICES }[] = [
   { label: "Text", type: "text" },
   { label: "Number", type: "number" },
   { label: "Yes / no", type: "boolean" },
@@ -181,9 +169,9 @@ const TYPES: { label: string; type: FieldType | typeof CHOICES }[] = [
   { label: "Link to another table", type: { link: "" } },
   { label: "Free-form", type: "json" },
 ];
-const isChoice = (type: FieldType): type is Extract<FieldType, { enum: unknown }> =>
+const isChoice = (type: ColumnType): type is Extract<ColumnType, { enum: unknown }> =>
   typeof type === "object" && "enum" in type;
-const sameChip = (a: FieldType | typeof CHOICES, b: FieldType) => (a === CHOICES ? isChoice(b) : deepEquals(a, b));
+const sameChip = (a: ColumnType | typeof CHOICES, b: ColumnType) => (a === CHOICES ? isChoice(b) : deepEquals(a, b));
 
 /** The panel's heading for each change. */
 function titleOf(collection: CollectionEntry, { change, field, key }: ColumnSearch) {
@@ -221,13 +209,13 @@ export function ColumnPanel({
   const remote = useQuery(remoteQuery()).data;
   const declared = column.field === undefined ? undefined : collection.fields[column.field];
   const [name, setName] = useState(column.change === "rename" ? (column.field ?? "") : "");
-  const [type, setType] = useState<FieldType>(declared && column.change === "retype" ? typeOf(declared) : "text");
+  const [type, setType] = useState<ColumnType>(declared && column.change === "retype" ? typeOf(declared) : "text");
   const [choices, setChoices] = useState(isChoice(type) ? type.enum.join("\n") : "");
   const [optional, setOptional] = useState(true);
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string>();
   const field = column.field ?? "";
-  const typed: FieldType = isChoice(type)
+  const typed: ColumnType = isChoice(type)
     ? { enum: choices.split("\n").flatMap((line) => (line.trim() ? [line.trim()] : [])) }
     : type;
   const intent = {
@@ -235,7 +223,7 @@ export function ColumnPanel({
     rename: { kind: "rename", from: field, to: name },
     retype: { kind: "retype", field, to: typed },
     convert: { kind: "convert", field, key: column.key ?? "", type: typed },
-    delete: { kind: "delete", field },
+    delete: { kind: "hide", field },
   }[column.change];
   const parsed = ColumnChange.safeParse(intent);
   const problem = parsed.success ? problemOf(collection, parsed.data) : parsed.error.issues[0]?.message;
@@ -341,7 +329,6 @@ export function ColumnPanel({
               What will happen, over the records on screen (the review counts every one)
             </span>
             <span className="text-sm">{unchanged ? "Nothing changes." : plan ? happens(plan) : problem}</span>
-            {plan && !unchanged && fileOnly(plan) && <span className="text-xs text-muted-foreground">{FILE_ONLY}</span>}
           </div>
           {failed && <Notice variant="destructive">{failed}</Notice>}
           <div className="flex items-center gap-2">

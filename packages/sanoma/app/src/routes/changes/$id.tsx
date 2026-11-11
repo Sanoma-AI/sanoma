@@ -1,3 +1,4 @@
+import { TableChangePlanSchema } from "sanoma/workflows/description";
 import { CHANGE_WORKFLOW } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
@@ -15,7 +16,6 @@ import {
   ToneBadge,
   When,
 } from "#/components/common.tsx";
-import { TableChangePlan } from "#/components/grid/plan.ts";
 import { TABLE_VERBS, TableChangeReview } from "#/components/grid/review.tsx";
 import { PermissionsDiff } from "#/components/permissions-diff.tsx";
 import { filesOf, groupFiles, isSettled, phaseLabel, ruleOf } from "#/lib/changes.ts";
@@ -58,7 +58,7 @@ function ChangePage() {
   const { state } = change;
   // A change to a collection's columns carries its plan: reviewed as the table change it is, when
   // it reads as one (else as any change).
-  const plan = TableChangePlan.safeParse(state.plan).data;
+  const plan = TableChangePlanSchema.safeParse(state.plan).data;
   const { data: config } = useSuspenseQuery(configQuery());
   return (
     <>
