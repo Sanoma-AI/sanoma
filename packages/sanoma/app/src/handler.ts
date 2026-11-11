@@ -11,6 +11,7 @@ import { hostName, placeOf } from "./loopback.ts";
 import { seoFile } from "./seo.ts";
 import { siteHost } from "./site-path.ts";
 import type { AppSnapshot } from "./snapshot.ts";
+import { redeemToken } from "./server/token-redeem.ts";
 import { plain, remoteWebhook } from "./server/webhooks.ts";
 
 /** A machine route, such as the wakeup's `/wake`: answered ahead of the public sites and the login (`AppHandlerOptions.ingress`). */
@@ -51,7 +52,7 @@ export interface AppHandlerOptions {
    * when `method` is given and the request's is another. One route per path, never `/healthz`.
    * Nothing checks who is asking, so each checks its own token; never give one a page's path.
    * Besides these, the app answers `POST /webhooks/<vendor>` for each connector's remote half that
-   * reads webhooks (`remoteWebhook`).
+   * reads webhooks (`remoteWebhook`), and `POST /api/token/redeem` (`redeemToken`).
    */
   ingress?: readonly IngressRoute[];
   /** Start's server entry: the pages and the server functions. */
@@ -78,10 +79,10 @@ export interface AppHandler {
 }
 
 /**
- * Makes the app's handler: `/healthz`, the machine routes and the webhooks, then a public site's
- * host (its robots.txt and sitemap, its front door, then its pages and its `api`), then the staff
- * login, the host's files and the app's pages and server functions. The public sites' hosts are
- * read from `first`, the snapshot the host starts with.
+ * Makes the app's handler: `/healthz`, the machine routes, the webhooks and the token's redeem,
+ * then a public site's host (its robots.txt and sitemap, its front door, then its pages and its
+ * `api`), then the staff login, the host's files and the app's pages and server functions. The
+ * public sites' hosts are read from `first`, the snapshot the host starts with.
  */
 export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppHandler {
   const { resolved, client, login } = options;
@@ -95,6 +96,8 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
         path: `/webhooks/${vendor}`,
         handle: async (request) => remoteWebhook(await contextOf(), vendor, request),
       })),
+    // A handed-off token, for its one-time code and verifier alone (`sanoma.token.handoff`).
+    { method: "POST", path: "/api/token/redeem", handle: (request) => redeemToken(client, request) },
   ]);
   const hosts = publicHosts(first.description, options.domains ?? {});
   const domains = new Map([...hosts.values()].flatMap((site) => (site.domain ? [[site.name, site.domain]] : [])));
