@@ -778,7 +778,10 @@ describe("a company's app with its sites", () => {
     expect((await at("/sites/hello/posts/hello", "hello.localhost", { method: "POST" })).status).toBe(404);
     expect((await at("/sites/intl/posts/hello", "hello.localhost")).status).toBe(404);
     expect((await at("/sites/hello2/posts/hello", "hello.localhost")).status).toBe(404);
-    expect((await at("/sites/hello//evil.example/x", "hello.localhost")).headers.location).not.toMatch(/^\/\//);
+    // `//evil.example/x` at the root is another host to a browser: no 308 there, only the router's
+    // 307 to the path with its slashes collapsed, on this host.
+    const offSite = await at("/sites/hello//evil.example/x", "hello.localhost");
+    expect([offSite.status, offSite.headers.location]).toEqual([307, "/sites/hello/evil.example/x"]);
     expect((await fetch(new URL("/sites/hello/posts/hello", app.url), { redirect: "manual" })).status).toBe(200);
   });
 
