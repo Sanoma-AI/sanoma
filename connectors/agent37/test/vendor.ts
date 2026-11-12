@@ -10,11 +10,10 @@ import { RUNNER_HEALTH, RUNNER_PORT } from "sanoma/workflows";
 // `https://api.agent37.com/v1` from memory (every other URL goes out), its exec `sh -c` here, each
 // instance's home a directory of its own, and its edge a port of this machine per instance's port:
 // the runner the backend starts with exec listens on one of its own (`SANOMA_RUNNER_PORT`). Its
-// `PATH` is a template's: `~/.local/bin` first, this machine's `node` and a corepack whose `enable`
-// puts a pnpm (answering 12.18.0) in its install directory, and no pnpm of this machine's. A
-// stop, a delete and `close` end what an instance's execs left running, as a fresh boot would; a
-// sleep keeps it. The edge answers `/health` itself, on every port, as Agent37's does. `answer`
-// puts a reply ahead of the next request.
+// `PATH` is a template's: no pnpm, but a corepack that makes one. A stop, a delete and `close` end
+// what an instance's execs left running, as a fresh boot would; a sleep keeps it. The edge answers
+// `/health` itself, on every port, as Agent37's does. `answer` puts a reply ahead of the next
+// request.
 
 export const KEY = "sk_live_test";
 

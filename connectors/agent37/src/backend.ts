@@ -103,7 +103,7 @@ export function agent37Backend(
     await runnerUp(api, made.id, url, headers, deadline);
     const { stop, ...box } = runnerBox({ url, headers, id: made.id });
     // On every open, so a box whose runner an earlier release started gets it too.
-    const pnpm = await box.run(PNPM);
+    const pnpm = await box.run(PNPM, { signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) });
     const [, why, { exitCode }] = await Promise.all([
       new Response(pnpm.stdout).text(),
       new Response(pnpm.stderr).text(),
