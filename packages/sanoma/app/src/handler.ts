@@ -162,15 +162,6 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
           "This site is not served: its site.ts or its login has a problem, which the app's log names.\n",
         );
       }
-      // A page's path on the app's host (`/sites/<name>/x`, a link copied from there) is its path
-      // here, at the root: a GET or HEAD goes there, never to `//…`, which a browser reads as a host.
-      const rooted = sitePath(entry.name, url.pathname);
-      if (
-        (request.method === "GET" || request.method === "HEAD") &&
-        rooted !== url.pathname &&
-        !rooted.startsWith("//")
-      )
-        return new Response(null, { status: 308, headers: { location: `${rooted}${url.search}` } });
       // Its URLs are at its domain, when it has one; only there may a crawler index it.
       const origin = entry.domain ? `https://${entry.domain}` : requestOrigin(request);
       // The sitemap lists the published content as it is now.
@@ -191,11 +182,13 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
   }
 
   /**
-   * What the host has for the request, else Start's answer, in the context `asked` makes of the
-   * snapshot as it is now: a file never waits for the snapshot to be checked.
+   * What the host has for the request, else (on `site`'s own host) `rootedAt`'s redirect, else
+   * Start's answer, in the context `asked` makes of the snapshot as it is now: a file never waits
+   * for the snapshot to be checked.
    */
   const served = async (request: Request, asked: (app: AppContext) => RequestContext, site?: string) =>
     (await options.files?.(request, site)) ??
+    (site === undefined ? undefined : rootedAt(request, site)) ??
     (await options.entry.fetch(request, { context: asked(await contextOf()) }));
 
   return {
@@ -211,6 +204,19 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
       }
     },
   };
+}
+
+/**
+ * On `site`'s own host, a page's path on the app's host (`/sites/<name>/x`, a link copied from
+ * there) as its path here, at the root: a GET or HEAD goes there, never to `//…`, which a browser
+ * reads as a host. Only what no file answers: Vite's dev server serves the site's modules there.
+ */
+function rootedAt(request: Request, site: string): Response | undefined {
+  const url = new URL(request.url);
+  const rooted = sitePath(site, url.pathname);
+  if ((request.method !== "GET" && request.method !== "HEAD") || rooted === url.pathname || rooted.startsWith("//"))
+    return undefined;
+  return new Response(null, { status: 308, headers: { location: `${rooted}${url.search}` } });
 }
 
 /** `response` with the header set: a copy, since a response another made may have its headers fixed. */
