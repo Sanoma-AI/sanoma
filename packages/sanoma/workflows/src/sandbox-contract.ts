@@ -32,7 +32,10 @@ export interface SandboxOutputs {
 export interface SandboxSpec {
   capabilities: SandboxCapabilities;
   inputs: {
-    /** The image a box runs. */
+    /**
+     * The image a box runs: it holds `bash`, `git`, `node` (22 or later) and `pnpm` on its `PATH`,
+     * which the agents and their installs run, or its backend puts them there at `open`.
+     */
     image: string;
     /** A box's size, in vCPUs: its memory follows the vendor's shapes. */
     size: string;

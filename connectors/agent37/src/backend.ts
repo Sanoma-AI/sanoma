@@ -102,6 +102,17 @@ export function agent37Backend(
     const url = edge(made.id, RUNNER_PORT);
     await runnerUp(api, made.id, url, headers, deadline);
     const { stop, ...box } = runnerBox({ url, headers, id: made.id });
+    // On every open, so a box whose runner an earlier release started gets it too.
+    const pnpm = await box.run(PNPM, { signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) });
+    const [, why, { exitCode }] = await Promise.all([
+      new Response(pnpm.stdout).text(),
+      new Response(pnpm.stderr).text(),
+      pnpm.wait(),
+    ]);
+    if (exitCode !== 0) {
+      await stop().catch(() => undefined);
+      throw new Error(`agent37: pnpm could not be put in the box ${made.id} (exit ${exitCode}): ${why.trim()}`);
+    }
     return {
       ...box,
       expose: async (port) => ({ url: edge(made.id, port), headers }),
@@ -114,6 +125,17 @@ export function agent37Backend(
     };
   }
 }
+
+/**
+ * Puts pnpm on the box's `PATH` unless it is there: the agents' installs run it, and Agent37's
+ * templates have corepack but no pnpm. `~/.local/bin` comes first on their `PATH`, and a new box
+ * has none.
+ */
+const PNPM = `set -e
+command -v pnpm >/dev/null && exit 0
+mkdir -p ~/.local/bin
+corepack enable --install-directory ~/.local/bin pnpm
+pnpm --version >/dev/null`;
 
 /** How long `stop` waits for the runner to kill what runs in the box, in ms. */
 const STOP_MS = 30_000;

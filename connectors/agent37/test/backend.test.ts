@@ -140,6 +140,33 @@ describe("agent37Backend", () => {
     await backend.discard({ name: "sanoma-end" });
   });
 
+  it("puts pnpm on a box's PATH with corepack at every open, and fails an open where it cannot, saying why", async () => {
+    const backend = backendOf();
+    const box = await open(backend, "sanoma-pnpm");
+    const pnpm = async (at: typeof box) => {
+      const ran = await at.run("pnpm --version");
+      return new Response(ran.stdout).text();
+    };
+    expect(await pnpm(box)).toBe("12.18.0\n");
+    // A box whose runner is current: the open starts none, and pnpm is put back.
+    await box.run("rm ~/.local/bin/pnpm").then((ran) => ran.wait());
+    await box.stop();
+    vendor.sent.length = 0;
+    const again = await open(backend, "sanoma-pnpm");
+    expect(execs(box.id)).toBe(0);
+    expect(await pnpm(again)).toBe("12.18.0\n");
+    // One whose corepack fails.
+    await again.run("rm ~/.local/bin/pnpm").then((ran) => ran.wait());
+    await again.write(".local/bin/corepack", new TextEncoder().encode("#!/bin/sh\necho 'no network' >&2\nexit 1\n"), {
+      mode: 0o755,
+    });
+    await again.stop();
+    await expect(open(backend, "sanoma-pnpm")).rejects.toThrow(
+      `agent37: pnpm could not be put in the box ${box.id} (exit 1): no network`,
+    );
+    await backend.discard({ name: "sanoma-pnpm" });
+  });
+
   it("fails an open whose runner does not start, with what exec said", async () => {
     const backend = backendOf();
     const box = await open(backend, "sanoma-broken");
