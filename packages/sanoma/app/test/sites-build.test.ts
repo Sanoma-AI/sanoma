@@ -748,7 +748,7 @@ describe("a company's app with its sites", () => {
   });
 
   it("answers a public host's request for the app's pages, routes, a staff login's routes or a staff server function with a 404", async () => {
-    for (const path of ["/workflows", "/sites/hello", "/setup/github/manifest", "/auth/invite", "/auth/loopback"]) {
+    for (const path of ["/workflows", "/setup/github/manifest", "/auth/invite", "/auth/loopback"]) {
       expect((await at(path, "hello.localhost")).status, path).toBe(404);
     }
     expect((await at("/", "hello.localhost", { method: "PUT" })).status).toBe(405);
@@ -761,6 +761,25 @@ describe("a company's app with its sites", () => {
     expect(read.body).not.toContain("hello");
     const startRun = `/_serverFn/${serverFnId(result.distDir, "startRunFn")}`;
     expect((await at(startRun, "hello.localhost", { method: "POST", headers: SAME_ORIGIN })).status).toBe(404);
+  });
+
+  it("sends a GET or HEAD for /sites/<name>/… on the site's own host to its path there, the query kept", async () => {
+    for (const [path, location] of [
+      ["/sites/hello/posts/hello?ref=app&x=1", "/posts/hello?ref=app&x=1"],
+      ["/sites/hello", "/"],
+      ["/sites/hello/", "/"],
+    ] as const) {
+      for (const method of ["GET", "HEAD"]) {
+        const sent = await at(path, "hello.localhost", { method });
+        expect([sent.status, sent.headers.location], `${method} ${path}`).toEqual([308, location]);
+      }
+    }
+    // Not a POST, not another site's path, never to another host, and never on the app's host.
+    expect((await at("/sites/hello/posts/hello", "hello.localhost", { method: "POST" })).status).toBe(404);
+    expect((await at("/sites/intl/posts/hello", "hello.localhost")).status).toBe(404);
+    expect((await at("/sites/hello2/posts/hello", "hello.localhost")).status).toBe(404);
+    expect((await at("/sites/hello//evil.example/x", "hello.localhost")).headers.location).not.toMatch(/^\/\//);
+    expect((await fetch(new URL("/sites/hello/posts/hello", app.url), { redirect: "manual" })).status).toBe(200);
   });
 
   it("serves a site's public files as they are, at /sites/<name>/ and at the root of its own host, never another site's there", async () => {
@@ -783,8 +802,8 @@ describe("a company's app with its sites", () => {
       expect([own.status, own.headers["content-type"]], name).toEqual([200, type]);
     }
     expect((await at("/demo/mount.js", "hello.localhost")).body).toBe(demoFile("mount.js").toString());
-    // Not under /sites/ on a site's own host, its own or another's, nor at another site's root.
-    expect((await at("/sites/hello/demo/mount.js", "hello.localhost")).status).toBe(404);
+    // Not under /sites/ on a site's own host, its own (sent to the root) or another's, nor at another site's root.
+    expect((await at("/sites/hello/demo/mount.js", "hello.localhost")).headers.location).toBe("/demo/mount.js");
     expect((await at("/sites/hello/demo/mount.js", "intl.localhost")).status).toBe(404);
     expect((await at("/%73ites/hello/demo/mount.js", "intl.localhost")).status).toBe(404);
     expect((await at("/..%2Fhello/demo/mount.js", "intl.localhost")).status).toBe(404);

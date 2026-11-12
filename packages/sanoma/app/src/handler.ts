@@ -9,7 +9,7 @@ import { siteDir } from "sanoma/workflows/shared";
 import type { AdmittingLogin, AppContext, RequestContext, ServerEntry } from "./context.ts";
 import { hostName, placeOf } from "./loopback.ts";
 import { seoFile } from "./seo.ts";
-import { siteHost } from "./site-path.ts";
+import { siteHost, sitePath } from "./site-path.ts";
 import type { AppSnapshot } from "./snapshot.ts";
 import { redeemToken } from "./server/token-redeem.ts";
 import { plain, remoteWebhook } from "./server/webhooks.ts";
@@ -162,6 +162,15 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
           "This site is not served: its site.ts or its login has a problem, which the app's log names.\n",
         );
       }
+      // A page's path on the app's host (`/sites/<name>/x`, a link copied from there) is its path
+      // here, at the root: a GET or HEAD goes there, never to `//…`, which a browser reads as a host.
+      const rooted = sitePath(entry.name, url.pathname);
+      if (
+        (request.method === "GET" || request.method === "HEAD") &&
+        rooted !== url.pathname &&
+        !rooted.startsWith("//")
+      )
+        return new Response(null, { status: 308, headers: { location: `${rooted}${url.search}` } });
       // Its URLs are at its domain, when it has one; only there may a crawler index it.
       const origin = entry.domain ? `https://${entry.domain}` : requestOrigin(request);
       // The sitemap lists the published content as it is now.
