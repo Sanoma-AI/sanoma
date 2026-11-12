@@ -509,6 +509,7 @@ describe("a workflow's name in a site's api", () => {
       ["follow", []],
       ["ghost", [[1, 1, "A site calls this workflow api.ghost, which is the vendor ghost's operations: rename it"]]],
       ["go-live", []],
+      ["go-live-cloud", []],
       ["go-live-host", []],
       [
         "outbound-next",

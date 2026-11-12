@@ -32,7 +32,7 @@ The host says only its decisions, as `cloudflare.host` does: apply gives it the 
 
 ### The company's slug
 
-One company is one slug, its address `<slug>.sanoma.work`, and both declarations are bound to it. The host's slug is its `name`, else `<slug>` of a `hostname` (or the deprecated `domains.app`) of `<slug>.sanoma.work`, else its repository's name (without accents, lower case, each run of other characters a dash); plan refuses one that is no slug the Cloud takes (`no_slug`: lower case letters, digits and dashes, a dash at neither end, one of them or 3 to 40). The database's is its `name`, else the one Cloud company the token holds: the one the wizard made, or the one the host makes, so a file whose token holds no company yet, or several (an account with a second company), declares `name` on the database, the same as the host's: an unnamed one is refused at plan (`no_slug`) until it is bound. A new company declares both from the start: `sanoma`'s template (`resources/sanoma/infra.ts`, which `sanoma init` names by the company's slug) and Sanoma-AI/company-template, its copy, declare `cloud.database({ name })` and `cloud.host({ name, database, hostname: "<slug>.sanoma.work" })`, and nothing is made until the company goes live. The app's Go live does not apply them yet ([#717](https://github.com/Sanoma-AI/sanoma/issues/717)): it leaves out the types of a vendor whose host binds its own bootstrap.
+One company is one slug, its address `<slug>.sanoma.work`, and both declarations are bound to it. The host's slug is its `name`, else `<slug>` of a `hostname` (or the deprecated `domains.app`) of `<slug>.sanoma.work`, else its repository's name (without accents, lower case, each run of other characters a dash); plan refuses one that is no slug the Cloud takes (`no_slug`: lower case letters, digits and dashes, a dash at neither end, one of them or 3 to 40). The database's is its `name`, else the one Cloud company the token holds: the one the wizard made, or the one the host makes, so a file whose token holds no company yet, or several (an account with a second company), declares `name` on the database, the same as the host's: an unnamed one is refused at plan (`no_slug`) until it is bound. A new company declares both from the start: `sanoma`'s template (`resources/sanoma/infra.ts`, which `sanoma init` names by the company's slug) and Sanoma-AI/company-template, its copy, declare `cloud.database({ name })` and `cloud.host({ name, database, hostname: "<slug>.sanoma.work" })`, and nothing is made until the company goes live. The app's Go live applies them as they are (the built-in `go-live-cloud`, from Hosting), through the account's operations below; going live on the company's own accounts instead writes the file again while nothing of it is bound.
 
 ### `cloud.database`
 
@@ -64,9 +64,19 @@ Its state adds `revision`, `url` and `healthy`. It meets the [`Host` contract](h
 | `cloud.host.read`, `.import`, `.plan`         | `read`  | Read the company's host from `cloud-list`; plan a change.                                                                   |
 | `cloud.host.create`, `.update`, `.delete`     | `write` | Apply's: make it with `cloud-signup`, move it to apply's revision with `cloud-deploy`, close it with `cloud-close`.         |
 
+### The account
+
+The host names three operations of the token's account (`HostSpec.account`), which the app calls to go live from a computer. They are not resources: nothing declares them.
+
+| Operation                  | Effect   | What it does                                                                                                                                                                |
+| -------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cloud.company.available`  | `read`   | `{ slug }` to `{ available, yours }`: whether `<slug>.sanoma.work` is free, or the account's own already, with `cloud-available`.                                           |
+| `cloud.company.repository` | `write`  | `{ slug }` to `{ owner, name }`: the company's repository, made empty by the Sanoma.work GitHub App with `cloud-signup`'s `repository` part, or the one `cloud-list` shows. |
+| `cloud.company.invite`     | `access` | `{ slug, email }` to `{ url }`: a one-use link that signs the account's own email in on the company's host, with `cloud-invite`. The link is opaque.                        |
+
 ## Driver
 
-`cloudDriver` starts sanoma-ops's workflows through `POST <SANOMA_CLOUD_URL>/api/call` (the app's plain-JSON form of a site's `api`): `<workflow>.start` with an id made from the call's idempotency key, so a retry resumes the same run, then `<workflow>.result` until the run ends (each request waits up to 20 s; `run_running` means wait again), with the token as `Authorization: Bearer`. A read starts `cloud-list { slug }`, and an empty list is a missing object; `create` starts `cloud-signup { slug, name, part, repository?, ref?, revision?, region?, domains? }`, `update` of the host `cloud-deploy { slug, revision }`, and `delete` `cloud-close { slug, part }` once `cloud-list` shows the part.
+`cloudDriver` starts sanoma-ops's workflows through `POST <SANOMA_CLOUD_URL>/api/call` (the app's plain-JSON form of a site's `api`): `<workflow>.start` with an id made from the call's idempotency key, so a retry resumes the same run, then `<workflow>.result` until the run ends (each request waits up to 20 s; `run_running` means wait again), with the token as `Authorization: Bearer`. A read starts `cloud-list { slug }`, and an empty list is a missing object; `create` starts `cloud-signup { slug, name, part, repository?, ref?, revision?, region?, domains? }`, `update` of the host `cloud-deploy { slug, revision }`, and `delete` `cloud-close { slug, part }` once `cloud-list` shows the part. The account's operations start `cloud-available { slug }`, `cloud-signup { slug, name, part: "repository" }` then `cloud-list { slug }`, and `cloud-invite { slug, email }`; an answer that is not what the workflow says it is refused.
 
 ### Environment
 
@@ -94,7 +104,7 @@ SANOMA_LIVE=1 SANOMA_CLOUD_TOKEN=sca_... SANOMA_CLOUD_TEST_REPOSITORY=Sanoma-AI/
 
 ## The fake
 
-`fakeCloud()` is an in-memory Cloud: the token's companies by slug, each with the parts `cloud-signup` made, all healthy; a host runs `start`'s runtime (a stub answering `/healthz` and `/wake` by default) behind an address in this process that outlives it, starts it on a request, and moves it on a deploy; `cloud-close` removes a part, and the company with its last. `stop(slug)` stops a host's runtime as a quiet spell would. It refuses what the workflows refuse.
+`fakeCloud()` is an in-memory Cloud: the token's companies by slug, each with the parts `cloud-signup` made, all healthy; a host runs `start`'s runtime (a stub answering `/healthz` and `/wake` by default) behind an address in this process that outlives it, starts it on a request, and moves it on a deploy; `cloud-close` removes a part, and the company with its last. `stop(slug)` stops a host's runtime as a quiet spell would. A repository part is `<owner>/<slug>` (`owner`, `sanoma-test` by default); a slug in `taken` is someone else's, which `cloud-available` says and a sign-up refuses; an invite is a made-up link on the host's address. It refuses what the workflows refuse.
 
 ## Testing
 

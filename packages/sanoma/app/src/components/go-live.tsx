@@ -105,10 +105,13 @@ function GoLiveSteps() {
   const github = status.githubApp !== null || isSet("GITHUB_TOKEN");
   // The vendors the config asks tokens of, each connected once its tokens are stored.
   const asked = new Set(status.tokens.map((t) => t.name));
-  const vendors = SETUP_VENDORS.filter((v) => v.tokens.some((name) => asked.has(name))).map((v) => ({
-    ...v,
-    connected: v.tokens.every(isSet),
-  }));
+  // Not Sanoma Cloud's: these steps go live on the company's own accounts instead.
+  const vendors = SETUP_VENDORS.filter((v) => v.vendor !== "cloud" && v.tokens.some((name) => asked.has(name))).map(
+    (v) => ({
+      ...v,
+      connected: v.tokens.every(isSet),
+    }),
+  );
   // The sign-in sender's connector, when the setup rows above do not list it already.
   const { data: titles } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors });
   const named = senderVendorOf(status.signIn);
@@ -174,7 +177,15 @@ function GoLiveSteps() {
             <pre className="overflow-x-auto rounded-lg border p-3 text-xs">{progress.infra}</pre>
           </>
         ) : github ? (
-          <ChooseForm />
+          <>
+            {progress.replaces && (
+              <Notice>
+                <code>resources/sanoma/infra.ts</code> declares Sanoma Cloud now. Going live on your own accounts writes
+                it again, with what you choose here.
+              </Notice>
+            )}
+            <ChooseForm />
+          </>
         ) : (
           <p className="text-muted-foreground">Connect GitHub first.</p>
         )}

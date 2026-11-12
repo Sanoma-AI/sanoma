@@ -88,6 +88,7 @@ import {
   RUNS_KEY,
   runLink,
   runsQuery,
+  sanomaSignInQuery,
   setupStatusQuery,
   sourceQuery,
   useStartRun,
@@ -106,18 +107,29 @@ export const Route = createFileRoute("/hosting/")({
       queryClient.query({ ...companyStateQuery({ force: !preload }), staleTime: "static" }).catch(() => undefined),
       drift && loadLastCheck(queryClient, drift),
     ]);
-    if (state && panelOf(state, own) === "goLive") await loadGoLive(queryClient);
+    const panel = state && panelOf(state, own);
+    if (panel === "goLive") await loadGoLive(queryClient);
+    if (panel === "ready" || panel === "failed") {
+      await queryClient.prefetchQuery({ ...sanomaSignInQuery(), staleTime: "static" });
+    }
   },
   component: HostingPage,
 });
 
 /**
  * Hosting's panel for the company's state: Ready to go live while it is Local and `infra.ts`
- * declares Sanoma Cloud (unless `own`), going live on its own accounts while it is Local
- * otherwise, and the state's own while it is going live, failed or live.
+ * declares Sanoma Cloud; going live on its own accounts while it is Local otherwise, and with
+ * `own` while it is Local or failed (the way back to the steps); and the state's own while it is
+ * going live, failed or live.
  */
 const panelOf = ({ state, declared }: CompanyState, own: boolean) =>
-  state !== "local" ? state : declared === "cloud" && !own ? "ready" : "goLive";
+  own && (state === "local" || state === "failed")
+    ? "goLive"
+    : state !== "local"
+      ? state
+      : declared === "cloud"
+        ? "ready"
+        : "goLive";
 
 /** The slots on top of Hosting, each a contract a resource type meets (`capabilities`), in the order they show. */
 const SLOTS = [
@@ -617,7 +629,7 @@ function StatePanelOf({ own }: { own: boolean }) {
     case "deploying":
       return <GoingLive state={state} />;
     case "failed":
-      return <GoLiveFailed run={state.run!} />;
+      return <GoLiveFailed run={state.run!} cloud={state.declared === "cloud"} />;
     case "live":
       return <Live state={state} />;
   }
@@ -652,12 +664,37 @@ function GoingLive({ state }: { state: CompanyState }) {
   );
 }
 
-/** Going live's run failed: why, Retry (going live's push and host again) and Ask the agent, with the error. */
-function GoLiveFailed({ run }: { run: GoLiveRun }) {
+/**
+ * Going live's run failed: why, Ask the agent, with the error, and Retry. On Sanoma Cloud, Retry is
+ * Ready to go live's own Go live (signing in first when the token is gone), with its other ways
+ * on; on the company's own accounts, going live's push and host again, and the way back to its
+ * steps (`?own`).
+ */
+function GoLiveFailed({ run, cloud }: { run: GoLiveRun; cloud: boolean }) {
   const retry = useGoLiveHost();
   const why = [run.error, ...(run.results ?? []).flatMap((r) => (r.status === "failed" ? [`${r.id}: ${r.error}`] : []))]
     .filter(Boolean)
     .join("; ");
+  const ask = (
+    <ChatButton
+      size="default"
+      variant="outline"
+      prompt={`Going live failed${why ? `: ${why}` : ""}. What went wrong, and how do I fix it?`}
+    >
+      Ask the agent
+    </ChatButton>
+  );
+  if (cloud) {
+    return (
+      <>
+        <Region title="Go live failed">
+          <RunStatus run={run} />
+          <div>{ask}</div>
+        </Region>
+        <ReadyToGoLive retry />
+      </>
+    );
+  }
   return (
     <Region title="Go live failed">
       <RunStatus run={run} />
@@ -670,13 +707,12 @@ function GoLiveFailed({ run }: { run: GoLiveRun }) {
           )}
           Retry
         </Button>
-        <ChatButton
-          size="default"
-          variant="outline"
-          prompt={`Going live failed${why ? `: ${why}` : ""}. What went wrong, and how do I fix it?`}
-        >
-          Ask the agent
-        </ChatButton>
+        {ask}
+        <ButtonLink variant="ghost">
+          <Link to="/hosting" search={{ own: true }}>
+            Back to the steps
+          </Link>
+        </ButtonLink>
       </div>
     </Region>
   );

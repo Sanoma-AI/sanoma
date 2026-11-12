@@ -81,6 +81,8 @@ describe("a chat turn, on a worker with the app's steps", () => {
     patch: failing,
     goLive: failing,
     goLiveHost: failing,
+    goLiveCloud: failing,
+    pushCloud: failing,
     connectExisting: failing,
     saveDraft: failing,
     chat,

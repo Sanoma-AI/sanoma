@@ -1,12 +1,15 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
+import { randomUUID } from "node:crypto";
 import {
   APPLY_WORKFLOW,
   errorMessage,
   HOST_SIGNING_KEY,
   type HostOutputs,
+  type HostSpec,
   isEnded,
   keyBytes,
+  memorySecrets,
   type Principal,
   postInvite,
   type RunSummary,
@@ -23,6 +26,7 @@ import { WAKEUP_TOKEN } from "sanoma/workflows/wakeup-service";
 import { slugged } from "sanoma/workflows/shared";
 import {
   ApiError,
+  type CloudAddress,
   INFRA,
   type GoLiveChoices,
   type GoLiveProgress,
@@ -34,6 +38,7 @@ import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { applyAheadOf, invalid } from "./core.ts";
 import { declaredEmail } from "./people.ts";
+import { CLOUD_TOKEN, slugOf } from "./sanoma-sign-in.ts";
 import { secretValues } from "./secrets.ts";
 import { WAKEUP_URL } from "./setup.ts";
 
@@ -61,6 +66,24 @@ export const KEYS = {
 } as const;
 /** The host's type in `infra.ts`, as `renderInfra` writes it. */
 const HOST_LINE = /^export const host = (\w+)\.(\w+)\(/m;
+
+/**
+ * The account of the vendor whose host `infra` declares, when that host binds its own bootstrap in
+ * the vendor's account (Sanoma Cloud's, as the template declares it): the operations going live
+ * there calls (`HostSpec.account`). Undefined for a host of the company's own accounts, or none.
+ */
+export const accountOf = ({ resolved }: Pick<Company, "resolved">, infra: string): HostSpec["account"] => {
+  const [, vendor, type] = HOST_LINE.exec(infra) ?? [];
+  const host = resolved.types.get(`${vendor}.${type}`)?.host;
+  return host?.bindsBootstrap ? host.account : undefined;
+};
+
+/**
+ * Whether going live on the company's own accounts writes `infra` again: it declares a host in its
+ * vendor's account (`accountOf`), and the lockfile binds nothing of it (`bound`, its keys).
+ */
+export const replaceable = (app: Pick<Company, "resolved">, infra: string, bound: readonly string[]) =>
+  accountOf(app, infra) !== undefined && !bound.some((key) => key.startsWith(`${INFRA}#`));
 /**
  * What the first apply makes (step 3), and what must be bound before the host's, of what `infra`
  * declares: the deploy key a host that derives is given by apply (minted then), or the one an
@@ -105,9 +128,9 @@ const GITHUB_API = "https://api.github.com";
 export const idOf = (type: Resource) => `${type.vendor}.${type.type}`;
 
 /**
- * The resource types going live may choose from: all but those of a vendor whose host binds its
- * own bootstrap (Sanoma Cloud's), whose database and host go together in a file of their own
- * that going live does not write yet (#514 G1).
+ * The resource types going live on the company's own accounts may choose from: all but those of a
+ * vendor whose host binds its own bootstrap (Sanoma Cloud's), whose database and host the template
+ * declares together and `go-live-cloud` applies as they are.
  */
 function offered({ resolved }: Company): Resource[] {
   const types = [...resolved.types.values()];
@@ -379,6 +402,15 @@ export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{
   if (!email) {
     throw new ApiError(409, { error: `${actor.id} has no email declared in the people file: add one to be signed in` });
   }
+  // A host in its vendor's account signs with a key of the vendor's: the account mints the link.
+  const account = accountOf(app, app.snapshot.infra ?? "");
+  if (account) {
+    try {
+      return (await cloudCall(app, account.invite, { slug: slugOf(app), email })) as { url: string };
+    } catch (err) {
+      throw new ApiError(502, { error: `Sanoma Cloud did not mint an invite (${errorMessage(err)})` });
+    }
+  }
   // With no signing key bound, a host that derives has its own, generated at its create: sealed with that one.
   const own = app.resolved.secrets.bindings?.SANOMA_SIGNING_KEY
     ? undefined
@@ -388,6 +420,33 @@ export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{
   } catch (err) {
     throw new ApiError(502, { error: `The host did not mint an invite (${errorMessage(err)})` });
   }
+}
+
+/**
+ * One of the account's operations that no run makes (the sign-in link, as this app's own invite is
+ * posted by itself), its driver called here with the stored Cloud token alone; never logged.
+ */
+async function cloudCall({ resolved, client }: Company, opId: string, input: unknown): Promise<unknown> {
+  const driver = resolved.drivers.get(opId);
+  if (!driver) throw new Error(`${opId} has no driver: install the Sanoma Cloud connector of this release`);
+  const token = (await client.secrets([CLOUD_TOKEN])).get(CLOUD_TOKEN)?.value;
+  const secrets = memorySecrets(token === undefined ? {} : { [CLOUD_TOKEN]: token });
+  return driver(input, { idempotencyKey: randomUUID(), runId: "go-live", opId, attempt: 1, secrets });
+}
+
+/**
+ * Whether `slug` can be the company's address at its vendor's account: free, its own already, or
+ * someone else's, by the account's `available` (a read, as the person, through the policy and the
+ * ledger). Refused while `infra.ts` declares no host in a vendor's account.
+ */
+export async function cloudAddress(app: AppContext, actor: Principal, slug: string): Promise<CloudAddress> {
+  const account = accountOf(app, app.snapshot.infra ?? "");
+  if (!account) throw new ApiError(409, { error: `${INFRA} declares no host on Sanoma Cloud` });
+  const { available, yours } = (await app.client.call(account.available, { slug }, { actor })) as {
+    available: boolean;
+    yours: boolean;
+  };
+  return { slug, status: yours ? "yours" : available ? "available" : "taken" };
 }
 
 /** Where the host answers, as the latest of the last finished apply runs that made or changed it says. */
@@ -414,12 +473,16 @@ async function hostAnswer({ client }: AppContext): Promise<GoLiveProgress["host"
 
 /** How far going live is: `infra.ts` and the lockfile's bindings as the snapshot read them, the latest apply run and the host. */
 export async function goLiveProgress(app: AppContext): Promise<GoLiveProgress> {
-  const { infra, bound: bindings } = app.snapshot;
+  const { bound: bindings } = app.snapshot;
+  // A Cloud file with nothing bound is one going live on the company's own accounts writes again.
+  const replaces = replaceable(app, app.snapshot.infra ?? "", bindings);
+  const infra = replaces ? null : app.snapshot.infra;
   const before = beforeHost(app, infra ?? "");
   const bound = { beforeHost: before.every((key) => bindings.includes(key)), host: bindings.includes(KEYS.host) };
   const run = await latestRun(app);
   return {
     infra,
+    replaces,
     beforeHost: before,
     bound,
     run,

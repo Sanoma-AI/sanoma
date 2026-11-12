@@ -55,6 +55,19 @@ const Problem = z.object({ error: z.string(), code: z.string().optional() });
 /** A start's answer. */
 const Started = z.object({ runId: z.string().min(1) });
 
+/** `cloud-available`'s output. */
+const Available = z.object({ available: z.boolean(), yours: z.boolean() });
+
+/** `cloud-invite`'s output. */
+const Invited = z.object({ url: z.url({ protocol: /^https?$/ }) });
+
+/** `output`, as `schema` reads it, or a refusal saying `workflow` answered something else. */
+function answered<T>(workflow: string, schema: z.ZodType<T>, output: unknown): T {
+  const parsed = schema.safeParse(output);
+  if (parsed.success) return parsed.data;
+  throw new DriverError(`Sanoma Cloud: ${workflow}: its answer is not what it should be`, { retryable: false });
+}
+
 /** The id a call's start of `workflow` takes: the same for each attempt of the call, so a retry resumes its run. */
 const runIdOf = (call: CallContext, workflow: string) =>
   `sanoma-cloud-${createHash("sha256").update(`${call.idempotencyKey}\n${workflow}`).digest("hex").slice(0, 32)}`;
@@ -146,6 +159,9 @@ function workflowsApi(call: CallContext, { timeoutMs, runTimeoutMs }: Required<C
     },
     deploy: (input) => resume("cloud-deploy", input),
     close: (input) => resume("cloud-close", input),
+    // Reads, and a link minted again on each try.
+    available: async (input) => answered("cloud-available", Available, await run("cloud-available", input)),
+    invite: async (input) => answered("cloud-invite", Invited, await run("cloud-invite", input)),
   };
 }
 

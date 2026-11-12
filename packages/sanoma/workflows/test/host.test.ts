@@ -81,6 +81,11 @@ describe("a host type", () => {
       { bindsBootstrap: true },
       /inputs\.secrets is not taken by a host that binds its own bootstrap/,
     ],
+    [
+      "an account, when it does not bind its own bootstrap",
+      { account: { repository: "acme.company.repository", available: "acme.company.available", invite: "acme.i" } },
+      /account is for a host that binds its own bootstrap/,
+    ],
     ["a revision that is write-only", { writeOnly: ["env", "commit"] }, /revision must not be write-only/],
     [
       "a lifetime it does not know (stops-when-quiet: the host's inactivity never decides)",

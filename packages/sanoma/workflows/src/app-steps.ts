@@ -1,6 +1,8 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import type { ApplyReport } from "./apply.ts";
 import type { AppAction, AppRunner, AppStepContext, AppSteps } from "./app-workflows.ts";
 import type { ResolvedConfig, SanomaConfig } from "./config.ts";
+import { child } from "./change-steps.ts";
 import { type Run, runNow } from "./run.ts";
 import { APPLY_WORKFLOW } from "./shared.ts";
 
@@ -74,5 +76,20 @@ export const appRunner: AppRunner = {
     const runId = `${run.id}:apply`;
     await run.state.startRun(APPLY_WORKFLOW, runId, { input: apply, startedBy: run.actor });
     return { ...rest, runId };
+  },
+  async applyAndWait(apply) {
+    const { runId, output, error } = await child(runNow("An app step"), APPLY_WORKFLOW, "apply", apply);
+    if (error !== undefined) throw new Error(`Apply did not finish: ${error}`);
+    const { results, plan } = output as ApplyReport;
+    // A step that failed or was skipped, and a resource asked for that apply made no step of
+    // (its plan failed, as `plan.problems` says): either leaves going live undone.
+    const unplanned = (apply.only ?? []).filter((id) => !results.some((r) => r.id === id));
+    const undone = [
+      ...results.filter((r) => r.status !== "done").map((r) => `${r.id} ${r.error ?? r.status}`),
+      ...unplanned.map((id) => `${id} was not applied`),
+      ...(unplanned.length ? plan.problems.map((p) => p.message) : []),
+    ];
+    if (undone.length) throw new Error(`Apply did not finish: ${undone.join("; ")}`);
+    return { runId };
   },
 };

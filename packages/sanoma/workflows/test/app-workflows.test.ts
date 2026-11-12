@@ -21,6 +21,7 @@ import {
   ADOPT_WORKFLOW,
   BUILT_IN_WORKFLOWS,
   CONNECT_EXISTING_WORKFLOW,
+  GO_LIVE_CLOUD_WORKFLOW,
   GO_LIVE_HOST_WORKFLOW,
   GO_LIVE_WORKFLOW,
   PATCH_WORKFLOW,
@@ -43,6 +44,7 @@ const INPUTS = {
   [PATCH_WORKFLOW]: { at: { file: "resources/people.ts", export: "alice" }, fields: { name: "Alice" } },
   [GO_LIVE_WORKFLOW]: { owner: "acme", name: "acme-ops", region: "eu-west-1", port: 8080 },
   [GO_LIVE_HOST_WORKFLOW]: {},
+  [GO_LIVE_CLOUD_WORKFLOW]: { address: "acme" },
   [CONNECT_EXISTING_WORKFLOW]: { repository: "acme/ops" },
 };
 const APP_WORKFLOWS = Object.keys(INPUTS) as (keyof typeof INPUTS)[];
@@ -112,6 +114,13 @@ describe("on a worker given the app's steps", () => {
       await record(step);
       throw new Error("Apply the repository, its deploy key and the database first");
     },
+    goLiveCloud: async (step) => {
+      await record(step);
+      throw new Error("Sign in to Sanoma first");
+    },
+    pushCloud: async () => {
+      throw new Error("Not reached");
+    },
     connectExisting: async (step) => {
       await record(step);
       return { file: "resources/sanoma/infra.ts", text: "export default [];\n", apply: { only: [] } };
@@ -171,6 +180,11 @@ describe("on a worker given the app's steps", () => {
       "Apply the repository, its deploy key and the database first",
     );
     expect((await app.client.run(pushed))?.error).toBe("Apply the repository, its deploy key and the database first");
+    const cloud = await app.client.start(GO_LIVE_CLOUD_WORKFLOW, INPUTS[GO_LIVE_CLOUD_WORKFLOW], {
+      startedBy: "alice",
+    });
+    await expect(app.client.result(cloud)).rejects.toThrow("Sign in to Sanoma first");
+    expect(await app.client.run(`${cloud}:apply`)).toBeUndefined();
   });
 
   it("brings the records along a column change written without a remote, then starts the worker again on it", async () => {
