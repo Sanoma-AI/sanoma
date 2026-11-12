@@ -162,9 +162,9 @@ export const SitePageSchema = z.strictObject({
    */
   sitemap: z.literal(false).optional(),
   /**
-   * `true` when a call (`SiteCall`) is made from one of its files or from a file of the site one of
-   * them imports, directly or through others (statically or by `import()`): what it shows depends
-   * on who asks, so neither it nor a page under it is built once as a file.
+   * `true` when a call (`SiteCall`) is made from one of its files, a layout's above it, or a file
+   * of the site one of them imports, directly or through others (statically or by `import()`):
+   * what it shows depends on who asks, so it is not built once as a file.
    */
   calls: z.literal(true).optional(),
 });

@@ -638,6 +638,12 @@ export function stringValue(node: Node): string | undefined {
   return undefined;
 }
 
+/** What an import, an `export … from` or an `import()` names as its module, written out; undefined for any other node. */
+export function moduleSpecifier(node: Node): string | undefined {
+  if (/^(?:ImportDeclaration|ExportNamedDeclaration|ExportAllDeclaration)$/.test(node.type)) return node.source?.value;
+  return node.type === "ImportExpression" ? stringValue(node.source) : undefined;
+}
+
 /** The node under the wrappers that leave its value as it is, and a default's pattern. */
 export function unwrap(node: Node): Node {
   let n = node;

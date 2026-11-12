@@ -4,9 +4,9 @@ import { z } from "zod";
 import { childrenOf, keyName, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
-import { stringValue, unwrap } from "./outline.ts";
+import { moduleSpecifier, stringValue, unwrap } from "./outline.ts";
 import { exportsOf, loadModules } from "./load.ts";
-import { APPS_DIR, appFolders, filesUnder, isDirectory, relPath, SITE_ENTRIES } from "./paths.ts";
+import { APPS_DIR, appFolders, filesUnder, isDirectory, RELATIVE, relPath, SITE_ENTRIES } from "./paths.ts";
 import { isObject } from "./resource.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { START } from "./schema.ts";
@@ -176,44 +176,48 @@ type FileRoute = Omit<SitePage, "sitemap"> & { says?: Says };
 
 /**
  * A site's pages, by path, from its files: a layout's and its index's (one path) merged, the most
- * its own route that says deciding `sitemap`, and `calls` when any of its files is `callingFiles`'.
+ * its own route that says deciding `sitemap`, and `calls` on each page at or under a path one of
+ * whose files is `callingFiles`'.
  */
 function pagesOf(read: readonly SiteFile[]): Map<string, SitePage> {
   const calling = callingFiles(read);
   const pages = new Map<string, SitePage>();
   const own = new Map<string, Says>();
+  const callers: string[] = [];
   for (const { file, route } of read) {
     if (!route) continue;
     const { says, ...page } = route;
-    pages.set(page.path, { ...pages.get(page.path), ...page, ...(calling.has(file) && { calls: true as const }) });
+    pages.set(page.path, { ...pages.get(page.path), ...page });
     if (says && says.rank > (own.get(page.path)?.rank ?? 0)) own.set(page.path, says);
+    if (calling.has(file)) callers.push(page.path);
   }
   for (const [path, { listed }] of own) if (!listed) pages.get(path)!.sitemap = false;
+  for (const [path, page] of pages) {
+    if (callers.some((caller) => path === caller || path.startsWith(`${caller}/`))) page.calls = true;
+  }
   return pages;
 }
 
 /**
- * The files of a site a call is made from (`SiteFile.uses`): in the file itself, or in a file of
- * the site it imports, directly or through others. An import names the file as written, else with
- * `.ts` or `.tsx`, else its folder's `index`; one of no file the site's `readSiteFiles` read is left out.
+ * The files of a site a call is made from (any use in `SiteFile.uses`, `api.sanoma.describe` too):
+ * in the file itself, or in a file of the site it imports, directly or through others. An import
+ * names the file as written, else with `.ts` or `.tsx`, else its folder's `index`; an import of a
+ * file the site does not have is skipped.
  */
 function callingFiles(read: readonly SiteFile[]): Set<string> {
   const files = new Set(read.map(({ file }) => file));
-  const fileAt = (path: string) =>
-    [path, `${path}.ts`, `${path}.tsx`, `${path}/index.ts`, `${path}/index.tsx`].find((candidate) =>
-      files.has(candidate),
-    );
-  const importing = read.map(({ file, imports }) => ({ file, imports: imports.flatMap((path) => fileAt(path) ?? []) }));
-  const calling = new Set(read.flatMap(({ file, uses }) => (uses.length ? [file] : [])));
-  // Until a pass adds none: each file that imports one that calls.
-  for (let added = true; added;) {
-    added = false;
-    for (const { file, imports } of importing) {
-      if (calling.has(file) || !imports.some((path) => calling.has(path))) continue;
-      calling.add(file);
-      added = true;
+  const importers = new Map<string, string[]>();
+  for (const { file, imports } of read) {
+    for (const path of imports) {
+      const imported = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"]
+        .map((end) => path + end)
+        .find((f) => files.has(f));
+      if (imported !== undefined) importers.set(imported, [...(importers.get(imported) ?? []), file]);
     }
   }
+  const calling = new Set(read.flatMap(({ file, uses }) => (uses.length ? [file] : [])));
+  // A set's iteration reaches what is added to it as it goes.
+  for (const file of calling) for (const importer of importers.get(file) ?? []) calling.add(importer);
   return calling;
 }
 
@@ -385,13 +389,9 @@ function readSiteFile({ program, at }: SourceFile, file: string): SiteFile {
       const value = attribute?.value?.type === "JSXExpressionContainer" ? attribute.value.expression : attribute?.value;
       const name = stringValue(value);
       if (name !== undefined) found.push({ kind: "workflow", name, via: "RunForm", file, ...at(node.start) });
-    } else if (
-      /^(?:ImportExpression|ImportDeclaration|ExportNamedDeclaration|ExportAllDeclaration)$/.test(node.type) &&
-      node.importKind !== "type" &&
-      node.exportKind !== "type"
-    ) {
-      const source = stringValue(node.source);
-      if (source?.startsWith(".")) imports.push(posix.join(posix.dirname(file), source));
+    } else if (node.importKind !== "type" && node.exportKind !== "type") {
+      const source = moduleSpecifier(node);
+      if (source !== undefined && RELATIVE.test(source)) imports.push(posix.join(posix.dirname(file), source));
     }
     for (const child of childrenOf(node)) visit(child);
   };

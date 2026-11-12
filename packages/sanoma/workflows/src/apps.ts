@@ -4,7 +4,7 @@ import { z } from "zod";
 import { childrenOf, type Node, readSource } from "./ast.ts";
 import type { AppEntry } from "./description.ts";
 import { exportsOf, type Loaded, loadModules } from "./load.ts";
-import { stringValue } from "./outline.ts";
+import { moduleSpecifier } from "./outline.ts";
 import { APPS_DIR, filesUnder, inside, isDirectory, RELATIVE, relPath } from "./paths.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { APP_NAME, problemLine } from "./shared.ts";
@@ -119,15 +119,8 @@ export function crossAppImports(root: string | undefined, apps: readonly AppEntr
       const rel = relPath(root, path);
       const visit = (node: Node) => {
         if (!node) return;
-        const specifier =
-          node.type === "ImportDeclaration" ||
-          node.type === "ExportAllDeclaration" ||
-          node.type === "ExportNamedDeclaration"
-            ? node.source?.value
-            : node.type === "ImportExpression"
-              ? stringValue(node.source)
-              : undefined;
-        if (typeof specifier === "string" && RELATIVE.test(specifier)) {
+        const specifier = moduleSpecifier(node);
+        if (specifier !== undefined && RELATIVE.test(specifier)) {
           const target = resolve(dirname(path), specifier);
           const other = apps.find((a) => a !== app && inside(join(root, a.dir), target));
           if (other) {

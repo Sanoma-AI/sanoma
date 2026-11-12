@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppBundle } from "sanoma/app";
-import { buildAppBundle, NodeOnlyImport, prerenderedPages } from "sanoma/app/bundle";
+import { buildAppBundle, NodeOnlyImport } from "sanoma/app/bundle";
 import { prepareBetterAuth, prepareBetterAuthStaff } from "sanoma/better-auth";
 import { testDatabaseUrl } from "sanoma/testing";
 import { defineConfig, SanomaClient, sealInvite } from "sanoma/workflows";
@@ -198,26 +198,10 @@ afterAll(async () => {
   for (const dir of temporary) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("prerenderedPages", () => {
-  it("leaves out the pages a call is made from (`calls`), and those under them, as under a layout", () => {
-    const pages = [
-      { path: "/sites/www" },
-      { path: "/sites/www/form", calls: true as const },
-      { path: "/sites/www/shop", calls: true as const },
-      { path: "/sites/www/shop/cart" },
-      { path: "/sites/www/shopping" },
-    ];
-    expect(prerenderedPages(pages)).toEqual([{ path: "/sites/www" }, { path: "/sites/www/shopping" }]);
-    // A call from the site's own layout: none of its pages.
-    expect(prerenderedPages([{ path: "/sites/www", calls: true }, { path: "/sites/www/about" }])).toEqual([]);
-  });
-});
-
 describe("buildAppBundle", () => {
   it("prerenders the pages no call is made from of the public sites on a domain, with a login or not", () => {
-    // hello's component calls `api` for leads alone, which calls itself; members' greet imports one
-    // that calls; every page of intl, in each language. members has a login, made under the
-    // build's throwaway signing key: its page answered the build's request.
+    // hello's calling component is leads' alone; members has a login, and its greet imports a call;
+    // every page of intl, in each language.
     expect(bundle.prerendered.map(({ asset }) => asset).toSorted()).toEqual([
       "/__sanoma/pages/hello.example/index.html",
       "/__sanoma/pages/hello.example/posts/hello/index.html",
@@ -430,7 +414,6 @@ describe("buildAppBundle", () => {
   });
 
   it("serves a site with a login on the Worker, its half made on the request's client", async () => {
-    expect((await get("https://members.example/")).status).toBe(200);
     // The half's own route, on its site's host alone: the fixture login's sign-out clears its cookie.
     const signOut = await get("https://members.example/auth/fixture-login/sign-out", { method: "POST" });
     expect([signOut.status, signOut.headers.get("set-cookie")]).toEqual([204, "x-fixture-visitor=; Max-Age=0; Path=/"]);

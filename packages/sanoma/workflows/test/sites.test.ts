@@ -550,7 +550,7 @@ describe("readSites", () => {
         'import type { list } from "../components/cloud.ts";',
         "return null as unknown as typeof list;",
       ),
-      // A layout that calls: its page (one with its index), not the page under it, which the build's prerender leaves out as under it.
+      // A layout that calls: its page (one with its index) and the page under it.
       "sites/www/routes/shop.tsx": page(
         "/sites/www/shop",
         'import { widgets } from "../components/widgets/index.ts";',
@@ -566,7 +566,7 @@ describe("readSites", () => {
         { path: "/sites/www/lazy", calls: true },
         { path: "/sites/www/new", calls: true },
         { path: "/sites/www/shop", calls: true },
-        { path: "/sites/www/shop/cart" },
+        { path: "/sites/www/shop/cart", calls: true },
         { path: "/sites/www/typed" },
       ],
     ]);

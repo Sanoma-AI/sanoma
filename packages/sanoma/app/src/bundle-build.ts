@@ -11,7 +11,6 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { declarationFiles, filesUnder, type SanomaConfig, timeMatcherFile, vendorInfo } from "sanoma/workflows";
 import { domainsText } from "sanoma/workflows/shared";
-import type { SiteEntry } from "sanoma/workflows/describe";
 import MagicString from "magic-string";
 import type { InlineConfig, Plugin, PluginOption, Rollup } from "vite";
 import { type AppBundle, prerenderedAsset } from "./app-bundle.ts";
@@ -110,15 +109,6 @@ export interface BuildAppBundleOptions {
   domains?: Readonly<Record<string, string>>;
   /** See `BuildAppOptions.log`. */
   log?: (line: string) => void;
-}
-
-/**
- * The pages of a site the build prerenders: those no call is made from (`SitePage.calls`), in the
- * page's files, a layout's above it or the site's files they import.
- */
-export function prerenderedPages(pages: SiteEntry["pages"]): SiteEntry["pages"] {
-  const calling = pages.flatMap(({ path, calls }) => (calls ? [path] : []));
-  return pages.filter(({ path }) => !calling.some((page) => path === page || path.startsWith(`${page}/`)));
 }
 
 const BUNDLE = "virtual:sanoma/app-bundle";
@@ -436,7 +426,7 @@ const MODULE_TYPES: Record<string, AppBundle["modules"][number]["type"]> = { js:
 type PageToPrerender = AppBundle["prerendered"][number];
 
 /**
- * The pages to prerender: each public site's on its domain that no call is made from, as its
+ * The pages to prerender: each public site's on its domain that no call is made from (`SitePage.calls`), as its
  * sitemap lists them, with the published content as it is now. A login does not matter: on the
  * site's domain the server's render never reads the visitor, whom the page asks for once loaded.
  */
@@ -445,7 +435,7 @@ async function pagesOf(snapshot: AppSnapshot, domains: Readonly<Record<string, s
   return snapshot.description.sites.flatMap((site) => {
     const domain = domains[site.name]?.toLowerCase();
     if (!servedOnWorker(site) || !domain) return [];
-    const pages = { ...site, pages: prerenderedPages(site.pages) };
+    const pages = { ...site, pages: site.pages.filter((page) => !page.calls) };
     return sitemapEntries(pages, `https://${domain}`, snapshot.published).flatMap(({ loc }) => {
       const path = new URL(loc).pathname;
       const asset = prerenderedAsset(domain, path);
