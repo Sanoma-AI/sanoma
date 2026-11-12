@@ -38,6 +38,7 @@ import { isNew, type RecordsView, savedIn, withValue } from "./collection.ts";
 import { BY, ColumnMenu, HEADS, NewColumnLink, readWidths, UPDATED, writeWidths } from "./columns.tsx";
 import { type Conflict, conflictId, ConflictRow } from "./conflicts.tsx";
 import { useGestures } from "./gestures.ts";
+import { shownFields } from "./plan.ts";
 import { typedCharacter, useGridKeys } from "./keys.ts";
 import { HeldBar, ReviewCard, STAGED_FIRST, StagedBar, StagedNote, useStagedChange } from "./staged.tsx";
 
@@ -165,7 +166,7 @@ export function DataGrid({
   const columns = useMemo(
     () =>
       column.columns([
-        ...Object.keys(collection.fields).map((field) =>
+        ...shownFields(collection.fields).map((field) =>
           column.accessor((saved) => saved.record[field], {
             id: field,
             header: field,

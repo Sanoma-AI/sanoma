@@ -16,6 +16,7 @@ import { Route as ConnectorsRouteRouteImport } from './routes/connectors/route'
 import { Route as DataRouteRouteImport } from './routes/data/route'
 import { Route as HostingRouteRouteImport } from './routes/hosting/route'
 import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as PeopleRouteImport } from './routes/people'
 import { Route as PermissionsRouteImport } from './routes/permissions'
 import { Route as ResourcesRouteImport } from './routes/resources'
@@ -86,6 +87,11 @@ const HostingRouteRoute = HostingRouteRouteImport.update({
 const InboxRoute = InboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PeopleRoute = PeopleRouteImport.update({
@@ -278,6 +284,7 @@ export interface FileRoutesByFullPath {
   '/hosting': typeof HostingRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/inbox': typeof InboxRoute
+  '/mcp': typeof McpRoute
   '/people': typeof PeopleRoute
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
@@ -317,6 +324,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/inbox': typeof InboxRoute
+  '/mcp': typeof McpRoute
   '/people': typeof PeopleRoute
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
@@ -361,6 +369,7 @@ export interface FileRoutesById {
   '/hosting': typeof HostingRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/inbox': typeof InboxRoute
+  '/mcp': typeof McpRoute
   '/people': typeof PeopleRoute
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
@@ -408,6 +417,7 @@ export interface FileRouteTypes {
     | '/hosting'
     | '/workflows'
     | '/inbox'
+    | '/mcp'
     | '/people'
     | '/permissions'
     | '/resources'
@@ -447,6 +457,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/inbox'
+    | '/mcp'
     | '/people'
     | '/permissions'
     | '/resources'
@@ -490,6 +501,7 @@ export interface FileRouteTypes {
     | '/hosting'
     | '/workflows'
     | '/inbox'
+    | '/mcp'
     | '/people'
     | '/permissions'
     | '/resources'
@@ -536,6 +548,7 @@ export interface RootRouteChildren {
   HostingRouteRoute: typeof HostingRouteRouteWithChildren
   WorkflowsRouteRoute: typeof WorkflowsRouteRouteWithChildren
   InboxRoute: typeof InboxRoute
+  McpRoute: typeof McpRoute
   PeopleRoute: typeof PeopleRoute
   PermissionsRoute: typeof PermissionsRoute
   ResourcesRoute: typeof ResourcesRoute
@@ -603,6 +616,13 @@ declare module '@tanstack/react-router' {
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/people': {
@@ -986,6 +1006,7 @@ const rootRouteChildren: RootRouteChildren = {
   HostingRouteRoute: HostingRouteRouteWithChildren,
   WorkflowsRouteRoute: WorkflowsRouteRouteWithChildren,
   InboxRoute: InboxRoute,
+  McpRoute: McpRoute,
   PeopleRoute: PeopleRoute,
   PermissionsRoute: PermissionsRoute,
   ResourcesRoute: ResourcesRoute,

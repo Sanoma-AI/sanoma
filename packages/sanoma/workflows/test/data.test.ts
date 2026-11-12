@@ -3,8 +3,9 @@ import { testDatabaseUrl } from "sanoma/testing";
 import { eq, getTableName, inArray } from "drizzle-orm";
 import { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { collection } from "../src/collection.ts";
-import { collectionsDriver } from "../src/collection-driver.ts";
+import { collection, recordsOps } from "../src/collection.ts";
+import { collectionsDriver, recordsDriver } from "../src/collection-driver.ts";
+import { reshape } from "../src/shared.ts";
 import { databaseOn, lazyDb } from "../src/db.ts";
 import { data } from "../src/db/company.ts";
 import { z } from "zod";
@@ -335,6 +336,112 @@ describe("the collections' driver on Postgres", () => {
       issues,
     });
     expect(await call(leads.list, {})).toMatchObject([{ key: "Acme", issues }]);
+  });
+});
+
+describe("sanoma.records.reshape on Postgres", () => {
+  const url = testDatabaseUrl("data");
+  const pool = lazyDb(url, "reshape test");
+  const driver = recordsDriver(() => pool.db());
+  const op = recordsOps.records.reshape;
+  afterAll(() => pool.close());
+  beforeEach(async () => {
+    await (await pool.db()).delete(data).where(inArray(data.collection, ["deals", "others"]));
+  });
+  /** Calls the driver as a run does, as `run:t`: the input parsed by the operation's schema, the output too. */
+  const reshapeCall = async (input: unknown) =>
+    op.output.parse(
+      await driver.ops["records.reshape"]!(op.input.parse(input), {
+        idempotencyKey: "t:reshape",
+        runId: "t",
+        opId: op.id,
+        attempt: 1,
+        secrets: memorySecrets(),
+      }),
+    );
+  const rowsOf = async (name: string) =>
+    (await pool.db())
+      .select({ key: data.key, record: data.record, updatedBy: data.updatedBy })
+      .from(data)
+      .where(eq(data.collection, name))
+      .orderBy(data.key);
+  const deals = [
+    { company: "Acme", seats: "12", owner: "leon", stage: "won" },
+    { company: "Brightwater", seats: "about 40", owner: "leon" },
+    { company: "Cedar", seats: 4, lastTouched: "2026-01-02" },
+    { company: "Delta", seats: "", lastTouched: "2026-01-03", contact: "x" },
+    { company: "Elm" },
+  ];
+  const changes = [
+    { kind: "rename", from: "lastTouched", to: "lastContact" },
+    { kind: "retype", field: "seats", to: "number", decision: "clear" },
+    { kind: "retype", field: "stage", to: { enum: ["new", "won"] } },
+  ];
+
+  it("brings each kind of change along in one call, writing only the records that changed, by the run, and counts them", async () => {
+    const db = await pool.db();
+    await db
+      .insert(data)
+      .values([
+        ...deals.map((record) => ({ collection: "deals", key: record.company, record, updatedBy: "leon" })),
+        { collection: "others", key: "Acme", record: { company: "Acme", seats: "12" }, updatedBy: "leon" },
+      ]);
+    expect(await reshapeCall({ collection: "deals", changes })).toEqual({
+      rows: 5,
+      changed: 4,
+      converted: 1,
+      cleared: 1,
+      kept: 0,
+    });
+    expect(await rowsOf("deals")).toEqual([
+      { key: "Acme", record: { company: "Acme", seats: 12, owner: "leon", stage: "won" }, updatedBy: "run:t" },
+      { key: "Brightwater", record: { company: "Brightwater", owner: "leon" }, updatedBy: "run:t" },
+      { key: "Cedar", record: { company: "Cedar", seats: 4, lastContact: "2026-01-02" }, updatedBy: "run:t" },
+      // The empty value is no value to convert: dropped.
+      { key: "Delta", record: { company: "Delta", lastContact: "2026-01-03", contact: "x" }, updatedBy: "run:t" },
+      { key: "Elm", record: { company: "Elm" }, updatedBy: "leon" },
+    ]);
+    // Another collection's records are left alone.
+    expect(await rowsOf("others")).toEqual([
+      { key: "Acme", record: { company: "Acme", seats: "12" }, updatedBy: "leon" },
+    ]);
+    // Again: nothing left to bring along.
+    expect(await reshapeCall({ collection: "deals", changes })).toEqual({
+      rows: 5,
+      changed: 0,
+      converted: 0,
+      cleared: 0,
+      kept: 0,
+    });
+  });
+
+  it("keeps the values that cannot convert by default, counting them each time, and agrees with `reshape` in memory", async () => {
+    const db = await pool.db();
+    await db
+      .insert(data)
+      .values(deals.map((record) => ({ collection: "deals", key: record.company, record, updatedBy: "leon" })));
+    const keep = [{ kind: "retype", field: "seats", to: "number" }] as const;
+    const expected = reshape(deals, keep);
+    expect(await reshapeCall({ collection: "deals", changes: keep })).toEqual(expected.counts);
+    expect(expected.counts).toMatchObject({ converted: 1, kept: 1, cleared: 0 });
+    expect((await rowsOf("deals")).map((row) => row.record)).toEqual(
+      deals.map((record, i) => expected.changed.get(i) ?? record),
+    );
+    expect(await reshapeCall({ collection: "deals", changes: keep })).toMatchObject({ changed: 0, kept: 1 });
+  });
+
+  it("writes a collection larger than one statement's chunk whole", async () => {
+    const many = Array.from({ length: 1234 }, (_, i) => ({ company: `c${String(i).padStart(4, "0")}`, seats: `${i}` }));
+    await (
+      await pool.db()
+    )
+      .insert(data)
+      .values(many.map((record) => ({ collection: "deals", key: record.company, record, updatedBy: "leon" })));
+    expect(
+      await reshapeCall({ collection: "deals", changes: [{ kind: "retype", field: "seats", to: "number" }] }),
+    ).toMatchObject({ rows: 1234, changed: 1234, converted: 1234 });
+    const rows = await rowsOf("deals");
+    expect(rows.every(({ record }, i) => record.seats === i && typeof record.seats === "number")).toBe(true);
   });
 });
 

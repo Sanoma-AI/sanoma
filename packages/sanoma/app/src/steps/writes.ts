@@ -27,7 +27,6 @@ import {
   renameFields,
   setFields,
 } from "sanoma/workflows/describe";
-import { TableChangePlan } from "../components/grid/plan.ts";
 
 // A change from the app's own pages, in the worker (the built-ins `adopt`, `patch` and
 // `save-draft`): Adopt (a drifted field's value at the vendor) and a form's Save, each written into
@@ -98,14 +97,14 @@ export async function written(step: AppStepContext, file: string, text: string, 
  * `rename` names (`renameFields`), as the run's actor, and lands it.
  * With a repository that drafts and has a remote a connector's remote half is for, it is a change:
  * the file written in a draft of its own (`ui-<id>`), committed there, and the change opened for
- * review (`SanomaClient.openChange`, carrying `plan` when it is the plan of the collection at `at`,
- * each change to a field it edits, for its review), whose
+ * review (`SanomaClient.openChange`, carrying `plan`, for its review and its merge), whose
  * run holds a change to the rules for `admin`; the change's run id. Otherwise the file is written
  * in the checkout and committed as Adopt does, but a change to the rules (a people file) only by
- * someone in `admin`: `not_approver` for anyone else, since nothing would review it. Refused
- * (`invalid_input`) for a declaration the description does not name, a rename the file cannot
- * take, and, with the writer's reason and the `field`, for a field the file computes or a
- * declaration that is no object literal.
+ * someone in `admin`: `not_approver` for anyone else, since nothing would review it (the `patch`
+ * run then brings the records along with the plan itself). Refused (`invalid_input`) for a
+ * declaration the description does not name, a plan that is not of the collection at `at` with
+ * each change to a field it edits, a rename the file cannot take, and, with the writer's reason and
+ * the `field`, for a field the file computes or a declaration that is no object literal.
  */
 export async function patch(step: AppStepContext, { at, fields, rename = {}, plan }: PatchInput): Promise<PatchOutput> {
   const root = rootOf(step);
@@ -119,19 +118,22 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
   ].some((known) => known?.file === at.file && known.export === at.export);
   if (!named) throw new SanomaError("invalid_input", `${at.file}#${at.export} is not a declaration`);
   const paths = [...Object.keys(fields), ...Object.keys(rename)];
-  // A plan is a column change's: it goes on the change only as the plan of this collection's
-  // declaration, each of its changes to a field this patch edits, so the review says what merges.
+  // A plan is a column change's: only of this collection's declaration, each of its changes to a
+  // field this patch edits, so the review says what merges and the records follow what is written.
   const collection = description.collections.find(
     (c) => c.declared?.at.file === at.file && c.declared.at.export === at.export,
   );
-  const parsed = TableChangePlan.safeParse(plan).data;
-  const planned =
-    parsed?.collection === collection?.name &&
-    parsed?.changes.every((change) =>
-      paths.includes(
-        `fields.${change.kind === "rename" ? change.from : change.kind === "convert" ? change.key : change.field}`,
-      ),
-    );
+  if (
+    plan &&
+    (plan.collection !== collection?.name ||
+      !plan.changes.every((change) =>
+        paths.includes(
+          `fields.${change.kind === "rename" ? change.from : change.kind === "convert" ? change.key : change.field}`,
+        ),
+      ))
+  ) {
+    throw new SanomaError("invalid_input", `The plan is not of the fields this saves in ${at.export}`);
+  }
   const message = `Change ${paths.join(", ")} of ${at.export === "default" ? at.file : at.export}`;
   /**
    * The file under `dir` as it is, and with the fields set and renamed; refused, saying why, when
@@ -170,7 +172,7 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
       // No page for its pull request's status to link: the app's origin is no fact the worker has,
       // and a run's input is its starter's to choose.
       return {
-        change: await client.openChange({ id, title: message, ...(planned && { plan }) }, { startedBy: by }),
+        change: await client.openChange({ id, title: message, ...(plan && { plan }) }, { startedBy: by }),
       };
     } catch (err) {
       // No change opened on it (a policy refusing the change, say): the draft would be left behind with nothing to close it.

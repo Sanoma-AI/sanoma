@@ -14,6 +14,7 @@ import {
   recordChanged,
   recordExists,
   recordsChanged,
+  recordsOps,
   type SaveInput,
   updatedBy,
 } from "./collection.ts";
@@ -21,10 +22,11 @@ import type { Db } from "./db.ts";
 import { data } from "./db/company.ts";
 import { isObject } from "./resource.ts";
 import { type CallContext, defineDriver, type Driver, type DriverImpl } from "./op.ts";
-import { BATCH, type Deleted } from "./shared.ts";
+import { BATCH, type Deleted, reshape } from "./shared.ts";
 
-// The collections' driver: their records as rows of the `data` table, in the config's database.
-// Apart from `collection.ts`, which declares them and fakes them in memory with no database.
+// The collections' driver: their records as rows of the `data` table, in the config's database,
+// and `sanoma.records.reshape`'s. Apart from `collection.ts`, which declares them and fakes them in
+// memory with no database.
 
 const COLUMNS = { key: data.key, record: data.record, updatedAt: data.updatedAt, updatedBy: data.updatedBy };
 // By namespace: the fake names a range's bounds `gt`, `gte`, `lt` and `lte`.
@@ -145,6 +147,47 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
     return [c.name, ops];
   });
   return defineDriver(collectionsConnector(list), Object.fromEntries(impl) as DriverImpl<DataOps>);
+}
+
+/** How many records one statement of a reshape updates. */
+const RESHAPE_CHUNK = 500;
+
+/**
+ * `sanoma.records.reshape`'s driver, on the `data` table of the database `db` opens: in one
+ * transaction, the collection's rows read and locked (`for update`), each brought along by
+ * `reshape` (`shared.ts`, the one rule the app's counts use too), and only the rows that changed
+ * written back, `RESHAPE_CHUNK` a statement, saved now by the call's actor (`updatedBy`). From the
+ * input's names and types alone: the declaration the worker loaded may still be the one before.
+ */
+export function recordsDriver(db: () => Promise<Db>): Driver {
+  return defineDriver(recordsOps, {
+    records: {
+      reshape: async ({ collection, changes }, call) =>
+        (await db()).transaction(async (tx) => {
+          const rows = await tx
+            .select({ key: data.key, record: data.record })
+            .from(data)
+            .where(eq(data.collection, collection))
+            .orderBy(data.key)
+            .for("update");
+          const { changed, counts } = reshape(
+            rows.map((row) => row.record),
+            changes,
+          );
+          const updates = [...changed].map(([i, record]) => ({ key: rows[i]!.key, record }));
+          const by = updatedBy(call);
+          for (let at = 0; at < updates.length; at += RESHAPE_CHUNK) {
+            // The rows as one JSON parameter, read back as a table to join on.
+            const chunk = JSON.stringify(updates.slice(at, at + RESHAPE_CHUNK));
+            await tx.execute(sql`
+              UPDATE ${data} SET record = v.record, updated_at = now(), updated_by = ${by}
+              FROM jsonb_to_recordset(${chunk}::jsonb) AS v(key text, record jsonb)
+              WHERE ${data.collection} = ${collection} AND ${data.key} = v.key`);
+          }
+          return counts;
+        }),
+    },
+  });
 }
 
 const SQL_TYPE = { string: "text", number: "numeric", boolean: "boolean" } as const;

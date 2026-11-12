@@ -1,18 +1,19 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { RUNNER_HEALTH, RUNNER_PORT } from "sanoma/workflows";
 
 // Agent37 on this machine, for the backend's tests: its Sandbox API as a `fetch` that answers
 // `https://api.agent37.com/v1` from memory (every other URL goes out), its exec `sh -c` here, each
 // instance's home a directory of its own, and its edge a port of this machine per instance's port:
-// the runner the backend starts with exec listens on one of its own (`SANOMA_RUNNER_PORT`). A
-// stop, a delete and `close` end what an instance's execs left running, as a fresh boot would; a
-// sleep keeps it. The edge answers `/health` itself, on every port, as Agent37's does. `answer`
-// puts a reply ahead of the next request.
+// the runner the backend starts with exec listens on one of its own (`SANOMA_RUNNER_PORT`). Its
+// `PATH` is a template's: no pnpm, but a corepack that makes one. A stop, a delete and `close` end
+// what an instance's execs left running, as a fresh boot would; a sleep keeps it. The edge answers
+// `/health` itself, on every port, as Agent37's does. `answer` puts a reply ahead of the next
+// request.
 
 export const KEY = "sk_live_test";
 
@@ -49,6 +50,20 @@ export async function fakeAgent37Vendor() {
   const answers: { method: string; path: string; status: number; body: unknown }[] = [];
   let seq = 0;
   const home = (id: string) => join(root, id);
+  // The template's own programs: node, and corepack as far as the backend uses it.
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  symlinkSync(process.execPath, join(bin, "node"));
+  writeFileSync(
+    join(bin, "corepack"),
+    `#!/bin/sh
+[ "$1 $2 $4" = "enable --install-directory pnpm" ] || { echo "corepack: not faked: $*" >&2; exit 1; }
+printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
+`,
+    { mode: 0o755 },
+  );
+  /** This machine's `PATH` but where a pnpm is, as a template has none. */
+  const searched = (process.env.PATH ?? "").split(":").filter((dir) => dir && !existsSync(join(dir, "pnpm")));
 
   /**
    * Ends what the instance's execs left running (its runner, which ends what it started), and
@@ -79,7 +94,7 @@ export async function fakeAgent37Vendor() {
       cwd: "/",
       env: {
         HOME: home(id),
-        PATH: [dirname(process.execPath), process.env.PATH].join(":"),
+        PATH: [join(home(id), ".local/bin"), bin, ...searched].join(":"),
         SANOMA_RUNNER_HOST: "127.0.0.1",
         SANOMA_RUNNER_PORT: String(runner.port),
       },

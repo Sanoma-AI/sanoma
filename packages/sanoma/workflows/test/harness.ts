@@ -10,6 +10,7 @@ import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 import { testDatabaseUrl } from "sanoma/testing";
 import { type TestApp, useTestApp } from "sanoma/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "sanoma/workflows/fake";
+import { sql } from "drizzle-orm";
 import { escapeIdentifier, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach } from "vitest";
 import {
@@ -20,6 +21,7 @@ import {
   type SanomaConfig,
   withSetup,
 } from "../src/index.ts";
+import { databaseOn } from "../src/db.ts";
 import { VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
 
@@ -196,3 +198,15 @@ export const pending =
     const approvals = await client().approvals(runId);
     return approvals.filter((a) => a.status === "pending").length === 1 && approvals.length === count;
   };
+
+/** Gives the run `runId` another `builtInCode`, as if another runtime had started it. */
+export async function setBuiltInCode(databaseUrl: string, runId: string, builtInCode: string) {
+  const db = new Pool({ connectionString: databaseUrl });
+  try {
+    await databaseOn(db).execute(
+      sql`UPDATE dbos.workflow_status SET attributes = attributes || ${JSON.stringify({ builtInCode })}::jsonb WHERE workflow_uuid = ${runId}`,
+    );
+  } finally {
+    await db.end();
+  }
+}

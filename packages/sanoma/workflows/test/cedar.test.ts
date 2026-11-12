@@ -19,6 +19,7 @@ import {
   cedarPolicy,
   defineConfig,
   defineConnector,
+  defineResource,
   defineWorkflow,
   loadPolicies,
   memoryLedger,
@@ -799,6 +800,315 @@ forbid (principal, action in Sanoma::Action::"effect:write", resource == Sanoma:
     expect(await failure(app.client.call("data.leads.delete", { key: "l11" }, { actor: "ada" }))).toMatchObject({
       code: "policy_denied",
       message: "data.leads.delete was denied by policy: That lead stays",
+    });
+  });
+});
+
+/** Claude Code acting for `person`, as admitted. */
+const forOf = (person: string): Principal => ({ id: "claude-code", groups: ["agents"], onBehalfOf: person });
+/** An approved approval addressed to `approver`, covering `op`. */
+const approvedBy = (op: string, approver: ApprovalState["approver"]): ApprovalState => ({
+  ...approved(approver, typeof approver === "string" ? approver : "x"),
+  covers: [op],
+});
+
+describe("an agent acting for a person, who may do no more than that person", () => {
+  const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
+  const acting = [
+    ada!,
+    bo!,
+    cy!,
+    refundBot,
+    claudeCode,
+    sanoma.group({ name: "contractors", members: [ada!] }),
+    sanoma.group({ name: "finance", members: [bo!] }),
+  ];
+  const { policies, problems } = loadPolicies([
+    {
+      file: "policies/acting.cedar",
+      text: `@id("contractors-no-refund")
+@reason("Contractors start no refunds")
+forbid (principal in Sanoma::Group::"contractors", action == Sanoma::Action::"workflow:refund", resource);
+
+@id("cy-no-save")
+@reason("Cy saves no leads")
+forbid (principal == Sanoma::Principal::"cy", action == Sanoma::Action::"data.leads.save", resource);
+
+@id("finance-money")
+@hold("cy")
+forbid (principal in Sanoma::Group::"finance", action in Sanoma::Action::"effect:money", resource);
+
+@id("agents-money")
+@hold("on-behalf-of")
+forbid (principal in Sanoma::Group::"agents", action in Sanoma::Action::"effect:money", resource);
+
+@id("agents-no-tags")
+@reason("Agents set no tags")
+forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"shop.tags.set", resource);
+
+@id("notes-for-whom")
+@hold("on-behalf-of")
+forbid (principal, action == Sanoma::Action::"shop.notes.add", resource);
+`,
+    },
+  ]);
+  const decide = cedarPolicy(resolved, policies, acting);
+  const call = (op: "refund" | "save" | "tags" | "notes", actor: Principal, approvals: ApprovalState[] = []) =>
+    decide({
+      ...(op === "refund"
+        ? { op: policyOpOf(shop.refunds.create), effect: "money", input: { amount: 5, customer: "c" } }
+        : op === "save"
+          ? {
+              op: policyOpOf(leads.save),
+              effect: "write",
+              target: "data:leads/l1",
+              input: { record: { id: "l1", stage: "open" } },
+            }
+          : op === "tags"
+            ? { op: policyOpOf(shop.tags.set), effect: "write", input: { tags: "a" } }
+            : { op: policyOpOf(shop.notes.add), effect: "write", input: { text: "t", tags: {} } }),
+      actor,
+      run: run(approvals),
+    } as PolicyCall);
+
+  it("loads", () => {
+    expect(problems).toEqual([]);
+  });
+
+  it("refuses the agent a start a forbid on the person's group refuses the person", () => {
+    expect(decide.start({ id: "ada" }, "refund", { amount: 1 })).toMatchObject({
+      kind: "deny",
+      reason: "Contractors start no refunds",
+    });
+    expect(decide.start(forOf("ada"), "refund", { amount: 1 })).toMatchObject({
+      kind: "deny",
+      reason: "Contractors start no refunds",
+      reasons: ["contractors-no-refund"],
+    });
+    // Bo is no contractor, and neither is his agent: both start it.
+    expect(decide.start(forOf("bo"), "refund", { amount: 1 })).toMatchObject({ kind: "allow" });
+  });
+
+  it("refuses the agent a call a forbid naming the person refuses the person", () => {
+    expect(call("save", { id: "cy" })).toMatchObject({ kind: "deny", reason: "Cy saves no leads" });
+    expect(call("save", forOf("cy"))).toMatchObject({ kind: "deny", reason: "Cy saves no leads" });
+    expect(call("save", forOf("ada"))).toMatchObject({ kind: "allow" });
+  });
+
+  it("holds the agent where the person's group is held, and for the agents' own hold too, one after the other", () => {
+    const refunds = shop.refunds.create.id;
+    expect(call("refund", { id: "bo" })).toMatchObject({ kind: "approve", approver: "cy", reasons: ["finance-money"] });
+    // The agents' hold first, addressed to bo, whom it acts for; then bo's own, for cy.
+    expect(call("refund", forOf("bo"))).toMatchObject({ kind: "approve", approver: "bo", reasons: ["agents-money"] });
+    expect(call("refund", forOf("bo"), [approvedBy(refunds, "bo")])).toMatchObject({
+      kind: "approve",
+      approver: "cy",
+      reasons: ["finance-money"],
+    });
+    expect(call("refund", forOf("bo"), [approvedBy(refunds, "bo"), approvedBy(refunds, "cy")])).toMatchObject({
+      kind: "allow",
+    });
+    // Ada is in no held group: her agent waits for her alone.
+    expect(call("refund", forOf("ada"), [approvedBy(refunds, "ada")])).toMatchObject({ kind: "allow" });
+  });
+
+  it("still refuses the agent what a rule refuses agents alone, and not the person", () => {
+    expect(call("tags", forOf("ada"))).toMatchObject({ kind: "deny", reason: "Agents set no tags" });
+    expect(call("tags", { id: "ada" })).toMatchObject({ kind: "allow" });
+  });
+
+  it("resolves an on-behalf-of hold to the person in their own pass, where a person alone is refused as before", () => {
+    const notes = shop.notes.add.id;
+    expect(call("notes", { id: "ada" })).toMatchObject({ kind: "deny", reason: "cannot resolve approver" });
+    expect(call("notes", forOf("ada"))).toMatchObject({ kind: "approve", approver: "ada" });
+    expect(call("notes", forOf("ada"), [approvedBy(notes, "ada")])).toMatchObject({ kind: "allow" });
+  });
+
+  it("decides an agent acting for no one, and a person, as before", () => {
+    const alone = { id: "claude-code", groups: ["agents"] };
+    // No one to hold for: the agents' on-behalf-of hold cannot resolve, as before; finance's does not apply.
+    expect(call("refund", alone)).toMatchObject({ kind: "deny", reason: "cannot resolve approver" });
+    expect(decide.start(alone, "refund", { amount: 1 })).toMatchObject({ kind: "allow" });
+    expect(call("save", alone)).toMatchObject({ kind: "allow" });
+  });
+});
+
+describe("a declared agent's start of a built-in, and of a run it starts for someone", () => {
+  const databaseUrl = testDatabaseUrl("cedar_agents");
+  // A vendor whose hook a data file declares, so the config has drift.
+  const hook = defineResource({
+    vendor: "hooks",
+    type: "hook",
+    title: "Hook",
+    identity: "name",
+    schema: z.object({ name: z.string() }),
+    fields: { immutable: [], vendorOwned: [], writeOnly: [] },
+    find: ({ name }) => name,
+  });
+  const hooks = defineConnector("hooks", { hook }, { title: "Hooks", package: "@acme/hooks" });
+  const hooksFake = defineFake(hooks, {
+    initial: () => ({}),
+    ops: () => ({
+      hook: {
+        import: async ({ id }) => ({ id, gone: false, state: { name: id } }),
+        read: async ({ id }) => ({ id, gone: true }),
+      },
+    }),
+  });
+  const root = rootWith({
+    "resources/people.ts": `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada" });
+export const bo = sanoma.person({ id: "bo" });
+export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
+export const finance = sanoma.group({ name: "finance", members: [ada, bo] });
+export const contractors = sanoma.group({ name: "contractors", members: [ada] });
+`,
+    "resources/hooks.ts": `import { hooks } from "@acme/hooks/resources";\n\nexport const deploys = hooks.hook({ name: "deploys" });\n`,
+    "policies/agents.cedar": `@id("agents-no-drift")
+@reason("Agents do not check drift here")
+forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflow:drift", resource);
+
+@id("agent-payouts")
+@hold("on-behalf-of")
+@title("An agent's payout needs whom it acts for")
+forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflow:payout", resource);
+
+@id("contractors-no-bonus")
+@reason("Contractors get no bonus")
+forbid (principal in Sanoma::Group::"contractors", action == Sanoma::Action::"workflow:bonus", resource);
+
+@id("finance-transfers")
+@hold("bo")
+@title("A finance transfer needs bo")
+forbid (principal in Sanoma::Group::"finance", action == Sanoma::Action::"workflow:transfer", resource)
+unless { principal == Sanoma::Principal::"bo" };
+
+@id("agent-transfers")
+@hold("on-behalf-of")
+@title("An agent's transfer needs whom it acts for")
+forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflow:transfer", resource);
+`,
+  });
+  const payout = defineWorkflow({
+    name: "payout",
+    trigger: "manual",
+    input: z.object({ amount: z.number().int() }),
+    uses: [],
+    run: async (_ctx, { amount }) => ({ paid: amount }),
+  });
+  const bonus = defineWorkflow({
+    name: "bonus",
+    trigger: "manual",
+    input: z.object({ amount: z.number().int() }),
+    uses: [],
+    run: async (_ctx, { amount }) => ({ bonus: amount }),
+  });
+  const transfer = defineWorkflow({
+    name: "transfer",
+    trigger: "manual",
+    input: z.object({ amount: z.number().int() }),
+    uses: [],
+    run: async (_ctx, { amount }) => ({ transfer: amount }),
+  });
+  const app = useTestApp(
+    { workflows: [payout, bonus, transfer], connectors: [withFake(hooks, hooksFake)], root, databaseUrl },
+    { databaseUrl },
+  );
+  const forAda = { id: "claude-code", onBehalfOf: "ada" };
+
+  it("refuses an agent's drift a forbid on workflow:drift names, and not a person's or a runtime agent's", async () => {
+    expect(await failure(app.client.drift({ startedBy: forAda }))).toMatchObject({
+      code: "policy_denied",
+      message: "workflow:drift was denied by policy: Agents do not check drift here",
+    });
+    // A person's start of a built-in is not asked, as before; nor is the runtime's agents', though in agents.
+    for (const startedBy of ["ada", "host-check"]) {
+      const runId = await app.client.drift({ startedBy });
+      expect((await app.client.driftReport(runId)).resources, startedBy).toEqual([
+        expect.objectContaining({ id: "resources/hooks.ts#deploys" }),
+      ]);
+    }
+  });
+
+  it("refuses an agent every other built-in but call, before any policy", async () => {
+    for (const [workflow, input] of [
+      ["go-live-host", {}],
+      ["adopt", { runId: "r1", id: "resources/hooks.ts#deploys", paths: ["name"] }],
+    ] as const) {
+      const runId = randomUUID();
+      expect(await failure(app.client.start(workflow, input, { startedBy: forAda, runId })), workflow).toMatchObject({
+        code: "policy_denied",
+        message: `workflow:${workflow} was denied by policy: an agent starts none of the runtime's own workflows but drift`,
+      });
+      expect(await app.client.run(runId)).toBeUndefined();
+    }
+  });
+
+  it("refuses the agent a start a forbid on the person's group refuses them, and not another person's agent", async () => {
+    for (const startedBy of ["ada", forAda]) {
+      expect(
+        await failure(app.client.start(bonus, { amount: 1 }, { startedBy })),
+        JSON.stringify(startedBy),
+      ).toMatchObject({
+        code: "policy_denied",
+        message: "workflow:bonus was denied by policy: Contractors get no bonus",
+      });
+    }
+    const forBo = { id: "claude-code", onBehalfOf: "bo" };
+    expect(await app.client.result(await app.client.start(bonus, { amount: 2 }, { startedBy: forBo }))).toEqual({
+      bonus: 2,
+    });
+  });
+
+  it("holds an agent's start for whom it acts for and for the person's own hold, one after the other", async () => {
+    const pending = async (runId: string, count: number) => {
+      await waitFor(
+        async () =>
+          (await app.client.approvals(runId)).filter((a) => a.status === "pending").length === 1 &&
+          (await app.client.approvals(runId)).length === count,
+      );
+      return (await app.client.approvals(runId)).at(-1)!;
+    };
+    // Ada alone waits for bo.
+    const own = await app.client.start(transfer, { amount: 3 }, { startedBy: "ada" });
+    expect(await pending(own, 1)).toMatchObject({ approver: "bo", reasons: ["finance-transfers"] });
+    // Her agent waits for her, then for bo, as she would.
+    const runId = await app.client.start(transfer, { amount: 4 }, { startedBy: forAda });
+    expect(await pending(runId, 1)).toMatchObject({ approver: "ada", reasons: ["agent-transfers"] });
+    await app.client.decide(runId, { decision: "approve", by: { id: "ada" } });
+    expect(await pending(runId, 2)).toMatchObject({
+      title: "A finance transfer needs bo",
+      approver: "bo",
+      reasons: ["finance-transfers"],
+    });
+    await app.client.decide(runId, { decision: "approve", by: { id: "bo" } });
+    expect(await app.client.result(runId)).toEqual({ transfer: 4 });
+  });
+
+  it("addresses an on-behalf-of hold on a run an agent starts for someone to them, who may approve it", async () => {
+    const runId = await app.client.start(payout, { amount: 5 }, { startedBy: forAda });
+    await waitFor(async () => (await app.client.approvals(runId)).some((a) => a.status === "pending"));
+    expect(await app.client.approvals(runId)).toEqual([
+      expect.objectContaining({
+        title: "An agent's payout needs whom it acts for",
+        approver: "ada",
+        status: "pending",
+        reasons: ["agent-payouts"],
+      }),
+    ]);
+    // Bo, in finance, is not whom it acts for; Ada is, though the run is her agent's for her.
+    expect(await failure(app.client.decide(runId, { decision: "approve", by: { id: "bo" } }))).toMatchObject({
+      code: "not_approver",
+    });
+    expect(await app.client.decide(runId, { decision: "approve", by: { id: "ada" } })).toMatchObject({
+      status: "approved",
+      decidedBy: "ada",
+    });
+    expect(await app.client.result(runId)).toEqual({ paid: 5 });
+    // A person's own payout is not held.
+    expect(await app.client.result(await app.client.start(payout, { amount: 6 }, { startedBy: "bo" }))).toEqual({
+      paid: 6,
     });
   });
 });

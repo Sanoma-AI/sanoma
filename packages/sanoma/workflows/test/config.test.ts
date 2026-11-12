@@ -20,6 +20,7 @@ import {
   type SanomaConfig,
   withSetup,
 } from "../src/index.ts";
+import { recordsOps } from "../src/collection.ts";
 import { setupOf, VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
 import { tree } from "./tree.ts";
@@ -181,6 +182,8 @@ describe("a change's operations, built in", () => {
     // Beside the listing of apps and the runtime's own operations, also built in.
     expect([...resolved.ops.keys()]).toEqual([
       ...ids,
+      // What brings a collection's records along a column change: after a merge, or a patch without a remote.
+      "sanoma.records.reshape",
       "sanoma.connection.test",
       "sanoma.connection.refresh",
       "sanoma.connection.revoke",
@@ -217,6 +220,13 @@ describe("a change's operations, built in", () => {
     await expect(resolved.drivers.get("sanoma.change.merge")!({}, { secrets: {} } as never)).rejects.toThrow(
       "This worker was given no repository",
     );
+    const reshape = resolved.ops.get("sanoma.records.reshape")!;
+    expect([reshape.effect, reshape.idempotent, reshape.target!({ collection: "deals" })]).toEqual([
+      "write",
+      true,
+      "data:deals",
+    ]);
+    expect(resolved.drivers.has("sanoma.records.reshape")).toBe(true);
     // Not a vendor with credentials to set.
     expect(resolved.driversByVendor.size).toBe(0);
   });
@@ -231,6 +241,17 @@ describe("a change's operations, built in", () => {
     });
     expect(() => resolveConfig(config({ workflows: [merging] }))).toThrow(
       'Workflow "merging": sanoma.change.merge changes the company\'s repository, which only change does: send a draft for review instead',
+    );
+    // Nor one that rewrites a collection's records, outside its own operations and their policy.
+    const reshaping = defineWorkflow({
+      name: "reshaping",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [recordsOps.records.reshape],
+      run: async () => 1,
+    });
+    expect(() => resolveConfig(config({ workflows: [reshaping] }))).toThrow(
+      "Workflow \"reshaping\": sanoma.records.reshape rewrites a collection's records, which only change and patch do: change the collection's columns from its grid instead",
     );
     const named = defineWorkflow({
       name: "change",

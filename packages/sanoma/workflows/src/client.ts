@@ -32,7 +32,7 @@ import { type Call, callsOf, inputOf, opCalled, outputsOf, recorded } from "./ct
 import { type Chats, chatStore } from "./chats.ts";
 import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection-driver.ts";
-import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import { queueFor, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import { readStoreMoves, type StoreMove } from "./store-move.ts";
 import {
@@ -83,6 +83,8 @@ import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
 import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
 import {
+  AGENT_BUILT_IN_REFUSAL,
+  AGENT_BUILT_INS,
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
   CHANGE_EVENT,
@@ -104,6 +106,7 @@ import {
   FOLLOW_WORKFLOW,
   HOST_CHECK_AGENT,
   isBatch,
+  isDeclaredAgent,
   isEnded,
   isToken,
   isVisitor,
@@ -410,7 +413,7 @@ export class SanomaClient {
     const handle = await this.dbos
       .enqueue(
         {
-          queueName: this.config.queueName,
+          queueName: queueFor(this.config, workflow.name, sandbox) ?? this.config.queueName,
           workflowName: workflow.name,
           workflowID: runId,
           applicationName: this.config.appName,
@@ -445,7 +448,10 @@ export class SanomaClient {
    * before its body. A run `runId` names already is returned as it is, whatever the policy says now, but to a visitor.
    * A visitor (`isVisitor`, an api token's principal too) starts no built-in but `call`, whose calls
    * the policy decides as direct ones: the app's own actions on the repository (`app-workflows.ts`)
-   * are staff's, as their server functions were, which no site's host answered.
+   * are staff's, as their server functions were, which no site's host answered. A declared agent
+   * (`isDeclaredAgent`, not one of the runtime's own) starts none but `call` and those in
+   * `AGENT_BUILT_INS`, whose start the policy decides as a company workflow's; a person's start of
+   * a built-in, and the runtime's agents', are not asked.
    */
   private async startHold(
     workflow: string,
@@ -462,7 +468,11 @@ export class SanomaClient {
         "A visitor may not start the runtime's own workflows",
       );
     }
-    if (builtIn || (policy === allowAll && !visitor)) return undefined;
+    const agent = builtIn && workflow !== CALL_WORKFLOW && isDeclaredAgent(startedBy);
+    if (agent && !AGENT_BUILT_INS.has(workflow)) {
+      throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, AGENT_BUILT_IN_REFUSAL);
+    }
+    if ((builtIn && !agent) || (policy === allowAll && !visitor)) return undefined;
     // A visitor's start is decided whatever run its id names: a visitor shares an id (`anonymous`) with others.
     if (!visitor && runId !== undefined && (await this.row(runId))) return undefined;
     const decision = decideStart(policy, workflow, input, startedBy);
@@ -516,7 +526,7 @@ export class SanomaClient {
     // One made and partly recorded is made again, as a retry (the store keeps the records it has).
     let attempt = 1;
     if (write && options.id !== undefined) {
-      const made = await this.recordedCall(runId, op, calls, connection);
+      const made = await this.recordedCall(runId, op, calls, actor, connection);
       if (made && "partial" in made) attempt = 2;
       else {
         const first = made ?? (await this.heldCall(op.id, heldId, held));
@@ -645,7 +655,7 @@ export class SanomaClient {
       });
     } catch (err) {
       if (!is(err, TransactionRollbackError)) throw err;
-      const first = await this.recordedCall(runId, op, calls, context.connection);
+      const first = await this.recordedCall(runId, op, calls, actor, context.connection);
       if (!first || "partial" in first) throw err;
       return first.output;
     }
@@ -653,7 +663,8 @@ export class SanomaClient {
 
   /**
    * What the direct write recorded as `runId` returned, when one did (a batch's output from its
-   * entries' records): refused (`invalid_input`) when it was of another operation or input, its
+   * entries' records): refused (`invalid_input`) when another actor made it (another id, or the
+   * same agent for another person), or it was of another operation or input, its
    * failure again (`driver_failed`) when it failed, and `partial` when fewer records than its
    * calls are there (a batch's, appended one by one outside a transaction, cut short).
    */
@@ -661,13 +672,16 @@ export class SanomaClient {
     runId: string,
     op: Op,
     calls: readonly Call[],
+    actor: Principal,
     connection?: ConnectionSnapshot,
   ): Promise<{ output: unknown } | { partial: true } | undefined> {
     const made = (await this.audit.store.read(runId)).filter((r) => r.type === "op.called");
     if (!made.length) return undefined;
     const same = (what: (record: (typeof made)[number], call: Call) => boolean) =>
       made.length <= calls.length && made.every((r, i) => what(r, calls[i]!));
+    // Made by someone else, as `mustMatch` tells a run's starter (`sameActor`).
     const differs = [
+      ...(sameActor(made[0]!.actor, actor) ? [] : ["actor"]),
       ...(same((r, c) => r.op === c.op.id) ? [] : ["op"]),
       ...(same((r, c) => sameJson(r.input, recorded(c.op, c.input))) ? [] : ["input"]),
       ...(sameJson(made[0]!.connection ?? null, connection ?? null) ? [] : ["connection"]),
@@ -968,6 +982,27 @@ export class SanomaClient {
    */
   async apply(input: ApplyInput, options: StartOptions): Promise<string> {
     return this.start(this.builtIn(APPLY_WORKFLOW), input, options);
+  }
+
+  /**
+   * The apply that the apply `runId`, queued, waits for: one runs at a time (`queueFor`), so the
+   * one running (or waiting for a person), else the oldest queued before it. Undefined when
+   * `runId` is not a live apply queued behind another.
+   */
+  async applyAhead(runId: string): Promise<RunSummary | undefined> {
+    const unfinished = await this.dbos.listWorkflows({
+      workflowName: APPLY_WORKFLOW,
+      applicationName: this.config.appName,
+      status: dbosStatusesOf("queued", "running"),
+      queueName: this.config.applyQueueName,
+      sortDesc: false,
+      loadInput: false,
+      loadOutput: false,
+    });
+    const at = unfinished.findIndex((r) => r.workflowID === runId);
+    if (at < 0 || unfinished[at]!.status !== "ENQUEUED") return undefined;
+    const ahead = unfinished.find((r) => r.status === "PENDING") ?? (at > 0 ? unfinished[0] : undefined);
+    return ahead && this.summarize(ahead);
   }
 
   /**
@@ -1767,11 +1802,11 @@ export class SanomaClient {
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
   private async mustMatch(runId: string, args: RunArgs) {
     const [stored] = ((await this.dbos.getWorkflow(runId))?.input ?? []) as [RunArgs?];
-    // Who started it by id alone: their groups are the people files' at the time, which may change.
+    // Who started it by id and for whom alone (`sameActor`).
     const differs = (["input", "startedBy", "sandbox"] as const).filter(
       (key) =>
         !stored ||
-        (key === "startedBy" ? stored.startedBy?.id !== args.startedBy.id : !sameJson(stored[key], args[key])),
+        (key === "startedBy" ? !sameActor(stored.startedBy, args.startedBy) : !sameJson(stored[key], args[key])),
     );
     if (differs.length) {
       throw new SanomaError(
@@ -1874,6 +1909,13 @@ const asJson = (v: unknown): unknown => (v === undefined ? undefined : JSON.pars
 
 /** True when the two are the same JSON, whatever the order of their keys. */
 const sameJson = (a: unknown, b: unknown): boolean => isDeepStrictEqual(asJson(a), asJson(b));
+
+/**
+ * True when `stored` is `actor`: one id, acting for the same person (one agent acts for several
+ * people). Their groups aside: those are the people files' at the time, which may change.
+ */
+const sameActor = (stored: Pick<Principal, "id" | "onBehalfOf"> | undefined, actor: Principal): boolean =>
+  stored?.id === actor.id && stored.onBehalfOf === actor.onBehalfOf;
 
 /** A secret's value as `SanomaClient.secrets` reads it, and where from. */
 export interface StoredSecret {

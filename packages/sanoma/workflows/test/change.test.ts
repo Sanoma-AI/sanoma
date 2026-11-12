@@ -3,8 +3,13 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeHost, testRepository } from "sanoma/testing/host";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { lazyDb } from "../src/db.ts";
+import { data } from "../src/db/company.ts";
+import type { TableChangePlan } from "../src/description.ts";
+import type { Source } from "../src/source.ts";
 import { lintWorkflow } from "../src/lint.ts";
 import { CHANGE_MERGE, type ChangeReport, defineWorkflow, type LedgerRecord, memoryLedger } from "../src/index.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
@@ -22,11 +27,16 @@ export const ada = sanoma.person({ id: "ada" });
 export const bob = sanoma.person({ id: "bob" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 `;
-// A change that touches secret/ is denied: anything else is allowed, but for the runtime's own rule.
+// A change that touches secret/ is denied, and so is a reshape of the archive's records: anything
+// else is allowed, but for the runtime's own rule.
 const POLICY = `@id("no-secrets")
 @reason("A change to secret/ is refused")
 forbid (principal, action == Sanoma::Action::"sanoma.change.merge", resource is Sanoma::Change)
 when { resource.touches.contains("secret/") };
+
+@id("archive-held")
+@reason("The archive's records are held as they are")
+forbid (principal, action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:archive");
 `;
 const page = (id: string) => `https://sanoma.example/changes/${id}`;
 
@@ -49,11 +59,16 @@ describe("the change workflow", () => {
   const root = rootWith({ "resources/people.ts": PEOPLE, "policies/no-secrets.cedar": POLICY });
   const remote = fakeRemote();
   const repo = memorySource({ root: here, remote });
+  const databaseUrl = freshDatabase("change");
   const app = useTestApp(
     { workflows: [waits], connectors: [remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl: freshDatabase("change"), source: repo.source },
+    { databaseUrl, source: repo.source },
   );
-  afterAll(() => repo.remove());
+  const pool = lazyDb(databaseUrl, "change test");
+  afterAll(async () => {
+    repo.remove();
+    await pool.close();
+  });
 
   const open = (id: string, title = `Change ${id}`) =>
     app.client.openChange({ id, title, page: page(id) }, { startedBy: "alice" });
@@ -104,7 +119,7 @@ describe("the change workflow", () => {
     expect(publish).toMatchObject({
       title: "Publish the change",
       approver: { group: "admin" },
-      covers: [CHANGE_MERGE],
+      covers: [CHANGE_MERGE, "sanoma.records.reshape"],
       links: [pr.url, page("rules")],
       status: "pending",
     });
@@ -137,6 +152,8 @@ describe("the change workflow", () => {
     // The ledger's merge records the facts the policy decided on.
     const records = await app.client.ledger(runId);
     expect(merges(records)).toEqual([expect.objectContaining({ input: expect.objectContaining({ facts }) })]);
+    // No plan: no records to bring along.
+    expect(opsOf(records)).not.toContain("sanoma.records.reshape");
     const done = (await app.client.change("rules"))!;
     expect(done).toMatchObject({ status: "finished", state: { phase: "merged", merged: { sha } }, report });
     // Once it has ended, the draft's next change is a run of its own.
@@ -276,6 +293,69 @@ describe("the change workflow", () => {
     await waitFor(pending(() => app.client, moved));
     await app.client.changeEvent("moved-on", { kind: "close", by: "alice" }, { by: "alice" });
     expect(await app.client.result(moved)).toMatchObject({ outcome: "closed" });
+  });
+
+  it("brings a collection's records along its plan once it merges, before it deploys, and reports what became of them", async () => {
+    const db = await pool.db();
+    await db.insert(data).values([
+      {
+        collection: "deals",
+        key: "Acme",
+        record: { company: "Acme", seats: "12", touched: "2026-01-02" },
+        updatedBy: "leon",
+      },
+      { collection: "deals", key: "Cedar", record: { company: "Cedar", seats: "about 40" }, updatedBy: "leon" },
+    ]);
+    const plan: TableChangePlan = {
+      collection: "deals",
+      rows: 2,
+      changes: [
+        { kind: "add", field: "region", type: "text", required: false, empty: 2 },
+        { kind: "rename", from: "touched", to: "contacted" },
+        {
+          kind: "retype",
+          field: "seats",
+          from: "text",
+          to: "number",
+          wontConvert: { count: 1, sample: [{ key: "Cedar", value: "about 40" }] },
+        },
+      ],
+    };
+    const head = repo.edit("deals", { "notes/deals.md": "\n" });
+    const runId = await app.client.openChange(
+      { id: "deals", title: "Deal columns", page: page("deals"), save: head, plan },
+      { startedBy: "alice" },
+    );
+    const reshaped = { rows: 2, changed: 1, converted: 1, cleared: 0, kept: 1 };
+    expect(await app.client.result(runId)).toMatchObject({ outcome: "merged", reshaped, deploy: { follow: {} } });
+    expect((await app.client.change("deals"))!.state).toMatchObject({ plan, merged: { reshaped } });
+    // After the merge, under the run; a value that cannot convert is kept (no decision).
+    expect(opsOf(await app.client.ledger(runId)).slice(-2)).toEqual([CHANGE_MERGE, "sanoma.records.reshape"]);
+    const rows = await db.select().from(data).where(eq(data.collection, "deals")).orderBy(data.key);
+    expect(rows.map((r) => [r.record, r.updatedBy])).toEqual([
+      [{ company: "Acme", seats: 12, contacted: "2026-01-02" }, `run:${runId}`],
+      [{ company: "Cedar", seats: "about 40" }, "leon"],
+    ]);
+  });
+
+  it("reports a reshape that fails on the change, merged all the same, the run not failed", async () => {
+    // A rename of the archive's field: the plan carries it, the policy denies the reshape.
+    const plan: TableChangePlan = {
+      collection: "archive",
+      rows: 0,
+      changes: [{ kind: "rename", from: "seats", to: "count" }],
+    };
+    const head = repo.edit("unnamed", { "notes/unnamed.md": "\n" });
+    const runId = await app.client.openChange(
+      { id: "unnamed", title: "Unnamed", page: page("unnamed"), save: head, plan },
+      { startedBy: "alice" },
+    );
+    const reshaped = { error: expect.stringContaining("sanoma.records.reshape") };
+    expect(await app.client.result(runId)).toMatchObject({ outcome: "merged", reshaped, deploy: { follow: {} } });
+    expect(await app.client.change("unnamed")).toMatchObject({
+      status: "finished",
+      state: { phase: "merged", merged: { reshaped } },
+    });
   });
 
   it("closes the change when Publish is rejected", async () => {
@@ -422,4 +502,124 @@ describe("the change workflow's deploy on a declared host", () => {
     // The checkout follows main first, so the hosts applied are the merged ones.
     expect(repo.follows.at(-1)).toEqual({ url: remote.url, token: expect.any(String), ref: "main" });
   });
+});
+
+describe("a change whose deploy starts the worker again", () => {
+  const source = testRepository();
+  const root = rootWith({ "resources/infra.ts": testhostInfra(source.url) });
+  /**
+   * Once, the next start of the host: the worker starts again meanwhile, and that start ends only
+   * once it has, its worker gone (the fake takes one start after another, so the next waits for it).
+   */
+  let cut: (() => void) | undefined;
+  const host = fakeHost(async () => {
+    const now = cut;
+    cut = undefined;
+    if (now) {
+      now();
+      await Promise.all(restarts);
+    }
+    return { url: "http://127.0.0.1:4100", stop: async () => {} };
+  });
+  const remote = fakeRemote();
+  const repo = memorySource({ root: here, remote });
+  // The checkout as `localGitSource`'s: at the commit it last followed, so following a merge moves it.
+  let checkedOut = "0".repeat(40);
+  const moving: Source = {
+    ...repo.source,
+    head: (ref) => (ref === undefined || ref === "HEAD" ? checkedOut : repo.source.head(ref)),
+    async follow(target) {
+      const moved = await repo.source.follow!(target);
+      if (target.ref === "main" && "revision" in moved) checkedOut = moved.revision;
+      return moved;
+    },
+  };
+  /** Each start again the worker was asked, as `sanoma serve`'s reload does it: this worker stopped, a new one started. */
+  const restarts: Promise<void>[] = [];
+  /** What the worker's `reload` does: start again at once, unless a test says otherwise. */
+  let reload = () => void restarts.push(app.restart());
+  const databaseUrl = freshDatabase("change-reload");
+  const app = useTestApp(
+    { workflows: [], connectors: [host.connector, remote.connector], ledger: memoryLedger(), root },
+    { databaseUrl, source: moving, reload: () => reload() },
+  );
+  const pool = lazyDb(databaseUrl, "change reload test");
+  beforeAll(() => source.commit());
+  afterAll(async () => {
+    await host.close();
+    source.remove();
+    repo.remove();
+    await pool.close();
+  });
+
+  it("merges, brings the records along, deploys, verifies and closes across the worker starting again", async () => {
+    const hostId = "resources/infra.ts#app";
+    await app.client.applyReport(await app.client.apply({ only: [hostId] }, { startedBy: "alice" }));
+    const db = await pool.db();
+    await db
+      .insert(data)
+      .values([
+        { collection: "deals", key: "Acme", record: { company: "Acme", touched: "2026-01-02" }, updatedBy: "leon" },
+      ]);
+    const plan: TableChangePlan = {
+      collection: "deals",
+      rows: 1,
+      changes: [{ kind: "rename", from: "touched", to: "contacted" }],
+    };
+    repo.edit("columns", { "notes/columns.md": "\n" });
+    const runId = await app.client.openChange({ id: "columns", title: "Columns", plan }, { startedBy: "alice" });
+    await waitFor(pending(() => app.client, runId));
+    await app.client.decide(runId, { decision: "approve", by: { id: "alice" } });
+    const report = (await app.client.result(runId, 60_000)) as ChangeReport;
+    expect(restarts).toHaveLength(1);
+    await Promise.all(restarts);
+    const reshaped = { rows: 1, changed: 1, converted: 0, cleared: 0, kept: 0 };
+    expect(report).toMatchObject({
+      outcome: "merged",
+      reshaped,
+      deploy: { follow: { revision: checkedOut }, apply: { runId: `${runId}:deploy`, hosts: [hostId] } },
+      verified: { runId: `${runId}:verify`, drifted: [] },
+    });
+    expect((await app.client.change("columns"))!.state).toMatchObject({ phase: "merged", merged: { reshaped } });
+    expect(repo.closed).toContain("columns");
+    // Cut short by the stop and taken up by the worker started in its place.
+    expect((await app.raw.getWorkflow(runId))?.recoveryAttempts).toBeGreaterThan(1);
+    const [row] = await db.select().from(data).where(eq(data.collection, "deals"));
+    expect(row!.record).toEqual({ company: "Acme", contacted: "2026-01-02" });
+  });
+
+  it("finishes its deploy on another version when the worker starts again during the apply", async () => {
+    restarts.length = 0;
+    // The merge changes the company's code: the worker started again runs another version, and
+    // stops the old one while the apply it started (a child run) is still under way.
+    reload = () => {};
+    cut = () => {
+      process.env.DBOS__APPVERSION = "moved";
+      restarts.push(app.restart());
+    };
+    try {
+      // The host's source moved on, so the apply starts it again.
+      await source.commit();
+      repo.edit("moved", { "notes/moved.md": "\n" });
+      const runId = await app.client.openChange({ id: "moved", title: "Moved" }, { startedBy: "alice" });
+      await waitFor(pending(() => app.client, runId));
+      await app.client.decide(runId, { decision: "approve", by: { id: "alice" } });
+      const report = (await app.client.result(runId, 60_000)) as ChangeReport;
+      await Promise.all(restarts);
+      expect(restarts).toHaveLength(1);
+      expect(report).toMatchObject({
+        outcome: "merged",
+        deploy: { apply: { runId: `${runId}:deploy`, hosts: ["resources/infra.ts#app"] } },
+        verified: { runId: `${runId}:verify`, drifted: [] },
+      });
+      expect(report.deploy!.apply).not.toHaveProperty("error");
+      // Both carried onto the version started in their place.
+      for (const id of [runId, `${runId}:deploy`]) {
+        expect((await app.raw.getWorkflow(id))?.applicationVersion).toMatch(/@moved$/);
+      }
+    } finally {
+      delete process.env.DBOS__APPVERSION;
+      reload = () => void restarts.push(app.restart());
+    }
+  }, 90_000);
 });

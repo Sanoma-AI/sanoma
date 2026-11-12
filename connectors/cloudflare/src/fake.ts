@@ -482,8 +482,9 @@ interface FakeVersion {
  * requests went to the version before (none: at once), and then restarts the object over the new
  * bindings and images, its container, storage and alarm kept: the object finds the labels changed
  * at the next start, and drains and replaces it. `settings` and `content` give the latest upload
- * back, its tag and its modules, and an upload that keeps its assets (`keep_assets`) serves the
- * version before's. `copyImage` pins its copy by a made-up digest,
+ * back, its tag and its modules, `deployments` every upload's id, newest first (an upload made
+ * while the one before still waits replaces it, which never answers), and an upload that keeps its
+ * assets (`keep_assets`) serves the version before's. `copyImage` pins its copy by a made-up digest,
  * and `prepareImage` answers ready for an image pinned in the account's registry. An assets upload
  * session asks for the hashes `state.assets` lacks, in one bucket, and an upload that redeems its
  * completion jwt keeps each path's hash on the Worker (`state.scripts[…].assets`). `stop(name)`
@@ -500,9 +501,10 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
    * (`next`, after `after` more requests). A version as it runs: its env (its bindings' text, the
    * secrets' with it, which the state does not keep, its database, assets and object), its app,
    * the upload's `app/index.js` imported from a folder of its own on the first request, the images
-   * its object may start, its assets (each path's hash) and its modules, as its content gives them.
+   * its object may start, its assets (each path's hash) and its modules, as its content gives them;
+   * and the id of every upload, newest first, as its deployments list them (`ids`).
    */
-  const workers = new Map<string, { live?: FakeVersion; next?: FakeVersion; after: number }>();
+  const workers = new Map<string, { live?: FakeVersion; next?: FakeVersion; after: number; ids: string[] }>();
   /** Where each upload's modules are written, to be imported as files. */
   let uploads: string | undefined;
   /** Each Hyperdrive config's database URL, which the state does not keep: its password is in it. */
@@ -755,7 +757,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
             ),
           );
         }
-        const versions = workers.get(script) ?? { after: 0 };
+        const versions = workers.get(script) ?? { after: 0, ids: [] };
+        versions.ids.unshift(version);
         versions.next = {
           env,
           loadApp: written(modules),
@@ -767,6 +770,9 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         workers.set(script, versions);
         if (!versions.after) promote(script, versions);
         return version;
+      },
+      async deployments(script) {
+        return [...(workers.get(script)?.ids ?? [])];
       },
       async enableSubdomain(script) {
         const found = state.scripts[script];

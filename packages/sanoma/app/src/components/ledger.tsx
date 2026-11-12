@@ -6,7 +6,7 @@ import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { memo, type ReactNode } from "react";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { utcText } from "#/lib/time.ts";
-import { type RunCheck, SEALED_SHOWN } from "../api.ts";
+import { type RunCheck, SEALED_SHOWN, starterName } from "../api.ts";
 import { configQuery, opsById } from "../queries.ts";
 import {
   ALONE,
@@ -166,7 +166,7 @@ export const LedgerRow = memo(function LedgerRow({
       body = (
         <>
           <p>
-            Started by {record.actor.id}
+            Started by {starterName({ startedBy: record.actor })}
             {record.scheduledFor && (
               <>
                 , on its schedule for <UtcTime at={record.scheduledFor} />
@@ -297,7 +297,7 @@ export const LedgerRow = memo(function LedgerRow({
 function traceLine(record: LedgerRecord, title: (approval: string) => string): ReactNode {
   switch (record.type) {
     case "run.started":
-      return `Started by ${record.actor.id}`;
+      return `Started by ${starterName({ startedBy: record.actor })}`;
     case "op.called":
       return (
         <>

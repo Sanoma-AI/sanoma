@@ -164,7 +164,8 @@ cpSync(
 const PEOPLE = ["alice", "Ålice", "tester", "held", "marketing-lead", "someone-else"];
 writeFileSync(
   join(appRoot, "resources/people.ts"),
-  `import { sanoma } from "sanoma/resources";\n\n${PEOPLE.map((id, i) => `export const p${i} = sanoma.person({ id: "${id}" });\n`).join("")}`,
+  `import { sanoma } from "sanoma/resources";\n\n${PEOPLE.map((id, i) => `export const p${i} = sanoma.person({ id: "${id}" });\n`).join("")}` +
+    `export const agent = sanoma.agent({ id: "claude-code" });\n`,
 );
 mkdirSync(join(appRoot, "policies"));
 writeFileSync(
@@ -522,6 +523,7 @@ describe("the server functions", () => {
     expect(body.resources.map((r) => r.id)).toEqual([
       ...company.declared.map((r) => r.id),
       ...PEOPLE.map((_, i) => `resources/people.ts#p${i}`),
+      "resources/people.ts#agent",
     ]);
     expect(body.problems).toEqual([]);
     // Its collections, with where resources/data.ts declares each.
@@ -1145,6 +1147,31 @@ describe("the page", () => {
     // Its row says how it was decided, not only by colour.
     expect(decidedPage.text).toContain("approved · Announce a launch · from held");
     expect(decidedPage.text).not.toContain(">Approve<");
+  });
+
+  it("names an agent's run for whom it acts in the inbox and its trace, and holds its calls as that person's", async () => {
+    const id = await ctx.client.start("announce", input("By an agent"), {
+      startedBy: { id: "claude-code", onBehalfOf: "held" },
+    });
+    await waitFor(
+      () => detail(id),
+      (d) => d.approvals.some((a) => a.status === "pending"),
+    );
+    const open = await page(`/inbox?approval=${id}/approval-1`);
+    expect(open.text).toContain("The run by claude-code for held</a> of");
+    expect(open.text).toContain("Announce a launch · from claude-code for held");
+    expect((await page(`/workflows/announce/runs/${id}`)).text).toContain("Started by claude-code for held");
+    // The policy holds held's publish for marketing-lead: their agent's waits for them too.
+    await decideAs({ runId: id, approvalId: "approval-1", decision: "approve" }, { actor: "marketing-lead" });
+    const held = await waitFor(
+      () => detail(id),
+      (d) => d.approvals.some((a) => a.requestedBy === "policy"),
+    );
+    expect(held.approvals.find((a) => a.requestedBy === "policy")).toMatchObject({
+      title: HOLD_TITLE,
+      approver: "marketing-lead",
+      status: "pending",
+    });
   });
 
   it("lists the pending approvals beside the one open, newest first, each row opening its own", async () => {

@@ -115,6 +115,7 @@ describe("cloud.host meets the Host contract on the fake", () => {
       { name: "a sleep that ends while stopped continues after a wake", ok: true },
       { name: "the host stops when its worker is idle", ok: true },
       { name: "a run queued while the worker is stopping still runs", ok: true },
+      { name: "two deploys at once leave one revision, the loser at once", ok: true },
       { name: "a new commit shows as drift that apply clears", ok: true },
       { name: "no secret is in the ledger", ok: true },
     ]);

@@ -486,8 +486,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
   }
   // Only change takes a change's steps; `resolveConfig` refuses any other workflow that uses one.
   const reserved = reservedFor(op);
-  if (reserved && run.workflow !== reserved.workflow) {
-    throw new SanomaError("invalid_input", `${op.id} ${reserved.does}, which only ${reserved.workflow} does`, {
+  if (reserved && !reserved.workflows.includes(run.workflow)) {
+    throw new SanomaError("invalid_input", `${op.id} ${reserved.does}, which ${reserved.by}`, {
       op: op.id,
       workflow: run.workflow,
     });

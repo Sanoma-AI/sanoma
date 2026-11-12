@@ -17,11 +17,17 @@ import {
   Principal,
   remoteFor,
   type RunSummary,
+  type SanomaClient,
   SanomaError,
 } from "sanoma/workflows";
 import {
+  AGENT_BUILT_IN_REFUSAL,
+  AGENT_BUILT_INS,
   apiNameOf,
+  APPLY_WORKFLOW,
   CALL_WORKFLOW,
+  DESCRIBE_CALL,
+  isDeclaredAgent,
   isVisitor,
   flatten,
   LOGIN_CODE_WORKFLOW,
@@ -29,11 +35,12 @@ import {
   type Saved,
   undoDraftOf,
 } from "sanoma/workflows/shared";
-import { type ConfigDescription, permissionsGrid } from "sanoma/workflows/describe";
+import { agentActing, type ConfigDescription, permissionsGrid } from "sanoma/workflows/describe";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import { z } from "zod";
 import {
   ACTOR_HEADER,
+  AGENT_HEADER,
   ApiError,
   asApiError,
   type AppConfig,
@@ -58,6 +65,7 @@ import {
   type HistoryRequest,
   type PermissionsResponse,
   type PreviewQuery,
+  type ApplyAhead,
   type RunDetail,
   RunsQuery,
   SEALED_SHOWN,
@@ -68,7 +76,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { bearerOf } from "../login/public.ts";
-import { databaseHost, LOOPBACK } from "../loopback.ts";
+import { databaseHost, headerValue, LOOPBACK } from "../loopback.ts";
 import type { AppSnapshot } from "../snapshot.ts";
 import { secretValues } from "./secrets.ts";
 
@@ -113,6 +121,30 @@ export async function requireActor({ app, actor }: ActorContext): Promise<Princi
   throw new ApiError(400, { error, code: "invalid_input" });
 }
 
+/**
+ * Who a call is made as: `actor`, the person the login admitted, or, when the request names a
+ * declared agent in the `x-sanoma-agent` header (`AGENT_HEADER`, URI-encoded or not, as
+ * `x-sanoma-actor` is), that agent acting on their
+ * behalf (`agentActing`, over the snapshot's people: an id that is not a declared agent, or one
+ * that acts for someone else alone, is `not_admitted`). Only the loopback login takes the header;
+ * on a host it is a 400, since the sign-in says who acts there.
+ */
+export function actingFor(app: AppContext, request: Request, actor: Principal): Principal {
+  const named = headerValue(request, AGENT_HEADER);
+  if (named === undefined) return actor;
+  if (saysWho(app)) {
+    throw new ApiError(400, {
+      error: `The ${AGENT_HEADER} header is taken on this machine alone: on a host, the sign-in says who is asking`,
+      code: "invalid_input",
+    });
+  }
+  const agent = named.trim();
+  if (!agent) {
+    throw new ApiError(400, { error: `The ${AGENT_HEADER} header names no agent`, code: "invalid_input" });
+  }
+  return agentActing(agent, actor.id, app.snapshot.people);
+}
+
 /** True when the login says who is asking; false for the loopback login, which takes the name the page sends. */
 export const saysWho = (app: AppContext) => app.login.name !== LOOPBACK;
 
@@ -148,6 +180,76 @@ export const appConfig = ({ snapshot, place, resolved }: AppContext): AppConfig 
   place,
   databaseHost: databaseHost(resolved.databaseUrl),
   content: snapshot.content,
+});
+
+/**
+ * The company as an agent reads it (`agentDescription`): what it may start, call and look up, as
+ * JSON Schema, and nothing an agent has no use for or should not see.
+ */
+export interface AgentDescription {
+  /** The company's name as people read it. */
+  name: string;
+  /** The company's own workflows (none of the runtime's): started by `name`, or `apiName` through `callApi`. */
+  workflows: {
+    name: string;
+    apiName: string;
+    title?: string;
+    trigger: ConfigDescription["workflows"][number]["trigger"];
+    input: Record<string, unknown>;
+  }[];
+  /** The operations that may be called directly (`OpEntry.direct`), outside a run: a lookup is one whose effect is read. */
+  ops: {
+    id: string;
+    effect: string;
+    description?: string;
+    input: Record<string, unknown>;
+    output: Record<string, unknown>;
+  }[];
+  /** The collections, with their operations' ids. */
+  collections: {
+    name: string;
+    title?: string;
+    key: string;
+    fields: ConfigDescription["collections"][number]["fields"];
+    ops: string[];
+  }[];
+}
+
+/**
+ * The snapshot's description narrowed for an agent (`DESCRIBE_CALL`): each of the company's own
+ * workflows' name, api name, title, trigger and input; each direct operation's contract; each
+ * collection's fields. One projection for `/mcp` and a site or script alike. Left out on purpose:
+ * the runtime's own workflows (`builtin`: an agent starts none; drift is `/mcp`'s own tool), the
+ * policy and its text, files and source, the resources' desired values, secret bindings,
+ * connections, sites and the database's host.
+ */
+export const agentDescription = (description: ConfigDescription): AgentDescription => ({
+  name: description.name,
+  workflows: description.workflows
+    .filter((wf) => !wf.builtin)
+    .map((wf) => ({
+      name: wf.name,
+      apiName: apiNameOf(wf.name),
+      ...(wf.title !== undefined && { title: wf.title }),
+      trigger: wf.trigger,
+      input: wf.input,
+    })),
+  ops: description.ops
+    .filter((op) => op.direct)
+    .map((op) => ({
+      id: op.id,
+      effect: op.effect,
+      ...(op.description !== undefined && { description: op.description }),
+      input: op.input,
+      output: op.output,
+    })),
+  collections: description.collections.map((c) => ({
+    name: c.name,
+    ...(c.title !== undefined && { title: c.title }),
+    key: c.key,
+    fields: c.fields,
+    ops: c.ops,
+  })),
 });
 
 /**
@@ -196,13 +298,22 @@ function sealedShown(record: LedgerRecord): LedgerRecord {
     : record;
 }
 
-/** The run with its ledger and approvals, and a sandbox run's checks as the worker last ran them, or a 404. */
+/**
+ * The apply that `run`, a queued apply, waits for (`SanomaClient.applyAhead`), as the page names
+ * it; undefined for any other run, and once it is the one running.
+ */
+export async function applyAheadOf(client: SanomaClient, run: RunSummary): Promise<ApplyAhead | undefined> {
+  if (run.workflow !== APPLY_WORKFLOW || run.status !== "queued") return undefined;
+  const ahead = await client.applyAhead(run.runId);
+  return ahead && { runId: ahead.runId, status: ahead.status, startedBy: ahead.startedBy, createdAt: ahead.createdAt };
+}
+
+/** The run with its ledger and approvals, a sandbox run's checks as the worker last ran them, and the apply a queued one waits for; or a 404. */
 export async function runDetail(app: AppContext, runId: string): Promise<RunDetail> {
   const { client, snapshot } = app;
   const run = await client.run(runId);
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
-  const { approvals } = run;
-  const [read, told] = await Promise.all([
+  const [read, told, ahead] = await Promise.all([
     client.ledger(runId).then(
       (records) => ({ records }),
       (err: unknown) => ({ err }),
@@ -213,40 +324,42 @@ export async function runDetail(app: AppContext, runId: string): Promise<RunDeta
       logReadOnce(runId, error, "the checks", err);
       return { error };
     }),
+    applyAheadOf(client, run),
   ]);
+  // What every answer has: the run, its approvals, and the apply a queued one waits for.
+  const base = { run, approvals: run.approvals, ...(ahead && { ahead }) };
   if ("err" in read) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
     // corrupt file, a permission): logged for the operator once, and the page shows the run and
     // why its ledger is missing.
     const ledgerError = errorMessage(read.err);
     logReadOnce(runId, ledgerError, "the ledger", read.err);
-    return { run, ledger: [], ledgerError, approvals };
+    return { ...base, ledger: [], ledgerError };
   }
   const ledger = run.workflow === LOGIN_CODE_WORKFLOW ? read.records.map(sealedShown) : read.records;
   // A run that has started records run.started first. Seeing none, the likeliest cause is an
   // app on another ledger than the worker's (another database, or a jsonl directory relative to
   // another cwd).
   if (ledger.length === 0 && run.status !== "queued") {
-    return { run, ledger, ledgerError: NO_RECORDS, approvals };
+    return { ...base, ledger, ledgerError: NO_RECORDS };
   }
   const seeded = ledger.find((r) => r.type === "scenario.seeded");
-  if (!seeded) return { run, ledger, approvals };
+  if (!seeded) return { ...base, ledger };
   if (!told) {
     // Not checked yet (the worker checks a seeded run when it first waits): its scenario's Then
     // steps, each not answered yet.
     const scenario = snapshot.scenarios.scenarios.find((s) => s.name === seeded.scenario);
     const pending = scenario?.steps.filter((step) => step.kind === "then");
     return {
-      run,
+      ...base,
       ledger,
-      approvals,
       ...(pending && { checks: pending.map(({ text }) => ({ step: text, ok: false, settled: false })) }),
     };
   }
-  if ("error" in told) return { run, ledger, approvals, checksError: told.error };
+  if ("error" in told) return { ...base, ledger, checksError: told.error };
   // Every answer is final once the run has ended.
   const ended = isEnded(run.status);
-  return { run, ledger, approvals, checks: told.checks.map((c) => ({ ...c, settled: ended || c.settled })) };
+  return { ...base, ledger, checks: told.checks.map((c) => ({ ...c, settled: ended || c.settled })) };
 }
 
 /**
@@ -632,11 +745,18 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * workflow's api name (`apiNameOf`) starts it, as does `<name>.start`, answering `{ runId }`;
  * `<name>.result` (`{ runId, waitMs? }`, at most 20 s; a failed run's failure, `runFailure`), `.latest`, `.runs` (`{ limit? }`),
  * `.approvals` and `.ledger` (`{ runId }`) read its runs, a run of another workflow being none.
- * Anything else is `invalid_input`. A visitor (`isVisitor`) calls no built-in workflow and reads
- * only the result of a run it started: its other reads are `policy_denied`.
+ * `sanoma.describe` (`DESCRIBE_CALL`, a name of the runtime's vendor, so none of the company's)
+ * answers `agentDescription`. Anything else is `invalid_input`. A visitor (`isVisitor`) calls no
+ * built-in workflow, reads no description and reads only the result of a run it started: its other
+ * reads are `policy_denied`. A declared agent (`isDeclaredAgent`) starts no built-in workflow but
+ * those in `AGENT_BUILT_INS` (`policy_denied`), as the client refuses it too.
  */
 export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
   const { client, resolved } = app;
+  if (name === DESCRIBE_CALL) {
+    if (isVisitor(actor)) throw new PolicyDeniedError(name, "a visitor does not read the company's description");
+    return agentDescription(app.snapshot.description);
+  }
   if (resolved.ops.has(name)) {
     return client.call(name, input ?? {}, { actor, ...(id === undefined ? {} : { id }) });
   }
@@ -647,6 +767,16 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
   const visitor = isVisitor(actor);
   if (!entry || (visitor && entry.builtin)) throw notCallable(name);
   const workflow = entry.name;
+  // As `SanomaClient.start` refuses it: a declared agent starts no built-in but `call` and those it may.
+  if (
+    method === "start" &&
+    entry.builtin &&
+    workflow !== CALL_WORKFLOW &&
+    isDeclaredAgent(actor) &&
+    !AGENT_BUILT_INS.has(workflow)
+  ) {
+    throw new PolicyDeniedError(name, AGENT_BUILT_IN_REFUSAL);
+  }
   if (visitor && method !== "start" && method !== "result") {
     throw new PolicyDeniedError(name, "a visitor reads only the result of a run it started");
   }

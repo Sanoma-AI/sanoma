@@ -2,11 +2,8 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { startTestWorker } from "sanoma/testing";
-import { sql } from "drizzle-orm";
-import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { databaseOn } from "../src/db.ts";
 import {
   dbosClient,
   defineWorkflow,
@@ -17,7 +14,7 @@ import {
   type Worker,
 } from "../src/index.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
-import { freshDatabase, pending, rootWith, waitFor } from "./harness.ts";
+import { freshDatabase, pending, rootWith, setBuiltInCode, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. A built-in run outlives the restart its own deploy causes: a worker
 // on new company code (another version of the app) takes over the built-in runs (a change run
@@ -150,14 +147,7 @@ describe("carrying built-in runs onto a new version", () => {
     await waitFor(pending(() => client, runId));
     await stop(worker);
     // Started by other change code: the runtime's own, before an upgrade.
-    const db = new Pool({ connectionString: databaseUrl });
-    try {
-      await databaseOn(db).execute(
-        sql`UPDATE dbos.workflow_status SET attributes = attributes || '{"builtInCode":"other"}' WHERE workflow_uuid = ${runId}`,
-      );
-    } finally {
-      await db.end();
-    }
+    await setBuiltInCode(databaseUrl, runId, "other");
 
     const carried = carriedLines();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-github",
-  "version": "0.11.22",
+  "version": "0.11.23",
   "description": "GitHub resources (repositories, branch protection, team membership, deploy keys, collaborators) for Sanoma, read through the OpenTofu provider, and repositories generated, committed to and given deploy keys through Sanoma's GitHub App; and Copilot, a coding agent for the chat on a person's own plan",
   "keywords": [
     "coding-agent",

@@ -40,8 +40,8 @@ import { importWorkflow } from "./import-workflow.ts";
 import { connectWorkflow } from "./connect-workflow.ts";
 import { storeMoveDriver, storeMoveOps } from "./store-move.ts";
 import { migrateStoreWorkflow } from "./store-move-workflow.ts";
-import { type Collection, collectionsConnector, collectionsFake, isCollection } from "./collection.ts";
-import { collectionsDriver } from "./collection-driver.ts";
+import { type Collection, collectionsConnector, collectionsFake, isCollection, recordsOps } from "./collection.ts";
+import { collectionsDriver, recordsDriver } from "./collection-driver.ts";
 import { lazyDb, type LazyDb } from "./db.ts";
 import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
 import { callerFile } from "./company-file.ts";
@@ -222,6 +222,11 @@ export interface ResolvedConfig {
   builtInCodes: Readonly<Record<string, string>>;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
+  /**
+   * The DBOS queue every live run of apply is started on, one at a time across the database's
+   * workers: `sanoma:<appName>:apply` (`queueFor`).
+   */
+  applyQueueName: string;
   /** The config's `login`, checked (`checkLogin`); the built-in `login-code` workflow sends through its `sender`, from its `from`. */
   login?: Login;
   /**
@@ -318,6 +323,18 @@ export interface ResolvedConfig {
  * URL named it starts the company's own Postgres and sets `SANOMA_DATABASE_URL` to it.
  */
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
+
+/**
+ * The queue a run of `workflow` must wait on: a live apply's is the apply queue, which runs one at
+ * a time across the database's workers, so two never write the hosts at once; anything else, a
+ * sandbox apply too (it calls fakes), none (the client queues it on the app's, a run's child runs
+ * at once). The one rule the client and the worker share.
+ */
+export const queueFor = (
+  { applyQueueName }: Pick<ResolvedConfig, "applyQueueName">,
+  workflow: string,
+  sandbox: string | undefined,
+): string | undefined => (workflow === APPLY_WORKFLOW && sandbox === undefined ? applyQueueName : undefined);
 
 /** Returns the config, with the file it is called from as its `file`: its directory is the config's `root`. */
 export function defineConfig(config: SanomaConfig): SanomaConfig {
@@ -450,11 +467,13 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const declared = [...collections.values()];
   const dataStore = declared.length ? lazyDb(databaseUrl, "data") : undefined;
   // Built-in, in every config: a change's operations, which the template's policy names
-  // (`sanoma.change.merge`), the listing of apps a page may call (`sanoma.apps.list`), and what a
+  // (`sanoma.change.merge`), the records brought along with a column change
+  // (`sanoma.records.reshape`), the listing of apps a page may call (`sanoma.apps.list`), and what a
   // workflow asks the runtime to do for it (`sanoma`, runtime-ops.ts).
   const ops = indexConnectors([
     ...running,
     changeOps,
+    recordsOps,
     connectionOps,
     appsListOps,
     sanoma,
@@ -474,6 +493,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     [
       ...driversByVendor.values(),
       changeDriver(remotes),
+      recordsDriver(() => connectionStore.db()),
       connectionDriver(connections),
       appsListDriver,
       runtimeDriver({
@@ -548,7 +568,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     const { resources, bindings } = await declaredOf("host");
     return resources.filter((r) => r.id in bindings).map((r) => r.id);
   };
-  names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
+  names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, recordsOps, changeSteps({ remotes, hosts })));
   // Built-in, in every config: what a git host's webhook says happened, which the worker with the checkout follows.
   names.set(FOLLOW_WORKFLOW, followWorkflow(followSteps({ remotes, hosts })));
   // Built-in, in every config: the app's own actions on the repository, which a worker given the app's steps runs.
@@ -559,7 +579,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     const op = ops.get(id);
     return op && drivers.has(id) ? [op] : [];
   });
-  for (const wf of appWorkflows(appRunner, repositories)) names.set(wf.name, wf);
+  for (const wf of appWorkflows(appRunner, recordsOps, repositories)) names.set(wf.name, wf);
   // Built-in, in every config: a chat turn, which a worker given the app's steps runs.
   names.set(CHAT_WORKFLOW, chatWorkflow(chatSteps()));
   // Built-in: an OAuth connection's exchange, which the app's callback starts, when a declared
@@ -601,6 +621,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
         [...names.values()].filter((wf) => BUILT_IN_WORKFLOWS.has(wf.name)).map((wf) => [wf.name, builtInCodeOf(wf)]),
       ),
     queueName: `sanoma:${appName}`,
+    applyQueueName: `sanoma:${appName}:apply`,
     ...(login && { login }),
     ops,
     drivers,
@@ -1181,7 +1202,7 @@ function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
  * The workflow normally imports the same connector object; a copy is accepted only if it
  * declares the same effect and retry setting, and the worker's declaration is used either way.
  * None may use an operation a built-in workflow alone calls (`reservedFor`): a change's step, which
- * only the change workflow takes. A resource type's change operations are allowed: the call
+ * only the change workflow takes, or a reshape of a collection's records. A resource type's change operations are allowed: the call
  * refuses one aimed at a declared object (`DeclaredObjects`), which only apply changes.
  */
 function checkUses(wf: WorkflowDefinition<any, any>, ops: Map<string, Op>, impls: Map<string, unknown>) {
@@ -1191,7 +1212,7 @@ function checkUses(wf: WorkflowDefinition<any, any>, ops: Map<string, Op>, impls
     const reserved = known && reservedFor(known);
     if (!known) problems.push(`${op.id} is not declared by any connector in \`connectors\``);
     else if (reserved) {
-      problems.push(`${op.id} ${reserved.does}, which only ${reserved.workflow} does: ${reserved.instead} instead`);
+      problems.push(`${op.id} ${reserved.does}, which ${reserved.by}: ${reserved.instead} instead`);
     } else if (known !== op && (known.effect !== op.effect || known.idempotent !== op.idempotent)) {
       problems.push(
         `${op.id} is declared with effect "${op.effect}"${op.idempotent ? " (idempotent)" : ""}, ` +

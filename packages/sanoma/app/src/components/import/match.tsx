@@ -5,6 +5,7 @@ import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { plural } from "#/lib/utils.ts";
+import { shownFields } from "../grid/plan.ts";
 import { CardHeading, Notice, ToneBadge } from "../kit.tsx";
 import { columnOf, fieldNamed, type Person, type Sheet, type ValueToMap, valuesToMap } from "./sheet.ts";
 
@@ -41,7 +42,7 @@ export function MatchColumns({
   onBack(): void;
   onNext(): void;
 }) {
-  const fields = Object.keys(collection.fields);
+  const fields = shownFields(collection.fields);
   const wrong = mappingProblems(collection, mapping);
   const refused = wrong.length
     ? []

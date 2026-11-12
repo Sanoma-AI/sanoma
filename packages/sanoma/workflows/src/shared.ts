@@ -6,8 +6,17 @@ import type { OpEntry, WorkflowEntry } from "./describe.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Effect } from "./op.ts";
 import type { PreviewRequest } from "./policy.ts";
-import type { DeclaredResource, ResourceProblem } from "./description.ts";
+import type {
+  ColumnType,
+  DeclaredResource,
+  ReshapeChange,
+  ReshapeInput,
+  ReshapeOutput,
+  ResourceProblem,
+  TableChangePlan,
+} from "./description.ts";
 import type { OutlineNode } from "./outline.ts";
+import { isDate } from "./import.ts";
 
 // Types only: resource types as a UI reads them. Erased from the bundle.
 export type {
@@ -23,7 +32,15 @@ export type { At, DeclaredResource, ResourceProblem } from "./description.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
 export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";
-export type { ChangeDeploy, ChangeEvent, ChangeFacts, ChangeReport, ChangeState, ChangeVerified } from "./change.ts";
+export type {
+  ChangeDeploy,
+  ChangeEvent,
+  ChangeFacts,
+  ChangeReport,
+  ChangeReshaped,
+  ChangeState,
+  ChangeVerified,
+} from "./change.ts";
 export type { AvailableApp, AvailableApps } from "./apps-list.ts";
 
 // What a UI in the browser may use from the runtime, besides types: `sanoma/workflows/shared`.
@@ -271,7 +288,11 @@ export function checkCollection(declaration: { name?: unknown; key?: unknown; fi
   if (title !== undefined && typeof title !== "string") throw new Error(`${where}: the title must be a string`);
 }
 
-/** Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, or an enum of distinct strings. */
+/**
+ * Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, or an
+ * enum of distinct strings; an optional one may be marked `hidden: true` (removed by a person: its
+ * values kept, the app leaves it out of the grid and the forms; to the runtime an optional field).
+ */
 function checkField(where: string, field: string, kind: unknown): void {
   const refused = (why: string) => new Error(`${where}: the field "${field}" ${why}`);
   if (!FIELD_NAME.test(field)) throw refused("must be named with letters, digits and _, not a digit first");
@@ -282,9 +303,12 @@ function checkField(where: string, field: string, kind: unknown): void {
     return;
   }
   if (!isRecord(kind)) throw refused(kinds);
-  const { type, enum: values, optional, ...rest } = kind;
+  const { type, enum: values, optional, hidden, ...rest } = kind;
   if (Object.keys(rest).length || (type === undefined) === (values === undefined)) throw refused(kinds);
   if (optional !== undefined && optional !== true) throw refused("may only be marked `optional: true`");
+  if (hidden !== undefined && (hidden !== true || optional !== true)) {
+    throw refused("may only be marked `hidden: true`, and only when it is `optional: true`");
+  }
   if (type !== undefined && !types.includes(type)) throw refused(kinds);
   if (
     values !== undefined &&
@@ -295,6 +319,152 @@ function checkField(where: string, field: string, kind: unknown): void {
   ) {
     throw refused("needs an enum of distinct strings, at least one");
   }
+}
+
+const NUMBER = /^-?\d+(\.\d+)?$/;
+const BOOLEANS: Readonly<Record<string, boolean>> = { true: true, false: false, yes: true, no: false };
+
+/**
+ * `value` as a column of `type` holds it, or undefined when it does not read as one: a number from
+ * its digits ("12" is 12), yes or no (true, false, yes, no, any case), a date as a `date` field takes
+ * it, text and a person from a string, number or yes/no (a person not empty), a choice from one of
+ * its strings, a link from a string, anything as free-form. A value already of the type is itself.
+ */
+function asType(value: unknown, type: ColumnType): { value: unknown } | undefined {
+  const scalar = typeof value === "number" || typeof value === "boolean" ? String(value) : undefined;
+  if (typeof type === "object") {
+    if ("link" in type) return typeof value === "string" ? { value } : undefined;
+    const text = typeof value === "string" ? value : scalar;
+    return text !== undefined && type.enum.includes(text) ? { value: text } : undefined;
+  }
+  switch (type) {
+    case "json":
+      return { value };
+    case "number":
+      if (typeof value === "number") return Number.isFinite(value) ? { value } : undefined;
+      return typeof value === "string" && NUMBER.test(value.trim()) ? { value: Number(value.trim()) } : undefined;
+    case "boolean":
+      if (typeof value === "boolean") return { value };
+      return typeof value === "string" && Object.hasOwn(BOOLEANS, value.trim().toLowerCase())
+        ? { value: BOOLEANS[value.trim().toLowerCase()] }
+        : undefined;
+    case "date":
+      return typeof value === "string" && isDate(value) ? { value } : undefined;
+    case "text":
+      return typeof value === "string" ? { value } : scalar === undefined ? undefined : { value: scalar };
+    case "person": {
+      const text = typeof value === "string" ? value : scalar;
+      return text ? { value: text } : undefined;
+    }
+  }
+}
+
+/** Whether `value` reads as a column of `type` (`reshaped` stores it so): what a retype or a conversion keeps. */
+export const converts = (value: unknown, type: ColumnType): boolean => asType(value, type) !== undefined;
+
+/**
+ * What a reshape did to one record's value: moved to a new name, converted to the new type,
+ * cleared or kept as it was because it cannot convert; none when it left the record alone.
+ */
+type Reshaping = "moved" | "converted" | "cleared" | "kept";
+
+/** An empty value: `""` or `null`, which holds nothing to convert. */
+const isEmpty = (value: unknown) => value === "" || value === null;
+
+/** `from` without its `key`. */
+function without(from: Readonly<Record<string, unknown>>, key: string): Record<string, unknown> {
+  const { [key]: _, ...rest } = from;
+  return rest;
+}
+
+/**
+ * `record` with `change` brought along, and what became of its value (`did`); the very `record`
+ * when nothing changed. Idempotent: a rename moves the value only where `from` is present and `to`
+ * absent; a retype converts a value that reads as the new type (`converts`) and leaves one already
+ * of it, and one that cannot convert is cleared or left as it is, by `decision` (absent: keep); a
+ * conversion moves the key `key` out of the free-form object in `field` to a field of its own, only
+ * where that field is empty, converted, and one that cannot convert is cleared from the object or
+ * left in it. An empty value (`""`, `null`) the new type does not hold is no value to convert: it
+ * is dropped, with no `did`. Pure: the app's draft counts, the driver and its tests agree through it.
+ */
+export function reshaped(
+  record: Readonly<Record<string, unknown>>,
+  change: ReshapeChange,
+): { record: Readonly<Record<string, unknown>>; did?: Reshaping } {
+  switch (change.kind) {
+    case "rename":
+      if (!Object.hasOwn(record, change.from) || Object.hasOwn(record, change.to)) return { record };
+      return { record: { ...without(record, change.from), [change.to]: record[change.from] }, did: "moved" };
+    case "retype": {
+      const value = record[change.field];
+      if (value === undefined) return { record };
+      const as = asType(value, change.to);
+      if (as)
+        return as.value === value ? { record } : { record: { ...record, [change.field]: as.value }, did: "converted" };
+      if (isEmpty(value)) return { record: without(record, change.field) };
+      return change.decision === "clear"
+        ? { record: without(record, change.field), did: "cleared" }
+        : { record, did: "kept" };
+    }
+    case "convert": {
+      const inner = record[change.field];
+      if (!isRecord(inner) || inner[change.key] === undefined || record[change.key] !== undefined) return { record };
+      const value = inner[change.key];
+      const as = asType(value, change.type);
+      const rest = { ...record, [change.field]: without(inner, change.key) };
+      if (as) return { record: { ...rest, [change.key]: as.value }, did: "converted" };
+      if (isEmpty(value)) return { record: rest };
+      return change.decision === "clear" ? { record: rest, did: "cleared" } : { record, did: "kept" };
+    }
+  }
+}
+
+/**
+ * `changes` brought along in each of `records`, in order (`reshaped`): the records that changed,
+ * by their index in `records`, and the counts `sanoma.records.reshape` answers.
+ */
+export function reshape(
+  records: readonly Readonly<Record<string, unknown>>[],
+  changes: readonly ReshapeChange[],
+): { changed: Map<number, Record<string, unknown>>; counts: ReshapeOutput } {
+  const counts: ReshapeOutput = { rows: records.length, changed: 0, converted: 0, cleared: 0, kept: 0 };
+  const changed = new Map<number, Record<string, unknown>>();
+  records.forEach((before, i) => {
+    let record = before;
+    for (const change of changes) {
+      const next = reshaped(record, change);
+      record = next.record;
+      if (next.did === "converted" || next.did === "cleared" || next.did === "kept") counts[next.did]++;
+    }
+    if (record !== before) changed.set(i, record as Record<string, unknown>);
+  });
+  counts.changed = changed.size;
+  return { changed, counts };
+}
+
+/**
+ * What `sanoma.records.reshape` is called with for `plan`: its collection and its changes that bring
+ * the records along (renames, retypes and conversions), each by names, target type and decision;
+ * undefined for no plan or one with none (add, require, hide and link change the declaration alone).
+ */
+export function reshapeOf(plan: TableChangePlan | undefined): ReshapeInput | undefined {
+  const changes = (plan?.changes ?? []).flatMap((change): ReshapeChange[] => {
+    switch (change.kind) {
+      case "rename":
+        return [{ kind: "rename", from: change.from, to: change.to }];
+      case "retype": {
+        const { field, to, decision } = change;
+        return [{ kind: "retype", field, to, ...(decision && { decision }) }];
+      }
+      case "convert": {
+        const { field, key, type, decision } = change;
+        return [{ kind: "convert", field, key, type, ...(decision && { decision }) }];
+      }
+      default:
+        return [];
+    }
+  });
+  return plan && changes.length ? { collection: plan.collection, changes } : undefined;
 }
 
 /**
@@ -587,7 +757,7 @@ const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | 
   resources.flatMap((r) => (r.vendor === "sanoma" && r.type === type ? [r.desired as T] : []));
 
 type PersonFields = { id: string; name?: string; email?: string; github?: string };
-type AgentFields = { id: string; onBehalfOf?: string };
+type AgentFields = { id: string; onBehalfOf?: string; client?: string };
 type GroupFields = { name: string; members: string[] };
 
 /** The groups a policy may name and a principal may be in: the declared ones, `agents` and `visitors`, sorted. */
@@ -601,6 +771,33 @@ export const personsOf = (resources: readonly PeopleResource[]): PersonFields[] 
 /** The ids of the declared people and agents (not the runtime's own). */
 export const principalIdsOf = (resources: readonly PeopleResource[]): string[] =>
   [...personsOf(resources), ...peopleOfType<AgentFields>(resources, "agent")].map((p) => p.id);
+
+/** The declared agent (`sanoma.agent`) `id` names, as declared; undefined for anyone else, the runtime's own agents among them. */
+export const declaredAgentOf = (id: string, resources: readonly PeopleResource[]): AgentFields | undefined =>
+  peopleOfType<AgentFields>(resources, "agent").find((a) => a.id === id);
+
+/**
+ * The id of the declared agent that declares `client` (`sanoma.agent({ client })`), the OAuth
+ * client it stands for; undefined when none does, or when two do (`clientClashes`).
+ */
+export function agentOfClient(client: string, resources: readonly PeopleResource[]): string | undefined {
+  const declaring = peopleOfType<AgentFields>(resources, "agent").filter((a) => a.client === client);
+  return declaring.length === 1 ? declaring[0]!.id : undefined;
+}
+
+/**
+ * True for a declared agent's principal: in `agents`, and neither one of the runtime's own agents
+ * (`RUNTIME_AGENTS`) nor a visitor. Such an agent starts no built-in workflow but those in
+ * `AGENT_BUILT_INS` and `call`, and those through the start policy.
+ */
+export const isDeclaredAgent = (p: Pick<Principal, "id" | "groups">): boolean =>
+  !isVisitor(p) && (p.groups?.includes(AGENTS) ?? false) && !RUNTIME_AGENTS.includes(p.id);
+
+/** The built-in workflows a declared agent (`isDeclaredAgent`) may start, its start decided by the policy: drift, which changes nothing. */
+export const AGENT_BUILT_INS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW]);
+
+/** Why a declared agent's start of another built-in is refused (`policy_denied`), in the client and the app's `callApi` alike. */
+export const AGENT_BUILT_IN_REFUSAL = `an agent starts none of the runtime's own workflows but ${[...AGENT_BUILT_INS].join(", ")}`;
 
 /** True when the data files declare a person, agent or group: then only a declared principal is admitted. */
 export const declaresPeople = (resources: readonly PeopleResource[]): boolean =>
@@ -688,6 +885,19 @@ const KNOWN = new Set<string>(CODES);
 export function errorCode(e: unknown): ErrorCode | undefined {
   const code = ownProperty<string>(e, "code", "string");
   return code !== undefined && KNOWN.has(code) ? (code as ErrorCode) : undefined;
+}
+
+/**
+ * A runner that runs each piece of work it is given after the one before it settles, failed or
+ * not: one at a time, in the order given.
+ */
+export function oneAtATime(): <T>(work: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (work) => {
+    const done = tail.then(work);
+    tail = done.catch(() => undefined);
+    return done;
+  };
 }
 
 /** A `DriverError`'s `vendorCode` (`no_token`, `bad_signature`), read as a property: undefined for anything else. */
@@ -853,6 +1063,13 @@ export const credentialReady = ({ status, optional }: CredentialStatus): boolean
  * comes out as a vendor's id or `data`, as a problem on the workflow.
  */
 export const apiNameOf = (name: string): string => name.replace(/[-.]([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+
+/**
+ * The app's `callApi` name for the company as an agent reads it (`agentDescription` in the app):
+ * the runtime's vendor `sanoma`, which no connector takes, a workflow's api name may not be, and
+ * whose operations have three parts, so it names nothing of the company's.
+ */
+export const DESCRIBE_CALL = "sanoma.describe";
 
 /**
  * A workflow as a site's `api` has it (`api.<apiNameOf(name)>`), started as the person on the

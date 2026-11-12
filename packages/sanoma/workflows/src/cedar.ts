@@ -40,6 +40,7 @@ import {
   CALL_WORKFLOW,
   DATA_VENDOR,
   groupNamesOf,
+  isDeclaredAgent,
   isVisitor,
   type PeopleResource,
   principalIdsOf,
@@ -307,13 +308,13 @@ export function cedarPolicy(
   };
 
   /**
-   * The determining `forbid`s, in the order written, each with whom it holds for: the first that
-   * refuses (no `@hold`, else a hold for no one), or the holds.
+   * The determining `forbid`s, in the order written, each with whom it holds for (`actsFor` for an
+   * `on-behalf-of` hold): the first that refuses (no `@hold`, else a hold for no one), or the holds.
    */
-  const forbidsOf = (ids: readonly string[], principal: Principal) => {
+  const forbidsOf = (ids: readonly string[], actsFor: string | undefined) => {
     const holds = policies
       .filter((p) => p.effect === "forbid" && ids.includes(p.id))
-      .map((p) => ({ p, approver: p.hold === undefined ? undefined : holdOf(p.hold, principal, people) }));
+      .map((p) => ({ p, approver: p.hold === undefined ? undefined : holdOf(p.hold, actsFor, people) }));
     const refusing = holds.find(({ p }) => p.hold === undefined) ?? holds.find(({ approver }) => !approver);
     return { refusing: refusing?.p, holds };
   };
@@ -360,7 +361,10 @@ export function cedarPolicy(
   /**
    * May `actor` take `action` on `target` with `context`, given the run's `approvals` so far; at a
    * start or a direct call (`atStart`), a visitor only where a company permit lets it in. `entity`,
-   * the attributes of what it acts on, when that has any (a `Change`).
+   * the attributes of what it acts on, when that has any (a `Change`). A declared agent acting for
+   * a person (`onBehalfOf`) may do no more than that person: asked as the agent, then as the person
+   * alone (in their declared groups, an `on-behalf-of` hold theirs), the stricter answer stands
+   * (`stricter`). Anyone else is asked once, as before.
    */
   const authorize = (
     actor: Principal,
@@ -371,8 +375,28 @@ export function cedarPolicy(
     atStart: boolean,
     entity: Record<string, unknown> = {},
   ): Decision => {
-    const { cedar, schema, set, permitsSet } = prepare();
     const principal = directory.principal(actor);
+    const asked = (who: Principal, actsFor: string | undefined) =>
+      authorizeAs(who, actsFor, action, target, context, approvals, atStart, entity);
+    const agent = asked(principal, principal.onBehalfOf);
+    const person =
+      isDeclaredAgent(principal) && principal.onBehalfOf !== principal.id ? principal.onBehalfOf : undefined;
+    if (person === undefined) return agent;
+    return stricter(agent, asked({ id: person, groups: principalOf(person, people)?.groups ?? [] }, person));
+  };
+
+  /** `authorize`'s question for one principal, as declared (`directory.principal`), its `on-behalf-of` holds `actsFor`'s. */
+  const authorizeAs = (
+    principal: Principal,
+    actsFor: string | undefined,
+    action: string,
+    target: string | undefined,
+    context: Record<string, unknown>,
+    approvals: PolicyCall["run"]["approvals"],
+    atStart: boolean,
+    entity: Record<string, unknown>,
+  ): Decision => {
+    const { cedar, schema, set, permitsSet } = prepare();
     const attrs = () => entity;
     /** The answer of the policy set `id`. */
     const ask = (id: string) => {
@@ -413,7 +437,7 @@ export function cedarPolicy(
     if (failed) return deny(`${failed.policyId} failed: ${messageOf(failed.error)}`, [failed.policyId]);
     const reasons = diagnostics.reason;
     if (decision === "allow") return allow(reasons);
-    const { refusing, holds } = forbidsOf(reasons, principal);
+    const { refusing, holds } = forbidsOf(reasons, actsFor);
     if (refusing) {
       return deny(
         refusing.hold === undefined ? (refusing.reason ?? `Refused by ${refusing.id}`) : "cannot resolve approver",
@@ -480,7 +504,7 @@ export function cedarPolicy(
       const { decision, mustBeDetermining, nontrivialResiduals, residuals } = partial(staticPolicies);
       if (decision === "allow") return { answer: "allow" };
       if (decision === "deny") {
-        const { refusing, holds } = forbidsOf(mustBeDetermining, principal);
+        const { refusing, holds } = forbidsOf(mustBeDetermining, principal.onBehalfOf);
         const first = holds[0];
         if (refusing || !first) return { answer: "deny", ...(refusing && { rule: ruleOf(refusing) }) };
         return { answer: "hold", rule: ruleOf(first.p), approver: first.approver! };
@@ -582,9 +606,22 @@ const uid = (type: string, id: string) => ({ type: `${NAMESPACE}::${type}`, id }
 const unknown = (names: string[]) =>
   Object.fromEntries(names.map((name) => [name, { __extn: { fn: "unknown", arg: name } }]));
 
-/** Whom `@hold(hold)` holds the call for, resolved for `principal`: undefined when it names no one. */
-const holdOf = (hold: string, principal: Principal, people: readonly PeopleResource[]): Approver | undefined =>
-  hold === ON_BEHALF_OF ? principal.onBehalfOf : approverOf(hold, people);
+/** Whom `@hold(hold)` holds the call for, `actsFor` for `on-behalf-of`: undefined when it names no one. */
+const holdOf = (hold: string, actsFor: string | undefined, people: readonly PeopleResource[]): Approver | undefined =>
+  hold === ON_BEHALF_OF ? actsFor : approverOf(hold, people);
+
+/**
+ * The stricter of an agent's answer and the person's it acts for: a deny (the agent's first), else
+ * a hold (the agent's first; once approved, the policy is asked again and the other's stands, so
+ * both are waited for, one after the other), else allowed, by the policies that allowed either.
+ */
+function stricter(agent: Decision, person: Decision): Decision {
+  if (agent.kind === "deny") return agent;
+  if (person.kind === "deny") return person;
+  if (agent.kind === "approve") return agent;
+  if (person.kind === "approve") return person;
+  return allow([...new Set([...(agent.reasons ?? []), ...(person.reasons ?? [])])]);
+}
 
 interface Directory {
   /** The principal with the groups and `onBehalfOf` it is declared with added. */

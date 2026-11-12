@@ -10,7 +10,14 @@ import {
   type ListQuery,
   type Saved,
 } from "sanoma/workflows/shared";
-import { type QueryClient, queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  queryOptions,
+  skipToken,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -39,6 +46,7 @@ import {
   getChatModel,
   getChats,
   getCloudAddress,
+  getColumnPlan,
   getCompanyState,
   getConfig,
   getCredentials,
@@ -69,6 +77,7 @@ import {
   startRunFn,
 } from "./functions.ts";
 import type { UntypedApi } from "./api-client.ts";
+import { type ColumnChange, isHidden } from "./components/grid/plan.ts";
 import { api } from "./site-api.ts";
 
 /**
@@ -105,6 +114,35 @@ export const refreshWritten = (queryClient: QueryClient, file: string) =>
   Promise.all(
     [sourceQuery(file).queryKey, configQuery().queryKey].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
   );
+
+/** How long, at most, a page waits for the app to start again on what was written, a try each second. */
+const STARTING_TRIES = 120;
+
+/**
+ * After a column change of the collection `name` written in the checkout (`file`): its records read
+ * again (they were brought along), and the file and the description. When the app starts again on
+ * it (`running`, `PatchOutput.running`), the description it started with is the old one until it
+ * has: read again a second at a time until the collection's fields are no longer `before` (the app
+ * answering the old ones meanwhile, or none while it starts), then the file and the records once more.
+ */
+export async function refreshColumns(
+  queryClient: QueryClient,
+  { file, name, before, running }: { file: string; name: string; before: CollectionEntry["fields"]; running: boolean },
+): Promise<void> {
+  const records = () => queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] });
+  await records();
+  if (running) {
+    const was = JSON.stringify(before);
+    for (let tries = 0; tries < STARTING_TRIES; tries++) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const config = await queryClient.fetchQuery({ ...configQuery(), staleTime: 0 }).catch(() => undefined);
+      const fields = config && collectionNamed(name)(config)?.fields;
+      if (fields && JSON.stringify(fields) !== was) break;
+    }
+    await records();
+  }
+  await refreshWritten(queryClient, file);
+}
 
 /** The file a workflow's outline was read from; none when it was read from `run`'s text, or not at all. */
 export const workflowFile = (workflow: Pick<WorkflowEntry, "outline">): string | undefined =>
@@ -209,10 +247,12 @@ export function siteCallers(config: ConfigDescription, kind: SiteCall["kind"], t
   return [...byFile.values()];
 }
 
-/** A collection's enum fields, each with its values, in the collection's order. */
+/** A collection's enum fields the grid shows (none hidden), each with its values, in the collection's order. */
 export const enumFields = (fields: CollectionEntry["fields"]) =>
   Object.entries(fields).flatMap(([name, kind]) =>
-    typeof kind === "object" && "enum" in kind ? [{ name, values: kind.enum as readonly string[] }] : [],
+    typeof kind === "object" && "enum" in kind && !isHidden(kind)
+      ? [{ name, values: kind.enum as readonly string[] }]
+      : [],
   );
 
 /** Each workflow's title (its name when it has none), by name: for `select`. */
@@ -778,6 +818,18 @@ export const countQuery = (name: string, where: ListQuery<Record<string, unknown
   });
 
 /**
+ * A proposed column change's plan over every record of its collection (`getColumnPlan`), as the
+ * person asking reads them: the column panel's What will happen and the count it asks on. Under
+ * the collection's key, so it is read again with its records; none for no change (`skipToken`).
+ */
+export const columnPlanQuery = (collection: string, change: ColumnChange | undefined) =>
+  queryOptions({
+    queryKey: [...DATA_KEY, collection, "column-plan", change ?? null],
+    queryFn: change ? () => getColumnPlan({ data: { collection, change } }) : skipToken,
+    staleTime: 5_000,
+  });
+
+/**
  * The keys of a collection's records whose save or delete waits for an approval: the pending
  * policy holds of `data.<name>.save`, `.delete` and `.saveMany` (each of its records and
  * deletes) among the runs waiting (`waitingRunsQuery`, the Inbox's), so a decision, or the run
@@ -827,7 +879,7 @@ export const DataSearch = z.object({
   hide: z.array(z.string().min(1)).min(1).optional().catch(undefined),
   column: z
     .object({
-      change: z.enum(["add", "rename", "retype", "convert", "delete"]),
+      change: z.enum(["add", "rename", "retype", "convert", "hide"]),
       field: z.string().min(1).optional(),
       key: z.string().min(1).optional(),
     })

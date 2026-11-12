@@ -210,7 +210,6 @@ function CollectionPage() {
               key={JSON.stringify(column)}
               collection={collection}
               column={column}
-              rows={records.data ?? []}
             />
           )}
           {formOpen && (

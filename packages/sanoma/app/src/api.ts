@@ -52,6 +52,12 @@ import { ColumnChange } from "./components/grid/plan.ts";
 export const ACTOR_HEADER = "x-sanoma-actor";
 
 /**
+ * The declared agent (`sanoma.agent`) a call is made by, on behalf of the person the login names:
+ * read on the loopback login alone (`actingFor`), refused on a host, whose sign-in says who acts.
+ */
+export const AGENT_HEADER = "x-sanoma-agent";
+
+/**
  * The same name, kept in a cookie by the page as well (URI-encoded), so the loopback login knows
  * who is asking while the server renders a page, whose loader may call `api`. The header wins.
  */
@@ -210,7 +216,15 @@ export interface RunDetail {
    * those that did not load), or the scenarios could not be read at all.
    */
   checksError?: string;
+  /** For a queued apply, the apply it waits for: one runs at a time (`ApplyAhead`). */
+  ahead?: ApplyAhead;
 }
+
+/**
+ * The apply that a queued apply waits for, as the page names it: live applies run one at a time
+ * across the company's workers, so a second waits until this one ends.
+ */
+export type ApplyAhead = Pick<RunSummary, "runId" | "status" | "startedBy" | "createdAt">;
 
 /**
  * A scenario as the page lists it: what it says and the input its run starts with, not how the
@@ -531,6 +545,8 @@ export interface GoLiveRun {
   pending?: { approvalId: string; plan?: ApplyPlan };
   results?: ApplyResult[];
   error?: string;
+  /** For a queued apply, the apply it waits for. */
+  ahead?: ApplyAhead;
 }
 
 /**
@@ -654,8 +670,15 @@ export type CallRequest = z.infer<typeof CallRequest>;
 export const HistoryRequest = z.object({ name: z.string().min(1), key: z.string().min(1) });
 export type HistoryRequest = z.infer<typeof HistoryRequest>;
 
-/** What `proposeColumnChangeFn` takes: a change to the columns of the collection `collection`. */
-export const ProposeColumnChange = z.object({ collection: z.string().min(1), change: ColumnChange });
+/** What `getColumnPlan` takes: a change to the columns of the collection `collection`, to plan over its records. */
+export const ColumnPlanRequest = z.object({ collection: z.string().min(1), change: ColumnChange });
+export type ColumnPlanRequest = z.infer<typeof ColumnPlanRequest>;
+
+/**
+ * What `proposeColumnChangeFn` takes: the change, and with a `clear` decision `clears`, how many
+ * values the person was shown it leaves empty (`getColumnPlan`'s count of those that won't convert).
+ */
+export const ProposeColumnChange = ColumnPlanRequest.extend({ clears: z.number().int().min(0).optional() });
 export type ProposeColumnChange = z.infer<typeof ProposeColumnChange>;
 
 /** A field one write changed: its value before and after, each absent where the field was not set. */
@@ -877,8 +900,13 @@ export function runFailure(run: Pick<RunSummary, "runId" | "status" | "error">, 
 /** A run's short name, for a title: "Run" and its id's first 8 characters (a UUID's first group). */
 export const runName = (runId: string) => `Run ${runId.slice(runId.lastIndexOf(":") + 1).slice(0, 8)}`;
 
-/** Who started a run, as text. */
-export const starterName = (run: Pick<RunSummary, "startedBy">): string => run.startedBy?.id ?? "unknown";
+/** Who started a run, as text: "claude-code for ada" for an agent acting for someone. */
+export const starterName = ({ startedBy }: Pick<RunSummary, "startedBy">): string =>
+  startedBy === undefined
+    ? "unknown"
+    : startedBy.onBehalfOf === undefined
+      ? startedBy.id
+      : `${startedBy.id} for ${startedBy.onBehalfOf}`;
 
 /** A run's approvals still waiting for a decision. */
 export const pendingApprovals = (run: Pick<RunSummary, "approvals">): ApprovalState[] =>

@@ -26,13 +26,28 @@ const inSites = (pathname: string) => sites.some((site) => `${pathname}/`.starts
 /** The attribute `mount` sets on its element, which every rule of `demo.css` is scoped to. */
 const SCOPE = "data-sanoma-demo";
 
+/** Each element's latest `mount` call, by its runtime: one still seeding when another is called on its element never renders. */
+const latest = new WeakMap<Element, Promise<unknown>>();
+
 /**
  * Renders the sites into `element`, from `path`, on a history of their own (the host's URL and
  * history untouched), over a fresh runtime seeded from the world. Resolves to the unmount, which
- * empties the element. A page shows one demo at a time: mounting another moves `api` to it.
+ * empties the element and stops the runtime (`stop`: its runs dropped, a sleeping one's timer
+ * with it); one that another `mount` on the element overtook while it seeded renders
+ * nothing and resolves to an unmount that does nothing. `api` is its runtime's (`serve`).
  */
 export async function mount(element: Element, { path = `/sites/${sites[0]}`, exit }: MountOptions = {}) {
-  const seeded = await runtime();
+  // Served in the order mounts are called, not as their worlds seed.
+  const seeding = runtime();
+  latest.set(element, seeding);
+  const release = serve(seeding);
+  seeding.catch(release);
+  const page = await seeding;
+  if (latest.get(element) !== seeding) {
+    release();
+    page.stop();
+    return () => {};
+  }
   const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 1_000 } } });
   // What a site's start form reads of the config, never asked of a server.
   queryClient.setQueryData(configQuery().queryKey, description);
@@ -68,7 +83,6 @@ export async function mount(element: Element, { path = `/sites/${sites[0]}`, exi
   element.setAttribute(SCOPE, "");
   const root = createRoot(element);
   element.addEventListener("click", onClick);
-  const release = serve(seeded);
   root.render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
@@ -79,6 +93,7 @@ export async function mount(element: Element, { path = `/sites/${sites[0]}`, exi
     root.unmount();
     unblock();
     release();
+    page.stop();
     queryClient.clear();
     element.removeAttribute(SCOPE);
   };
