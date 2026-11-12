@@ -268,6 +268,7 @@ export {
 } from "./database.ts";
 export {
   type Box,
+  IMAGE_AGENTS,
   type Process,
   type SandboxBackend,
   type SandboxCapabilities,

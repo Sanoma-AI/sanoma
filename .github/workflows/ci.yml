@@ -105,3 +105,20 @@ jobs:
         run: docker build --build-arg PACKAGES="$(node scripts/runtime-packages.ts --public)" -t sanoma-runtime packages/sanoma/runtime
       - name: The identity command runs
         run: docker run --rm sanoma-runtime identity --help | grep '^  sanoma identity '
+
+  box-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the box image (not pushed)
+        run: docker build --platform linux/amd64 -t sanoma-box packages/sanoma/box
+      # As Agent37 runs it: as `node`, its home an empty volume over the image's. pnpm answers, and each
+      # agent's bin starts from the image's install (`pi-acp` prints no version, and exits 0).
+      - name: pnpm and every agent start with an empty home
+        run: |
+          bins=$(jq -r '.[] | "/opt/sanoma/agents/\(.id)/node_modules/.bin/\(.bin)"' packages/sanoma/box/agents.json)
+          docker run --rm --user node --tmpfs /home/node:exec,uid=1000,gid=1000 sanoma-box sh -euc '
+            cd
+            pnpm --version
+            for bin; do echo "$bin:"; timeout 120 "$bin" --version </dev/null; done
+          ' sh $bins

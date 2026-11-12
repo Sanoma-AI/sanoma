@@ -1,8 +1,9 @@
 name: Release
 # Run by hand on release/<version>, a branch at the bump's merge commit, never on main (README "Release"):
-# it publishes every public package whose version is not yet on npm, then pushes the runtime image for the
-# sanoma version to GitHub's registry (ghcr.io/sanoma-ai/runtime) when it does not have it yet, and the
-# company template (packages/sanoma/template) to Sanoma-AI/company-template's main.
+# it publishes every public package whose version is not yet on npm, then pushes the runtime image and the
+# box image for the sanoma version to GitHub's registry (ghcr.io/sanoma-ai/runtime, ghcr.io/sanoma-ai/box)
+# when it does not have them yet, and the company template (packages/sanoma/template) to
+# Sanoma-AI/company-template's main.
 on:
   workflow_dispatch:
 
@@ -122,6 +123,53 @@ jobs:
           push: true
           tags: ${{ steps.image.outputs.tag }}
           build-args: PACKAGES=${{ steps.image.outputs.packages }}
+
+  box-image:
+    needs: publish
+    runs-on: ubuntu-latest
+    # As the runtime image's job. The package ghcr.io/sanoma-ai/box is made public once by hand in GitHub
+    # (its package settings) after its first push: Agent37 copies it into a workspace's templates with no
+    # registry credentials. Until then Agent37 cannot copy it, and new boxes are made from agent37-base.
+    permissions:
+      contents: read
+      packages: write
+    # Actions pinned to commits, as in the publish job: this job can push the box image.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Tagged with the sanoma version, never `latest`, and never replaced: a workspace's template of a
+      # version is that version's image. A run that published only other packages pushes nothing.
+      - name: Tag not yet on ghcr.io
+        id: image
+        run: |
+          tag="ghcr.io/sanoma-ai/box:$(jq -r .version packages/sanoma/package.json)"
+          if docker buildx imagetools inspect "$tag" > /dev/null 2> "$RUNNER_TEMP/inspect.err"; then
+            echo "::notice title=Box image skipped::$tag is already on ghcr.io."
+          # As the runtime image's: only a missing tag or package is a push, any other error stops here.
+          elif grep -qiE ': not found|manifest unknown|name unknown|denied' "$RUNNER_TEMP/inspect.err"; then
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          else
+            cat "$RUNNER_TEMP/inspect.err" >&2
+            exit 1
+          fi
+      # The README's hand command, with the same flags. No layer cache, as in the publish job.
+      - if: steps.image.outputs.tag
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: packages/sanoma/box
+          # Agent37 runs linux/amd64 images only.
+          platforms: linux/amd64
+          # One image manifest, not an index with an attestation, as the runtime image.
+          provenance: false
+          push: true
+          tags: ${{ steps.image.outputs.tag }}
 
   company-template:
     needs: publish
