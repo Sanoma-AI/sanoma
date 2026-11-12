@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-agent37",
-  "version": "0.11.23",
+  "version": "0.11.24",
   "description": "Agent37 Cloud for Sanoma: the boxes coding agents work in, one persistent Linux instance each, driven through Sanoma's runner",
   "keywords": [
     "agent37",
