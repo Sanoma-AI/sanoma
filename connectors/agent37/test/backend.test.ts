@@ -1,6 +1,8 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { checkSandbox } from "sanoma/testing/sandbox";
 import { installedSanoma, RUNNER_PORT, runnerHealth } from "sanoma/workflows";
+import { slugged } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { agent37Api } from "../src/api.ts";
 import { agent37Backend, BOX, BOX_IMAGE, labelOf } from "../src/backend.ts";
@@ -21,12 +23,9 @@ beforeEach(() => {
   return () => vi.unstubAllGlobals();
 });
 
-/** The backend of a box `declared`, with the key `key`: a workspace of its own to the templates it remembers. */
-const backendOf = (declared: Record<string, unknown> = {}, key = KEY) =>
-  agent37Backend(
-    { secrets: async (names) => new Map(names.map((name) => [name, key])), declared },
-    { edge: vendor.edge, budgetMs: 20_000 },
-  );
+const secrets = async (names: readonly string[]) => new Map(names.map((name) => [name, KEY]));
+const backendOf = (declared: Record<string, unknown> = {}) =>
+  agent37Backend({ secrets, declared }, { edge: vendor.edge, budgetMs: 20_000 });
 /** Opens the box `name` of the default shape, on Agent37's plain template. */
 const open = (backend: ReturnType<typeof backendOf>, name: string) => backend.open({ name, image: BASE, size: 2 });
 const text = (bytes: Uint8Array | null) => (bytes === null ? null : Buffer.from(bytes).toString());
@@ -219,37 +218,48 @@ describe("agent37Backend", () => {
     beforeAll(async () => {
       const version = await installedSanoma(fileURLToPath(new URL("..", import.meta.url)));
       image = `${BOX_IMAGE}:${version}`;
-      template = `sanoma-box-${version}`.replaceAll(/[^a-z0-9]/g, "-");
+      template = slugged(`sanoma-box-${version}`);
     });
     beforeEach(() => vendor.templates.clear());
 
-    it("makes a new box from Sanoma's box image, registered once as the workspace's template, and remembers it", async () => {
-      const backend = backendOf({}, `${KEY}-register`);
-      // Two boxes made at once share the registration.
+    it("makes a new box from Sanoma's box image, registered once as the workspace's template, and asks for it at each new box", async () => {
+      const backend = backendOf();
+      // Two boxes made at once share the registration, which Agent37 answers once it has copied the image.
+      vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+        if (new Request(input, init).url.includes("/v1/templates")) await delay(300);
+        return vendor.fetch(input, init);
+      });
       const [one, two] = await Promise.all([
         backend.open({ name: "sanoma-image-one" }),
         backend.open({ name: "sanoma-image-two" }),
       ]);
       expect(template).toMatch(/^[a-z][a-z0-9-]{1,62}$/);
-      expect(templateCalls()).toEqual([
+      const registered = [
         { method: "GET", path: `/templates/${template}` },
         { method: "POST", path: "/templates", body: { name: template, image_ref: image } },
-      ]);
+      ];
+      expect(templateCalls()).toEqual(registered);
       expect(madeFrom()).toEqual([template, template]);
-      // The next box of this process asks nothing; one that exists keeps its image.
+      // The next new box finds the template; one that exists keeps its image and asks nothing.
+      vi.stubGlobal("fetch", vendor.fetch);
       vendor.sent.length = 0;
       await Promise.all([one.stop(), two.stop()]);
       const three = await backend.open({ name: "sanoma-image-three" });
       await backend.open({ name: "sanoma-image-one" }).then((again) => again.stop());
-      expect(templateCalls()).toEqual([]);
+      expect(templateCalls()).toEqual([registered[0]]);
       expect(madeFrom()).toEqual([template]);
-      await three.stop();
-      await Promise.all(["one", "two", "three"].map((n) => backend.discard({ name: `sanoma-image-${n}` })));
+      // A template deleted in Agent37's dashboard is registered again.
+      vendor.templates.clear();
+      vendor.sent.length = 0;
+      const four = await backend.open({ name: "sanoma-image-four" });
+      expect(templateCalls()).toEqual(registered);
+      await Promise.all([three.stop(), four.stop()]);
+      await Promise.all(["one", "two", "three", "four"].map((n) => backend.discard({ name: `sanoma-image-${n}` })));
     });
 
     it("uses the workspace's template of the image when it is there", async () => {
       vendor.templates.set(template, { name: template, image_ref: image });
-      const backend = backendOf({}, `${KEY}-found`);
+      const backend = backendOf();
       const box = await backend.open({ name: "sanoma-image-found" });
       expect(templateCalls()).toEqual([{ method: "GET", path: `/templates/${template}` }]);
       expect(madeFrom()).toEqual([template]);
@@ -259,7 +269,7 @@ describe("agent37Backend", () => {
 
     it("makes the box from Agent37's plain template when the image cannot be registered, saying why, and asks again next time", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const backend = backendOf({}, `${KEY}-refused`);
+      const backend = backendOf();
       vendor.answer("POST", "/templates", 400, {
         error: { code: "invalid_request", message: "the image cannot be pulled" },
       });
@@ -282,7 +292,7 @@ describe("agent37Backend", () => {
     });
 
     it("takes a declared image as it is", async () => {
-      const backend = backendOf({ image: BASE }, `${KEY}-declared`);
+      const backend = backendOf({ image: BASE });
       const box = await backend.open({ name: "sanoma-image-declared" });
       expect(templateCalls()).toEqual([]);
       expect(madeFrom()).toEqual([BASE]);

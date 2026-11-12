@@ -133,7 +133,7 @@ describe("a person's own agent's install", () => {
     const at = join(agents, "fake");
     const agent = { id: "fake", packages: [`file:${pkg}`], bin: "fake-agent", args: [], signIn: { run: [] } };
     // The box's image carries none (this machine has no /opt/sanoma/agents/fake).
-    expect(await install(box, agent, at)).toBe(at);
+    expect(await install(box, agent, agents)).toBe(at);
     expect(readFileSync(join(at, "installed.json"), "utf8")).toBe(JSON.stringify(agent.packages));
     // Its bin, and pnpm's store, as the box sees them with the agents' HOME: theirs, never this
     // machine user's, the store written by the install.
@@ -147,7 +147,7 @@ describe("a person's own agent's install", () => {
     expect(store.startsWith(`${agents}/`) && existsSync(store)).toBe(true);
     // Installed: the next turn finds it so.
     rmSync(join(at, "node_modules"), { recursive: true });
-    expect(await install(box, agent, at)).toBe(at);
+    expect(await install(box, agent, agents)).toBe(at);
     expect(existsSync(join(at, "node_modules"))).toBe(false);
   }, 120_000);
 
@@ -158,7 +158,7 @@ describe("a person's own agent's install", () => {
     writeFileSync(join(image, "pre/installed.json"), JSON.stringify(agent.packages));
     const at = join(agents, "pre");
     // No registry has `pre-agent`: an install would fail.
-    expect(await install(withImage(box, image), agent, at)).toBe(join(IMAGE_AGENTS, "pre"));
+    expect(await install(withImage(box, image), agent, agents)).toBe(join(IMAGE_AGENTS, "pre"));
     expect(existsSync(at)).toBe(false);
   });
 
@@ -171,7 +171,7 @@ describe("a person's own agent's install", () => {
     mkdirSync(join(image, "newer"), { recursive: true });
     writeFileSync(join(image, "newer/installed.json"), JSON.stringify(["newer-agent@1.0.0"]));
     const at = join(agents, "newer");
-    expect(await install(withImage(box, image), agent, at)).toBe(at);
+    expect(await install(withImage(box, image), agent, agents)).toBe(at);
     expect(readFileSync(join(at, "installed.json"), "utf8")).toBe(JSON.stringify(agent.packages));
     expect(existsSync(join(at, "node_modules/newer-agent/package.json"))).toBe(true);
   }, 120_000);

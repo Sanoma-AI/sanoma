@@ -14,6 +14,7 @@ import {
   type SandboxBackend,
   type SandboxContext,
 } from "sanoma/workflows";
+import { slugged } from "sanoma/workflows/shared";
 import { agent37Api, type Agent37Api, type Instance, isCode } from "./api.ts";
 import { BASE, wanted } from "./connector.ts";
 
@@ -73,6 +74,12 @@ export function agent37Backend(
   };
   /** The opens in flight, by name: a second open of a name waits for the first, so one instance is made. */
   const opening = new Map<string, Promise<Box>>();
+  /**
+   * The box image's template asked for or registered in flight, by its name: opens at once make one
+   * `GET` and at most one `POST`. It goes once settled, so each later new box asks again, and a
+   * template deleted in Agent37's dashboard is registered again.
+   */
+  const registering = new Map<string, Promise<void>>();
   return {
     async open({ name, image, size }) {
       const before = opening.get(name) ?? Promise.resolve();
@@ -95,7 +102,7 @@ export function agent37Backend(
     const api = agent37Api(key);
     const [found] = await holding(api, name);
     // A box that exists keeps its image; a new one's may be registered first, outside the budget.
-    const template = found ? undefined : (want.image ?? (await boxTemplate(api, key)));
+    const template = found ? undefined : (want.image ?? (await boxTemplate(api)));
     const deadline = Date.now() + budgetMs;
     const made =
       found ??
@@ -139,44 +146,36 @@ export function agent37Backend(
       },
     };
   }
-}
 
-/**
- * The workspace templates of the box image this process found or registered, by the workspace (a
- * hash of its key) and the template's name. A failed one is forgotten: the next new box asks again.
- */
-const templates = new Map<string, Promise<void>>();
-
-/**
- * The template a new box with no declared image is made from: the box image of the `sanoma` this
- * connector is installed beside, the workspace's template `sanoma-box-<version>` (each character
- * Agent37 refuses in a name a dash), registered when the workspace has none. Opens at once share
- * one registration. When it cannot be had, a warning says why and the box is made from `BASE`:
- * the image only spares the agents' installs.
- */
-async function boxTemplate(api: Agent37Api, key: string): Promise<string> {
-  const version = await installedSanoma(fileURLToPath(new URL("..", import.meta.url)));
-  if (version === undefined) return instead("the installed sanoma's version, which tags its box image, is unknown");
-  const image = `${BOX_IMAGE}:${version}`;
-  const name = `sanoma-box-${version}`.replaceAll(/[^a-z0-9]/g, "-");
-  const at = `${createHash("sha256").update(key).digest("hex")} ${name}`;
-  let had = templates.get(at);
-  if (!had) {
-    had = api.template(name).then(
-      () => undefined,
-      (error: unknown) => {
-        if (!isCode(error, "not_found")) throw error;
-        return api.register({ name, image_ref: image }, TEMPLATE_MS);
-      },
-    );
-    templates.set(at, had);
-    void had.catch(() => templates.delete(at));
-  }
-  try {
-    await had;
-    return name;
-  } catch (error) {
-    return instead(`${image} could not be registered as the workspace's template ${name}: ${errorMessage(error)}`);
+  /**
+   * The template a new box with no declared image is made from: the box image of the `sanoma` this
+   * connector is installed beside, the workspace's template `sanoma-box-<version>` (slugged, as
+   * Agent37 takes a name), registered when the workspace has none. When it cannot be
+   * had, a warning says why and the box is made from `BASE`: the image only spares the agents' installs.
+   */
+  async function boxTemplate(api: Agent37Api): Promise<string> {
+    const version = await installedSanoma(fileURLToPath(new URL("..", import.meta.url)));
+    if (version === undefined) return instead("the installed sanoma's version, which tags its box image, is unknown");
+    const image = `${BOX_IMAGE}:${version}`;
+    const name = slugged(`sanoma-box-${version}`);
+    let had = registering.get(name);
+    if (!had) {
+      had = api.template(name).then(
+        () => undefined,
+        (error: unknown) => {
+          if (!isCode(error, "not_found")) throw error;
+          return api.register({ name, image_ref: image }, TEMPLATE_MS);
+        },
+      );
+      registering.set(name, had);
+      void had.catch(() => undefined).then(() => registering.delete(name));
+    }
+    try {
+      await had;
+      return name;
+    } catch (error) {
+      return instead(`${image} could not be registered as the workspace's template ${name}: ${errorMessage(error)}`);
+    }
   }
 }
 

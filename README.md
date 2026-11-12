@@ -266,7 +266,7 @@ The container's worker builds the app bundle for a deploy's revision, in a check
 
 ### Publish the box image
 
-Agent37 boxes are made by default from the public [box image](packages/sanoma/README.md#the-box-image) at `ghcr.io/sanoma-ai/box`, which [the connector](connectors/agent37/README.md#the-box-image) registers as a template of the company's workspace. It has one linux/amd64 manifest and is tagged with the `sanoma` version, never `latest`. After the npm packages publish, `release.yml` pushes it if its tag is missing, as it does the runtime image; tags are never replaced, so changes to `packages/sanoma/box/` require a new `sanoma` version. After the first push, make the `box` package public once in GitHub's package settings, as the runtime's was: Agent37 pulls it with no credentials.
+Agent37 boxes are made by default from the public [box image](packages/sanoma/README.md#the-box-image) at `ghcr.io/sanoma-ai/box`, which [the connector](connectors/agent37/README.md#the-box-image) registers as a template of the company's workspace. It has one linux/amd64 manifest and is tagged with the `sanoma` version, never `latest`. After the npm packages publish, `release.yml` pushes it if its tag is missing, as it does the runtime image; tags are never replaced, so changes to `packages/sanoma/box/` require a new `sanoma` version. After its first push, make the `box` package public once in GitHub's package settings, as the runtime's was: Agent37 pulls it with no credentials, so until then it cannot copy it and new boxes are made from `agent37-base`.
 
 To publish manually, run `docker login ghcr.io`, check that `docker buildx imagetools inspect ghcr.io/sanoma-ai/box:<version>` finds no tag, then:
 

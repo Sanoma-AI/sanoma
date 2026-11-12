@@ -127,8 +127,9 @@ jobs:
   box-image:
     needs: publish
     runs-on: ubuntu-latest
-    # As the runtime image's job. The package ghcr.io/sanoma-ai/box was made public once by hand in GitHub
-    # (its package settings): Agent37 copies it into a workspace's templates with no registry credentials.
+    # As the runtime image's job. The package ghcr.io/sanoma-ai/box is made public once by hand in GitHub
+    # (its package settings) after its first push: Agent37 copies it into a workspace's templates with no
+    # registry credentials. Until then Agent37 cannot copy it, and new boxes are made from agent37-base.
     permissions:
       contents: read
       packages: write

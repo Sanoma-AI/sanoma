@@ -146,7 +146,7 @@ async function runTurn(agent: TurnAgent<"own">, engineTurn: EngineTurn, writer: 
         // own): the box's stop would end it.
         const [cloned, installed, shimmed] = await Promise.allSettled([
           carryIn(box, step.source, chat.id, { home: boxHome, signal }),
-          install(box, agent, join(home, agent.id)),
+          install(box, agent, home),
           shims(box, home),
         ]);
         if (cloned.status === "rejected") throw cloned.reason;
@@ -678,24 +678,26 @@ const exitText = (exitCode: number) => `exit code ${exitCode}`;
 
 /**
  * The directory that holds `agent`'s install in `box`: the image's (`IMAGE_AGENTS`) when its
- * `installed.json` is the packages wanted, which installs nothing; else `dir`, installed there once:
- * its packages at their versions by the `pnpm` on the box's `PATH`, as the HarnessAgent bridges run
- * it (the desktop shell ships no npm), with the agents' HOME (`dir`'s parent) as its `HOME`, so
+ * `installed.json` is the packages wanted, which installs nothing; else `<home>/<agent>`, installed
+ * there once: its packages at their versions by the `pnpm` on the box's `PATH`, as the HarnessAgent
+ * bridges run it (the desktop shell ships no npm), with `home`, the agents' HOME, as its `HOME`, so
  * pnpm's store and config are theirs, in the box, outside the company's workspace, and with no
  * install script run but the vendor's own `setup`, as `installed.json` records; stopped after
  * `INSTALL_WAIT`. The last install's `node_modules` goes first: pnpm refuses one made from another
  * store (the repo moved) or by another major version. Another turn waits for an install under
  * way; a failed one is tried again by the next.
  */
-export async function install(box: Box, agent: OwnAgent & { id: string }, dir: string): Promise<string> {
+export async function install(box: Box, agent: OwnAgent & { id: string }, home: string): Promise<string> {
   const wanted = JSON.stringify(agent.packages);
   const holds = async (at: string) => {
     const found = await box.read(join(at, "installed.json"));
     return found !== null && utf8.decode(found) === wanted;
   };
   const image = join(IMAGE_AGENTS, agent.id);
-  if (await holds(image)) return image;
-  if (await holds(dir)) return dir;
+  const dir = join(home, agent.id);
+  const [inImage, inHome] = await Promise.all([holds(image), holds(dir)]);
+  if (inImage) return image;
+  if (inHome) return dir;
   const key = `${box.id} ${dir}`;
   let running = installs.get(key);
   if (!running) {
@@ -703,7 +705,7 @@ export async function install(box: Box, agent: OwnAgent & { id: string }, dir: s
       await box.write(join(dir, "package.json"), utf8.encode('{ "private": true }\n'));
       const pnpm = ["add", "--ignore-scripts", "--ignore-workspace", "--loglevel=error", ...agent.packages];
       // As its agent's HOME, so pnpm's store and config are theirs; stopped if it hangs.
-      const options = { env: { HOME: dirname(dir) }, signal: AbortSignal.timeout(INSTALL_WAIT) };
+      const options = { env: { HOME: home }, signal: AbortSignal.timeout(INSTALL_WAIT) };
       await ran(box, `rm -rf node_modules && ${commandLine("pnpm", pnpm)}`, { cwd: dir, ...options });
       if (agent.setup) {
         const setup = join(dir, agent.setup);

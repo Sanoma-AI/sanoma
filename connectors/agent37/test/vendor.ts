@@ -10,12 +10,10 @@ import { RUNNER_HEALTH, RUNNER_PORT } from "sanoma/workflows";
 // `https://api.agent37.com/v1` from memory (every other URL goes out), its exec `sh -c` here, each
 // instance's home a directory of its own, and its edge a port of this machine per instance's port:
 // the runner the backend starts with exec listens on one of its own (`SANOMA_RUNNER_PORT`). Its
-// workspace templates are names in memory, an image registered at once. Every key that starts
-// with `KEY` is one of its workspace's, so a test may use a key of its own. Its
-// `PATH` is a template's: no pnpm, but a corepack that makes one. A stop, a delete and `close` end
-// what an instance's execs left running, as a fresh boot would; a sleep keeps it. The edge answers
-// `/health` itself, on every port, as Agent37's does. `answer` puts a reply ahead of the next
-// request.
+// workspace templates are names in memory, an image registered at once. Its `PATH` is a template's:
+// no pnpm, but a corepack that makes one. A stop, a delete and `close` end what an instance's execs
+// left running, as a fresh boot would; a sleep keeps it. The edge answers `/health` itself, on every
+// port, as Agent37's does. `answer` puts a reply ahead of the next request.
 
 export const KEY = "sk_live_test";
 
@@ -196,7 +194,7 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     const text = await request.text();
     const body = text ? JSON.parse(text) : undefined;
     sent.push({ method: request.method, path, ...(body && { body }) });
-    if (!request.headers.get("authorization")?.startsWith(`Bearer ${KEY}`)) return problem(401, "invalid_api_key");
+    if (request.headers.get("authorization") !== `Bearer ${KEY}`) return problem(401, "invalid_api_key");
     return api(request.method, path, body);
   };
   const headersSeen: string[] = [];

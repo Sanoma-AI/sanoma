@@ -53,7 +53,7 @@ The runner is [`sanoma/workflows`'s](https://github.com/Sanoma-AI/sanoma/blob/ma
 
 ### The box image
 
-With no `image` declared, a new box is made from Sanoma's box image, `ghcr.io/sanoma-ai/box:<version>` of the `sanoma` the connector is installed beside: Node 26, git, pnpm, and each connector's own coding agent installed under `/opt/sanoma/agents/<agent>`, so a person's first turn waits for no install (the app installs an agent in the box's home only when the image's is not at the versions it wants). Agent37 makes an instance from a template of the workspace, never from an image, so before it makes the first box `open` asks for the workspace's template `sanoma-box-<version>` (the version's dots as dashes) and, when there is none, registers the image as it (`POST /v1/templates`: Agent37 copies the public image once, which can take minutes, given up to 5 apart from `open`'s 3; a `409 template_conflict` means it is there). The process remembers a template it found or registered, and opens at once share one registration. When the template cannot be had, a warning says why and the box is made from `agent37-base`, which works as before, only slower to its first turn. A declared `image` is used as it is, and a box that exists keeps the image it was made from.
+With no `image` declared, a new box is made from [Sanoma's box image](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/README.md#the-box-image), `ghcr.io/sanoma-ai/box:<version>` of the `sanoma` the connector is installed beside, which carries each connector's own coding agent installed, so a person's first turn waits for no install. Agent37 makes an instance from a template of the workspace, never from an image, so before it makes a box `open` asks for the workspace's template `sanoma-box-<version>` (the version's dots as dashes) and, when there is none, registers the image as it (`POST /v1/templates`: Agent37 copies the public image once, which can take minutes, given up to 5 apart from `open`'s 3; a `409 template_conflict` means it is there). Opens at once share one registration, and each new box after asks again, so a template deleted in Agent37's dashboard is registered again. When the template cannot be had, a warning says why and the box is made from `agent37-base`, which works as before, only slower to its first turn. A declared `image` is used as it is, and a box that exists keeps the image it was made from.
 
 ### What it costs
 
@@ -96,6 +96,8 @@ A failure is a `DriverError` with Agent37's status and its error's `code` as `ve
 pnpm build
 SANOMA_LIVE=1 AGENT37_API_KEY=sk_live_... node connectors/agent37/test/live.ts ../company-template
 ```
+
+Its boxes run `agent37-base`; `AGENT37_TEST_IMAGE` names another template of the workspace, such as the box image's (`sanoma-box-<version>`).
 
 ## Testing
 
