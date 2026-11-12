@@ -82,7 +82,26 @@ export default defineWorkflow({
 });
 `;
 
-/** A copy of the fixture company, with the app installed as a company installs it, one person declared, and workflow files. */
+/** A component of the members site that calls `api`, on a click. */
+const GREET = `import { api } from "sanoma/site";
+
+export function Greet() {
+  return (
+    <button type="button" onClick={() => void api.hello.start({ who: "a member" })}>
+      Greet a member
+    </button>
+  );
+}
+`;
+
+/** A page of the members site that makes no call itself, and imports one that does (`GREET`). */
+const GREET_PAGE = `import { createFileRoute } from "@tanstack/react-router";
+import { Greet } from "../components/greet.tsx";
+
+export const Route = createFileRoute("/sites/members/greet")({ component: Greet });
+`;
+
+/** A copy of the fixture company, with the app installed as a company installs it, one person declared, workflow files, and a members page importing a component that calls. */
 function company(): { repo: string; config: ReturnType<typeof defineConfig> } {
   const repo = mkdtempSync(join(tmpdir(), "sanoma-bundle-"));
   temporary.push(repo);
@@ -90,6 +109,8 @@ function company(): { repo: string; config: ReturnType<typeof defineConfig> } {
   write(join(repo, "resources", "people.ts"), PEOPLE);
   write(join(repo, "workflows", "nightly.ts"), NIGHTLY);
   write(join(repo, "workflows", "render-invoice.ts"), INVOICE);
+  write(join(repo, "sites", "members", "components", "greet.tsx"), GREET);
+  write(join(repo, "sites", "members", "routes", "greet.tsx"), GREET_PAGE);
   mkdirSync(join(repo, "node_modules"));
   symlinkSync(join(appDir, ".."), join(repo, "node_modules", "sanoma"));
   return { repo, config: defineConfig({ ...fixture, root: repo, file: join(repo, "sanoma.config.ts"), databaseUrl }) };
@@ -177,44 +198,35 @@ afterAll(async () => {
   for (const dir of temporary) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A site's page at `path`, and a call made from `page` (none: from a file that is no page). */
-const pageAt = (path: string) => ({ path });
-const callFrom = (page?: string) => ({
-  kind: "workflow" as const,
-  target: "hello",
-  via: "api" as const,
-  file: "sites/www/routes/index.tsx",
-  line: 1,
-  column: 1,
-  ...(page && { page }),
-});
-
 describe("prerenderedPages", () => {
-  it("leaves out the pages a call is made from, on the page or a layout above it", () => {
+  it("leaves out the pages a call is made from (`calls`), and those under them, as under a layout", () => {
     const pages = [
-      pageAt("/sites/www"),
-      pageAt("/sites/www/form"),
-      pageAt("/sites/www/shop"),
-      pageAt("/sites/www/shop/cart"),
+      { path: "/sites/www" },
+      { path: "/sites/www/form", calls: true as const },
+      { path: "/sites/www/shop", calls: true as const },
+      { path: "/sites/www/shop/cart" },
+      { path: "/sites/www/shopping" },
     ];
-    expect(prerenderedPages({ pages, calls: [callFrom("/sites/www/form"), callFrom("/sites/www/shop")] })).toEqual([
-      pageAt("/sites/www"),
-    ]);
-  });
-
-  it("prerenders nothing when a call is made from a file that is no page", () => {
-    expect(prerenderedPages({ pages: [pageAt("/sites/www")], calls: [callFrom()] })).toEqual([]);
+    expect(prerenderedPages(pages)).toEqual([{ path: "/sites/www" }, { path: "/sites/www/shopping" }]);
+    // A call from the site's own layout: none of its pages.
+    expect(prerenderedPages([{ path: "/sites/www", calls: true }, { path: "/sites/www/about" }])).toEqual([]);
   });
 });
 
 describe("buildAppBundle", () => {
-  it("prerenders the pages no call is made from, of the public sites with no login on a domain", () => {
-    // hello's component calls `api`, so none of hello's; every page of intl, in each language.
+  it("prerenders the pages no call is made from of the public sites on a domain, with a login or not", () => {
+    // hello's component calls `api` for leads alone, which calls itself; members' greet imports one
+    // that calls; every page of intl, in each language. members has a login, made under the
+    // build's throwaway signing key: its page answered the build's request.
     expect(bundle.prerendered.map(({ asset }) => asset).toSorted()).toEqual([
+      "/__sanoma/pages/hello.example/index.html",
+      "/__sanoma/pages/hello.example/posts/hello/index.html",
+      "/__sanoma/pages/hello.example/posts/index.html",
       "/__sanoma/pages/intl.example/fr/index.html",
       "/__sanoma/pages/intl.example/fr/posts/hello/index.html",
       "/__sanoma/pages/intl.example/index.html",
       "/__sanoma/pages/intl.example/posts/hello/index.html",
+      "/__sanoma/pages/members.example/index.html",
     ]);
     const paths = new Set(bundle.assets.map(({ path }) => path));
     for (const { asset } of bundle.prerendered) expect(paths).toContain(asset);
@@ -331,7 +343,9 @@ describe("buildAppBundle", () => {
   });
 
   it("renders a page on the Worker, and its robots.txt", async () => {
-    expect(await (await get("https://hello.example/")).text()).toContain("Hello from the hello site");
+    const page = await get("https://hello.example/run");
+    expect([page.status, page.headers.get("etag")]).toEqual([200, null]);
+    expect(await page.text()).toContain("Greet someone");
     expect(await (await get("https://hello.example/robots.txt")).text()).toContain(
       "Sitemap: https://hello.example/sitemap.xml",
     );
@@ -401,6 +415,18 @@ describe("buildAppBundle", () => {
     const listed = await listTools({ cookie: cookie! });
     expect(listed.status).toBe(200);
     expect(await listed.text()).toContain('"name":"start_run"');
+  });
+
+  it("answers a page of a site with a login from the assets, whoever asks, and renders one that imports a call on each request", async () => {
+    // The fixture login's session cookie: a signed-in visitor gets the file anyone gets.
+    for (const headers of [{}, { cookie: "x-fixture-visitor=ada" }]) {
+      const page = await get("https://members.example/", { headers });
+      expect([page.status, page.headers.get("etag")]).toEqual([200, expect.any(String)]);
+      expect(await page.text()).toContain("For members");
+    }
+    const greet = await get("https://members.example/greet", { headers: { cookie: "x-fixture-visitor=ada" } });
+    expect([greet.status, greet.headers.get("etag")]).toEqual([200, null]);
+    expect(await greet.text()).toContain("Greet a member");
   });
 
   it("serves a site with a login on the Worker, its half made on the request's client", async () => {

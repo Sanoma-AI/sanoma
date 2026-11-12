@@ -131,11 +131,11 @@ describe("readSites", () => {
         // A layout and its index are one page; a page per post, the one kind its file reads.
         pages: [
           { path: "/sites/hello" },
-          { path: "/sites/hello/leads" },
+          { path: "/sites/hello/leads", calls: true },
           { path: "/sites/hello/posts" },
           { path: "/sites/hello/posts/$slug", content: "posts" },
-          { path: "/sites/hello/run" },
-          { path: "/sites/hello/started" },
+          { path: "/sites/hello/run", calls: true },
+          { path: "/sites/hello/started", calls: true },
         ],
         calls: [
           // A component's, which is no page; its call by a name not written out is skipped.
@@ -262,7 +262,11 @@ describe("readSites", () => {
         name: "desk",
         at: atSite("desk"),
         title: "Front desk",
-        pages: [{ path: "/sites/desk" }, { path: "/sites/desk/later" }, { path: "/sites/desk/settings" }],
+        pages: [
+          { path: "/sites/desk", calls: true },
+          { path: "/sites/desk/later", calls: true },
+          { path: "/sites/desk/settings", calls: true },
+        ],
         calls: [
           {
             kind: "collection",
@@ -508,6 +512,64 @@ describe("readSites", () => {
     ]);
     expect(warnings[0]!.message).toMatch(/^the sitemap lists none of this page's entries/);
     expect(siteContentPages(root)).toEqual({ "/sites/www/blog/$slug": "posts", "/sites/www/guides/$slug": "guides" });
+  });
+
+  it("marks the pages a call is made from: in their own files, or in a site file they import, directly or not", () => {
+    const root = tree("importing", {
+      "sites/www/components/cloud.ts":
+        'import { api } from "sanoma/site";\n\nexport const list = () => api.hello.start({ who: "x" });\n',
+      // Calls through others: a re-export, and a folder's index importing it with no extension.
+      "sites/www/components/card.tsx": 'export { list } from "./cloud.ts";\n',
+      "sites/www/components/widgets/index.ts": 'import { list } from "../cloud";\n\nexport const widgets = [list];\n',
+      // Two files that import each other, and neither calls.
+      "sites/www/components/ping.ts": 'import { pong } from "./pong.ts";\n\nexport const ping = () => pong;\n',
+      "sites/www/components/pong.ts": 'import { ping } from "./ping.ts";\n\nexport const pong = () => ping;\n',
+      "sites/www/routes/index.tsx": page(
+        "/sites/www/",
+        'import { ping } from "../components/ping.ts";',
+        "return ping();",
+      ),
+      "sites/www/routes/account.tsx": page(
+        "/sites/www/account",
+        'import { list } from "../components/cloud.ts";',
+        "return list();",
+      ),
+      "sites/www/routes/new.tsx": page(
+        "/sites/www/new",
+        'import { widgets } from "../components/widgets";',
+        "return widgets;",
+      ),
+      "sites/www/routes/lazy.tsx": page(
+        "/sites/www/lazy",
+        'import { lazy } from "react";\n\nconst Card = lazy(() => import("../components/card.tsx"));',
+        "return Card;",
+      ),
+      // A type-only import makes no call.
+      "sites/www/routes/typed.tsx": page(
+        "/sites/www/typed",
+        'import type { list } from "../components/cloud.ts";',
+        "return null as unknown as typeof list;",
+      ),
+      // A layout that calls: its page (one with its index), not the page under it, which the build's prerender leaves out as under it.
+      "sites/www/routes/shop.tsx": page(
+        "/sites/www/shop",
+        'import { widgets } from "../components/widgets/index.ts";',
+        "return widgets;",
+      ),
+      "sites/www/routes/shop.index.tsx": page("/sites/www/shop/", "", "return null;"),
+      "sites/www/routes/shop.cart.tsx": page("/sites/www/shop/cart", "", "return null;"),
+    });
+    expect(describeConfig(config(root)).sites.map(({ pages }) => pages)).toEqual([
+      [
+        { path: "/sites/www" },
+        { path: "/sites/www/account", calls: true },
+        { path: "/sites/www/lazy", calls: true },
+        { path: "/sites/www/new", calls: true },
+        { path: "/sites/www/shop", calls: true },
+        { path: "/sites/www/shop/cart" },
+        { path: "/sites/www/typed" },
+      ],
+    ]);
   });
 
   it("reads a page its route keeps out of the sitemap, written out, its index deciding over its layout", () => {

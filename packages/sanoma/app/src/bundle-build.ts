@@ -104,8 +104,8 @@ export interface BuildAppBundleOptions {
   /** The company's config, loaded from its file (`config.file`), which the bundle imports for its workflows and connectors. */
   config: SanomaConfig;
   /**
-   * A public site's domain, by site name (`SANOMA_DOMAINS`): the sites with no login whose pages
-   * are prerendered, at their domain. A site without one is rendered on each request.
+   * A public site's domain, by site name (`SANOMA_DOMAINS`): the sites whose pages are
+   * prerendered, at their domain. A site without one is rendered on each request.
    */
   domains?: Readonly<Record<string, string>>;
   /** See `BuildAppOptions.log`. */
@@ -113,13 +113,12 @@ export interface BuildAppBundleOptions {
 }
 
 /**
- * The pages of `site` the build prerenders: those no call is made from, on the page or a layout
- * above it. A call from a file that is no page (a component's) may be on any of them: none then.
+ * The pages of a site the build prerenders: those no call is made from (`SitePage.calls`), in the
+ * page's files, a layout's above it or the site's files they import.
  */
-export function prerenderedPages(site: Pick<SiteEntry, "pages" | "calls">): SiteEntry["pages"] {
-  if (site.calls.some((call) => call.page === undefined)) return [];
-  const pages = site.calls.map((call) => call.page!);
-  return site.pages.filter(({ path }) => !pages.some((page) => path === page || path.startsWith(`${page}/`)));
+export function prerenderedPages(pages: SiteEntry["pages"]): SiteEntry["pages"] {
+  const calling = pages.flatMap(({ path, calls }) => (calls ? [path] : []));
+  return pages.filter(({ path }) => !calling.some((page) => path === page || path.startsWith(`${page}/`)));
 }
 
 const BUNDLE = "virtual:sanoma/app-bundle";
@@ -437,16 +436,16 @@ const MODULE_TYPES: Record<string, AppBundle["modules"][number]["type"]> = { js:
 type PageToPrerender = AppBundle["prerendered"][number];
 
 /**
- * The pages to prerender: each public site's with no login, on its domain, that no call is made
- * from, as its sitemap lists them, with the published content as it is now.
+ * The pages to prerender: each public site's on its domain that no call is made from, as its
+ * sitemap lists them, with the published content as it is now. A login does not matter: on the
+ * site's domain the server's render never reads the visitor, whom the page asks for once loaded.
  */
 async function pagesOf(snapshot: AppSnapshot, domains: Readonly<Record<string, string>>): Promise<PageToPrerender[]> {
   const { sitemapEntries } = await import("./seo.ts");
   return snapshot.description.sites.flatMap((site) => {
     const domain = domains[site.name]?.toLowerCase();
-    // A site with a login shows each visitor their own pages: nothing of it is prerendered.
-    if (!servedOnWorker(site) || site.login !== undefined || !domain) return [];
-    const pages = { ...site, pages: prerenderedPages(site) };
+    if (!servedOnWorker(site) || !domain) return [];
+    const pages = { ...site, pages: prerenderedPages(site.pages) };
     return sitemapEntries(pages, `https://${domain}`, snapshot.published).flatMap(({ loc }) => {
       const path = new URL(loc).pathname;
       const asset = prerenderedAsset(domain, path);
@@ -618,7 +617,7 @@ async function runOnWorkerd(
  * Builds the company's app bundle for Cloudflare's Worker (`AppBundle`): every route, the app's
  * and each site's, under the app's `__root.tsx`, bundled with the runtime, the config and the
  * snapshot of the company's files (`appSnapshot`) for workerd by `@cloudflare/vite-plugin`, and
- * every page no call is made from of a public site with no login on a domain (`domains`)
+ * every page no call is made from of a public site on a domain (`domains`)
  * prerendered into the assets. Refuses a site's file or the app's own that imports what the
  * Worker does not have (`NodeOnlyImport`). Written under `.sanoma/app/bundle/` and read back,
  * nothing kept.
