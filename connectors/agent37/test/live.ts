@@ -16,7 +16,7 @@ import { checkSandbox } from "sanoma/testing/sandbox";
 import type { Box } from "sanoma/workflows";
 import { agent37Api, isCode } from "../src/api.ts";
 import { agent37Backend, BOX, KEY } from "../src/backend.ts";
-import { DEFAULTS, instance } from "../src/connector.ts";
+import { BASE, DEFAULTS, instance } from "../src/connector.ts";
 
 const key = process.env[KEY];
 const repo = process.argv[2];
@@ -51,7 +51,7 @@ async function sh(box: Box, command: string) {
 let failed = false;
 try {
   const box = await timed("create to ready (made, running, the runner started)", () =>
-    backend.open({ name: NAME, image: DEFAULTS.image, size: DEFAULTS.size }),
+    backend.open({ name: NAME, image: BASE, size: DEFAULTS.size }),
   );
 
   // The company repo, as the instance hands a box its draft: a bundle the box clones.
@@ -82,7 +82,7 @@ try {
     }
   }
   console.log(`checkpoint written (sleep to a start it takes): ${seconds(waking - asleep)}`);
-  const woken = await backend.open({ name: NAME, image: DEFAULTS.image, size: DEFAULTS.size });
+  const woken = await backend.open({ name: NAME, image: BASE, size: DEFAULTS.size });
   console.log(`wake from sleep (start to the runner answering): ${seconds(Date.now() - waking)}`);
   if (!(await sh(woken, "test -d repo/node_modules && echo kept")).includes("kept")) {
     throw new Error("node_modules did not survive the sleep");
@@ -94,7 +94,7 @@ try {
     backend,
     capabilities: instance.sandbox!.capabilities,
     name: `${NAME}-kit`,
-    image: DEFAULTS.image,
+    image: BASE,
     size: DEFAULTS.size,
     timeoutMs: 5 * 60_000,
   });

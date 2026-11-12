@@ -15,8 +15,14 @@ const SHAPES = [
   { cpu: 4, memory: 32, disk: 80 },
 ] as const;
 
-/** A box's defaults: Agent37's smallest shape and its plain Linux template, on its shared CPU in `us`. */
-export const DEFAULTS = { size: 2, disk: 10, image: "agent37-base", region: "us", type: "default" } as const;
+/**
+ * A box's defaults: Agent37's smallest shape on its shared CPU in `us`. Its image, when none is
+ * declared, is Sanoma's box image of this release (`backend.ts`), else `BASE`.
+ */
+export const DEFAULTS = { size: 2, disk: 10, region: "us", type: "default" } as const;
+
+/** Agent37's plain Linux template: a box's when Sanoma's box image cannot be had. */
+export const BASE = "agent37-base";
 
 const instanceSchema = z
   .object({
@@ -34,7 +40,9 @@ const instanceSchema = z
       .string()
       .min(1)
       .optional()
-      .describe("The template a box runs: `agent37-base` (the default) or one registered in the workspace"),
+      .describe(
+        "The template a box runs: by default Sanoma's box image of this release, registered in the workspace; or `agent37-base`, or another template of the workspace",
+      ),
     region: z
       .enum(["us", "eu", "ap-south"])
       .optional()
@@ -59,8 +67,8 @@ const instanceSchema = z
     path: ["type"],
   });
 
-/** What a declaration asks of a box, its defaults filled. */
-export type Wanted = Required<Omit<z.infer<typeof instanceSchema>, "id" | "healthy">>;
+/** What a declaration asks of a box, its defaults filled: its image only when declared or given. */
+export type Wanted = Required<Omit<z.infer<typeof instanceSchema>, "id" | "healthy" | "image">> & { image?: string };
 
 /** The shape `size` and `memory` name, the memory following the size when it is not given. */
 function shapeOf({ size = DEFAULTS.size, memory }: { size?: number; memory?: number }) {

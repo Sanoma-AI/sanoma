@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { anthropic } from "@sanoma-ai/connector-anthropic";
-import { type Box, resolveConfig } from "sanoma/workflows";
+import { type Box, IMAGE_AGENTS, resolveConfig } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { install, shims } from "../src/steps/agent/acp.ts";
 import { agentOn } from "../src/steps/agent/checkout.ts";
@@ -22,7 +22,8 @@ import { localBackend } from "../src/steps/agent/local-box.ts";
 // What a person's own agent finds in their box (a local backend's): the shims first on its PATH
 // (`shims` in acp.ts), run as the agent runs them: `gh`, `open` and `xdg-open` refuse; `security`
 // is a Keychain that is there, empty, and takes nothing, so Claude Code keeps its sign-in in its
-// own file under its HOME, `.acp` in the box; and its install (`install`), there. With SANOMA_LIVE=1
+// own file under its HOME, `.acp` in the box; and its install (`install`), there, or the box image's
+// when that carries the agent at the packages wanted. With SANOMA_LIVE=1
 // on macOS, Claude Code itself, installed, stores a secret through the shims.
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-shims-")));
@@ -113,6 +114,12 @@ describe("a person's own agent's shims", () => {
   });
 });
 
+/** `local` with its image's agents (`IMAGE_AGENTS`) at `image` on this machine. */
+const withImage = (local: Box, image: string): Box => ({
+  ...local,
+  read: (path) => local.read(path.startsWith(`${IMAGE_AGENTS}/`) ? join(image, path.slice(IMAGE_AGENTS.length)) : path),
+});
+
 describe("a person's own agent's install", () => {
   it("lands in the agents' HOME in the box, installed by pnpm run there with that HOME", async () => {
     // A package of this machine's, so no registry: its bin says its HOME.
@@ -124,8 +131,9 @@ describe("a person's own agent's install", () => {
     );
     writeFileSync(join(pkg, "bin.js"), '#!/usr/bin/env node\nprocess.stdout.write(process.env.HOME ?? "");\n');
     const at = join(agents, "fake");
-    const agent = { title: "Fake", packages: [`file:${pkg}`], bin: "fake-agent", args: [], signIn: { run: [] } };
-    await install(box, agent, at);
+    const agent = { id: "fake", packages: [`file:${pkg}`], bin: "fake-agent", args: [], signIn: { run: [] } };
+    // The box's image carries none (this machine has no /opt/sanoma/agents/fake).
+    expect(await install(box, agent, at)).toBe(at);
     expect(readFileSync(join(at, "installed.json"), "utf8")).toBe(JSON.stringify(agent.packages));
     // Its bin, and pnpm's store, as the box sees them with the agents' HOME: theirs, never this
     // machine user's, the store written by the install.
@@ -139,8 +147,33 @@ describe("a person's own agent's install", () => {
     expect(store.startsWith(`${agents}/`) && existsSync(store)).toBe(true);
     // Installed: the next turn finds it so.
     rmSync(join(at, "node_modules"), { recursive: true });
-    await install(box, agent, at);
+    expect(await install(box, agent, at)).toBe(at);
     expect(existsSync(join(at, "node_modules"))).toBe(false);
+  }, 120_000);
+
+  it("is the image's when it carries the agent at the packages wanted, and installs nothing", async () => {
+    const image = join(scratch, "image");
+    const agent = { id: "pre", packages: ["pre-agent@1.0.0"], bin: "pre-agent", args: [], signIn: { run: [] } };
+    mkdirSync(join(image, "pre"), { recursive: true });
+    writeFileSync(join(image, "pre/installed.json"), JSON.stringify(agent.packages));
+    const at = join(agents, "pre");
+    // No registry has `pre-agent`: an install would fail.
+    expect(await install(withImage(box, image), agent, at)).toBe(join(IMAGE_AGENTS, "pre"));
+    expect(existsSync(at)).toBe(false);
+  });
+
+  it("is installed in the home when the image carries the agent at other packages", async () => {
+    const pkg = join(scratch, "newer-agent");
+    mkdirSync(pkg);
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "newer-agent", version: "2.0.0" }));
+    const image = join(scratch, "older-image");
+    const agent = { id: "newer", packages: [`file:${pkg}`], bin: "newer-agent", args: [], signIn: { run: [] } };
+    mkdirSync(join(image, "newer"), { recursive: true });
+    writeFileSync(join(image, "newer/installed.json"), JSON.stringify(["newer-agent@1.0.0"]));
+    const at = join(agents, "newer");
+    expect(await install(withImage(box, image), agent, at)).toBe(at);
+    expect(readFileSync(join(at, "installed.json"), "utf8")).toBe(JSON.stringify(agent.packages));
+    expect(existsSync(join(at, "node_modules/newer-agent/package.json"))).toBe(true);
   }, 120_000);
 });
 

@@ -10,6 +10,8 @@ import { RUNNER_HEALTH, RUNNER_PORT } from "sanoma/workflows";
 // `https://api.agent37.com/v1` from memory (every other URL goes out), its exec `sh -c` here, each
 // instance's home a directory of its own, and its edge a port of this machine per instance's port:
 // the runner the backend starts with exec listens on one of its own (`SANOMA_RUNNER_PORT`). Its
+// workspace templates are names in memory, an image registered at once. Every key that starts
+// with `KEY` is one of its workspace's, so a test may use a key of its own. Its
 // `PATH` is a template's: no pnpm, but a corepack that makes one. A stop, a delete and `close` end
 // what an instance's execs left running, as a fresh boot would; a sleep keeps it. The edge answers
 // `/health` itself, on every port, as Agent37's does. `answer` puts a reply ahead of the next
@@ -43,6 +45,8 @@ const problem = (status: number, code: string) => json(status, { error: { code, 
 export async function fakeAgent37Vendor() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-agent37-")));
   const instances = new Map<string, FakeInstance>();
+  /** The workspace's templates, by name: what was registered. */
+  const templates = new Map<string, { name: string; image_ref: string }>();
   /** Each instance's runner port, and the process groups its execs led. */
   const runners = new Map<string, { port: number; groups: number[] }>();
   const sent: Sent[] = [];
@@ -126,6 +130,17 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
       return json(status, reply);
     }
     if (method === "GET" && path === "/instances") return json(200, { data: [...instances.values()].toReversed() });
+    if (method === "POST" && path === "/templates") {
+      if (templates.has(body!.name)) return problem(409, "template_conflict");
+      const made = { name: body!.name, image_ref: body!.image_ref };
+      templates.set(made.name, made);
+      return json(201, made);
+    }
+    const template = path.match(/^\/templates\/([^/]+)$/)?.[1];
+    if (method === "GET" && template) {
+      const found = templates.get(template);
+      return found ? json(200, found) : problem(404, "not_found");
+    }
     if (method === "POST" && path === "/instances") {
       const id = `fake${String(++seq).padStart(6, "0")}`;
       const made: FakeInstance = { ...body!, id, status: "running", metadata: body!.metadata ?? null } as FakeInstance;
@@ -181,13 +196,14 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     const text = await request.text();
     const body = text ? JSON.parse(text) : undefined;
     sent.push({ method: request.method, path, ...(body && { body }) });
-    if (request.headers.get("authorization") !== `Bearer ${KEY}`) return problem(401, "invalid_api_key");
+    if (!request.headers.get("authorization")?.startsWith(`Bearer ${KEY}`)) return problem(401, "invalid_api_key");
     return api(request.method, path, body);
   };
   const headersSeen: string[] = [];
 
   return {
     instances,
+    templates,
     sent,
     headersSeen,
     fetch,
