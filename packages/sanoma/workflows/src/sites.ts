@@ -32,8 +32,6 @@ import {
 
 export type { SiteCall, SiteEntry, SitePage };
 
-/** Where a site's code is: its pages and its components. */
-const SITE_DIRS = ["routes", "components"];
 const KIND_NAMES = { workflow: "workflow", collection: "collection", op: "operation" } as const;
 /** What a route's loader and head name its path's parameters by. */
 const PARAMS: ReadonlySet<string> = new Set(["params"]);
@@ -43,8 +41,8 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
 /**
  * The sites under `root` (`sitesUnder`): each folder of `sites/`, then of each app's
  * `apps/<app>/sites/`, with a `routes/` whose name is a URL segment, by key (as
- * `sanoma/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
- * `components/**` (`.ts` and `.tsx`, less tests and declarations) of each with oxc, never running
+ * `sanoma/app/build`'s `sitesOf` mounts them). Reads every file of each (`.ts` and `.tsx`, less
+ * tests and declarations: its pages under `routes/`, its components) with oxc, never running
  * them: each page (`SitePage`, from a route's id), each `<RunForm workflow="…" />` and each use of `api`, both imported from `sanoma/site`,
  * called or passed on (`queryFn: api.data.leads.list`):
  * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` (an app's
@@ -202,8 +200,8 @@ function pagesOf(read: readonly SiteFile[]): Map<string, SitePage> {
  * The files of a site a call may be made from: one that may call itself (`SiteFile.calls`), or
  * that imports one, directly or through others. An import names the file as written, else with
  * `.ts` or `.tsx`, else its folder's `index`. One of code (no extension, or a script's) that names
- * no file read here (outside `routes/` and `components/`, `./x.js`) is taken as calling: what it
- * reaches is not read. An asset's (`../style.css?url`) is skipped.
+ * no file of the site (outside its folder, `./x.js`) is taken as calling: what it reaches is not
+ * read. An asset's (`../style.css?url`) is skipped.
  */
 function callingFiles(read: readonly SiteFile[]): Set<string> {
   const files = new Set(read.map(({ file }) => file));
@@ -226,12 +224,10 @@ function callingFiles(read: readonly SiteFile[]): Set<string> {
 
 /** Each file of the site in `dir` (relative to `root`), as `readSiteFile` reads it, by path. */
 const readSiteFiles = (root: string, dir: string) =>
-  SITE_DIRS.flatMap((sub) => filesUnder(join(root, dir, sub), isSource))
-    .toSorted()
-    .flatMap((path) => {
-      const file = readSource(path);
-      return typeof file === "string" ? [] : [readSiteFile(file, relPath(root, path))];
-    });
+  filesUnder(join(root, dir), isSource).flatMap((path) => {
+    const file = readSource(path);
+    return typeof file === "string" ? [] : [readSiteFile(file, relPath(root, path))];
+  });
 
 /**
  * Each site's pages under `root` whose entries are a content kind's (`SitePage.content`), path to

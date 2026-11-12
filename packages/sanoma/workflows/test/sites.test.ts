@@ -551,8 +551,10 @@ describe("readSites", () => {
         'import type { list } from "../components/cloud.ts";\nimport og from "../assets/og.png";\nimport css from "../style.css?url";',
         "return [null as unknown as typeof list, og, css];",
       ),
+      // Through a file of another folder of the site: read too.
+      "sites/www/lib/x.ts": 'export { list as x } from "../components/cloud.ts";\n',
       // `api` imported and used in a form no call is read from, a module not written out, and code
-      // the site's reading does not reach (a folder but routes/ and components/, a `.js` name): each may call.
+      // that is not read (outside the site's folder, a `.js` name): each may call.
       "sites/www/components/unread.ts": 'import { api } from "sanoma/site";\n\nexport const { hello } = api;\n',
       "sites/www/routes/unread.tsx": page(
         "/sites/www/unread",
@@ -566,6 +568,7 @@ describe("readSites", () => {
       ),
       "sites/www/routes/lib.tsx": page("/sites/www/lib", 'import { x } from "../lib/x.ts";', "return x;"),
       "sites/www/routes/js.tsx": page("/sites/www/js", 'import { ping } from "../components/ping.js";', "return ping;"),
+      "sites/www/routes/shared.tsx": page("/sites/www/shared", 'import { y } from "../../shared/y.ts";', "return y;"),
       // A layout that calls: its page (one with its index) and the page under it.
       "sites/www/routes/shop.tsx": page(
         "/sites/www/shop",
@@ -584,6 +587,7 @@ describe("readSites", () => {
         { path: "/sites/www/lazy", calls: true },
         { path: "/sites/www/lib", calls: true },
         { path: "/sites/www/new", calls: true },
+        { path: "/sites/www/shared", calls: true },
         { path: "/sites/www/shop", calls: true },
         { path: "/sites/www/shop/cart", calls: true },
         { path: "/sites/www/typed" },
