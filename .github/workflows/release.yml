@@ -112,6 +112,21 @@ jobs:
             cat "$RUNNER_TEMP/inspect.err" >&2
             exit 1
           fi
+      # npm can take minutes to serve a version it has just accepted, and the image's `pnpm add` needs
+      # every package's. --prefer-online: each look asks npm again, not this runner's cache.
+      - name: Packages readable from npm
+        if: steps.image.outputs.tag
+        env:
+          PACKAGES: ${{ steps.image.outputs.packages }}
+        run: |
+          for package in $PACKAGES; do
+            for _ in $(seq 60); do
+              [ -n "$(npm view --prefer-online "$package" version 2> /dev/null)" ] && continue 2
+              sleep 15
+            done
+            echo "::error::$package is not on npm 15 minutes after the publish"
+            exit 1
+          done
       # The README's hand command, with the same flags. No layer cache, as in the publish job.
       - if: steps.image.outputs.tag
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
