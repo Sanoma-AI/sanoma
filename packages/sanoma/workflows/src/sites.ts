@@ -199,23 +199,26 @@ function pagesOf(read: readonly SiteFile[]): Map<string, SitePage> {
 }
 
 /**
- * The files of a site a call is made from (any use in `SiteFile.uses`, `api.sanoma.describe` too):
- * in the file itself, or in a file of the site it imports, directly or through others. An import
- * names the file as written, else with `.ts` or `.tsx`, else its folder's `index`; an import of a
- * file the site does not have is skipped.
+ * The files of a site a call may be made from: one that may call itself (`SiteFile.calls`), or
+ * that imports one, directly or through others. An import names the file as written, else with
+ * `.ts` or `.tsx`, else its folder's `index`. One of code (no extension, or a script's) that names
+ * no file read here (outside `routes/` and `components/`, `./x.js`) is taken as calling: what it
+ * reaches is not read. An asset's (`../style.css?url`) is skipped.
  */
 function callingFiles(read: readonly SiteFile[]): Set<string> {
   const files = new Set(read.map(({ file }) => file));
   const importers = new Map<string, string[]>();
-  for (const { file, imports } of read) {
+  const calling = new Set<string>();
+  for (const { file, calls, imports } of read) {
+    if (calls) calling.add(file);
     for (const path of imports) {
       const imported = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"]
         .map((end) => path + end)
         .find((f) => files.has(f));
       if (imported !== undefined) importers.set(imported, [...(importers.get(imported) ?? []), file]);
+      else if (!/\.\w+(?:\?.*)?$/.test(posix.basename(path)) || /\.[cm]?[jt]sx?$/.test(path)) calling.add(file);
     }
   }
-  const calling = new Set(read.flatMap(({ file, uses }) => (uses.length ? [file] : [])));
   // A set's iteration reaches what is added to it as it goes.
   for (const file of calling) for (const importer of importers.get(file) ?? []) calling.add(importer);
   return calling;
@@ -331,15 +334,18 @@ const isDescribe = ({ kind, name, method }: Written): boolean =>
   kind === "workflow" && `${name}.${method}` === DESCRIBE_CALL;
 
 /**
- * One file of a site, from the root (`sites/www/routes/index.tsx`): its uses, in its order, what
- * it imports by a relative path, statically or by `import()` (type-only imports left out), as a
- * path from the root as written (`sites/www/components/cloud.ts`, or with no extension), and the
+ * One file of a site, from the root (`sites/www/routes/index.tsx`): its uses, in its order,
+ * whether it may make a call (`calls`: it imports `api` or `RunForm`, used or not in a form `uses`
+ * reads, or has an `import()` of a module not written out), what it imports by a relative path,
+ * statically or by `import()` (type-only imports left out), as a path from the root as written
+ * (`sites/www/components/cloud.ts`, or with no extension), and the
  * page it is, from its route's id, with the content kind whose entry its one parameter names
  * (`SitePage.content`) and whether its route's options keep it out of the sitemap (`SitePage.sitemap`).
  */
 type SiteFile = {
   file: string;
   uses: Written[];
+  calls: boolean;
   imports: string[];
   route?: FileRoute;
   warning?: LintProblem & { file: string };
@@ -351,6 +357,7 @@ function readSiteFile({ program, at }: SourceFile, file: string): SiteFile {
   const runForm = importedAs(program, SITE_ENTRIES, "RunForm");
   const content = importedAs(program, SITE_ENTRIES, "content");
   const imports: string[] = [];
+  let calls = api.size > 0 || runForm.size > 0;
   const found: Omit<Written, "page">[] = [];
   /** Each `content.<kind>.get(arg)`: its kind, its argument and where it is. */
   const gets: { kind: string; arg: Node; start: number }[] = [];
@@ -391,13 +398,15 @@ function readSiteFile({ program, at }: SourceFile, file: string): SiteFile {
       if (name !== undefined) found.push({ kind: "workflow", name, via: "RunForm", file, ...at(node.start) });
     } else if (node.importKind !== "type" && node.exportKind !== "type") {
       const source = moduleSpecifier(node);
-      if (source !== undefined && RELATIVE.test(source)) imports.push(posix.join(posix.dirname(file), source));
+      if (source !== undefined && RELATIVE.test(source))
+        imports.push(posix.join(posix.dirname(file), source).replace(/\/$/, ""));
+      else if (source === undefined && node.type === "ImportExpression") calls = true;
     }
     for (const child of childrenOf(node)) visit(child);
   };
   visit(program);
   const uses = found.map((use) => (page === undefined ? use : { ...use, page }));
-  const read = { file, uses, imports };
+  const read = { file, uses, calls, imports };
   if (page === undefined) return read;
   const route: FileRoute = { path: page, ...(says && { says }) };
   // The one parameter's name (not a splat's), and the kinds whose `get` is given it (`params.slug`, or `slug` destructured).

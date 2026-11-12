@@ -163,8 +163,10 @@ export const SitePageSchema = z.strictObject({
   sitemap: z.literal(false).optional(),
   /**
    * `true` when a call (`SiteCall`) is made from one of its files, a layout's above it, or a file
-   * of the site one of them imports, directly or through others (statically or by `import()`):
-   * what it shows depends on who asks, so it is not built once as a file.
+   * of the site one of them imports, directly or through others (statically or by `import()`); a
+   * file that imports `api` or `RunForm`, or code that is not read (outside `routes/` and
+   * `components/`, an `import()` not written out), counts as one: what it shows may depend on who
+   * asks, so it is not built once as a file.
    */
   calls: z.literal(true).optional(),
 });

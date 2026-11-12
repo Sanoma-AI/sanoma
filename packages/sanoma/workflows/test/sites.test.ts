@@ -474,7 +474,8 @@ describe("readSites", () => {
         { path: "/sites/www/docs/$" },
         { path: "/sites/www/guides/$slug", content: "guides" },
         { path: "/sites/www/notes/$id" },
-        { path: "/sites/www/other/$slug" },
+        // Its `content` from a file the site does not have: it may call.
+        { path: "/sites/www/other/$slug", calls: true },
         { path: "/sites/www/tags/$tag", content: "tags" },
         { path: "/sites/www/two/$a/$b" },
       ],
@@ -544,12 +545,27 @@ describe("readSites", () => {
         'import { lazy } from "react";\n\nconst Card = lazy(() => import("../components/card.tsx"));',
         "return Card;",
       ),
-      // A type-only import makes no call.
+      // A type-only import makes no call; nor do an asset's and a stylesheet's.
       "sites/www/routes/typed.tsx": page(
         "/sites/www/typed",
-        'import type { list } from "../components/cloud.ts";',
-        "return null as unknown as typeof list;",
+        'import type { list } from "../components/cloud.ts";\nimport og from "../assets/og.png";\nimport css from "../style.css?url";',
+        "return [null as unknown as typeof list, og, css];",
       ),
+      // `api` imported and used in a form no call is read from, a module not written out, and code
+      // the site's reading does not reach (a folder but routes/ and components/, a `.js` name): each may call.
+      "sites/www/components/unread.ts": 'import { api } from "sanoma/site";\n\nexport const { hello } = api;\n',
+      "sites/www/routes/unread.tsx": page(
+        "/sites/www/unread",
+        'import { hello } from "../components/unread.ts";',
+        "return hello;",
+      ),
+      "sites/www/routes/computed.tsx": page(
+        "/sites/www/computed",
+        "",
+        "return import(`../components/${'plain'}.tsx`);",
+      ),
+      "sites/www/routes/lib.tsx": page("/sites/www/lib", 'import { x } from "../lib/x.ts";', "return x;"),
+      "sites/www/routes/js.tsx": page("/sites/www/js", 'import { ping } from "../components/ping.js";', "return ping;"),
       // A layout that calls: its page (one with its index) and the page under it.
       "sites/www/routes/shop.tsx": page(
         "/sites/www/shop",
@@ -563,11 +579,15 @@ describe("readSites", () => {
       [
         { path: "/sites/www" },
         { path: "/sites/www/account", calls: true },
+        { path: "/sites/www/computed", calls: true },
+        { path: "/sites/www/js", calls: true },
         { path: "/sites/www/lazy", calls: true },
+        { path: "/sites/www/lib", calls: true },
         { path: "/sites/www/new", calls: true },
         { path: "/sites/www/shop", calls: true },
         { path: "/sites/www/shop/cart", calls: true },
         { path: "/sites/www/typed" },
+        { path: "/sites/www/unread", calls: true },
       ],
     ]);
   });
