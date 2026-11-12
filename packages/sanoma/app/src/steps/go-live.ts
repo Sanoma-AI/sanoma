@@ -270,23 +270,26 @@ export async function goLive(step: AppStepContext, choices: GoLiveInput) {
     // Read again under the lock: another run may have written it, or bound what it declares, since.
     const replaces = existsSync(path) && (await replacing());
     const before = replaces ? await readFile(path, "utf8") : undefined;
-    await writeFile(path, text, { flag: replaces ? "w" : "wx" }).catch((err: NodeJS.ErrnoException) => {
-      throw err.code === "EEXIST" ? writtenAlready() : err;
-    });
+    if (!replaces) {
+      await writeFile(path, text, { flag: "wx" }).catch((err: NodeJS.ErrnoException) => {
+        throw err.code === "EEXIST" ? writtenAlready() : err;
+      });
+    }
     try {
+      if (replaces) await writeFile(path, text);
       if (key) await client.setSecret(SOURCE_KEY, key.privateKey, { by: by.id });
       // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
       if (chosen.wakeup.type) await mintWakeupToken(client, by);
+      await source?.commit({
+        paths: [INFRA],
+        message: "Go live: declare the repository, its deploy key, the database and the host",
+        author: by.id,
+      });
     } catch (err) {
-      // As it was again, so going live can be tried again.
+      // As it was again (the file, written or replaced, until it is committed), so going live can be tried again.
       await (before === undefined ? rm(path, { force: true }) : writeFile(path, before));
       throw err;
     }
-    await source?.commit({
-      paths: [INFRA],
-      message: "Go live: declare the repository, its deploy key, the database and the host",
-      author: by.id,
-    });
   });
   return { apply: { only: beforeHost(step, text) } };
 }
