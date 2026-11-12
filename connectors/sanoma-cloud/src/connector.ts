@@ -23,10 +23,7 @@ import { z } from "zod";
  */
 export const REGIONS = ["us-east", "us-west", "eu-central", "eu-west", "ap-southeast"] as const;
 
-/** A company's slug, its address `<slug>.sanoma.work`, as sanoma-ops's sign-up checks it (`CLOUD_SLUG`). */
-export const SLUG = CLOUD_SLUG;
-
-/** `SLUG` in words. */
+/** A company's slug (`CLOUD_SLUG`), its address `<slug>.sanoma.work`, in words. */
 export const SLUG_RULE = `a slug: ${CLOUD_SLUG_RULE}`;
 
 /** The port the runtime listens on in a Cloud host: the Cloud's, whatever is declared. */
@@ -63,7 +60,7 @@ export function hostSlug(desired: { name?: unknown; source?: unknown; domains?: 
   return repository ? slugged(repository.name) : "";
 }
 
-const slugField = z.string().regex(SLUG, SLUG_RULE);
+const slugField = z.string().regex(CLOUD_SLUG, SLUG_RULE);
 
 const databaseSchema = z.object({
   name: slugField
@@ -261,7 +258,10 @@ const companySpecs = {
     description:
       "Make the company's repository, empty, with the Sanoma.work GitHub App in the account it is installed on, unless the company has one (cloud-signup, part repository); its owner and name",
     input: z.object({ slug: slugField.describe("The company's slug") }),
-    output: z.object({ owner: z.string(), name: z.string() }),
+    output: z.object({
+      owner: z.string().regex(/^[\w-]+$/, "a GitHub owner"),
+      name: z.string().regex(/^(?!\.\.?$)[\w.-]+$/, "a GitHub repository's name"),
+    }),
     target: ({ slug }: { slug: string }) => slug,
   },
   invite: {

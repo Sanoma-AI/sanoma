@@ -311,7 +311,8 @@ export interface AppRunner {
   /**
    * `apply` started as a child run of this one (`<run>:apply`), as its own actor, and waited for
    * (an approval it waits on included): its run id once every step of it is done; a failure,
-   * saying which did not, when the apply failed or left one undone.
+   * saying which did not, when the apply failed or was cancelled, left one undone, or made no
+   * step for a resource `only` names (its plan failed).
    */
   applyAndWait(apply: ApplyInput): Promise<GoLiveOutput>;
 }

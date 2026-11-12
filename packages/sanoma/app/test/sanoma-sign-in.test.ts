@@ -32,6 +32,7 @@ const cloud = setupServer(
 /** The company's secrets, and whether a write of the Cloud token is refused as the environment's. */
 let stored: Map<string, { value: string; setBy: string }>;
 let readOnly = false;
+let clearFails = false;
 const client = {
   secrets: async (names: readonly string[]) =>
     new Map(
@@ -44,7 +45,10 @@ const client = {
     if (readOnly && name === "SANOMA_CLOUD_TOKEN") throw Object.assign(new Error("read only"), { code: "read_only" });
     stored.set(name, { value, setBy: by });
   },
-  clearSecret: async (name: string) => void stored.delete(name),
+  clearSecret: async (name: string) => {
+    if (clearFails) throw new Error("the store is down");
+    stored.delete(name);
+  },
 } as unknown as SanomaClient;
 
 const app = (place: AppContext["place"] = "this-computer") =>
@@ -61,8 +65,11 @@ let logged: unknown[][] = [];
 beforeAll(() => cloud.listen());
 afterAll(() => cloud.close());
 beforeEach(() => {
-  stored = new Map([["SANOMA_CLOUD_URL", { value: CLOUD, setBy: "alice" }]]);
+  // Where the Cloud driver reads it: the process's environment.
+  vi.stubEnv("SANOMA_CLOUD_URL", CLOUD);
+  stored = new Map();
   readOnly = false;
+  clearFails = false;
   redeemed.length = 0;
   answer = () => HttpResponse.json({ token: TOKEN });
   logged = [];
@@ -72,6 +79,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   // Nothing secret in any log.
   const text = JSON.stringify(logged);
   const leaked = [TOKEN, CODE, ...redeemed.map((r) => r.verifier)].filter((value) => text.includes(value));
@@ -116,6 +124,23 @@ describe("signing in to Sanoma", () => {
       status: 409,
       body: { error: "Signing in to Sanoma is for the app on a computer: a hosted company has its token" },
     });
+  });
+
+  it("comes back to a loopback address only", async () => {
+    await expect(startSanomaSignIn(app(), alice, "https://acme.example")).rejects.toMatchObject({
+      status: 409,
+      body: { error: "Signing in to Sanoma comes back to this app at a loopback address only" },
+    });
+    expect(await sanomaSignIn(app())).toEqual({ signedIn: false, pending: false });
+  });
+
+  it("answers a failure of its own with a page that is not cached", async () => {
+    const url = await started();
+    clearFails = true;
+    const res = await callback({ code: CODE, state: url.searchParams.get("state")! });
+    expect(res.status).toBe(500);
+    expect(await page(res)).toContain("Signing in to Sanoma failed");
+    expect(redeemed).toEqual([]);
   });
 
   it("redeems the code with the verifier once, and stores the Cloud token as who started it, never showing it", async () => {

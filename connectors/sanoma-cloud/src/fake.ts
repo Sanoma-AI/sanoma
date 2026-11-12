@@ -3,7 +3,8 @@ import type { AddressInfo } from "node:net";
 import { DriverError, errorMessage } from "sanoma/workflows";
 import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { oneAtATime } from "sanoma/workflows/shared";
-import { REGIONS, cloudOps, SLUG } from "./connector.ts";
+import { CLOUD_SLUG } from "sanoma/workflows/shared";
+import { REGIONS, cloudOps } from "./connector.ts";
 import { type CloudApi, cloudOperations, type Company } from "./operations.ts";
 
 /** What `start` runs for a company's host: a runtime answering at `url`, until `stop`. */
@@ -194,7 +195,7 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
 
   const api = (state: FakeCloudState): CloudApi => ({
     async signup({ slug, part, repository, ref, revision, region, domains }) {
-      if (!SLUG.test(slug)) throw fail("cloud-signup", `${slug} is not a company's address`);
+      if (!CLOUD_SLUG.test(slug)) throw fail("cloud-signup", `${slug} is not a company's address`);
       if (taken.has(slug)) throw fail("cloud-signup", `${slug}.sanoma.work is someone else's`);
       if (region && !(REGIONS as readonly string[]).includes(region)) {
         throw fail("cloud-signup", `Sanoma Cloud has no region ${region}`);

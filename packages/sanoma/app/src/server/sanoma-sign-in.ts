@@ -1,9 +1,9 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { calculatePKCECodeChallenge, generateRandomCodeVerifier } from "oauth4webapi";
-import { errorMessage, type Principal, type SanomaClient } from "sanoma/workflows";
-import { slugged } from "sanoma/workflows/shared";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { calculatePKCECodeChallenge, generateRandomCodeVerifier, generateRandomState } from "oauth4webapi";
+import { errorMessage, type Principal } from "sanoma/workflows";
+import { isLoopback, slugged } from "sanoma/workflows/shared";
 import { ApiError, INFRA, type SanomaSignIn } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { companyOf } from "../lib/names.ts";
@@ -23,7 +23,11 @@ import { escapeHtml, smallPage } from "../login/page.ts";
 export const CLOUD_TOKEN = "SANOMA_CLOUD_TOKEN";
 /** What a Cloud token looks like: an api token of sanoma-ops's (the driver's own check). */
 export const CLOUD_TOKEN_PATTERN = /^sca_[\w-]+$/;
-/** The Cloud's api: the variable the driver declares, as stored here, else www.sanoma.work, the driver's default. */
+/**
+ * The Cloud's api: the variable the Sanoma Cloud driver declares, read where the driver reads it
+ * (the process's environment, which a stored value never reaches), else the driver's declared
+ * default, so the token is redeemed at the Cloud the driver then calls with it.
+ */
 const CLOUD_URL = "SANOMA_CLOUD_URL";
 const DEFAULT_URL = "https://www.sanoma.work";
 
@@ -34,22 +38,26 @@ const SIGN_IN_MS = 10 * 60_000;
 /** Where the Cloud sends the browser back. */
 export const SIGN_IN_CALLBACK = "/hosting/sanoma/callback";
 
-/** A sign-in being made, as kept in `SIGN_IN`. */
+/** A sign-in being made, as kept in `SIGN_IN`: with the Cloud it was started at, where its code is redeemed. */
 interface Pending {
   state: string;
   verifier: string;
   expiresAt: number;
   by: string;
+  cloud: string;
 }
 
-/** The Cloud's api, where `/connect` and `/api/token/redeem` answer. */
-async function cloudUrlOf(client: SanomaClient): Promise<string> {
-  return (await client.secrets([CLOUD_URL])).get(CLOUD_URL)?.value ?? DEFAULT_URL;
+/** The Cloud's api, where `/connect` and `/api/token/redeem` answer: http or https, as the driver takes it. */
+function cloudUrl(): string {
+  const url = process.env[CLOUD_URL] || DEFAULT_URL;
+  if (!URL.canParse(url) || !["http:", "https:"].includes(new URL(url).protocol)) {
+    throw new ApiError(409, { error: `${CLOUD_URL} is not an http or https address` });
+  }
+  return url;
 }
 
-/** The sign-in being made, unless none is or it expired. */
-async function pendingOf(client: SanomaClient): Promise<Pending | undefined> {
-  const stored = (await client.secrets([SIGN_IN])).get(SIGN_IN)?.value;
+/** The sign-in being made, from `SIGN_IN`'s stored value, unless none is or it expired. */
+function pendingOf(stored: string | undefined): Pending | undefined {
   if (!stored) return undefined;
   try {
     const pending = JSON.parse(stored) as Pending;
@@ -86,19 +94,24 @@ export async function startSanomaSignIn(
     });
   }
   const { client } = app;
+  const back = new URL(SIGN_IN_CALLBACK, origin);
+  // A loopback address, as RFC 8252 asks, which the Cloud allows: `localhost` may name another.
+  if (!isLoopback(back.hostname)) {
+    throw new ApiError(409, { error: "Signing in to Sanoma comes back to this app at a loopback address only" });
+  }
+  if (back.hostname === "localhost") back.hostname = "127.0.0.1";
+  const cloud = cloudUrl();
   const verifier = generateRandomCodeVerifier();
   const pending: Pending = {
-    state: randomBytes(32).toString("base64url"),
+    state: generateRandomState(),
     verifier,
     expiresAt: Date.now() + SIGN_IN_MS,
     by: actor.id,
+    cloud,
   };
   await client.setSecret(SIGN_IN, JSON.stringify(pending), { by: actor.id });
-  const back = new URL(SIGN_IN_CALLBACK, origin);
-  // A loopback address, as RFC 8252 asks, which the Cloud allows: `localhost` may name another.
-  if (back.hostname === "localhost") back.hostname = "127.0.0.1";
   const slug = address ?? slugOf(app);
-  const url = new URL("/connect", await cloudUrlOf(client));
+  const url = new URL("/connect", cloud);
   url.searchParams.set("state", pending.state);
   url.searchParams.set("challenge", await calculatePKCECodeChallenge(verifier));
   url.searchParams.set("challenge_method", "S256");
@@ -110,12 +123,12 @@ export async function startSanomaSignIn(
 
 /** Whether a Cloud token is stored (and where from), and whether a sign-in is being made: never a value. */
 export async function sanomaSignIn({ client }: AppContext): Promise<SanomaSignIn> {
-  const [found, pending] = await Promise.all([client.secrets([CLOUD_TOKEN]), pendingOf(client)]);
+  const found = await client.secrets([CLOUD_TOKEN, SIGN_IN]);
   const token = found.get(CLOUD_TOKEN);
   const signedIn = token !== undefined && CLOUD_TOKEN_PATTERN.test(token.value);
   return {
     signedIn,
-    pending: pending !== undefined,
+    pending: pendingOf(found.get(SIGN_IN)?.value) !== undefined,
     ...(token && { source: token.source, ...(token.setBy && { setBy: token.setBy, setAt: token.setAt }) }),
   };
 }
@@ -133,20 +146,34 @@ const REDEEM_MS = 15_000;
  * kept here is dropped first (a code works once, and a second request finds none), its state
  * checked against the one sent (in constant time) and its expiry; the code is then redeemed with
  * the verifier at the Cloud, the answer taken only as a Cloud token, and stored as
- * `SANOMA_CLOUD_TOKEN` as the person who started it. A small page says how it went, never cached.
+ * `SANOMA_CLOUD_TOKEN` as the person who started it. A small page says how it went, never cached,
+ * a failure of its own too.
  */
 export async function sanomaCallback(app: AppContext, request: Request): Promise<Response> {
-  const { client } = app;
   const page = (status: number, title: string, text: string) =>
     smallPage(status, title, `<h1>${escapeHtml(title)}</h1><p>${text}</p>`, {
       company: companyOf(app.snapshot.description.name),
       ...(app.stylesheet && { stylesheet: app.stylesheet }),
     });
   const again = "Go back to the app and sign in to Sanoma again.";
-  const params = new URL(request.url).searchParams;
+  try {
+    return await callbackPage(app, new URL(request.url).searchParams, page, again);
+  } catch (err) {
+    console.error(`sanoma app: signing in to Sanoma failed: ${errorMessage(err)}`);
+    return page(500, "Signing in to Sanoma failed", again);
+  }
+}
+
+/** The callback's work, `sanomaCallback`'s: its page. */
+async function callbackPage(
+  { client }: AppContext,
+  params: URLSearchParams,
+  page: (status: number, title: string, text: string) => Response,
+  again: string,
+): Promise<Response> {
   const code = params.get("code");
   const state = params.get("state");
-  const pending = await pendingOf(client);
+  const pending = pendingOf((await client.secrets([SIGN_IN])).get(SIGN_IN)?.value);
   if (!pending || !state || !same(state, pending.state)) {
     return page(400, "This sign-in is not the app's", `It expired, was used, or another started since. ${again}`);
   }
@@ -155,7 +182,7 @@ export async function sanomaCallback(app: AppContext, request: Request): Promise
   if (!code || code.length > 256) return page(400, "Sanoma sent no code", again);
   let res: Response;
   try {
-    res = await fetch(new URL("/api/token/redeem", await cloudUrlOf(client)), {
+    res = await fetch(new URL("/api/token/redeem", pending.cloud), {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify({ code, verifier: pending.verifier }),

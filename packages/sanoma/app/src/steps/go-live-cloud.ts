@@ -72,20 +72,30 @@ export async function goLiveCloud(step: AppStepContext, { address }: GoLiveCloud
   return { slug, account: account.repository, origin: (await source.remoteUrl()) !== undefined };
 }
 
+/** A GitHub owner and repository name, as `connect-existing` takes them: nothing that could leave the path. */
+const OWNER = /^[\w-]+$/;
+const NAME = /^(?!\.\.?$)[\w.-]+$/;
+
 /**
  * `origin` set to the repository made in the Cloud's account (`repository`, when `origin` named
- * none), then `main` pushed there with git's own sign-in, as apply reads it to deploy (a host's
- * revision is `git ls-remote`'s): never a token in the URL or the config. Then the database and
- * the host, for the run to apply.
+ * none: its owner and name checked, then given to git as one argument, never through a shell),
+ * then `main` pushed there with git's own sign-in, as apply reads it to deploy (a host's revision
+ * is `git ls-remote`'s): never a token in the URL or the config. Then the database and the host,
+ * for the run to apply.
  */
 export async function pushCloud(step: AppStepContext, { repository }: PushCloudInput) {
   const { source } = step;
   if (!source?.pushOrigin) throw new Error("The worker has no repository to push from");
+  if (repository && !(OWNER.test(repository.owner) && NAME.test(repository.name))) {
+    throw new Error("Sanoma Cloud answered with a repository that is no GitHub owner/name");
+  }
   await step.serially(async () => {
     await onMain(source);
+    // Unless this step set it already, when it runs again.
     if (repository && (await source.remoteUrl?.()) === undefined) {
       const git = await gitAt(source.root);
-      await git?.("remote", "add", "origin", `https://github.com/${repository.owner}/${repository.name}.git`);
+      if (!git) throw new Error("The worker's repository is not a git checkout");
+      await git("remote", "add", "origin", `https://github.com/${repository.owner}/${repository.name}.git`);
     }
     await source.pushOrigin!();
   });

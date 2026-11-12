@@ -109,7 +109,7 @@ async function drain(
  * another run: undefined and the error's message when it failed, or was cancelled (a worker on a
  * new version cancels an apply started on other code, `carryBuiltInRuns`).
  */
-async function child(
+export async function child(
   run: Run,
   name: string,
   suffix: string,

@@ -19,6 +19,7 @@ import { admitting } from "../src/login/admission.ts";
 import { companyState } from "../src/server/company-state.ts";
 import { cloudAddress, goLiveProgress, goLiveSignIn } from "../src/server/go-live.ts";
 import { liveSnapshot } from "../src/snapshot-build.ts";
+import { pushCloud } from "../src/steps/go-live-cloud.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { pageApi } from "./page-api.ts";
 
@@ -207,5 +208,20 @@ describe("going live on Sanoma Cloud", () => {
     await expect(pageApi(await now(), alice).goLive(choices)).rejects.toMatchObject({
       body: { error: `${INFRA} is written already: change it in the file, and apply from Hosting` },
     });
+  });
+
+  it("pushes to no repository whose owner or name is not GitHub's, before touching the checkout", async () => {
+    const serially = vi.fn<() => Promise<void>>();
+    const step = { source: { pushOrigin: vi.fn<() => Promise<void>>() }, serially } as unknown as Parameters<
+      typeof pushCloud
+    >[0];
+    for (const repository of [
+      { owner: "evil/x", name: "ops" },
+      { owner: "acme", name: ".." },
+      { owner: "acme", name: "ops#x" },
+    ]) {
+      await expect(pushCloud(step, { repository })).rejects.toThrow("is no GitHub owner/name");
+    }
+    expect(serially).not.toHaveBeenCalled();
   });
 });

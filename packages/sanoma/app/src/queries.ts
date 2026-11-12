@@ -421,12 +421,16 @@ export const sanomaSignInQuery = () =>
     refetchInterval: (query) => (query.state.data?.pending ? POLL_MS : false),
   });
 
-/** Whether `slug` at Sanoma Cloud can be the company's address: the same answer for 30 s. */
+/**
+ * Whether `slug` at Sanoma Cloud can be the company's address: the same answer for 30 s, and not
+ * asked again as the window comes back, since each ask is a run at the Cloud.
+ */
 export const cloudAddressQuery = (slug: string) =>
   queryOptions({
     queryKey: ["cloud-address", slug],
     queryFn: () => getCloudAddress({ data: { slug } }),
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
     retry: false,
   });
 

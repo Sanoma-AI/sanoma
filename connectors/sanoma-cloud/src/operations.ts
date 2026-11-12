@@ -1,6 +1,7 @@
 import { type CallContext, diffDeclared, DriverError, type PlanAction } from "sanoma/workflows";
+import { CLOUD_SLUG } from "sanoma/workflows/shared";
 import type { z } from "zod";
-import { database, host, hostSlug, PORT, REGIONS, repositoryOf, SLUG, SLUG_RULE } from "./connector.ts";
+import { database, host, hostSlug, PORT, REGIONS, repositoryOf, SLUG_RULE } from "./connector.ts";
 
 // The connector's operations over Sanoma Cloud's API (`CloudApi`, sanoma-ops's workflows):
 // the driver's starts them over the public api, the fake's answers from its state. Both go
@@ -124,7 +125,7 @@ function expected(what: string, expect: Expect | undefined, fresh: Planned) {
 /** A host's slug (`hostSlug`), refused at plan when what it is made from is no slug the Cloud takes. */
 function slugOf(want: HostState): string {
   const slug = hostSlug(want);
-  if (!SLUG.test(slug)) {
+  if (!CLOUD_SLUG.test(slug)) {
     throw refused(
       `a cloud.host's slug, made from its name, hostname or repository, is ${slug ? `"${slug}"` : "empty"}, not ${SLUG_RULE}: declare \`name\``,
       "no_slug",
@@ -259,10 +260,7 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
       }),
     },
     company: {
-      available: async ({ slug }: { slug: string }, call: CallContext) => {
-        const { available, yours } = await api(call).available({ slug });
-        return { available, yours };
-      },
+      available: (input: { slug: string }, call: CallContext) => api(call).available(input),
       repository: async ({ slug }: { slug: string }, call: CallContext) => {
         const cloud = api(call);
         // Made once: a retry, or a company the wizard made with its repository, reads the one there.
@@ -276,10 +274,7 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
         }
         return { owner: found.repository.owner, name: found.repository.name };
       },
-      invite: async ({ slug, email }: { slug: string; email: string }, call: CallContext) => {
-        const { url } = await api(call).invite({ slug, email });
-        return { url };
-      },
+      invite: (input: { slug: string; email: string }, call: CallContext) => api(call).invite(input),
     },
     host: {
       import: hostRead,
