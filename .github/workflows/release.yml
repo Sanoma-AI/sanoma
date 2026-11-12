@@ -113,15 +113,15 @@ jobs:
             exit 1
           fi
       # npm can take minutes to serve a version it has just accepted, and the image's `pnpm add` needs
-      # every one of them.
+      # every package's. --prefer-online: each look asks npm again, not this runner's cache.
       - name: Packages readable from npm
         if: steps.image.outputs.tag
         env:
           PACKAGES: ${{ steps.image.outputs.packages }}
         run: |
           for package in $PACKAGES; do
-            for try in $(seq 60); do
-              [ -n "$(npm view "$package" version 2> /dev/null)" ] && continue 2
+            for _ in $(seq 60); do
+              [ -n "$(npm view --prefer-online "$package" version 2> /dev/null)" ] && continue 2
               sleep 15
             done
             echo "::error::$package is not on npm 15 minutes after the publish"
