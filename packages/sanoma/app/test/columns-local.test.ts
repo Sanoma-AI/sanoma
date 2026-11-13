@@ -8,7 +8,7 @@ import { collection } from "sanoma/data";
 import { resolveConfig, type SanomaConfig, type Source } from "sanoma/workflows";
 import { readPeople } from "sanoma/workflows/describe";
 import { and, eq } from "drizzle-orm";
-import { executablePath, launch } from "puppeteer-core";
+import { executablePath, launch, type Page } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { lazyDb } from "../../workflows/src/db.ts";
 import { data } from "../../workflows/src/db/company.ts";
@@ -126,6 +126,16 @@ async function chrome(ctx: { skip: (note: string) => void }) {
   return { browser, tab };
 }
 
+/**
+ * Waits for every menu open in `tab` to finish coming in: while a menu grows and slides in from
+ * its trigger, an item's box is not where it comes to rest, and a point read from it lands on the
+ * item above (the Fields menu's last items by most).
+ */
+const menusSettled = (tab: Page) =>
+  tab.waitForFunction(() =>
+    [...document.querySelectorAll('[role="menu"]')].every((menu) => menu.getAnimations({ subtree: true }).length === 0),
+  );
+
 describe("a collection's columns with no remote", () => {
   it("leaves a hidden field out of the grid and the record form", async () => {
     const { html } = await pageOf(app, "/data/outbound");
@@ -230,7 +240,11 @@ describe("a collection's columns with no remote", () => {
       await tab.goto(new URL("/data/outbound", app.url).href, { waitUntil: "networkidle0" });
       await (await tab.waitForSelector("button::-p-text(Fields)"))!.click();
       await tab.waitForSelector('[role="menu"] ::-p-text(Hidden columns)');
-      await (await tab.waitForSelector('[role="menuitem"]::-p-text(notes)'))!.click();
+      await menusSettled(tab);
+      // A hidden column's menu opens as the pointer rests on it (a press of it is ignored).
+      await (await tab.waitForSelector('[role="menuitem"]::-p-text(notes)'))!.hover();
+      await tab.waitForSelector('[role="menuitem"]::-p-text(Remove for good…)');
+      await menusSettled(tab);
       await (await tab.waitForSelector('[role="menuitem"]::-p-text(Remove for good…)'))!.click();
       const panel = '[aria-label="Remove notes for good"]';
       await tab.waitForSelector(`${panel} ::-p-text(Its values in 1 record are deleted)`);
