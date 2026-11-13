@@ -1080,9 +1080,10 @@ export class UsageError extends Error {}
 
 /**
  * The entries of `sanoma` that compute locally, a workflow's and a site's alike: plain functions
- * over the values given, with no clock, vendor, runtime or credentials (an invoice's arithmetic and its PDF).
+ * over the values given, with no clock, vendor, runtime or credentials (the company template's files with
+ * a company's own declared, an invoice's arithmetic and its PDF).
  */
-export const LOCAL_ENTRIES: readonly string[] = ["sanoma/invoices", "sanoma/invoices/pdf"];
+export const LOCAL_ENTRIES: readonly string[] = ["sanoma/init", "sanoma/invoices", "sanoma/invoices/pdf"];
 
 /** The entries of `sanoma` a browser bundle may load: plain values and React, no server, runtime or credentials. */
 export const CLIENT_ENTRIES: ReadonlySet<string> = new Set([
