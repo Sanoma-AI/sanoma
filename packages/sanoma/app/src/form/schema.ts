@@ -22,6 +22,8 @@ export interface ScalarField extends Base {
   kind: Scalar;
   /** For an enum: the allowed values. */
   options?: unknown[];
+  /** For `json`: its schema takes any value (`{}`, a collection's free-form field), so text that isn't JSON is that text. */
+  anything?: true;
 }
 
 export interface ObjectField extends Base {
@@ -87,8 +89,14 @@ function fieldOf(key: string, prop: Schema, required: boolean, depth: number): F
     }
   }
   const kind = scalarKind(prop);
-  return kind === "enum" ? { ...base, kind, options: prop.enum as unknown[] } : { ...base, kind };
+  if (kind === "enum") return { ...base, kind, options: prop.enum as unknown[] };
+  return kind === "json" && Object.keys(prop).every((k) => ANNOTATIONS.has(k))
+    ? { ...base, kind, anything: true }
+    : { ...base, kind };
 }
+
+/** The keywords that describe a value without constraining it: a schema of only these takes any value. */
+const ANNOTATIONS = new Set(["title", "description", "default", "deprecated", "examples"]);
 
 /** An object that also takes other keys can't be shown as just its properties. */
 const hasExtraKeys = (prop: Schema) => prop.additionalProperties !== undefined && prop.additionalProperties !== false;
@@ -246,12 +254,14 @@ function readScalar(field: ScalarField, raw: unknown, name: string, errors: Reco
     }
     case "enum":
       return field.options?.[Number(text)];
-    // Free-form: what reads as JSON is that value, anything else the text as written, as Import reads a cell.
+    // A schema that takes anything (free-form) takes text that isn't JSON as that text, as Import reads a cell.
     case "json":
       try {
         return JSON.parse(text);
       } catch {
-        return text;
+        if (field.anything) return text;
+        errors[name] = "Not valid JSON";
+        return OMIT;
       }
   }
 }

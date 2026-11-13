@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "sanoma/testing";
-import { eq, getTableName, inArray, sql } from "drizzle-orm";
+import { and, eq, getTableName, inArray, sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { collection, recordsOps } from "../src/collection.ts";
@@ -536,13 +536,19 @@ describe("links and free-form fields on Postgres", () => {
     key: "id",
     fields: { id: "text", customer: { link: "customers" }, meta: { type: "json", optional: true } },
   });
+  // A link hidden for everyone: kept as it is, neither checked nor flagged.
+  const invoices = collection({
+    name: "invoices",
+    key: "id",
+    fields: { id: "text", customer: { link: "customers", optional: true, hidden: true } },
+  });
   const url = testDatabaseUrl("data");
   const pool = lazyDb(url, "links test");
-  const driver = collectionsDriver([customers, orders], pool);
+  const driver = collectionsDriver([customers, orders, invoices], pool);
   const records = recordsDriver(() => pool.db());
   afterAll(() => pool.close());
   beforeEach(async () => {
-    await (await pool.db()).delete(data).where(inArray(data.collection, ["customers", "orders"]));
+    await (await pool.db()).delete(data).where(inArray(data.collection, ["customers", "orders", "invoices"]));
   });
   let n = 0;
   const call = async (op: Op, input: unknown) => {
@@ -581,6 +587,36 @@ describe("links and free-form fields on Postgres", () => {
     await expect(call(orders.save, { record: { ...order, meta: "edited" } })).rejects.toMatchObject(missing);
     await call(customers.save, { record: { id: "globex" } });
     expect(await call(orders.save, { record: { ...order, customer: "globex" } })).not.toHaveProperty("issues");
+  });
+
+  it("saves and reads a hidden link as it is: the person can't see it to fix it", async () => {
+    const invoice = { id: "i1", customer: "gone" };
+    expect(await call(invoices.save, { record: invoice })).toMatchObject({ record: invoice });
+    expect(await call(invoices.get, { key: "i1" })).not.toHaveProperty("issues");
+  });
+
+  it("holds the record a save links to against a delete until the save's transaction ends", async () => {
+    await call(customers.save, { record: { id: "acme" } });
+    const db = await pool.db();
+    await db.transaction(async (tx) => {
+      // The save in a transaction that stays open (as a direct call's, beside its ledger record).
+      const open = collectionsDriver([customers, orders], { db: async () => tx });
+      const context = {
+        idempotencyKey: "l:open",
+        runId: "t",
+        opId: orders.save.id,
+        attempt: 1,
+        secrets: memorySecrets(),
+      };
+      await open.ops["orders.save"]!(orders.save.input.parse({ record: order }), context);
+      // A delete of acme on another connection waits for it: here, given up by its lock timeout.
+      const deleting = db.transaction(async (other) => {
+        await other.execute(sql`set local lock_timeout = '200ms'`);
+        await other.delete(data).where(and(eq(data.collection, "customers"), eq(data.key, "acme")));
+      });
+      await expect(deleting).rejects.toMatchObject({ code: "55P03" });
+    });
+    expect(await call(customers.get, { key: "acme" })).toMatchObject({ key: "acme" });
   });
 
   it("matches a retype to a link against the keys there, and moves a free-form key to a column of its own", async () => {

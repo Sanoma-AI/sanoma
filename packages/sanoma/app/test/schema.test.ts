@@ -161,10 +161,21 @@ describe("buildInput", () => {
     });
   });
 
-  it("names the fields whose values it cannot read, and keeps a free-form value that isn't JSON as its text", () => {
-    const { errors, input: built } = filled({ count: "three", extra: "{", people: [{ name: "" }] });
-    expect(errors).toEqual({ count: "Not a number" });
-    expect(built).toMatchObject({ extra: "{" });
+  it("names the fields whose values it cannot read", () => {
+    const { errors } = filled({ count: "three", extra: "{", people: [{ name: "" }] });
+    expect(errors).toEqual({ count: "Not a number", extra: "Not valid JSON" });
+  });
+
+  it("keeps a free-form field's value that isn't JSON as its text, and reads one that is", () => {
+    const notes = collection({ name: "notes", key: "id", fields: { id: "text", meta: "json" } });
+    const [entry] = describeConfig({ workflows: [], connectors: [], collections: [notes] }).collections;
+    const record = fieldsOf(entry!.record)!;
+    expect(record.find((f) => f.key === "meta")).toMatchObject({ kind: "json", anything: true });
+    expect(buildInput(record, { id: "n1", meta: "call back {" })).toEqual({
+      input: { id: "n1", meta: "call back {" },
+      errors: {},
+    });
+    expect(buildInput(record, { id: "n1", meta: '{"seats": 3}' }).input).toEqual({ id: "n1", meta: { seats: 3 } });
   });
 });
 

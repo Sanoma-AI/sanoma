@@ -476,13 +476,20 @@ export const linksOf = (c: Collection): { field: string; target: string }[] =>
     return link === undefined ? [] : [{ field, target: linkTarget(c.name, link) }];
   });
 
+/**
+ * A collection's links a save checks and a read flags: every one but a hidden field's, whose values
+ * are kept as they are and which no form shows, so a record whose hidden link names a deleted
+ * record can still be saved; shown again, it is checked again.
+ */
+export const checkedLinks = (c: Collection) => linksOf(c).filter(({ field }) => !isHidden(c.fields[field]));
+
 /** The keys of records of other collections, by collection: those links name, or those found. */
 export type KeysByCollection = Map<string, Set<string>>;
 
 /** The keys `records`' links name, by the collection each links to: what a save checks are there, and a read whether they are. */
 export function linkedKeys(c: Collection, records: readonly Record<string, unknown>[]): KeysByCollection {
   const wanted: KeysByCollection = new Map();
-  for (const { field, target } of linksOf(c)) {
+  for (const { field, target } of checkedLinks(c)) {
     for (const record of records) {
       const value = record[field];
       if (typeof value !== "string") continue;
@@ -499,7 +506,7 @@ export function missingLinks(
   records: readonly Record<string, unknown>[],
   found: KeysByCollection,
 ): MissingLink[] {
-  return linksOf(c).flatMap(({ field, target }) =>
+  return checkedLinks(c).flatMap(({ field, target }) =>
     records.flatMap((record) => {
       const value = record[field];
       return typeof value === "string" && !found.get(target)?.has(value)

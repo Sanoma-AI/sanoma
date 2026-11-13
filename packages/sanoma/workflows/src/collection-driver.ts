@@ -13,7 +13,7 @@ import {
   type KeysByCollection,
   linkedKeys,
   linksMissing,
-  linksOf,
+  checkedLinks,
   type Listing,
   missingLinks,
   recordChanged,
@@ -48,7 +48,7 @@ type Row = Pick<typeof data.$inferSelect, keyof typeof COLUMNS>;
  */
 export function collectionsDriver(list: readonly Collection[], store: { db(): Promise<Db> }): Driver {
   const impl = list.map((c) => {
-    const linked = linksOf(c).length > 0;
+    const linked = checkedLinks(c).length > 0;
     const saved = (row: Row, found?: KeysByCollection) =>
       answer(
         c,

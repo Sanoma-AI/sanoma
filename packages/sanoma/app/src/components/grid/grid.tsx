@@ -1,5 +1,13 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
-import { errorMessage, isFreeForm, linkOf, linkTarget, type ListQuery, type Saved } from "sanoma/workflows/shared";
+import {
+  errorMessage,
+  isFreeForm,
+  linkOf,
+  linkTarget,
+  type ListQuery,
+  missingText,
+  type Saved,
+} from "sanoma/workflows/shared";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useNavigate } from "@tanstack/react-router";
@@ -666,9 +674,9 @@ export function DataGrid({
                         ) : linkOf(collection.fields[id]) !== undefined && !conflict ? (
                           <LinkedKey
                             name={linkTarget(name, linkOf(collection.fields[id])!)}
+                            field={id}
                             value={saved.record[id]}
-                            missing={saved.issues?.some(({ path }) => path[0] === id) ?? false}
-                            staged={staged !== undefined}
+                            issues={saved.issues}
                           />
                         ) : (
                           <Value value={conflict ? conflict.mine : saved.record[id]} />
@@ -761,36 +769,38 @@ export function DataGrid({
 }
 
 /**
- * A record's key, opening it in the form: disabled while a change is staged, as the form saves
- * nothing then, and says so as a `title`, one per row (a Tip's tooltip is too much for every row).
- */
-/**
  * A link cell's value: the key of a record of the collection it links to (`name`), opening that
- * record there; one that names no record there (`missing`, the read's issue at its field) struck
- * through, with what it lacks in its tooltip.
+ * record there (whatever is staged here: that collection's form saves); one that names no record
+ * there (the read's issue at its field saying so, `missingText`) struck through, with what it
+ * lacks in its tooltip.
  */
 function LinkedKey({
   name,
+  field,
   value,
-  missing,
-  staged,
+  issues,
 }: {
   name: string;
+  field: string;
   value: unknown;
-  missing: boolean;
-  staged: boolean;
+  issues: Saved["issues"];
 }) {
   if (typeof value !== "string") return <Value value={value} />;
-  if (missing) {
+  const said = missingText({ key: "", field, value, target: name });
+  if (issues?.some(({ path, message }) => path[0] === field && message === said)) {
     return (
       <span title={`There is no record ${value} in ${name}`} className="text-tone-bad-foreground line-through">
         {value}
       </span>
     );
   }
-  return <KeyLink name={name} recordKey={value} staged={staged} />;
+  return <KeyLink name={name} recordKey={value} staged={false} />;
 }
 
+/**
+ * A record's key, opening it in the form: disabled while a change is staged, as the form saves
+ * nothing then, and says so as a `title`, one per row (a Tip's tooltip is too much for every row).
+ */
 function KeyLink({ name, recordKey, staged }: { name: string; recordKey: string; staged: boolean }) {
   return (
     <Link
