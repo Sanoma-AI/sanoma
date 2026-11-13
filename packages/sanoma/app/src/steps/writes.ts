@@ -105,7 +105,7 @@ export async function written(step: AppStepContext, file: string, text: string, 
  * someone in `admin`: `not_approver` for anyone else, since nothing would review it (the `patch`
  * run then brings the records along with the plan itself). Refused (`invalid_input`) for a
  * declaration the description does not name, a plan that is not of the collection at `at` with
- * each change to a field it edits (a removal to a hidden field it removes), a rename the file
+ * each change to a field it edits (a removal to a hidden field it removes, alone in its plan), a rename the file
  * cannot take, and, with the writer's reason and
  * the `field`, for a field the file computes or a declaration that is no object literal.
  */
@@ -124,7 +124,8 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
   // A plan is a column change's: only of this collection's declaration, each of its changes to a
   // field this patch edits (a conversion's new column), so the review says what merges and the
   // records follow what is written. A removal, the one change that deletes values whatever they
-  // are, only of a hidden field this patch removes.
+  // are, only of a hidden field this patch removes, and alone in its plan: beside a rename onto
+  // that field's name it would delete the values of a column nobody was shown.
   const collection = description.collections.find(
     (c) => c.declared?.at.file === at.file && c.declared.at.export === at.export,
   );
@@ -134,7 +135,8 @@ export async function patch(step: AppStepContext, { at, fields, rename = {}, pla
       : paths.includes(
           `fields.${change.kind === "rename" ? change.from : change.kind === "convert" ? change.to : change.field}`,
         );
-  if (plan && (plan.collection !== collection?.name || !plan.changes.every(edits))) {
+  const alone = plan?.changes.length === 1 || !plan?.changes.some((change) => change.kind === "remove");
+  if (plan && (plan.collection !== collection?.name || !plan.changes.every(edits) || !alone)) {
     throw new SanomaError("invalid_input", `The plan is not of the fields this saves in ${at.export}`);
   }
   const message = `Change ${paths.join(", ")} of ${at.export === "default" ? at.file : at.export}`;

@@ -334,15 +334,21 @@ describe("a collection's columns with no remote", () => {
     expect(await stored("Acme Plumbing")).toMatchObject({ leadSource: "referral", meta: {} });
   });
 
-  it("refuses a hand-made plan that removes a field the save does not remove, or one not hidden, writing nothing", async () => {
+  it("refuses a hand-made plan that removes a field the save does not remove, one not hidden, or one beside another change, writing nothing", async () => {
     const context = await contextOf();
     const api: UntypedApi = createApi((request) => callApi(context, ada, request));
     const at = context.snapshot.description.collections.find((c) => c.name === "outbound")!.declared!.at;
     const file = readFileSync(join(root, "resources/data.ts"), "utf8");
-    // A removal under the cover of another edit to the field, and one of a field that is not hidden.
+    // A removal under the cover of another edit to the field, one of a field that is not hidden,
+    // and one of a hidden field beside a rename onto its name, which would delete that column's values.
+    const beside = {
+      ...removing("notes"),
+      changes: [{ kind: "rename", from: "contact", to: "notes" }, ...removing("notes").changes],
+    };
     for (const input of [
       { at, fields: { "fields.contact": "number" }, plan: removing("contact") },
       { at, fields: {}, rename: { "fields.contact": null }, plan: removing("contact") },
+      { at, fields: {}, rename: { "fields.contact": "notes", "fields.notes": null }, plan: beside },
     ]) {
       await expect(api.patch(input)).rejects.toThrow("The plan is not of the fields this saves");
     }
