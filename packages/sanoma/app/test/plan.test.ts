@@ -1,6 +1,6 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
 import { TableChangePlanSchema, type TableChangePlan } from "sanoma/workflows/description";
-import type { Saved } from "sanoma/workflows/shared";
+import { checkCollection, type Saved } from "sanoma/workflows/shared";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { createElement, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
@@ -10,6 +10,7 @@ import {
   declarationEdit,
   diffLines,
   happens,
+  hiddenFields,
   keysIn,
   landed,
   planOf,
@@ -22,7 +23,7 @@ import { TABLE_CHANGE_PLAN } from "./fixtures/table-change-plan.ts";
 // rows for each kind of change, what it may not change (`problemOf`), what it writes into the
 // declaration (`declarationEdit`) and its lines in the review's diff, in words (`happens`), and
 // what became of the records once it landed (`landed`); a free-form field's keys; the fields shown
-// (`shownFields`); and the review of a table change (`components/grid/review.tsx`) over the plan
+// (`shownFields`, `hiddenFields`), showing a hidden one again and removing it for good; and the review of a table change (`components/grid/review.tsx`) over the plan
 // fixture, rendered on the server in a memory router, with all four of its cards.
 
 /** The outbound fixture's collection, as the description has it, with a free-form `details` field the runtime does not take yet. */
@@ -53,6 +54,16 @@ const rows = [
   row("Cedar & Finch", { contact: "TBD", details: { source: "csv", seats: "two" } }),
   row("Delta Roofing", { contact: "" }),
 ];
+
+/** Outbound with seats and lastTouched hidden for everyone. */
+const hiding = {
+  ...outbound,
+  fields: {
+    ...outbound.fields,
+    lastTouched: { type: "date", optional: true, hidden: true },
+    seats: { type: "number", optional: true, hidden: true },
+  },
+} as CollectionEntry;
 
 /** Why `change` cannot be proposed on outbound, if it cannot. */
 const refused = (change: ColumnChange) => problemOf(outbound, change);
@@ -124,13 +135,33 @@ describe("planOf", () => {
   it("removes a column, counting the values it keeps", () => {
     const plan = planOf(outbound, rows, { kind: "hide", field: "seats" });
     expect(plan.changes).toEqual([{ kind: "hide", field: "seats", filled: 2 }]);
-    expect(happens(plan)).toBe("seats leaves the grid and the forms for everyone. Its values in 2 records are kept.");
-    // Hidden once it lands: the grid and the forms leave it out.
+    expect(happens(plan)).toBe(
+      "seats leaves the grid and the forms for everyone. Its values in 2 records are kept. Fields lists it under Hidden columns, to show again.",
+    );
+    // Hidden once it lands: the grid and the forms leave it out, Hidden columns lists it.
     const fields = {
       ...outbound.fields,
       seats: edit({ kind: "hide", field: "seats" }).fields["fields.seats"],
     } as CollectionEntry["fields"];
     expect(shownFields(fields)).toEqual(["company", "contact", "stage", "owner", "lastTouched"]);
+    expect(hiddenFields(fields)).toEqual(["seats"]);
+    expect(hiddenFields(outbound.fields)).toEqual([]);
+  });
+
+  it("shows a hidden column again, its values untouched, and removes one for good, counting the values it deletes", () => {
+    const shown = planOf(hiding, rows, { kind: "show", field: "seats" });
+    expect(shown.changes).toEqual([{ kind: "show", field: "seats", filled: 2 }]);
+    expect(happens(shown)).toBe(
+      "seats comes back to the grid and the forms for everyone, with its values in 2 records as they were.",
+    );
+    const removed = planOf(hiding, rows, { kind: "remove", field: "seats" });
+    expect(removed.changes).toEqual([{ kind: "remove", field: "seats", filled: 2 }]);
+    expect(happens(removed)).toBe(
+      "seats is removed for good. Its values in 2 records are deleted, and can't be brought back. Its name is free for a new column.",
+    );
+    expect(happens(planOf(hiding, rows, { kind: "remove", field: "lastTouched" }))).toBe(
+      "lastTouched is removed for good. No record has a value in it, so nothing is lost, and its name is free for a new column.",
+    );
   });
 
   it("renames a column as its own change, never a removal and an addition", () => {
@@ -158,6 +189,53 @@ describe("a column change", () => {
       "Links and free-form columns aren't available yet",
     );
     expect(refused({ kind: "add", field: "priority", type: "number", required: true })).toBeUndefined();
+  });
+
+  it("refuses a hidden column's name until it is removed for good, any change of it but showing or removing it, and either of those on a column not hidden", () => {
+    const taken = "seats is taken by a hidden column: remove it for good, under Fields, to use the name";
+    expect(problemOf(hiding, { kind: "rename", from: "contact", to: "seats" })).toBe(taken);
+    expect(problemOf(hiding, { kind: "add", field: "seats", type: "text", required: false })).toBe(taken);
+    for (const kind of ["show", "remove"] as const) {
+      expect(problemOf(hiding, { kind, field: "seats" })).toBeUndefined();
+      expect(refused({ kind, field: "seats" })).toBe("seats is not hidden");
+    }
+    for (const change of [
+      { kind: "rename", from: "seats", to: "places" },
+      { kind: "retype", field: "seats", to: "text" },
+      { kind: "require", field: "seats" },
+      { kind: "hide", field: "seats" },
+    ] as const) {
+      expect(problemOf(hiding, change)).toBe("seats is hidden for everyone: show it again first");
+    }
+    // Once removed for good, the name is free.
+    const { seats: _, ...rest } = hiding.fields;
+    expect(problemOf({ ...hiding, fields: rest }, { kind: "rename", from: "contact", to: "seats" })).toBeUndefined();
+  });
+
+  it("shows a hidden field again as optional, and removes one for good from the declaration: neither leaves a hidden required field", () => {
+    const show = declarationEdit(hiding.fields, { kind: "show", field: "seats" });
+    expect(show).toEqual({ fields: { "fields.seats": { type: "number", optional: true } }, rename: {} });
+    const remove = declarationEdit(hiding.fields, { kind: "remove", field: "seats" });
+    expect(remove).toEqual({ fields: {}, rename: { "fields.seats": null } });
+    const { seats: _, ...rest } = hiding.fields;
+    for (const fields of [{ ...hiding.fields, seats: show.fields["fields.seats"] }, rest]) {
+      expect(() => checkCollection({ name: "outbound", key: "company", fields })).not.toThrow();
+    }
+    // A hidden field is optional: a required one is refused, as the runtime refuses it.
+    expect(() =>
+      checkCollection({
+        name: "outbound",
+        key: "company",
+        fields: { company: "text", seats: { type: "number", hidden: true } },
+      }),
+    ).toThrow("may only be marked `hidden: true`, and only when it is `optional: true`");
+    expect(diffLines(hiding.fields, [{ kind: "show", field: "seats", filled: 2 }])).toEqual([
+      { sign: "-", text: 'seats: { type: "number", optional: true, hidden: true },' },
+      { sign: "+", text: 'seats: { type: "number", optional: true },' },
+    ]);
+    expect(diffLines(hiding.fields, [{ kind: "remove", field: "seats", filled: 2 }])).toEqual([
+      { sign: "-", text: 'seats: { type: "number", optional: true, hidden: true },' },
+    ]);
   });
 
   it("sets the declaration's field for an add, a retype and a requirement, keeping whether it was optional; hides it, optional, for a removal", () => {
@@ -218,6 +296,9 @@ describe("landed", () => {
       "297 contact values converted, 15 kept as they were, to fix in the grid.",
     );
     expect(landed(one(retype), counts)).toBe("No contact value needed converting.");
+    const remove = one({ kind: "remove", field: "legacyId", filled: 288 });
+    expect(landed(remove, { ...counts, changed: 288, cleared: 288 })).toBe("288 legacyId values deleted.");
+    expect(landed(remove, counts)).toBe("No record had a value in legacyId.");
     // Several together: each rename by name, the values counted together.
     expect(landed(TABLE_CHANGE_PLAN, { ...counts, changed: 312, converted: 297, cleared: 15 })).toBe(
       "The values of lastTouched are under lastContact now. 297 values converted, 15 left empty.",
@@ -292,6 +373,32 @@ describe("TableChangeReview", () => {
         "Chosen: keep them as they are.</span> They show as needs fixing in the grid until someone edits them.",
       );
     }
+  });
+
+  it("says plainly how many values removing a column for good deletes, and that showing one again is safe", async () => {
+    const remove = { kind: "remove", field: "legacyId", filled: 288 } as const;
+    const html = await render(
+      "waiting",
+      {},
+      {
+        collection: "outbound",
+        rows: 312,
+        changes: [{ kind: "show", field: "seats", filled: 2 }, remove],
+      },
+    );
+    expect(cards(html)).toEqual([
+      ["Show seats again", "Safe"],
+      ["Remove legacyId for good", "Deletes 288 values"],
+    ]);
+    expect(html).toContain("The values in 2 records are there as they were.");
+    expect(html).toContain("Its values in 288 records are deleted, and can't be brought back.");
+    expect(cards(await render("waiting", {}, one({ ...remove, filled: 0 })))).toEqual([
+      ["Remove legacyId for good", "Safe"],
+    ]);
+    const reshaped = { rows: 312, changed: 288, converted: 0, cleared: 288, kept: 0 };
+    expect(await render("finished", { merged: { sha: "abc", at: 0, reshaped } }, one(remove))).toContain(
+      "288 legacyId values deleted.",
+    );
   });
 
   it("says what became of the records once merged, or that they weren't brought along, never that nothing changed", async () => {

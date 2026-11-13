@@ -28,8 +28,10 @@ import { ensureSanomaBuilt } from "../../test/fixture.ts";
 // leaves empty the values that won't convert when that is the choice (refused, nothing written,
 // once the records changed since the count the person was shown), and `patch`'s output says what
 // became of them. The outbound fixture's collection, with a hidden field (`notes`), which
-// the grid and the record form leave out and an edit keeps. The tests in a browser need Google
-// Chrome, or `CHROME_PATH`, and skip without either.
+// the grid and the record form leave out and an edit keeps, Fields lists under Hidden columns,
+// and a change shows again or removes for good, its values deleted only for the count the
+// person confirmed. The tests in a browser need Google Chrome, or `CHROME_PATH`, and skip without
+// either.
 
 const FIELDS = {
   company: "text",
@@ -220,6 +222,70 @@ describe("a collection's columns with no remote", () => {
     expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toContain('contact: "number",');
     expect(await stored("Cedar & Finch")).toMatchObject({ contact: 42 });
     expect(await stored("Brightwater Dental")).not.toHaveProperty("contact");
+  });
+
+  it("lists a hidden column under Fields, whose Remove for good… asks to confirm the values it deletes before it goes on", async (ctx) => {
+    const { browser, tab } = await chrome(ctx);
+    try {
+      await tab.goto(new URL("/data/outbound", app.url).href, { waitUntil: "networkidle0" });
+      await (await tab.waitForSelector("button::-p-text(Fields)"))!.click();
+      await tab.waitForSelector('[role="menu"] ::-p-text(Hidden columns)');
+      await (await tab.waitForSelector('[role="menuitem"]::-p-text(notes)'))!.click();
+      await (await tab.waitForSelector('[role="menuitem"]::-p-text(Remove for good…)'))!.click();
+      const panel = '[aria-label="Remove notes for good"]';
+      await tab.waitForSelector(`${panel} ::-p-text(Its values in 1 record are deleted)`);
+      const submit = `${panel} button[type="submit"]`;
+      expect(await tab.$eval(submit, (b) => [b.textContent, b.hasAttribute("disabled")])).toEqual([
+        "Remove for good",
+        true,
+      ]);
+      await (await tab.waitForSelector(`${panel} [role="checkbox"]`))!.click();
+      await tab.waitForSelector(`${submit}:not([disabled])`);
+      expect(await tab.$eval(`label[for="column-remove-sure"]`, (l) => l.textContent)).toBe(
+        "Delete this value for good",
+      );
+      // Nothing sent: the value is there still.
+      expect(await stored("Acme Plumbing")).toMatchObject({ notes: "call back" });
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it("shows a hidden column again, writing it without hidden and leaving the records as they are", async () => {
+    const landed = await proposeColumnChange(await contextOf(), ada, {
+      collection: "outbound",
+      change: { kind: "show", field: "notes" },
+    });
+    expect(landed).toEqual({ file: "resources/data.ts", revision: "abcdef0123456789", running: false });
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toContain('notes: { type: "text", optional: true },');
+    expect(await stored("Acme Plumbing")).toMatchObject({ notes: "call back" });
+  });
+
+  it("refuses to remove a column for good unless the person confirmed the count of values it deletes, writing nothing", async () => {
+    const context = await contextOf();
+    const file = readFileSync(join(root, "resources/data.ts"), "utf8");
+    const change = { kind: "remove", field: "notes" } as const;
+    for (const clears of [0, undefined]) {
+      const answer = await proposeColumnChange(context, ada, { collection: "outbound", change, clears });
+      expect(answer).toEqual({ recounted: expect.objectContaining({ changes: [{ ...change, filled: 1 }] }) });
+    }
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toBe(file);
+    expect(await stored("Acme Plumbing")).toMatchObject({ notes: "call back" });
+  });
+
+  it("removes a hidden column for good: its declaration gone and its values deleted from every record", async () => {
+    // The running declaration still has notes hidden; the file has it shown since the test before.
+    const landed = await proposeColumnChange(await contextOf(), ada, {
+      collection: "outbound",
+      change: { kind: "remove", field: "notes" },
+      clears: 1,
+    });
+    expect(landed).toMatchObject({
+      file: "resources/data.ts",
+      reshaped: { rows: 3, changed: 1, converted: 0, cleared: 1, kept: 0 },
+    });
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).not.toContain("notes");
+    expect(await stored("Acme Plumbing")).not.toHaveProperty("notes");
   });
 
   it("says in the panel's toast what became of the records, and that it shows once Sanoma starts again", async (ctx) => {

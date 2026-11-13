@@ -10,7 +10,7 @@ import {
   type TableChangePlan,
   type WontConvert,
 } from "sanoma/workflows/description";
-import { isRecord, reshaped, type Saved } from "sanoma/workflows/shared";
+import { isHidden, isRecord, reshaped, type Saved } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 // A change to a collection's columns, as a person proposes it from the grid (`ColumnChange`) and
@@ -41,6 +41,8 @@ export const ColumnChange = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("require"), field: z.string().min(1) }),
   z.strictObject({ kind: z.literal("hide"), field: z.string().min(1) }),
+  z.strictObject({ kind: z.literal("show"), field: z.string().min(1) }),
+  z.strictObject({ kind: z.literal("remove"), field: z.string().min(1) }),
   z.strictObject({ kind: z.literal("link"), field: z.string().min(1), to: z.string().min(1) }),
   z.strictObject({
     kind: z.literal("convert"),
@@ -62,12 +64,13 @@ export const typeOf = (field: Field): ColumnType =>
 /** Whether a declared field is required: not marked `optional`. */
 export const requiredOf = (field: Field): boolean => typeof field === "string" || field.optional !== true;
 
-/** Whether a declared field is hidden: removed from the columns for everyone, its values kept. */
-export const isHidden = (field: Field | undefined): boolean => typeof field === "object" && field.hidden === true;
-
-/** The fields the grid and the forms show, in their declared order: every one but the hidden. */
+/** The fields the grid, its filters and Import show, in their declared order: every one but the hidden (`isHidden`). */
 export const shownFields = (fields: CollectionEntry["fields"]): string[] =>
   Object.keys(fields).filter((name) => !isHidden(fields[name]));
+
+/** The fields hidden for everyone (`isHidden`), in their declared order: Hidden columns, to show again or remove for good. */
+export const hiddenFields = (fields: CollectionEntry["fields"]): string[] =>
+  Object.keys(fields).filter((name) => isHidden(fields[name]));
 
 /** A field's declaration of `type`, required or `optional: true`, as the data file writes it. */
 function fieldOf(type: ColumnType, required: boolean): string | Record<string, unknown> {
@@ -120,15 +123,30 @@ export function keysIn(rows: readonly Saved[], field: string): { key: string; co
 
 /**
  * Why `change` cannot be proposed on `collection` as declared: a field it does not have, a name
- * it has already, the key (which names each record), a type the runtime does not take yet; none
- * when it can.
+ * it has already (a hidden column's too, until it is removed for good), the key (which names each
+ * record), a hidden column changed other than shown again or removed for good, or either of those
+ * on a column that is not hidden, a type the runtime does not take yet; none when it can.
  */
 export function problemOf({ key, fields }: Pick<CollectionEntry, "key" | "fields">, change: ColumnChange) {
   const named = "field" in change ? change.field : change.from;
   if (change.kind !== "add" && !Object.hasOwn(fields, named)) return `${named} is not a field of this collection`;
-  const taken = change.kind === "add" ? change.field : change.kind === "rename" ? change.to : undefined;
-  if (taken !== undefined && Object.hasOwn(fields, taken)) return `${taken} is a field already`;
-  if (change.kind === "convert" && Object.hasOwn(fields, change.key)) return `${change.key} is a field already`;
+  // The name a new column, a rename or a conversion takes.
+  const name =
+    change.kind === "add"
+      ? change.field
+      : change.kind === "rename"
+        ? change.to
+        : change.kind === "convert"
+          ? change.key
+          : undefined;
+  if (name !== undefined && isHidden(fields[name])) {
+    return `${name} is taken by a hidden column: remove it for good, under Fields, to use the name`;
+  }
+  if (name !== undefined && Object.hasOwn(fields, name)) return `${name} is a field already`;
+  const hiding = change.kind === "show" || change.kind === "remove";
+  if (change.kind !== "add" && hiding !== isHidden(fields[named])) {
+    return hiding ? `${named} is not hidden` : `${named} is hidden for everyone: show it again first`;
+  }
   if (change.kind !== "add" && change.kind !== "convert" && named === key) {
     return `${key} is the key, which names each record: it stays as it is`;
   }
@@ -165,6 +183,8 @@ export function planOf(collection: CollectionEntry, rows: readonly Saved[], chan
       planned = { ...change, empty: rows.length - count(change.field) };
       break;
     case "hide":
+    case "show":
+    case "remove":
       planned = { ...change, filled: count(change.field) };
       break;
     case "link":
@@ -180,7 +200,7 @@ export function planOf(collection: CollectionEntry, rows: readonly Saved[], chan
   return { collection: collection.name, changes: [planned], rows: rows.length };
 }
 
-/** What `patch` takes: the fields to set, and those to rename or remove. */
+/** What `patch` takes: the fields to set, and those to rename or remove (renamed to `null`). */
 interface DeclarationEdit {
   fields: Record<string, ReturnType<typeof fieldOf>>;
   rename: Record<string, string | null>;
@@ -202,7 +222,8 @@ const hidden = (field: string, declared: Field): DeclarationEdit => ({
 /**
  * What a change sets in the collection's declaration, by path as `setFields` takes them
  * (`fields`), and renames or removes (`rename`, as `renameFields` takes them), from its fields
- * as declared (`fields`, main's).
+ * as declared (`fields`, main's): showing a hidden field again sets it without `hidden`, removing
+ * it for good removes it.
  */
 export function declarationEdit(fields: CollectionEntry["fields"], change: ColumnChange | TableChange) {
   const declared = "field" in change ? fields[change.field] : undefined;
@@ -217,6 +238,11 @@ export function declarationEdit(fields: CollectionEntry["fields"], change: Colum
       return set(change.field, typeOf(declared!), true);
     case "hide":
       return hidden(change.field, declared!);
+    case "show":
+      // A hidden field is optional, and stays so.
+      return set(change.field, typeOf(declared!), false);
+    case "remove":
+      return rename(change.field, null);
     case "link":
       return set(change.field, { link: change.to }, requiredOf(declared!));
     case "convert":
@@ -254,6 +280,9 @@ export const renamed = (plan: TableChangePlan) => `${allRecords(plan)} keep thei
  */
 const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 const records = (n: number) => count(n, "record");
+
+/** What removing a column for good does to its `n` values, in a sentence, as the panel's What will happen and the review say it. */
+export const deleted = (n: number) => `Its values in ${records(n)} are deleted, and can't be brought back.`;
 
 /** The two choices for the `n` values a retype or a conversion cannot convert, as the column panel offers them. */
 export const DECIDED = {
@@ -295,9 +324,17 @@ export function happens(plan: TableChangePlan): string {
         ? `${change.field} is required from now on. Every record has it.`
         : `${change.field} is required from now on. ${records(change.empty)} have it empty, and need one before they save again.`;
     case "hide":
+      return `${change.field} leaves the grid and the forms for everyone. ${
+        change.filled === 0 ? "No record has a value in it." : `Its values in ${records(change.filled)} are kept.`
+      } Fields lists it under Hidden columns, to show again.`;
+    case "show":
       return change.filled === 0
-        ? `${change.field} leaves the grid and the forms for everyone. No record has a value in it.`
-        : `${change.field} leaves the grid and the forms for everyone. Its values in ${records(change.filled)} are kept.`;
+        ? `${change.field} comes back to the grid and the forms for everyone. No record has a value in it.`
+        : `${change.field} comes back to the grid and the forms for everyone, with its values in ${records(change.filled)} as they were.`;
+    case "remove":
+      return change.filled === 0
+        ? `${change.field} is removed for good. No record has a value in it, so nothing is lost, and its name is free for a new column.`
+        : `${change.field} is removed for good. ${deleted(change.filled)} Its name is free for a new column.`;
     case "link":
       return `${change.field} links to ${change.to}.`;
     case undefined:
@@ -307,21 +344,28 @@ export function happens(plan: TableChangePlan): string {
 
 /**
  * What became of the records once `plan` landed (`counts`, `sanoma.records.reshape`'s answer), in
- * sentences: a rename's records under the new name, then the values converted, left empty or kept
- * to fix. Counted by the plan's one change that brings the records along; a plan of several says
- * the counts together.
+ * sentences: a rename's records under the new name, a removed field's values deleted, then the
+ * values converted, left empty or kept to fix. Counted by the plan's one change that brings the
+ * records along; a plan of several says the counts together.
  */
 export function landed(plan: TableChangePlan, counts: ReshapeOutput): string {
-  const along = plan.changes.filter((change) => change.kind === "rename" || "wontConvert" in change);
+  const along = plan.changes.filter(
+    (change) => change.kind === "rename" || change.kind === "remove" || "wontConvert" in change,
+  );
   const one = along.length === 1;
   const said: string[] = [];
   for (const change of along) {
-    if (change.kind !== "rename") continue;
-    if (!one) said.push(`The values of ${change.from} are under ${change.to} now.`);
-    else if (counts.changed === 0) said.push(`No record had a value in ${change.from}.`);
-    else said.push(`${records(counts.changed)} now ${counts.changed === 1 ? "holds" : "hold"} ${change.to}.`);
+    if (change.kind === "rename") {
+      if (!one) said.push(`The values of ${change.from} are under ${change.to} now.`);
+      else if (counts.changed === 0) said.push(`No record had a value in ${change.from}.`);
+      else said.push(`${records(counts.changed)} now ${counts.changed === 1 ? "holds" : "hold"} ${change.to}.`);
+    } else if (change.kind === "remove") {
+      if (!one) said.push(`${change.field} is removed, with its values.`);
+      else if (counts.cleared === 0) said.push(`No record had a value in ${change.field}.`);
+      else said.push(`${count(counts.cleared, `${change.field} value`)} deleted.`);
+    }
   }
-  const typed = along.filter((change) => change.kind !== "rename");
+  const typed = along.filter((change) => change.kind !== "rename" && change.kind !== "remove");
   if (typed.length) {
     const [first] = typed;
     const value = one && first ? `${first.kind === "retype" ? first.field : first.key} value` : "value";
@@ -366,7 +410,7 @@ export function diffLines(fields: CollectionEntry["fields"], changes: readonly T
       // No longer declared on main (merged since): the change by name alone.
       if (declared === undefined) {
         if (change.kind === "rename") line("+", change.to, undefined);
-        else if (change.kind !== "hide") line("+", name, undefined);
+        else if (change.kind !== "hide" && change.kind !== "remove") line("+", name, undefined);
         continue;
       }
     }

@@ -58,10 +58,10 @@ export async function planColumnChange(
 /**
  * Proposes `change` to the columns of its collection, as `actor`: its plan over every record
  * (`planned`), and `patch` called, which starts its run and asks for its result until the run has
- * ended: the change it opened (with the plan), or the file it wrote. A `clear` decision is refused
- * with nothing written when the values that won't convert are no longer the `clears` the person
- * was shown: the answer is then the plan over the records as they are now (`recounted`), to
- * choose again on.
+ * ended: the change it opened (with the plan), or the file it wrote. A change that deletes values
+ * (a `clear` decision, or removing a column for good) is refused with nothing written when the
+ * values it deletes are no longer the `clears` the person was shown: the answer is then the plan
+ * over the records as they are now (`recounted`), to choose or confirm again on.
  */
 export async function proposeColumnChange(
   app: AppContext,
@@ -71,8 +71,13 @@ export async function proposeColumnChange(
   const { api, collection, at, plan } = await planned(app, actor, request);
   const { change } = request;
   const [one] = plan.changes;
-  const wont = one && "wontConvert" in one ? one.wontConvert.count : 0;
-  if ("decision" in change && change.decision === "clear" && clears !== wont) return { recounted: plan };
+  const deletes =
+    one?.kind === "remove"
+      ? one.filled
+      : "decision" in change && change.decision === "clear" && one && "wontConvert" in one
+        ? one.wontConvert.count
+        : undefined;
+  if (deletes !== undefined && clears !== deletes) return { recounted: plan };
   const input = { at, ...declarationEdit(collection.fields, change), plan };
   return (await api[PATCH_WORKFLOW](input)) as PatchOutput;
 }

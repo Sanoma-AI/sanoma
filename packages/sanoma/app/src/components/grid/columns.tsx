@@ -56,10 +56,11 @@ import { WontConvertSample } from "./review.tsx";
 
 // A collection's columns from its grid: each field's menu on its heading (Rename, Change type,
 // Hide for me, a free-form field's keys to make columns of, Remove for everyone), New column, and
-// the panel each opens beside the grid (`?column=`), which proposes the change
-// (`proposeColumnChangeFn`) after saying what will happen, planned by the server over every
-// record (`columnPlanQuery`), and asks what becomes of the values a type change cannot convert. A
-// column's width is this browser's.
+// the panel each opens beside the grid (`?column=`), as do Show again and Remove for good under
+// Fields' Hidden columns (`data-grid.tsx`), which proposes the change (`proposeColumnChangeFn`)
+// after saying what will happen, planned by the server over every record (`columnPlanQuery`), and
+// asks what becomes of the values a type change cannot convert, or confirms the values a removal
+// for good deletes. A column's width is this browser's.
 
 /** The columns after the fields, by ids no field can have. */
 export const UPDATED = "@updated";
@@ -221,6 +222,10 @@ function titleOf(collection: CollectionEntry, { change, field, key }: ColumnSear
       return `Make ${key} of ${field} a column`;
     case "hide":
       return `Remove ${field} for everyone`;
+    case "show":
+      return `Show ${field} again`;
+    case "remove":
+      return `Remove ${field} for good`;
   }
 }
 
@@ -232,10 +237,11 @@ const SETTLE_MS = 400;
  * type of the chips, its choices, Optional), What will happen over every record (the server's
  * plan, `columnPlanQuery`, read once the form settles) in plain words, for a type change with
  * values that won't convert those values and what becomes of them (the plan's `decision`, asked
- * before it goes on, for the count it was asked on), and Review the change, which proposes it: a
- * change to review, or, with no remote, the data file written and what became of the records. A
- * `clear` sent once the records changed is refused with the plan as it is now (`recounted`),
- * which the panel shows, asking again.
+ * before it goes on, for the count it was asked on), for removing a hidden column for good a
+ * confirmation that its values are deleted (for the count it was confirmed on), and Review the
+ * change, which proposes it: a change to review, or, with no remote, the data file written and
+ * what became of the records. A `clear` or a removal sent once the records changed is refused
+ * with the plan as it is now (`recounted`), which the panel shows, asking again.
  */
 export function ColumnPanel({ collection, column }: { collection: CollectionEntry; column: ColumnSearch }) {
   const navigate = useNavigate({ from: FROM });
@@ -248,7 +254,9 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
   const [optional, setOptional] = useState(true);
   // The choice for the values that won't convert, and how many there were when it was made.
   const [decided, setDecided] = useState<{ choice: ConvertDecision; of: number }>();
-  // Whether a `clear` was refused since the records changed: the count is new, and asked again.
+  // How many values a removal for good was confirmed to delete.
+  const [confirmed, setConfirmed] = useState<number>();
+  // Whether a `clear` or a removal was refused since the records changed: the count is new, and asked again.
   const [recounted, setRecounted] = useState(false);
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string>();
@@ -262,6 +270,8 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
     retype: { kind: "retype", field, to: typed },
     convert: { kind: "convert", field, key: column.key ?? "", type: typed },
     hide: { kind: "hide", field },
+    show: { kind: "show", field },
+    remove: { kind: "remove", field },
   }[column.change];
   const parsed = ColumnChange.safeParse(intent);
   const problem = parsed.success ? problemOf(collection, parsed.data) : parsed.error.issues[0]?.message;
@@ -293,6 +303,10 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
     setDecided(choice && wont ? { choice, of: wont.count } : undefined);
     setRecounted(false);
   };
+  // The values a removal for good deletes: it goes on once confirmed for this count.
+  const deletes = planned?.kind === "remove" ? planned.filled : undefined;
+  const confirms = deletes !== undefined && deletes > 0;
+  const sure = confirms && confirmed === deletes;
 
   async function propose() {
     if (!settled) return;
@@ -300,7 +314,7 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
     setFailed(undefined);
     try {
       const change = decision ? { ...settled, decision } : settled;
-      const clears = decision === "clear" ? wont?.count : undefined;
+      const clears = decision === "clear" ? wont?.count : deletes;
       const answer = await proposeColumnChangeFn({ data: { collection: collection.name, change, clears } });
       if ("recounted" in answer) {
         queryClient.setQueryData(columnPlanQuery(collection.name, settled).queryKey, answer.recounted);
@@ -446,11 +460,44 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
               now. Choose again.
             </Notice>
           )}
+          {confirms && (
+            <Field orientation="horizontal">
+              <Checkbox
+                id="column-remove-sure"
+                checked={sure}
+                onCheckedChange={(checked) => {
+                  setConfirmed(checked ? deletes : undefined);
+                  setRecounted(false);
+                }}
+              />
+              <FieldContent>
+                <FieldLabel htmlFor="column-remove-sure">
+                  Delete {deletes === 1 ? "this value" : `these ${deletes} values`} for good
+                </FieldLabel>
+                <FieldDescription>This can't be undone.</FieldDescription>
+              </FieldContent>
+            </Field>
+          )}
+          {recounted && confirms && !sure && (
+            <Notice>
+              The records changed since you confirmed: {deletes === 1 ? "1 value" : `${deletes} values`} would be
+              deleted now. Confirm again.
+            </Notice>
+          )}
           {failed && <Notice variant="destructive">{failed}</Notice>}
           <div className="flex items-center gap-2">
             {remote && <ToneBadge tone="waiting">Waits for admin</ToneBadge>}
-            <Button type="submit" className="ml-auto" disabled={!plan || unchanged || (asks && !decision) || sending}>
-              {sending ? "Opening the change…" : "Review the change"}
+            <Button
+              type="submit"
+              className="ml-auto"
+              variant={column.change === "remove" ? "destructive" : "default"}
+              disabled={!plan || unchanged || (asks && !decision) || (confirms && !sure) || sending}
+            >
+              {sending
+                ? "Opening the change…"
+                : column.change === "remove" && !remote
+                  ? "Remove for good"
+                  : "Review the change"}
             </Button>
           </div>
         </form>

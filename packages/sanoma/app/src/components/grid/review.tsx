@@ -11,13 +11,13 @@ import { cn, plural } from "#/lib/utils.ts";
 import type { ChangeDetail } from "../../api.ts";
 import type { Verbs } from "../approval.tsx";
 import { CardHeading, ToneBadge } from "../kit.tsx";
-import { allRecords, DECIDED, diffLines, DOES, landed, renamed, typeWords } from "./plan.ts";
+import { allRecords, DECIDED, deleted, diffLines, DOES, landed, renamed, typeWords } from "./plan.ts";
 
 // A table change's review on its change's page (`routes/changes/$id.tsx`), from the plan the
 // change carries (`ChangeState.plan`): once it merged, what became of the records
 // (`ChangeState.merged.reshaped`); a card per change in its kind's words and tone (Safe, Clears or
 // Keeps the values that won't convert, with a sample of them and the choice made where the change
-// was proposed, Keeps the data), Try it first, The details (the data file's lines), and Couldn't
+// was proposed, Keeps the data, Deletes n values for a column removed for good), Try it first, The details (the data file's lines), and Couldn't
 // apply this change over a run that failed before merging. Its decision is the change's own, in
 // the table change's words (`TABLE_VERBS`). It reads nothing of the app itself (the page gives it
 // the collection as main declares it), so a test renders it on its own.
@@ -44,7 +44,10 @@ function ChangeCard({
       size="sm"
       aria-label={title}
       role="region"
-      className={cn(tone === "waiting" && "ring-tone-waiting-foreground/40")}
+      className={cn(
+        tone === "waiting" && "ring-tone-waiting-foreground/40",
+        tone === "bad" && "ring-tone-bad-foreground/40",
+      )}
     >
       <CardHeader className="flex flex-wrap items-center gap-x-2.5">
         <CardHeading>{title}</CardHeading>
@@ -186,6 +189,35 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
               ? "No record has a value in it."
               : `The values in ${plural(change.filled, "record")} are kept.`}
           </p>
+          <p className="text-muted-foreground">
+            Removing it for good is a separate step, under Hidden columns in the grid's Fields.
+          </p>
+        </ChangeCard>
+      );
+    case "show":
+      return (
+        <ChangeCard title={`Show ${change.field} again`} tone="ok" said="Safe">
+          <p>
+            It comes back to the grid and the forms.{" "}
+            {change.filled === 0
+              ? "No record has a value in it."
+              : `The values in ${plural(change.filled, "record")} are there as they were.`}
+          </p>
+        </ChangeCard>
+      );
+    case "remove":
+      return change.filled === 0 ? (
+        <ChangeCard title={`Remove ${change.field} for good`} tone="ok" said="Safe">
+          <p>No record has a value in it, so nothing is lost. Its name is free for a new column.</p>
+        </ChangeCard>
+      ) : (
+        <ChangeCard
+          title={`Remove ${change.field} for good`}
+          tone="bad"
+          said={`Deletes ${plural(change.filled, "value")}`}
+        >
+          <p className="font-medium">{deleted(change.filled)}</p>
+          <p>Its name is free for a new column once this is applied. To keep the values, send the change back.</p>
         </ChangeCard>
       );
     case "link":
