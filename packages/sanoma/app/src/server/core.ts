@@ -176,12 +176,12 @@ export const readStartRun = (data: StartRunRequest): StartRunRequest =>
  * What `getConfig` answers (`AppConfig`): the snapshot's description (`withoutSources`), where
  * this instance is, whether its login is the loopback one, and the content kinds.
  */
-export const appConfig = ({ snapshot, place, resolved, login }: AppContext): AppConfig => ({
-  ...snapshot.description,
-  place,
-  loopbackLogin: login.name === LOOPBACK,
-  databaseHost: databaseHost(resolved.databaseUrl),
-  content: snapshot.content,
+export const appConfig = (app: AppContext): AppConfig => ({
+  ...app.snapshot.description,
+  place: app.place,
+  loopbackLogin: !saysWho(app),
+  databaseHost: databaseHost(app.resolved.databaseUrl),
+  content: app.snapshot.content,
 });
 
 /**

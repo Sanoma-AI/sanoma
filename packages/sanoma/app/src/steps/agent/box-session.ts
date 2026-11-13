@@ -9,12 +9,13 @@ import {
   type Box,
   type CheckResult,
   type Process,
+  REGISTRY,
   type ResolvedConfig,
   valueAt,
 } from "sanoma/workflows";
 import { errorMessage } from "sanoma/workflows/shared";
 import { DECLARE_BOX } from "../../api.ts";
-import { errorParts, noKeyText } from "../../lib/chat.ts";
+import { errorParts, localBox, noKeyText } from "../../lib/chat.ts";
 import { placeOf } from "../../loopback.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { boxTurn, carryIn, checkFailed, checkIn } from "./carrier.ts";
@@ -53,13 +54,6 @@ export const OWN_AGENTS_DIR = ".acp";
  * and Agent37's connector page for its key (`noKeyText`).
  */
 export const NO_BOX = noKeyText("agent37", DECLARE_BOX);
-
-/**
- * What every box reaches beside its agents' hosts: the package registry, where the clone's install
- * (`carryIn`), the agents' own installs and the pnpm corepack makes come from, and with them the
- * PostgreSQL that `sanoma check` starts in the box.
- */
-export const REGISTRY = "registry.npmjs.org";
 
 /**
  * The hosts a box of `resolved`'s may reach (`SandboxBackend.open`'s `hosts`): the package registry
@@ -106,7 +100,7 @@ export async function personBox(
         }),
     };
   }
-  if (!step.loopbackLogin || placeOf(resolved.databaseUrl) === "live") throw new Error(NO_BOX);
+  if (!localBox(placeOf(resolved.databaseUrl), step.loopbackLogin)) throw new Error(NO_BOX);
   // This machine is the local box's image and size.
   return { name, open: () => localBackend(agentHome(step, "boxes")).open({ name, hosts }) };
 }
@@ -151,7 +145,7 @@ export async function homeOf(box: Box): Promise<string> {
 
 /**
  * The session over `box`, `HarnessV1NetworkSandboxSession`. A path is the checkout's as the
- * checkout rule allows it (`allowedPaths`, on the box's files), or under the box's home, or refused. `stop` stops the
+ * checkout rule allows it (`inCheckout`, on the box's files), or under the box's home, or refused. `stop` stops the
  * box; `destroy` kills what the session started (so the box stays up for the turn's carry back,
  * and its opener stops it) and deletes the session's `.agent-runs`, which a bridge writes the
  * model's key into; `HarnessAgentSession.destroy()` leaves a session it was given running.

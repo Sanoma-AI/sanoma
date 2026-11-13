@@ -8,7 +8,7 @@ import {
   isToolUIPart,
   type UIMessage,
 } from "ai";
-import type { AppConfig } from "../api.ts";
+import type { AppConfig, Place } from "../api.ts";
 import type { LoopTools } from "../steps/agent/tools.ts";
 
 // The operator agent's chat as the browser and every engine share it: the message type, the
@@ -104,13 +104,15 @@ export function enginesOf(agents: AgentEntry[]): EngineOption[] {
   ];
 }
 
+/** Whether the local box opens here: only on one person's own computer, the loopback login on a database of its own. */
+export const localBox = (place: Place, loopbackLogin: boolean) => place !== "live" && loopbackLogin;
+
 /**
- * Whether a live instance, or one people sign in to, declares no box for the coding agents, which
- * run in one there (`DECLARE_BOX`): no resource whose type meets the `sandbox` contract. Only one
- * person's own computer (the loopback login, on a database of its own) has the local box.
+ * Whether an instance with no local box (`localBox`) declares no box for the coding agents, which
+ * run in one there (`DECLARE_BOX`): no resource whose type meets the `sandbox` contract.
  */
 export const boxless = (config: Pick<AppConfig, "place" | "loopbackLogin" | "resources" | "resourceTypes">) =>
-  (config.place === "live" || !config.loopbackLogin) &&
+  !localBox(config.place, config.loopbackLogin) &&
   !config.resources.some((r) =>
     config.resourceTypes.find((t) => t.id === `${r.vendor}.${r.type}`)?.capabilities?.includes("sandbox"),
   );

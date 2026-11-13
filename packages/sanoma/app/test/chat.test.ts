@@ -28,7 +28,7 @@ import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
 import { type ChatMessage, chatTransport, isIntro } from "../src/lib/chat.ts";
 import { INTRO } from "../src/server/chat.ts";
-import { allowedPaths, boxName, here, realIn } from "../src/steps/agent/checkout.ts";
+import { boxName, here, mustAllow, realIn } from "../src/steps/agent/checkout.ts";
 import { suggestedAsks } from "../src/steps/agent/transcript.ts";
 import { ENGINES } from "../src/steps/agent/turn.ts";
 import { appSteps } from "../src/steps/index.ts";
@@ -690,7 +690,7 @@ describe("suggestedAsks", () => {
   });
 });
 
-describe("allowedPaths", () => {
+describe("mustAllow", () => {
   it("allows a path inside the worktree, and refuses one outside it, under .git or node_modules, or through a symlink out, on this machine and in a box", async () => {
     const boxes = mkdtempSync(join(tmpdir(), "sanoma-allowed-"));
     // The worktree is a box's home: the box checks the same paths on its own files.
@@ -712,15 +712,18 @@ describe("allowedPaths", () => {
         "workflows/../../x",
       ];
       for (const real of [here, realIn(box)]) {
-        expect(
-          await allowedPaths(tree, [".", "workflows/new.ts", "new/deep/file.ts", "in/x.ts", ...refused], real),
-        ).toEqual([
+        const allowed = await Promise.all(
+          [".", "workflows/new.ts", "new/deep/file.ts", "in/x.ts"].map((path) => mustAllow(tree, path, real)),
+        );
+        expect(allowed).toEqual([
           at,
           join(at, "workflows/new.ts"),
           join(at, "new/deep/file.ts"),
           join(at, "workflows/x.ts"),
-          ...refused.map(() => undefined),
         ]);
+        for (const path of refused) {
+          await expect(mustAllow(tree, path, real), path).rejects.toThrow(/is outside your checkout/);
+        }
       }
     } finally {
       rmSync(boxes, { recursive: true, force: true });

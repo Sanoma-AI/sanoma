@@ -81,25 +81,6 @@ export const realIn =
     return JSON.parse(said) as (string | null)[];
   };
 
-/**
- * The checkout rule: the absolute paths `paths` (relative to `worktree`, or absolute) name, each
- * when an agent may read or write it there; undefined when it may not. Their real paths (`real`:
- * this machine's, or a box's, `realIn`, all in one go) must lie under the worktree's (the worktree
- * itself is allowed, for a listing), and their first segment there may not be `.git` or
- * `node_modules` (a draft's `node_modules` is a link into the live install). The rule for what
- * this process reads and writes for an agent: our loop's tools on the live draft, and an engine's
- * file calls on its box's clone (an ACP agent's `fs/*` and its terminals' working directory, a
- * harness session's file calls, `boxSession`); what an agent runs in its box is its own.
- */
-export async function allowedPaths(
-  worktree: string,
-  paths: readonly string[],
-  real: RealPaths = here,
-): Promise<(string | undefined)[]> {
-  const [root, ...fulls] = await real([resolve(worktree), ...paths.map((path) => resolve(worktree, path))]);
-  return fulls.map((full) => inCheckout(root, full));
-}
-
 /** The checkout rule on real paths: `full` when it lies under the checkout's `root` but not under `.git` or `node_modules` there. */
 export function inCheckout(root: string | null | undefined, full: string | null | undefined): string | undefined {
   if (!root || !full || !within(root, full)) return undefined;
@@ -107,11 +88,21 @@ export function inCheckout(root: string | null | undefined, full: string | null 
   return OFF_LIMITS.has(relative(root, full).split(sep)[0]!.toLowerCase()) ? undefined : full;
 }
 
-/** `path` under `root` as the checkout rule allows it (`real`: where its files are), or the refusal the agent reads. */
+/**
+ * The checkout rule: the absolute path `path` (relative to `root`, or absolute) names, when an
+ * agent may read or write it there, else the refusal the agent reads. Its real path (`real`: this
+ * machine's, or a box's, `realIn`) must lie under the checkout's (the checkout itself is allowed,
+ * for a listing), and its first segment there may not be `.git` or `node_modules` (a draft's
+ * `node_modules` is a link into the live install). The rule for what this process reads and
+ * writes for an agent: our loop's tools on the live draft, and an ACP agent's `fs/*` and its
+ * terminals' working directory on its box's clone (a harness session's file calls go through
+ * `inCheckout`, `boxSession`); what an agent runs in its box is its own.
+ */
 export async function mustAllow(root: string, path: string, real: RealPaths = here): Promise<string> {
-  const [full] = await allowedPaths(root, [path], real);
-  if (full === undefined) throw new Error(`${path} is outside your checkout, or under .git or node_modules`);
-  return full;
+  const [at, full] = await real([resolve(root), resolve(root, path)]);
+  const allowed = inCheckout(at, full);
+  if (allowed === undefined) throw new Error(`${path} is outside your checkout, or under .git or node_modules`);
+  return allowed;
 }
 
 /** Whether the absolute path `full` is `dir` or under it, by their paths as given. */

@@ -51,6 +51,13 @@ export interface SandboxSpec {
  */
 export const IMAGE_AGENTS = "/opt/sanoma/agents";
 
+/**
+ * The host every box reaches beside its agents' (`OwnAgent.hosts`, `KeyAgent.hosts`): the package
+ * registry, where the clone's install, the agents' own installs and the pnpm corepack makes come
+ * from, and with them the PostgreSQL that `sanoma check` starts in the box.
+ */
+export const REGISTRY = "registry.npmjs.org";
+
 /** A process `Box.run` started: `bash -c <command>`. */
 export interface Process {
   /** Its stdin: closed at once unless `run` was given `stdin: true`. */

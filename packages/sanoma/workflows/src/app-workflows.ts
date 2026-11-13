@@ -229,7 +229,7 @@ export interface AppStepContext {
    */
   reload?: () => void;
   /** Whether the app this worker serves is under the loopback login (`WorkerOptions.loopbackLogin`). */
-  loopbackLogin?: boolean;
+  loopbackLogin: boolean;
 }
 
 /**

@@ -11,6 +11,7 @@ import {
   type Chat,
   type ChatTurnContext,
   LOCAL_SANDBOX,
+  REGISTRY,
   resolveConfig,
   type Source,
   VENDOR,
@@ -19,15 +20,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { placeOf } from "../src/loopback.ts";
 import { acpEngine } from "../src/steps/agent/acp.ts";
-import {
-  boxHosts,
-  boxSession,
-  checkDraft,
-  homeOf,
-  NO_BOX,
-  personBox,
-  REGISTRY,
-} from "../src/steps/agent/box-session.ts";
+import { boxHosts, boxSession, checkDraft, homeOf, NO_BOX, personBox } from "../src/steps/agent/box-session.ts";
 import { boxName } from "../src/steps/agent/checkout.ts";
 import { harnessEngine } from "../src/steps/agent/harness.ts";
 import { freePort, localBackend } from "../src/steps/agent/local-box.ts";
@@ -257,7 +250,7 @@ describe("personBox", () => {
         'import { testsandbox } from "@sanoma-ai/testing-sandbox/resources";\nexport const box = testsandbox.box({ name: "box", image: "node:26", size: 2 });\n',
     });
     const resolved = resolveConfig({ workflows: [], connectors: [connector], root: declaring, databaseUrl: LIVE });
-    const chosen = await personBox({ resolved, by, client: undefined as never });
+    const chosen = await personBox({ resolved, by, client: undefined as never, loopbackLogin: false });
     expect(chosen.name).toBe(boxName("acme", "ada"));
     const opening = await chosen.open();
     expect(await homeOf(opening)).toBe(join(fake.root, chosen.name));
@@ -293,18 +286,9 @@ describe("personBox", () => {
     const resolved = resolveConfig({ workflows: [], connectors: [], root: company() });
     expect(placeOf(resolved.databaseUrl)).toBe("this-computer");
     const draft = { root: base, draft: () => undefined, diff: () => undefined } as unknown as Source;
-    for (const loopbackLogin of [false, undefined]) {
-      await expect(
-        personBox({
-          resolved,
-          by,
-          client: undefined as never,
-          source: draft,
-          ...(loopbackLogin === false && { loopbackLogin }),
-        }),
-      ).rejects.toThrow(NO_BOX);
-    }
-    expect(await checkDraft({ resolved, by, client: undefined as never, source: draft }, { id: "d1" })).toMatchObject({
+    const step = { resolved, by, client: undefined as never, source: draft, loopbackLogin: false };
+    await expect(personBox(step)).rejects.toThrow(NO_BOX);
+    expect(await checkDraft(step, { id: "d1" })).toMatchObject({
       ok: false,
       problems: [expect.stringContaining("one people sign in to")],
     });
@@ -313,12 +297,13 @@ describe("personBox", () => {
   it("refuses both engines' turns on a live instance that declares none, saying what to declare, before any draft, and makes its check one problem", async () => {
     // Pi's and Copilot's connectors, which give the engines their agents.
     const resolved = resolveConfig({ workflows: [], connectors: [pi, github], root: company(), databaseUrl: LIVE });
-    await expect(personBox({ resolved, by, client: undefined as never })).rejects.toThrow(NO_BOX);
+    const live = { resolved, by, client: undefined as never, loopbackLogin: true };
+    await expect(personBox(live)).rejects.toThrow(NO_BOX);
     const declare =
       "Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY";
     expect(NO_BOX).toBe(`${declare} [connector:agent37]`);
     // Publish's check and run_checks: a result the cards show, never run here.
-    expect(await checkDraft({ resolved, by, client: undefined as never }, { id: "d1" })).toEqual({
+    expect(await checkDraft(live, { id: "d1" })).toEqual({
       ok: false,
       problems: [`sanoma check: ${declare}`],
       warnings: [],

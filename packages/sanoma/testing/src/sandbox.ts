@@ -10,6 +10,7 @@ import {
   errorMessage,
   LOCAL_SANDBOX,
   localBackend,
+  REGISTRY,
   type SandboxBackend,
   type SandboxCapabilities,
   withSetup,
@@ -58,15 +59,7 @@ const HOMED = ".sanoma-kit";
  * `discard` leaves the next `open` empty. Starts from a discarded box, and discards it at the end.
  */
 export async function checkSandbox(s: SandboxUnderTest): Promise<SandboxCheck[]> {
-  const {
-    backend,
-    capabilities,
-    name = "sanoma-kit",
-    image,
-    size,
-    hosts = ["registry.npmjs.org"],
-    timeoutMs = 60_000,
-  } = s;
+  const { backend, capabilities, name = "sanoma-kit", image, size, hosts = [REGISTRY], timeoutMs = 60_000 } = s;
   const token = randomBytes(9).toString("base64url");
   const script = new TextEncoder().encode(`#!/bin/sh\necho ${token}\n`);
   const results: SandboxCheck[] = [];

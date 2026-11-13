@@ -171,7 +171,7 @@ async function openOnce(
         region: want.region,
         name: labelOf(name),
         metadata: { [BOX]: name, ...(group && { [GROUP]: group }) },
-        ...(network && { network: { allow: [...network] } }),
+        ...(network && { network: { allow: network } }),
         auto_sleep: true,
         idle_timeout_seconds: 900,
       },

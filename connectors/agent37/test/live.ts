@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { checkSandbox } from "sanoma/testing/sandbox";
-import type { Box } from "sanoma/workflows";
+import { type Box, REGISTRY } from "sanoma/workflows";
 import { agent37Api, isCode } from "../src/api.ts";
 import { agent37Backend, BOX, KEY } from "../src/backend.ts";
 import { BASE, DEFAULTS, instance } from "../src/connector.ts";
@@ -30,7 +30,7 @@ if (process.env.SANOMA_LIVE !== "1" || !key || !repo) {
 const IMAGE = process.env.AGENT37_TEST_IMAGE ?? BASE;
 const NAME = `sanoma-live-${Date.now().toString(36)}`;
 /** What the box may reach: the registry alone, which the install needs. */
-const HOSTS = ["registry.npmjs.org"];
+const HOSTS = [REGISTRY];
 const backend = agent37Backend({ secrets: async () => new Map([[KEY, key]]), declared: {} });
 const api = agent37Api(key);
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;

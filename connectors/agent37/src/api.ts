@@ -31,7 +31,7 @@ interface InstanceCreate {
   auto_sleep: boolean;
   idle_timeout_seconds: number;
   /** The domains and addresses it may reach, up to 100; anywhere when left out. */
-  network?: { allow: string[] };
+  network?: { allow: readonly string[] };
 }
 
 /** Agent37's error body: `{ error: { code, message } }`, or a flat `{ error: code }` from its edge. */
