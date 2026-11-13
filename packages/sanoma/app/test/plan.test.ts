@@ -59,6 +59,9 @@ const refused = (change: ColumnChange) => problemOf(outbound, change);
 /** What `change` writes into outbound's declaration. */
 const edit = (change: ColumnChange) => declarationEdit(outbound.fields, change);
 /** Each card's title and what it says it is, in order. */
+/** The labels of the buttons in `html`, in order. */
+const buttons = (html: string) => [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(([, label]) => label);
+
 const cards = (html: string) =>
   [...html.matchAll(/<h2>([^<]*)<\/h2>(?:(?!<h2>)[\s\S])*?data-slot="badge"[^>]*>([^<]*)</g)].map(([, title, said]) => [
     title,
@@ -228,19 +231,31 @@ describe("landed", () => {
 describe("TableChangeReview", () => {
   // By a path TypeScript does not follow: the components are JSX and DOM, checked by typecheck:ui.
   type Review = (props: {
-    change: { runId: string; status: string; state: { merged?: object } };
+    change: { runId: string; status: string; state: { merged?: object }; retry?: object };
     plan: TableChangePlan;
     collection: CollectionEntry | undefined;
+    tryAgain?: { start(): void; starting: boolean };
   }) => ReactNode;
   const load = (path: string) => import(new URL(path, import.meta.url).href) as Promise<{ TableChangeReview: Review }>;
 
   /** The review of `plan` (the plan fixture's) as the server renders it, in a router, as the app's pages are. */
-  const render = async (status: string, state: { merged?: object } = {}, plan = TABLE_CHANGE_PLAN) => {
+  const render = async (
+    status: string,
+    state: { merged?: object } = {},
+    plan = TABLE_CHANGE_PLAN,
+    more: { retry?: object; tryAgain?: { start(): void; starting: boolean } } = {},
+  ) => {
     const { TableChangeReview } = await load("../src/components/grid/review.tsx");
-    const change = { runId: "change:ui-1234abcd", status, state };
+    const change = {
+      runId: "change:ui-1234abcd",
+      status,
+      state: { title: "Outbound columns", ...state },
+      retry: more.retry,
+    };
     const router = createRouter({
       routeTree: createRootRoute({
-        component: () => createElement(TableChangeReview, { change, plan, collection: outbound }),
+        component: () =>
+          createElement(TableChangeReview, { change, plan, collection: outbound, tryAgain: more.tryAgain }),
       }),
       history: createMemoryHistory({ initialEntries: ["/"] }),
     });
@@ -308,5 +323,40 @@ describe("TableChangeReview", () => {
     );
     expect(failed).toContain('href="/runs/change%3Aui-1234abcd"');
     expect(failed).not.toContain("Nothing changed");
+    // Without the page's Try again, only the details to copy.
+    expect(buttons(failed)).toContain("Copy the details");
+    expect(buttons(failed)).not.toContain("Try again");
+  });
+
+  it("offers Try again when the records weren't brought along, and follows the run it starts", async () => {
+    const error = { merged: { sha: "abc", at: 0, reshaped: { error: "the database said no" } } };
+    const tryAgain = { start: () => {}, starting: false };
+    const offered = await render("finished", error, TABLE_CHANGE_PLAN, { tryAgain });
+    expect(buttons(offered)).toContain("Try again");
+    expect(offered).not.toMatch(/<button[^>]* disabled=""[^>]*>Try again</);
+    // Starting, or its run under way: no second one.
+    expect(await render("finished", error, TABLE_CHANGE_PLAN, { tryAgain: { ...tryAgain, starting: true } })).toMatch(
+      /<button[^>]* disabled=""[^>]*>Trying again…</,
+    );
+    const retry = { runId: "reshape:ui-1234abcd", status: "waiting" };
+    const waiting = await render("finished", error, TABLE_CHANGE_PLAN, { tryAgain, retry });
+    expect(waiting).toMatch(/<button[^>]* disabled=""[^>]*>Trying again…</);
+    expect(waiting).toContain("Trying again waits for an approval in the Inbox.");
+    expect(waiting).toContain('href="/runs/reshape%3Aui-1234abcd"');
+    // It failed to start the records' run: said, and offered again.
+    const failed = await render("finished", error, TABLE_CHANGE_PLAN, {
+      tryAgain,
+      retry: { ...retry, status: "failed", error: "the run stopped" },
+    });
+    expect(failed).toContain("Trying again failed: the run stopped.");
+    expect(failed).not.toMatch(/ disabled=""[^>]*>Try again</);
+    // Once it brought them along, its counts are what became of the records.
+    const reshaped = { rows: 312, changed: 312, converted: 297, cleared: 15, kept: 0 };
+    const done = await render("finished", error, TABLE_CHANGE_PLAN, {
+      tryAgain,
+      retry: { ...retry, status: "finished", reshaped },
+    });
+    expect(cards(done)[0]).toEqual(["The records", "Updated"]);
+    expect(buttons(done)).not.toContain("Try again");
   });
 });
