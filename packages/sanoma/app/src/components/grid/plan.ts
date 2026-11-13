@@ -124,13 +124,15 @@ const nameOf = (change: ColumnChange): string | undefined =>
  * value under it, which the column would take as its own (or, for a rename or a conversion, keep
  * in place of what it moves), left by a column change whose records weren't brought along (a
  * removal for good, or a rename, until Try again on its change) or saved in an earlier shape; none
- * when no record holds one.
+ * when no record holds one. Try again is offered only where a change has a page (`reviewed`: the
+ * repository has a remote changes are reviewed on); a change saved without one has none.
  */
-export function leftOver(rows: readonly Saved[], change: ColumnChange): string | undefined {
+export function leftOver(rows: readonly Saved[], change: ColumnChange, reviewed: boolean): string | undefined {
   const name = nameOf(change);
   const holding = name === undefined ? 0 : rows.filter(({ record }) => Object.hasOwn(record, name)).length;
   if (holding === 0) return undefined;
-  return `${records(holding)} still ${holding === 1 ? "holds a value" : "hold values"} under ${name}, left from a column change whose records weren't updated: try that change again first, or choose another name`;
+  const next = reviewed ? "try that change again first, or choose another name" : "choose another name";
+  return `${records(holding)} still ${holding === 1 ? "holds a value" : "hold values"} under ${name}, left from a column change whose records weren't updated: ${next}`;
 }
 
 /**

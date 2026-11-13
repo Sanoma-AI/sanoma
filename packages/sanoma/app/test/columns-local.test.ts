@@ -16,7 +16,9 @@ import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
+import { createApi, type UntypedApi } from "../src/api-client.ts";
 import { planColumnChange, proposeColumnChange } from "../src/server/columns.ts";
+import { callApi } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { pageOf, PEOPLE } from "./fixtures/change.ts";
@@ -41,6 +43,7 @@ const FIELDS = {
   lastTouched: { type: "date", optional: true },
   seats: { type: "number", optional: true },
   notes: { type: "text", optional: true, hidden: true },
+  meta: { type: "json", optional: true },
 } as const;
 /** The collection the data file declares, as the worker runs it. */
 const outbound = collection({ name: "outbound", title: "Outbound", key: "company", fields: FIELDS });
@@ -52,7 +55,7 @@ writeFileSync(
   join(root, "resources/data.ts"),
   readFileSync(join(root, "resources/data.ts"), "utf8").replace(
     '    seats: { type: "number", optional: true },\n',
-    '    seats: { type: "number", optional: true },\n    notes: { type: "text", optional: true, hidden: true },\n',
+    '    seats: { type: "number", optional: true },\n    notes: { type: "text", optional: true, hidden: true },\n    meta: { type: "json", optional: true },\n',
   ),
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -73,7 +76,14 @@ beforeAll(async () => {
   ensureSanomaBuilt();
   app = await startApp(testApp.config, { port: 0, source });
   for (const record of [
-    { company: "Acme Plumbing", contact: "dana@acme.test", lastTouched: "2026-11-01", seats: 4, notes: "call back" },
+    {
+      company: "Acme Plumbing",
+      contact: "dana@acme.test",
+      lastTouched: "2026-11-01",
+      seats: 4,
+      notes: "call back",
+      meta: { "Lead source": "referral" },
+    },
     { company: "Brightwater Dental", contact: "sam@brightwater.test", seats: 2 },
     { company: "Cedar & Finch", contact: "42" },
   ]) {
@@ -115,6 +125,13 @@ async function stored(key: string) {
   return row?.record;
 }
 
+/** A plan, made by hand, that removes `field` of outbound and claims it deletes nothing. */
+const removing = (field: string) => ({
+  collection: "outbound",
+  changes: [{ kind: "remove", field, filled: 0 }],
+  rows: 3,
+});
+
 /** Chrome, at the data page as ada; skipped without it. */
 async function chrome(ctx: { skip: (note: string) => void }) {
   const path = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
@@ -140,7 +157,7 @@ describe("a collection's columns with no remote", () => {
   it("leaves a hidden field out of the grid and the record form", async () => {
     const { html } = await pageOf(app, "/data/outbound");
     const menus = [...html.matchAll(/aria-label="Change the column (\w+)"/g)].map(([, field]) => field);
-    expect(menus).toEqual(["contact", "stage", "owner", "lastTouched", "seats"]);
+    expect(menus).toEqual(["contact", "stage", "owner", "lastTouched", "seats", "meta"]);
     expect(html).not.toContain(">notes<");
     expect(html).not.toContain(">call back<");
     const form = (await pageOf(app, `/data/outbound?record=${encodeURIComponent("Acme Plumbing")}`)).html;
@@ -302,6 +319,37 @@ describe("a collection's columns with no remote", () => {
     expect(await stored("Acme Plumbing")).not.toHaveProperty("notes");
   });
 
+  it("makes a key of a free-form column a column of its own under another name, moving its values", async () => {
+    const landed = await proposeColumnChange(await contextOf(), ada, {
+      collection: "outbound",
+      change: { kind: "convert", field: "meta", key: "Lead source", to: "leadSource", type: "text" },
+    });
+    expect(landed).toMatchObject({
+      file: "resources/data.ts",
+      reshaped: { rows: 3, changed: 1, converted: 1, cleared: 0, kept: 0 },
+    });
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toContain(
+      'leadSource: { type: "text", optional: true },',
+    );
+    expect(await stored("Acme Plumbing")).toMatchObject({ leadSource: "referral", meta: {} });
+  });
+
+  it("refuses a hand-made plan that removes a field the save does not remove, or one not hidden, writing nothing", async () => {
+    const context = await contextOf();
+    const api: UntypedApi = createApi((request) => callApi(context, ada, request));
+    const at = context.snapshot.description.collections.find((c) => c.name === "outbound")!.declared!.at;
+    const file = readFileSync(join(root, "resources/data.ts"), "utf8");
+    // A removal under the cover of another edit to the field, and one of a field that is not hidden.
+    for (const input of [
+      { at, fields: { "fields.contact": "number" }, plan: removing("contact") },
+      { at, fields: {}, rename: { "fields.contact": null }, plan: removing("contact") },
+    ]) {
+      await expect(api.patch(input)).rejects.toThrow("The plan is not of the fields this saves");
+    }
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toBe(file);
+    expect(await stored("Cedar & Finch")).toMatchObject({ contact: 42 });
+  });
+
   it("refuses a new column under a name records still hold values under, writing nothing", async () => {
     // A removal whose records weren't brought along leaves its values under a name no field has.
     const db = await pool.db();
@@ -320,7 +368,11 @@ describe("a collection's columns with no remote", () => {
     } as const;
     const refusal = {
       status: 400,
-      body: expect.objectContaining({ error: expect.stringContaining("1 record still holds a value under legacyId") }),
+      body: expect.objectContaining({
+        // No remote, so no change page to try it again on.
+        error:
+          "1 record still holds a value under legacyId, left from a column change whose records weren't updated: choose another name",
+      }),
     };
     await expect(planColumnChange(await contextOf(), ada, request)).rejects.toMatchObject(refusal);
     await expect(proposeColumnChange(await contextOf(), ada, request)).rejects.toMatchObject(refusal);

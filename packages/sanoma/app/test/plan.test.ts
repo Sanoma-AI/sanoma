@@ -301,17 +301,21 @@ describe("a name records still hold values under", () => {
     const left = [...rows, row("Echo Labs", { legacyId: "L-1" }), row("Fox & Co", { legacyId: null })];
     const said =
       "2 records still hold values under legacyId, left from a column change whose records weren't updated: try that change again first, or choose another name";
-    expect(leftOver(left, { kind: "add", field: "legacyId", type: "text", required: false })).toBe(said);
-    expect(leftOver(left, { kind: "rename", from: "contact", to: "legacyId" })).toBe(said);
-    expect(leftOver(left, { kind: "convert", field: "details", key: "source", to: "legacyId", type: "text" })).toBe(
-      said,
-    );
-    expect(leftOver(left.slice(0, -1), { kind: "add", field: "legacyId", type: "text", required: false })).toBe(
+    expect(leftOver(left, { kind: "add", field: "legacyId", type: "text", required: false }, true)).toBe(said);
+    expect(leftOver(left, { kind: "rename", from: "contact", to: "legacyId" }, true)).toBe(said);
+    expect(
+      leftOver(left, { kind: "convert", field: "details", key: "source", to: "legacyId", type: "text" }, true),
+    ).toBe(said);
+    expect(leftOver(left.slice(0, -1), { kind: "add", field: "legacyId", type: "text", required: false }, true)).toBe(
       "1 record still holds a value under legacyId, left from a column change whose records weren't updated: try that change again first, or choose another name",
     );
-    expect(leftOver(left, { kind: "add", field: "region", type: "text", required: false })).toBeUndefined();
-    expect(leftOver(left, { kind: "retype", field: "contact", to: "number" })).toBeUndefined();
-    expect(leftOver(left, { kind: "remove", field: "contact" })).toBeUndefined();
+    // Saved without a remote, a change has no page to try it again on.
+    expect(leftOver(left, { kind: "add", field: "legacyId", type: "text", required: false }, false)).toBe(
+      "2 records still hold values under legacyId, left from a column change whose records weren't updated: choose another name",
+    );
+    expect(leftOver(left, { kind: "add", field: "region", type: "text", required: false }, true)).toBeUndefined();
+    expect(leftOver(left, { kind: "retype", field: "contact", to: "number" }, true)).toBeUndefined();
+    expect(leftOver(left, { kind: "remove", field: "contact" }, true)).toBeUndefined();
   });
 });
 

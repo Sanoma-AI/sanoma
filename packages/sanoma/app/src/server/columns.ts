@@ -7,7 +7,7 @@ import { createApi, type UntypedApi } from "../api-client.ts";
 import { ApiError, type ColumnPlanRequest, type ProposeColumnChange } from "../api.ts";
 import { declarationEdit, leftOver, planOf, problemOf, targetOf } from "../components/grid/plan.ts";
 import type { AppContext } from "../context.ts";
-import { callApi } from "./core.ts";
+import { callApi, remoteOf } from "./core.ts";
 
 // A change to a collection's columns, proposed from the grid: its plan over every record, which
 // the column panel shows and asks on (`planColumnChange`), then the collection's declaration in
@@ -56,7 +56,7 @@ async function planned(app: AppContext, actor: Principal, { collection: name, ch
     everyRecord(api, name, collection.key),
     target && everyRecord(api, target.name, target.key),
   ]);
-  const left = leftOver(rows, change);
+  const left = leftOver(rows, change, remoteOf(app) !== undefined);
   if (left) throw refuse(left);
   const keys =
     linked && typeof type === "object" && "link" in type
