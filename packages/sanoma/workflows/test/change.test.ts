@@ -6,6 +6,7 @@ import { fakeHost, testRepository } from "sanoma/testing/host";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { collection } from "../src/collection.ts";
 import { lazyDb } from "../src/db.ts";
 import { data } from "../src/db/company.ts";
 import type { TableChangePlan } from "../src/description.ts";
@@ -65,13 +66,20 @@ const merges = (records: LedgerRecord[]) =>
   records.filter((r) => r.type === "op.called" && r.op === CHANGE_MERGE && !r.error);
 const opsOf = (records: LedgerRecord[]) => records.flatMap((r) => (r.type === "op.called" ? [r.op] : []));
 
+/** The collections Try again's tests bring along: `prospects` as it was before a rename to `contacted`. */
+const collections = [
+  collection({ name: "leads", key: "company", fields: { company: "text", contacted: "text" } }),
+  collection({ name: "ledger", key: "company", fields: { company: "text", contacted: "text" } }),
+  collection({ name: "prospects", key: "company", fields: { company: "text", touched: "text" } }),
+];
+
 describe("the change workflow", () => {
   const root = rootWith({ "resources/people.ts": PEOPLE, "policies/no-secrets.cedar": POLICY });
   const remote = fakeRemote();
   const repo = memorySource({ root: here, remote });
   const databaseUrl = freshDatabase("change");
   const app = useTestApp(
-    { workflows: [waits], connectors: [remote.connector], ledger: memoryLedger(), root },
+    { workflows: [waits], collections, connectors: [remote.connector], ledger: memoryLedger(), root },
     { databaseUrl, source: repo.source },
   );
   const pool = lazyDb(databaseUrl, "change test");
@@ -425,6 +433,25 @@ describe("the change workflow", () => {
     });
     await expect(app.client.result(await app.client.reshapeChange("nothing", { startedBy: "ada" }))).rejects.toThrow(
       "The draft nothing has no published change",
+    );
+  });
+
+  it("refuses Try again once the collection's columns are no longer what the change made them", async () => {
+    // `prospects` declares `touched` (made again by a later change, say): renaming it again would move its values.
+    const plan: TableChangePlan = {
+      collection: "prospects",
+      rows: 0,
+      changes: [{ kind: "rename", from: "touched", to: "contacted" }],
+    };
+    const head = repo.edit("prospects", { "notes/prospects.md": "\n" });
+    const runId = await app.client.openChange(
+      { id: "prospects", title: "Prospects", page: page("prospects"), save: head, plan },
+      { startedBy: "alice" },
+    );
+    expect(await app.client.result(runId)).toMatchObject({ outcome: "merged", reshaped: { rows: 0 } });
+    const retry = await app.client.reshapeChange("prospects", { startedBy: "ada" });
+    await expect(app.client.result(retry)).rejects.toThrow(
+      "The columns of prospects are no longer what the change of the draft prospects made them",
     );
   });
 

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { DBOS, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import { type ApprovalMessage, nextApprovalId, topicOf, withdrawApprovals } from "./approvals.ts";
 import { decide } from "./call.ts";
@@ -19,8 +20,8 @@ import {
   touchesOf,
 } from "./change.ts";
 import type { ChangeSteps } from "./change-workflow.ts";
-import { recordsOps } from "./collection.ts";
-import type { ReshapeInput } from "./description.ts";
+import { type Field, recordsOps } from "./collection.ts";
+import type { ColumnType, ReshapeChange, ReshapeInput } from "./description.ts";
 import type { DriftReport } from "./drift.ts";
 import { causes, isRunControlError } from "./errors.ts";
 import { warn } from "./log.ts";
@@ -316,7 +317,8 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     reshaping: (id) =>
       DBOS.runStep(
         async (): Promise<ReshapeInput> => {
-          const change = await (await runNow("A reshape step").state.client()).change(id);
+          const { state } = runNow("A reshape step");
+          const change = await (await state.client()).change(id);
           if (!change?.state.merged) {
             throw new Error(
               `The draft ${id} has no published change: its records follow a change once it is published`,
@@ -324,9 +326,36 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
           }
           const reshaping = reshapeOf(change.state.plan);
           if (!reshaping) throw new Error(`The change of the draft ${id} brings no records along`);
+          // A plan replayed over columns a later change made again would move or clear their values.
+          const fields = state.collections.get(reshaping.collection)?.fields;
+          if (!fields || !reshaping.changes.every((c) => declares(fields, c))) {
+            throw new Error(
+              `The columns of ${reshaping.collection} are no longer what the change of the draft ${id} made them, so its records are not brought along by it again`,
+            );
+          }
           return reshaping;
         },
         { name: "reshape:plan" },
       ),
   };
+}
+
+/** Whether `fields` declare what `change` made of them: its new name alone, or its field of its new type. */
+function declares(fields: Readonly<Record<string, Field>>, change: ReshapeChange): boolean {
+  const typed = (name: string, type: ColumnType) => {
+    const field = fields[name];
+    if (field === undefined) return false;
+    return isDeepStrictEqual(
+      typeof field === "string" ? field : "enum" in field ? { enum: [...field.enum] } : field.type,
+      type,
+    );
+  };
+  switch (change.kind) {
+    case "rename":
+      return Object.hasOwn(fields, change.to) && !Object.hasOwn(fields, change.from);
+    case "retype":
+      return typed(change.field, change.to);
+    case "convert":
+      return typed(change.key, change.type);
+  }
 }

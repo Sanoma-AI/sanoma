@@ -61,7 +61,8 @@ export interface ChangeSteps {
   held(reshaping: ReshapeInput): Promise<string | undefined>;
   /**
    * What bringing the records of the draft `id`'s change along takes (`reshapeOf` its plan): its
-   * latest change, merged, carrying a plan that brings records along; thrown otherwise.
+   * latest change, merged, carrying a plan that brings records along, over columns still as it
+   * made them (the running declaration); thrown otherwise.
    */
   reshaping(id: string): Promise<ReshapeInput>;
 }
