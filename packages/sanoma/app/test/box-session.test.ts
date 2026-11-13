@@ -13,11 +13,21 @@ import {
   LOCAL_SANDBOX,
   resolveConfig,
   type Source,
+  VENDOR,
   withSetup,
 } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { placeOf } from "../src/loopback.ts";
 import { acpEngine } from "../src/steps/agent/acp.ts";
-import { boxSession, checkDraft, homeOf, NO_BOX, personBox } from "../src/steps/agent/box-session.ts";
+import {
+  boxHosts,
+  boxSession,
+  checkDraft,
+  homeOf,
+  NO_BOX,
+  personBox,
+  REGISTRY,
+} from "../src/steps/agent/box-session.ts";
 import { boxName } from "../src/steps/agent/checkout.ts";
 import { harnessEngine } from "../src/steps/agent/harness.ts";
 import { freePort, localBackend } from "../src/steps/agent/local-box.ts";
@@ -44,7 +54,7 @@ execFileSync("ln", ["-s", tmpdir(), join(root, "out")]);
 
 let box: Box;
 beforeAll(async () => {
-  box = await boxes.open({ name });
+  box = await boxes.open({ name, hosts: [] });
 });
 afterAll(() => rmSync(base, { recursive: true, force: true }));
 
@@ -68,6 +78,7 @@ describe("the local backend", () => {
       { name: "stdout arrives before the command exits", ok: true },
       { name: "stdin reaches cat", ok: true },
       { name: "a written file reads back, and runs with its mode", ok: true },
+      { name: "the box opens again with other hosts", ok: true },
       { name: "a file and the home directory survive a stop and the next open", ok: true },
       { name: "an exposed port answers from outside the box", ok: true },
       { name: "a command killed mid-run exits non-zero", ok: true },
@@ -80,7 +91,7 @@ describe("the local backend", () => {
     expect(boxName("acme-ada", "x")).not.toBe(boxName("acme", "ada-x"));
     expect(await homeOf(box)).toBe(home);
     for (const bad of ["../out", ".hidden", ""]) {
-      await expect(boxes.open({ name: bad }), bad).rejects.toThrow(/no box's name/);
+      await expect(boxes.open({ name: bad, hosts: [] }), bad).rejects.toThrow(/no box's name/);
     }
   });
 });
@@ -217,6 +228,15 @@ function company(files: Record<string, string> = {}) {
   return at;
 }
 
+/** The Pi connector, its agent reaching `own` on a person's plan and `onKey` on the company's key. */
+const declares = (own: string[], onKey?: string[]) =>
+  withSetup(pi, {
+    agent: {
+      own: { ...pi[VENDOR].setup!.agent!.own!, hosts: own },
+      ...(onKey && { onKey: { ...pi[VENDOR].setup!.agent!.onKey!, hosts: onKey } }),
+    },
+  });
+
 describe("personBox", () => {
   const by = { id: "ada" };
 
@@ -241,16 +261,53 @@ describe("personBox", () => {
     expect(chosen.name).toBe(boxName("acme", "ada"));
     const opening = await chosen.open();
     expect(await homeOf(opening)).toBe(join(fake.root, chosen.name));
+    // The registry alone: no connector here gives a coding agent.
+    const hosts = [REGISTRY];
     expect(opened).toEqual([
-      { name: chosen.name, image: "node:26", size: 2, declared: { name: "box", image: "node:26", size: 2 } },
+      { name: chosen.name, image: "node:26", size: 2, hosts, declared: { name: "box", image: "node:26", size: 2 } },
     ]);
+  });
+
+  it("lets a box reach the registry and every installed agent's hosts on either plan, each once, and nothing else", () => {
+    expect(boxHosts(resolveConfig({ workflows: [], connectors: [] }))).toEqual([REGISTRY]);
+    const resolved = resolveConfig({
+      workflows: [],
+      connectors: [declares(["api.example.com", "login.example.com"], ["models.example.com"]), github],
+    });
+    const copilot = github[VENDOR].setup!.agent!.own!.hosts;
+    expect(boxHosts(resolved)).toEqual(
+      [...new Set([REGISTRY, "api.example.com", "login.example.com", "models.example.com", ...copilot])].toSorted(),
+    );
   });
 
   it("opens the local backend's box under the repository's .sanoma when none is declared, on this computer", async () => {
     const resolved = resolveConfig({ workflows: [], connectors: [], root: company() });
     const draft = { root: base, draft: () => undefined, diff: () => undefined } as unknown as Source;
-    const chosen = await personBox({ resolved, by, client: undefined as never, source: draft });
+    const chosen = await personBox({ resolved, by, client: undefined as never, source: draft, loopbackLogin: true });
     expect(await homeOf(await chosen.open())).toBe(join(base, ".sanoma/agent-home/boxes", boxName("acme", "ada")));
+  });
+
+  it("refuses the local box under a login provider, even on this computer's database, and a box is still declared there", async () => {
+    // A self-hosted server people sign in to, its database on loopback: every staff member's agent
+    // would otherwise run as the app's user.
+    const resolved = resolveConfig({ workflows: [], connectors: [], root: company() });
+    expect(placeOf(resolved.databaseUrl)).toBe("this-computer");
+    const draft = { root: base, draft: () => undefined, diff: () => undefined } as unknown as Source;
+    for (const loopbackLogin of [false, undefined]) {
+      await expect(
+        personBox({
+          resolved,
+          by,
+          client: undefined as never,
+          source: draft,
+          ...(loopbackLogin === false && { loopbackLogin }),
+        }),
+      ).rejects.toThrow(NO_BOX);
+    }
+    expect(await checkDraft({ resolved, by, client: undefined as never, source: draft }, { id: "d1" })).toMatchObject({
+      ok: false,
+      problems: [expect.stringContaining("one people sign in to")],
+    });
   });
 
   it("refuses both engines' turns on a live instance that declares none, saying what to declare, before any draft, and makes its check one problem", async () => {
@@ -258,7 +315,7 @@ describe("personBox", () => {
     const resolved = resolveConfig({ workflows: [], connectors: [pi, github], root: company(), databaseUrl: LIVE });
     await expect(personBox({ resolved, by, client: undefined as never })).rejects.toThrow(NO_BOX);
     const declare =
-      "Coding agents work in a box of their own on a live instance, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY";
+      "Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY";
     expect(NO_BOX).toBe(`${declare} [connector:agent37]`);
     // Publish's check and run_checks: a result the cards show, never run here.
     expect(await checkDraft({ resolved, by, client: undefined as never }, { id: "d1" })).toEqual({

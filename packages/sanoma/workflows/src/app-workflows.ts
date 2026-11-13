@@ -228,6 +228,8 @@ export interface AppStepContext {
    * can, as on a worker run alone.
    */
   reload?: () => void;
+  /** Whether the app this worker serves is under the loopback login (`WorkerOptions.loopbackLogin`). */
+  loopbackLogin?: boolean;
 }
 
 /**

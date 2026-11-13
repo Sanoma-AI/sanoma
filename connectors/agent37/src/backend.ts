@@ -21,8 +21,10 @@ import { otherGroup } from "./operations.ts";
 
 // The `Sandbox` backend on Agent37: a box is an instance, found by the name in its metadata,
 // made when there is none (from Sanoma's box image unless an image is declared), woken or started
-// when it sleeps or is stopped. Its commands and files go through Sanoma's runner in it
-// (`runnerBox`, at its port 7700 behind Agent37's edge), which `open` starts there when it does not
+// when it sleeps or is stopped, and reaching only the hosts `open` is given (Agent37's `network`
+// allowlist, set in place on one made with another). Its commands and files go through Sanoma's
+// runner in it (`runnerBox`, at its port 7700 behind Agent37's edge, which the app dials: an
+// allowlist limits only what the box dials out), which `open` starts there when it does not
 // answer: Agent37's own exec is buffered and has no stdin, which an agent's process needs. Its
 // ports are reached through the edge, and `stop` puts it to sleep, which keeps the runner running
 // for the next `open`. The control plane's box operations (`driver.ts`) open a box the same way
@@ -81,10 +83,11 @@ export function agent37Backend(
     return key;
   };
   return {
-    async open({ name, image, size }) {
+    async open({ name, image, size, hosts }) {
       const key = await keyOf();
       const api = agent37Api(key);
-      const id = await openInstance(api, key, { name, want: wanted(declared, { image, size }), edge, budgetMs });
+      const want = wanted(declared, { image, size });
+      const id = await openInstance(api, key, { name, want, network: hosts, edge, budgetMs });
       const headers = { "X-Agent37-Key": key };
       const { stop, ...box } = runnerBox({ url: edge(id, RUNNER_PORT), headers, id });
       return {
@@ -113,8 +116,12 @@ interface Opening {
   want: Wanted;
   /** The group a new box is labelled with (`GROUP`), such as the company it is for. */
   group?: string;
-  /** The domains and addresses a new box may reach; anywhere when not given. */
-  network?: string[];
+  /**
+   * The domains and addresses the box may reach: a new box is made with them, and one there with
+   * any other network is set to them in place before it is woken. Not given, a new box reaches
+   * anywhere and one there keeps its own.
+   */
+  network?: readonly string[];
   edge: (id: string, port: number) => string;
   budgetMs: number;
 }
@@ -128,7 +135,8 @@ export const opening = new Map<string, Promise<string>>();
 
 /**
  * Opens the box `name` with Agent37's API and edge, the key `key`: finds the instance whose
- * metadata holds its name or makes it (asleep when idle 15 minutes), wakes or starts it, starts
+ * metadata holds its name or makes it (asleep when idle 15 minutes), its network set to `network`
+ * either way when given, wakes or starts it, starts
  * the runner in it unless it answers, and puts pnpm in it with exec. It leaves no connection open,
  * which would keep the box awake. The instance's id.
  */
@@ -150,6 +158,8 @@ async function openOnce(
   // A box that exists keeps its image; a new one's may be registered first, outside the budget.
   const template = found ? undefined : (want.image ?? (await boxTemplate(api, key)));
   const deadline = Date.now() + budgetMs;
+  // Before it wakes, so it runs nothing with the network it had: one made before reached anywhere.
+  if (found && network && !reaches(found, network)) await retrying(deadline, () => api.network(found.id, network));
   const made =
     found ??
     (await api.create(
@@ -160,7 +170,7 @@ async function openOnce(
         region: want.region,
         name: labelOf(name),
         metadata: { [BOX]: name, ...(group && { [GROUP]: group }) },
-        ...(network && { network: { allow: network } }),
+        ...(network && { network: { allow: [...network] } }),
         auto_sleep: true,
         idle_timeout_seconds: 900,
       },
@@ -302,6 +312,14 @@ async function runnerUp(
 
 /** Whether a runner's health is this release's protocol. */
 const isCurrent = (health?: { protocol: number }) => health?.protocol === RUNNER_PROTOCOL;
+
+/** Whether `instance` may connect to exactly `allow`, as Agent37 stores a list (a domain lowercase), and nowhere else. */
+function reaches({ network }: Instance, allow: readonly string[]): boolean {
+  if (typeof network !== "object") return false;
+  const stored = new Set(network.allow);
+  const asked = new Set(allow.map((host) => host.toLowerCase()));
+  return stored.size === asked.size && [...asked].every((host) => stored.has(host));
+}
 
 /** The instances whose metadata holds `value` under `key` (`BOX` or `GROUP`), but those on their way out. */
 export const holding = async (api: Agent37Api, key: string, value: string) =>

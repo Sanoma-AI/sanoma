@@ -33,6 +33,8 @@ export interface SandboxUnderTest {
   name?: string;
   image: string;
   size: number;
+  /** What its boxes may reach (`open`'s `hosts`). Default the package registry alone. */
+  hosts?: readonly string[];
   /** How long a check waits. Default 60 s. */
   timeoutMs?: number;
 }
@@ -48,17 +50,27 @@ const HOMED = ".sanoma-kit";
 /**
  * Runs the conformance checks against a backend, in order, each on its own (one failing goes on
  * to the next, but once no box opens the rest fail at once): stdout arrives before a command
- * exits, stdin reaches `cat`, a written file reads back (and runs, with its mode); with `snapshot`,
+ * exits, stdin reaches `cat`, a written file reads back (and runs, with its mode), the box opens
+ * again with other hosts (whether a box reaches only its hosts needs a network, which the kit
+ * does not use); with `snapshot`,
  * that file and one a command wrote under `$HOME` survive `stop` and the next `open`; with `port`,
  * a server in the box answers at what `expose` returns; a command killed mid-run exits non-zero;
  * `discard` leaves the next `open` empty. Starts from a discarded box, and discards it at the end.
  */
 export async function checkSandbox(s: SandboxUnderTest): Promise<SandboxCheck[]> {
-  const { backend, capabilities, name = "sanoma-kit", image, size, timeoutMs = 60_000 } = s;
+  const {
+    backend,
+    capabilities,
+    name = "sanoma-kit",
+    image,
+    size,
+    hosts = ["registry.npmjs.org"],
+    timeoutMs = 60_000,
+  } = s;
   const token = randomBytes(9).toString("base64url");
   const script = new TextEncoder().encode(`#!/bin/sh\necho ${token}\n`);
   const results: SandboxCheck[] = [];
-  const open = () => timed(backend.open({ name, image, size }), timeoutMs, "open");
+  const open = (reach = hosts) => timed(backend.open({ name, image, size, hosts: reach }), timeoutMs, "open");
   let opened: Box | undefined;
   const check = async (title: string, run: (box: Box) => Promise<void>) => {
     if (!opened) return void results.push({ name: title, ok: false, error: "no box opened" });
@@ -115,6 +127,12 @@ export async function checkSandbox(s: SandboxUnderTest): Promise<SandboxCheck[]>
       await at.write(WRITTEN, script, { mode: 0o755 });
       if (!same(await at.read(WRITTEN), script)) throw new Error("it read back other bytes");
       if ((await ran(at, `./${WRITTEN}`)) !== `${token}\n`) throw new Error("it ran, but printed something else");
+    });
+    await check("the box opens again with other hosts", async (at) => {
+      await at.stop();
+      opened = undefined;
+      const again = (opened = await open([...hosts, "example.com"]));
+      if ((await ran(again, `echo ${token}`)) !== `${token}\n`) throw new Error("it ran, but printed something else");
     });
     if (capabilities.snapshot) {
       await check("a file and the home directory survive a stop and the next open", async (at) => {

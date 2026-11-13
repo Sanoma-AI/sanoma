@@ -93,9 +93,12 @@ export interface Box {
 export interface SandboxBackend {
   /**
    * The box `name`, made from `image` with `size` vCPUs when there is none (left out, the backend's
-   * own), woken or started when stopped.
+   * own), woken or started when stopped. It may reach only `hosts` (domain names, over HTTPS): a
+   * backend that keeps a box's network applies them to a box made before with others, in place
+   * where its vendor can, else by making the box again. A backend that cannot keep a box's network
+   * says so in its own documentation, as the local backend does.
    */
-  open(opts: { name: string; image?: string; size?: number }): Promise<Box>;
+  open(opts: { name: string; image?: string; size?: number; hosts: readonly string[] }): Promise<Box>;
   /** Deletes the box `name` and whatever the vendor kept of it: the next `open` finds it empty. */
   discard(opts: { name: string }): Promise<void>;
 }

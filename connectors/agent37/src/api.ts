@@ -1,7 +1,8 @@
 import { DriverError, retryableStatus } from "sanoma/workflows";
 import { z } from "zod";
 
-// Agent37's Sandbox API (https://www.agent37.com/docs/agents-api/instances, and /templates), cut to
+// Agent37's Sandbox API (https://www.agent37.com/docs/agents-api/instances, /templates, and
+// /instance-network for `network`), cut to
 // the calls the connector makes, on `fetch`: there is no SDK. Every failure is a `DriverError` carrying
 // Agent37's status and its error's `code` as `vendorCode`.
 
@@ -15,6 +16,8 @@ export interface Instance {
   status: string;
   metadata?: Record<string, unknown> | null;
   status_reason?: { message?: string } | null;
+  /** Where it may connect: `allow-all` (the default), `deny-all`, or the domains and addresses listed, as stored (a domain lowercase). */
+  network?: "allow-all" | "deny-all" | { allow: string[] };
 }
 
 /** What `POST /v1/instances` takes, cut to what the backend sends. */
@@ -96,6 +99,13 @@ export function agent37Api(key: string, timeoutMs = 30_000) {
       return { url, expiresAt: new Date(expires_at * 1000).toISOString() };
     },
     get: (id: string) => send<Instance>("GET", `/instances/${id}`),
+    /**
+     * Sets where the instance may connect, in any state but deleted, applied to a running one
+     * within seconds with no restart; `try_again` (503) means it is saved and on its way, and the
+     * same request is sent again to confirm it.
+     */
+    network: (id: string, allow: readonly string[]) =>
+      send<Instance>("PATCH", `/instances/${id}`, { network: { allow } }),
     /** Answers once the instance is `running`, which takes as long as its image takes to start: `ms`. */
     create: (body: InstanceCreate, ms: number) => send<Instance>("POST", "/instances", body, ms),
     /** Starts a stopped instance, or wakes a sleeping one. */

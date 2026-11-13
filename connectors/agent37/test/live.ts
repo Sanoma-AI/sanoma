@@ -29,6 +29,8 @@ if (process.env.SANOMA_LIVE !== "1" || !key || !repo) {
 /** The template its boxes run: Agent37's plain one, or `AGENT37_TEST_IMAGE` (a workspace template, such as the box image's). */
 const IMAGE = process.env.AGENT37_TEST_IMAGE ?? BASE;
 const NAME = `sanoma-live-${Date.now().toString(36)}`;
+/** What the box may reach: the registry alone, which the install needs. */
+const HOSTS = ["registry.npmjs.org"];
 const backend = agent37Backend({ secrets: async () => new Map([[KEY, key]]), declared: {} });
 const api = agent37Api(key);
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
@@ -53,7 +55,7 @@ async function sh(box: Box, command: string) {
 let failed = false;
 try {
   const box = await timed("create to ready (made, running, the runner started)", () =>
-    backend.open({ name: NAME, image: IMAGE, size: DEFAULTS.size }),
+    backend.open({ hosts: HOSTS, name: NAME, image: IMAGE, size: DEFAULTS.size }),
   );
 
   // The company repo, as the instance hands a box its draft: a bundle the box clones.
@@ -67,6 +69,11 @@ try {
   await timed(`pnpm install --frozen-lockfile (${pnpm})`, () =>
     sh(box, `cd repo && npx -y ${pnpm} install --frozen-lockfile --reporter=silent`),
   );
+  const offList = await sh(
+    box,
+    `node -e "fetch('https://example.com').then(() => console.log('reached'), () => console.log('refused'))"`,
+  );
+  console.log(`a host off the allowlist (example.com): ${offList.trim()}`);
 
   // The checkpoint: `start` answers `try_again` while it is being written.
   const asleep = Date.now();
@@ -84,7 +91,7 @@ try {
     }
   }
   console.log(`checkpoint written (sleep to a start it takes): ${seconds(waking - asleep)}`);
-  const woken = await backend.open({ name: NAME, image: IMAGE, size: DEFAULTS.size });
+  const woken = await backend.open({ hosts: HOSTS, name: NAME, image: IMAGE, size: DEFAULTS.size });
   console.log(`wake from sleep (start to the runner answering): ${seconds(Date.now() - waking)}`);
   if (!(await sh(woken, "test -d repo/node_modules && echo kept")).includes("kept")) {
     throw new Error("node_modules did not survive the sleep");

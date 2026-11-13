@@ -18,7 +18,10 @@ import { type ChatMessage, textOf } from "../../lib/chat.ts";
 import { inBox } from "./carrier.ts";
 import type { EngineTurn } from "./transcript.ts";
 
-/** Where an agent may never write in a checkout: git's own files, and the install (`node_modules`, a link to the live one in a draft). */
+/**
+ * Where this process never reads or writes for an agent in a checkout: git's own files, and the
+ * install (`node_modules`, a link to the live one in our loop's draft).
+ */
 const OFF_LIMITS = new Set([".git", "node_modules"]);
 
 /**
@@ -83,8 +86,10 @@ export const realIn =
  * when an agent may read or write it there; undefined when it may not. Their real paths (`real`:
  * this machine's, or a box's, `realIn`, all in one go) must lie under the worktree's (the worktree
  * itself is allowed, for a listing), and their first segment there may not be `.git` or
- * `node_modules` (a draft's `node_modules` is a link into the live install). One rule for every
- * engine: our loop's tools, `HarnessAgent`'s permission requests and an ACP agent's.
+ * `node_modules` (a draft's `node_modules` is a link into the live install). The rule for what
+ * this process reads and writes for an agent: our loop's tools on the live draft, and an engine's
+ * file calls on its box's clone (an ACP agent's `fs/*` and its terminals' working directory, a
+ * harness session's file calls, `boxSession`); what an agent runs in its box is its own.
  */
 export async function allowedPaths(
   worktree: string,
@@ -102,19 +107,12 @@ export function inCheckout(root: string | null | undefined, full: string | null 
   return OFF_LIMITS.has(relative(root, full).split(sep)[0]!.toLowerCase()) ? undefined : full;
 }
 
-/** What an agent is told when the checkout rule refuses `path`. */
-export const outsideCheckout = (path: string) => `${path} is outside your checkout, or under .git or node_modules`;
-
 /** `path` under `root` as the checkout rule allows it (`real`: where its files are), or the refusal the agent reads. */
 export async function mustAllow(root: string, path: string, real: RealPaths = here): Promise<string> {
   const [full] = await allowedPaths(root, [path], real);
-  if (full === undefined) throw new Error(outsideCheckout(path));
+  if (full === undefined) throw new Error(`${path} is outside your checkout, or under .git or node_modules`);
   return full;
 }
-
-/** What a coding agent is told when the checkout rule refuses a shell command. */
-export const NO_SHELL =
-  "No shell commands in this chat until previews exist: edit the files; the checks run after your turn";
 
 /** Whether the absolute path `full` is `dir` or under it, by their paths as given. */
 export function within(dir: string, full: string): boolean {

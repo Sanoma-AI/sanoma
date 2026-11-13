@@ -35,7 +35,7 @@ let dir = "";
 mkdirSync(join(scratch, "draft"));
 
 beforeAll(async () => {
-  box = await localBackend(join(scratch, "boxes")).open({ name: "sanoma-acme-ada" });
+  box = await localBackend(join(scratch, "boxes")).open({ name: "sanoma-acme-ada", hosts: [] });
   home = await homeOf(box);
   agents = join(home, ".acp");
   dir = await shims(box, agents);
@@ -131,7 +131,14 @@ describe("a person's own agent's install", () => {
     );
     writeFileSync(join(pkg, "bin.js"), '#!/usr/bin/env node\nprocess.stdout.write(process.env.HOME ?? "");\n');
     const at = join(agents, "fake");
-    const agent = { id: "fake", packages: [`file:${pkg}`], bin: "fake-agent", args: [], signIn: { run: [] } };
+    const agent = {
+      id: "fake",
+      packages: [`file:${pkg}`],
+      bin: "fake-agent",
+      args: [],
+      signIn: { run: [] },
+      hosts: [],
+    };
     // The box's image carries none (this machine has no /opt/sanoma/agents/fake).
     expect(await install(box, agent, agents)).toBe(at);
     expect(readFileSync(join(at, "installed.json"), "utf8")).toBe(JSON.stringify(agent.packages));
@@ -153,7 +160,14 @@ describe("a person's own agent's install", () => {
 
   it("is the image's when it carries the agent at the packages wanted, and installs nothing", async () => {
     const image = join(scratch, "image");
-    const agent = { id: "pre", packages: ["pre-agent@1.0.0"], bin: "pre-agent", args: [], signIn: { run: [] } };
+    const agent = {
+      id: "pre",
+      packages: ["pre-agent@1.0.0"],
+      bin: "pre-agent",
+      args: [],
+      signIn: { run: [] },
+      hosts: [],
+    };
     mkdirSync(join(image, "pre"), { recursive: true });
     writeFileSync(join(image, "pre/installed.json"), JSON.stringify(agent.packages));
     const at = join(agents, "pre");
@@ -167,7 +181,14 @@ describe("a person's own agent's install", () => {
     mkdirSync(pkg);
     writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "newer-agent", version: "2.0.0" }));
     const image = join(scratch, "older-image");
-    const agent = { id: "newer", packages: [`file:${pkg}`], bin: "newer-agent", args: [], signIn: { run: [] } };
+    const agent = {
+      id: "newer",
+      packages: [`file:${pkg}`],
+      bin: "newer-agent",
+      args: [],
+      signIn: { run: [] },
+      hosts: [],
+    };
     mkdirSync(join(image, "newer"), { recursive: true });
     writeFileSync(join(image, "newer/installed.json"), JSON.stringify(["newer-agent@1.0.0"]));
     const at = join(agents, "newer");

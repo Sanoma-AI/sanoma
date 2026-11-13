@@ -209,7 +209,7 @@ export default defineWorkflow({
   const box = boxName(resolveConfig(testApp.config).appName, "ada");
   installInClone(dir, join(dir, ".sanoma/agent-home/boxes", box, "repo"));
   // The worker runs the turns, in the repository.
-  await testApp.restart({ source: localGitSource(dir), app: appSteps });
+  await testApp.restart({ source: localGitSource(dir), app: appSteps, loopbackLogin: true });
   await start();
 }, 600_000);
 
@@ -694,7 +694,7 @@ describe("allowedPaths", () => {
   it("allows a path inside the worktree, and refuses one outside it, under .git or node_modules, or through a symlink out, on this machine and in a box", async () => {
     const boxes = mkdtempSync(join(tmpdir(), "sanoma-allowed-"));
     // The worktree is a box's home: the box checks the same paths on its own files.
-    const box = await localBackend(boxes).open({ name: "tree" });
+    const box = await localBackend(boxes).open({ name: "tree", hosts: [] });
     const tree = join(boxes, "tree");
     try {
       mkdirSync(join(tree, "workflows"));

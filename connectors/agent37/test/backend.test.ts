@@ -23,11 +23,14 @@ beforeEach(() => {
   return () => vi.unstubAllGlobals();
 });
 
+/** What the boxes may reach. */
+const HOSTS = ["registry.npmjs.org", "api.anthropic.com"];
 const secrets = async (names: readonly string[]) => new Map(names.map((name) => [name, KEY]));
 const backendOf = (declared: Record<string, unknown> = {}) =>
   agent37Backend({ secrets, declared }, { edge: vendor.edge, budgetMs: 20_000 });
 /** Opens the box `name` of the default shape, on Agent37's plain template. */
-const open = (backend: ReturnType<typeof backendOf>, name: string) => backend.open({ name, image: BASE, size: 2 });
+const open = (backend: ReturnType<typeof backendOf>, name: string) =>
+  backend.open({ hosts: HOSTS, name, image: BASE, size: 2 });
 const text = (bytes: Uint8Array | null) => (bytes === null ? null : Buffer.from(bytes).toString());
 /** Agent37's API, for what a test does behind the backend's back. */
 const api = agent37Api(KEY);
@@ -50,12 +53,13 @@ describe("agent37Backend", () => {
       timeoutMs: 20_000,
     });
     expect(results.filter((r) => !r.ok)).toEqual([]);
-    expect(results).toHaveLength(8);
+    expect(results).toHaveLength(9);
   });
 
   it("makes a box as declared, asleep when idle, its name in its metadata, its label one Agent37 takes", async () => {
     const name = `sanoma-${"c%2Fompany".repeat(6)}-person`;
     const box = await backendOf({ size: 4, memory: 16, disk: 30, region: "us" }).open({
+      hosts: HOSTS,
       name,
       image: "my-template",
       size: 4,
@@ -68,6 +72,7 @@ describe("agent37Backend", () => {
       region: "us",
       name: labelOf(name),
       metadata: { [BOX]: name },
+      network: { allow: HOSTS },
       auto_sleep: true,
       idle_timeout_seconds: 900,
     });
@@ -105,6 +110,46 @@ describe("agent37Backend", () => {
     expect(execs(box.id)).toBe(0);
     await again.stop();
     await backend.discard({ name: "sanoma-wake" });
+  });
+
+  it("sets a box made with another network to its hosts in place, before it wakes, keeping its files, and leaves one that has them", async () => {
+    const backend = backendOf();
+    const box = await open(backend, "sanoma-network");
+    await box.write("kept", new TextEncoder().encode("yes"));
+    await box.stop();
+    // Made open, as every box was before the allowlist.
+    vendor.instances.get(box.id)!.network = "allow-all";
+    // Saved and on its way: sent again to confirm it.
+    vendor.answer("PATCH", `/instances/${box.id}`, 503, { error: { code: "try_again", message: "applying" } });
+    vendor.sent.length = 0;
+    const again = await open(backend, "sanoma-network");
+    expect(again.id).toBe(box.id);
+    expect(text(await again.read("kept"))).toBe("yes");
+    const patches = vendor.sent.filter((s) => s.method === "PATCH");
+    expect(patches).toEqual([
+      { method: "PATCH", path: `/instances/${box.id}`, body: { network: { allow: HOSTS } } },
+      { method: "PATCH", path: `/instances/${box.id}`, body: { network: { allow: HOSTS } } },
+    ]);
+    // Set before the start that wakes it.
+    expect(vendor.sent.indexOf(patches[1]!)).toBeLessThan(
+      vendor.sent.findIndex((s) => s.path === `/instances/${box.id}/start`),
+    );
+    expect(vendor.instances.get(box.id)!.network).toEqual({ allow: HOSTS });
+    expect(vendor.sent.some((s) => s.method === "POST" && s.path === "/instances")).toBe(false);
+    await again.stop();
+    // The same hosts, in another order and case, are left alone; another list is set.
+    vendor.sent.length = 0;
+    await backend
+      .open({ hosts: ["API.anthropic.com", "registry.npmjs.org"], name: "sanoma-network", image: BASE, size: 2 })
+      .then((b) => b.stop());
+    expect(vendor.sent.filter((s) => s.method === "PATCH")).toEqual([]);
+    await backend
+      .open({ hosts: ["registry.npmjs.org"], name: "sanoma-network", image: BASE, size: 2 })
+      .then((b) => b.stop());
+    expect(vendor.sent.filter((s) => s.method === "PATCH").map((s) => s.body)).toEqual([
+      { network: { allow: ["registry.npmjs.org"] } },
+    ]);
+    await backend.discard({ name: "sanoma-network" });
   });
 
   it("stops a box whose sleep is refused, starts its runner again after the fresh boot, and fails at once on a refusal a wait does not change", async () => {
@@ -233,8 +278,8 @@ describe("agent37Backend", () => {
         return vendor.fetch(input, init);
       });
       const [one, two] = await Promise.all([
-        backend.open({ name: "sanoma-image-one" }),
-        backend.open({ name: "sanoma-image-two" }),
+        backend.open({ hosts: HOSTS, name: "sanoma-image-one" }),
+        backend.open({ hosts: HOSTS, name: "sanoma-image-two" }),
       ]);
       expect(template).toMatch(/^[a-z][a-z0-9-]{1,62}$/);
       const registered = [
@@ -247,14 +292,14 @@ describe("agent37Backend", () => {
       vi.stubGlobal("fetch", vendor.fetch);
       vendor.sent.length = 0;
       await Promise.all([one.stop(), two.stop()]);
-      const three = await backend.open({ name: "sanoma-image-three" });
-      await backend.open({ name: "sanoma-image-one" }).then((again) => again.stop());
+      const three = await backend.open({ hosts: HOSTS, name: "sanoma-image-three" });
+      await backend.open({ hosts: HOSTS, name: "sanoma-image-one" }).then((again) => again.stop());
       expect(templateCalls()).toEqual([registered[0]]);
       expect(madeFrom()).toEqual([template]);
       // A template deleted in Agent37's dashboard is registered again.
       vendor.templates.clear();
       vendor.sent.length = 0;
-      const four = await backend.open({ name: "sanoma-image-four" });
+      const four = await backend.open({ hosts: HOSTS, name: "sanoma-image-four" });
       expect(templateCalls()).toEqual(registered);
       await Promise.all([three.stop(), four.stop()]);
       await Promise.all(["one", "two", "three", "four"].map((n) => backend.discard({ name: `sanoma-image-${n}` })));
@@ -263,7 +308,7 @@ describe("agent37Backend", () => {
     it("uses the workspace's template of the image when it is there", async () => {
       vendor.templates.set(template, { name: template, image_ref: image });
       const backend = backendOf();
-      const box = await backend.open({ name: "sanoma-image-found" });
+      const box = await backend.open({ hosts: HOSTS, name: "sanoma-image-found" });
       expect(templateCalls()).toEqual([{ method: "GET", path: `/templates/${template}` }]);
       expect(madeFrom()).toEqual([template]);
       await box.stop();
@@ -276,7 +321,7 @@ describe("agent37Backend", () => {
       vendor.answer("POST", "/templates", 400, {
         error: { code: "invalid_request", message: "the image cannot be pulled" },
       });
-      const box = await backend.open({ name: "sanoma-image-refused" });
+      const box = await backend.open({ hosts: HOSTS, name: "sanoma-image-refused" });
       expect(madeFrom()).toEqual([BASE]);
       expect(warn).toHaveBeenCalledWith(
         `sanoma: agent37: a new box is made from ${BASE}: ${image} could not be registered as the workspace's template ${template}: agent37: POST /templates answered 400: the image cannot be pulled`,
@@ -286,7 +331,7 @@ describe("agent37Backend", () => {
       expect(await new Response(ran.stdout).text()).toBe("12.18.0\n");
       await box.stop();
       vendor.sent.length = 0;
-      const next = await backend.open({ name: "sanoma-image-next" });
+      const next = await backend.open({ hosts: HOSTS, name: "sanoma-image-next" });
       expect(madeFrom()).toEqual([template]);
       await next.stop();
       warn.mockRestore();
@@ -296,7 +341,7 @@ describe("agent37Backend", () => {
 
     it("takes a declared image as it is", async () => {
       const backend = backendOf({ image: BASE });
-      const box = await backend.open({ name: "sanoma-image-declared" });
+      const box = await backend.open({ hosts: HOSTS, name: "sanoma-image-declared" });
       expect(templateCalls()).toEqual([]);
       expect(madeFrom()).toEqual([BASE]);
       await box.stop();
@@ -305,13 +350,15 @@ describe("agent37Backend", () => {
   });
 
   it("refuses a shape Agent37 has not, and opens nothing without its key", async () => {
-    await expect(backendOf({ size: 2, memory: 8 }).open({ name: "x", image: "", size: 2 })).rejects.toThrow(
-      "Agent37's shapes",
-    );
-    await expect(backendOf({ region: "eu" }).open({ name: "x", image: "", size: 2 })).rejects.toThrow(
+    await expect(
+      backendOf({ size: 2, memory: 8 }).open({ hosts: HOSTS, name: "x", image: "", size: 2 }),
+    ).rejects.toThrow("Agent37's shapes");
+    await expect(backendOf({ region: "eu" }).open({ hosts: HOSTS, name: "x", image: "", size: 2 })).rejects.toThrow(
       "only `us` runs the `default` type",
     );
     const keyless = agent37Backend({ secrets: async () => new Map(), declared: {} });
-    await expect(keyless.open({ name: "x", image: "", size: 2 })).rejects.toThrow("AGENT37_API_KEY is not set");
+    await expect(keyless.open({ hosts: HOSTS, name: "x", image: "", size: 2 })).rejects.toThrow(
+      "AGENT37_API_KEY is not set",
+    );
   });
 });

@@ -18,6 +18,7 @@ describe("the sandbox conformance kit", () => {
       { name: "stdout arrives before the command exits", ok: true },
       { name: "stdin reaches cat", ok: true },
       { name: "a written file reads back, and runs with its mode", ok: true },
+      { name: "the box opens again with other hosts", ok: true },
       { name: "a file and the home directory survive a stop and the next open", ok: true },
       { name: "an exposed port answers from outside the box", ok: true },
       { name: "a command killed mid-run exits non-zero", ok: true },
@@ -43,6 +44,7 @@ describe("the sandbox conformance kit", () => {
       { name: "stdout arrives before the command exits", ok: false, error: "no box opened" },
       { name: "stdin reaches cat", ok: false, error: "no box opened" },
       { name: "a written file reads back, and runs with its mode", ok: false, error: "no box opened" },
+      { name: "the box opens again with other hosts", ok: false, error: "no box opened" },
       { name: "a command killed mid-run exits non-zero", ok: false, error: "no box opened" },
       { name: "discard leaves the next open empty", ok: false, error: "no box opened" },
     ]);
@@ -60,6 +62,8 @@ describe("fakeSandbox", () => {
   });
 
   it("refuses a name that is not one path segment", async () => {
-    await expect(sandbox.backend.open({ name: "../out", image: "local", size: 1 })).rejects.toThrow(/no box.s name/);
+    await expect(sandbox.backend.open({ name: "../out", image: "local", size: 1, hosts: [] })).rejects.toThrow(
+      /no box.s name/,
+    );
   });
 });
