@@ -484,7 +484,10 @@ function openColumn(messages: ChatMessage[], replies: ((writer: Writer) => void)
     config("this-computer", false),
     queryClient,
   );
-  return () => send.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+  return () =>
+    send.mock.calls
+      .filter(([url]) => url === "/api/chat")
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
 }
 
 /** Types `text` in the composer and sends it. */
@@ -495,7 +498,7 @@ async function write(text: string) {
 }
 
 /** Long enough for a send the column started to reach `fetch`. */
-const settled = () => new Promise((resolve) => setTimeout(resolve, 100));
+const settled = () => new Promise((resolve) => setTimeout(resolve, 250));
 
 describe("the chat column after a sign-in", () => {
   afterEach(() => vi.restoreAllMocks());

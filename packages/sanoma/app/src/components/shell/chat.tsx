@@ -28,7 +28,6 @@ import {
   MODEL_CONNECTOR,
   onModelConnector,
   textOf,
-  written,
 } from "../../lib/chat.ts";
 import { CHATS_KEY, chatModelQuery, chatQuery, chatsQuery, configQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
@@ -207,6 +206,8 @@ function Conversation({
     onError: () => void queryClient.invalidateQueries({ queryKey: chatModelQuery().queryKey }),
   });
   const busy = isBusy(status);
+  // The message the chat was opened at, as it was then: a refetch of the transcript changes `initial`, not `useChat`'s.
+  const [openedAt] = useState(initial.at(-1)?.id);
   const page = useCrumbs().at(-1)?.label;
   // The chat's own engine; a new chat opens on the person's choice (`choice`, which choosing here
   // changes) and keeps it after.
@@ -242,15 +243,14 @@ function Conversation({
   // not hold would ask forever), nor, once the person has written, for a card the chat was opened
   // on (it may be old, or sent again already, in another tab or before the chat was opened again).
   const greet = first && fresh && !openedOn && !opening && model !== undefined && !cards;
-  const signedIn =
-    signedInBy(last) && !signedInBy(messages.at(-3)) && (lastId !== initial.at(-1)?.id || !written(messages));
+  // The person's last message, which the sign-in's turn did not answer.
+  const asked = lastWritten(messages);
+  const signedIn = signedInBy(last) && !signedInBy(messages.at(-3)) && (!asked || lastId !== openedAt);
   const cue = !busy && !error && (greet || signedIn);
   const acted = useRef<string>(undefined);
   const act = useEffectEvent(() => {
     if (greet && !document.getElementById("chat")?.checkVisibility()) return;
     acted.current = lastId;
-    // The person's last message, which the sign-in's turn did not answer; else the agent's cue.
-    const asked = lastWritten(messages);
     if (asked) send(textOf(asked));
     else speak(engine);
   });
