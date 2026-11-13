@@ -146,7 +146,7 @@ beforeAll(async () => {
   source = localGitSource(dir);
   // Where alice's drafts are checked: her local box.
   installInClone(dir, join(dir, ".sanoma/agent-home/boxes", boxName(resolveConfig(config).appName, "alice"), "repo"));
-  worker = await startTestWorker(config, { databaseUrl, source, app: appSteps });
+  worker = await startTestWorker(config, { databaseUrl, source, app: appSteps, loopbackLogin: true });
   client = await SanomaClient.connect(config);
   app = await startApp(config, { port: 0, source });
 }, 600_000);
@@ -187,7 +187,7 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
       });
       // The card as our loop's run_checks writes it: the draft's diff and its checks in alice's box.
       const { grid: _, ...checks } = await checkDraft(
-        { source, resolved: resolveConfig(config), by: { id: "alice" }, client },
+        { source, resolved: resolveConfig(config), by: { id: "alice" }, client, loopbackLogin: true },
         { id: "rules" },
       );
       const card = { draft: "rules", branch: draft.branch, ...(await source.diff!("rules")), checks };

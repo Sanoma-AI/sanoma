@@ -31,6 +31,7 @@ export interface FakeInstance {
   region: string;
   auto_sleep: boolean;
   idle_timeout_seconds: number;
+  network: "allow-all" | "deny-all" | { allow: string[] };
 }
 
 export interface Sent {
@@ -150,7 +151,13 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     }
     if (method === "POST" && path === "/instances") {
       const id = `fake${String(++seq).padStart(6, "0")}`;
-      const made: FakeInstance = { ...body!, id, status: "running", metadata: body!.metadata ?? null } as FakeInstance;
+      const made = {
+        ...body!,
+        id,
+        status: "running",
+        metadata: body!.metadata ?? null,
+        network: stored(body!.network),
+      } as FakeInstance;
       instances.set(id, made);
       runners.set(id, { port: await freePort(), groups: [] });
       mkdirSync(home(id), { recursive: true });
@@ -160,6 +167,10 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     const found = id ? instances.get(id) : undefined;
     if (!found) return problem(404, "not_found");
     if (method === "GET" && !action) return json(200, found);
+    if (method === "PATCH" && !action) {
+      if (body?.network !== undefined) found.network = stored(body.network);
+      return json(200, found);
+    }
     if (method === "DELETE" && !action) {
       await boot(found.id);
       instances.delete(found.id);
@@ -243,6 +254,10 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     },
   };
 }
+
+/** A network as Agent37 stores it: `allow-all` when not given, a list's domains lowercased. */
+const stored = (network: FakeInstance["network"] | undefined): FakeInstance["network"] =>
+  typeof network === "object" ? { allow: network.allow.map((host) => host.toLowerCase()) } : (network ?? "allow-all");
 
 /** A port nothing listens on, for now. */
 const freePort = () =>

@@ -364,11 +364,15 @@ describe("the chat's composer", () => {
   });
 });
 
-/** A config of `AGENTS`, on this computer or live, with or without a declared box: what the chat's engines read of it. */
-const config = (place: AppConfig["place"], box: boolean) =>
+/**
+ * A config of `AGENTS`, on this computer or live, with or without a declared box, by the loopback
+ * login unless `loopbackLogin` is false: what the chat's engines read of it.
+ */
+const config = (place: AppConfig["place"], box: boolean, loopbackLogin = place === "this-computer") =>
   ({
     agents: AGENTS,
     place,
+    loopbackLogin,
     resourceTypes: [{ id: "agent37.instance", capabilities: ["sandbox"] }],
     resources: box ? [{ id: "resources/sanoma/infra.ts#box", vendor: "agent37", type: "instance" }] : [],
   }) as unknown as AppConfig;
@@ -387,13 +391,16 @@ describe("the chat's engines", () => {
     }
   });
 
-  it("offers every installed agent's plans on this computer, and on a live instance only what runs there", () => {
+  it("offers every installed agent's plans on this computer, and on a live instance or behind a login only what runs there", () => {
     const all = enginesOf(AGENTS).map((engine) => engine.name);
     expect(names(config("this-computer", false))).toEqual(all);
     // Live, an own plan that signs in by a command run once on the person's computer is no choice.
     expect(names(config("live", true))).toEqual(all.filter((name) => name !== "acp-opencode" && name !== "acp-pi"));
     // Live with no box declared, no coding agent runs: only our loop.
     expect(names(config("live", false))).toEqual(["loop"]);
+    // Nor on this computer's database behind a login provider (no local box), unless one is declared.
+    expect(names(config("this-computer", false, false))).toEqual(["loop"]);
+    expect(names(config("this-computer", true, false))).toEqual(all);
   });
 });
 

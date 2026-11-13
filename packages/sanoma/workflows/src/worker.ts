@@ -138,6 +138,13 @@ export interface WorkerOptions {
    */
   app?: AppSteps;
   /**
+   * The app this worker serves is under the loopback login: no login provider, on this machine
+   * only, so one person at its keyboard. Only then may a coding agent's box be a folder of this
+   * machine (`personBox` in the app's steps); otherwise it needs a declared sandbox. `sanoma serve`
+   * passes it with its app's login; off by default.
+   */
+  loopbackLogin?: boolean;
+  /**
    * How soon a deadline keeps the worker up (`idle`): 60 s by default, so apply's short sleeps
    * and other short waits never stop it.
    */
@@ -197,7 +204,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const horizonMs = options.idleHorizonMs ?? 60_000;
   // The worker's own client, connected by the first step that needs it, for the worker's version: what it starts runs on.
   let client: Promise<SanomaClient> | undefined;
-  const appSteps: WorkerApp | undefined = options.app && { steps: options.app, config, resolved };
+  const appSteps: WorkerApp | undefined = options.app && {
+    steps: options.app,
+    config,
+    resolved,
+    loopbackLogin: options.loopbackLogin === true,
+  };
   const shutdown = new AbortController();
   // One check of the apps' sources at a time; one asked for meanwhile runs once it ends, so the
   // table says what the latest `main` is behind.

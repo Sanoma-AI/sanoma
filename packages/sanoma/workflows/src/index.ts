@@ -271,6 +271,7 @@ export {
   type Box,
   IMAGE_AGENTS,
   type Process,
+  REGISTRY,
   type SandboxBackend,
   type SandboxCapabilities,
   type SandboxContext,

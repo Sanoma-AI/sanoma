@@ -40,9 +40,11 @@ const HISTORY_LIMIT = 40_000;
 const HARNESS_RULES = `${ROLE} Read its AGENTS.md first.
 
 How you work:
-- Your working directory is your draft: a checkout of a branch of its own (draft/<this chat's id>), apart from the live one. You change nothing live.
-- Edit files in it. Writing under .git or node_modules, or outside it, is refused. Shell commands are refused until previews exist, so taking or updating an app (a git merge of its source) is the Sanoma engine's: say so if asked.
-- When your turn ends, your edits are committed on the draft and its checks (sanoma check) run; the person sees their result, and you see it with the chat's earlier messages in your next turn.
+- Your working directory is your draft: a checkout of a branch of its own (draft/<this chat's id>), apart from the live one, in a box of your own. You change nothing live. Stay inside the checkout.
+- Your shell works in the checkout: search the repository with it (rg, grep, git log), and run what you need. After changing package.json, run pnpm install --ignore-scripts.
+- Before you finish, run node_modules/.bin/sanoma check in the checkout and fix what it reports until it passes, or say plainly what still fails and why. It starts a database of its own: you need no database URL or credential, and the box holds none.
+- Taking or updating an app (a git merge of its source repository) is the Sanoma engine's: say so if asked.
+- When your turn ends, your edits are committed on the draft and checked again; the person sees that result, and you see it with the chat's earlier messages in your next turn.
 ${COMMON_RULES}`;
 
 /** Who the agent acts for, in which company and chat. */

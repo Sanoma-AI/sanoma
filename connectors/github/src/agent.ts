@@ -11,5 +11,14 @@ export const copilot: CodingAgent = {
     args: ["--acp"],
     // Its advertised method (`copilot login`) opens a browser on this machine; the device flow prints a link and a code.
     signIn: { run: ["login", "--device-code"] },
+    // Its device-code sign-in, its Copilot token and the Copilot API, and the suggestion services
+    // GitHub lists as required: https://docs.github.com/en/copilot/reference/copilot-allowlist-reference.
+    hosts: [
+      "github.com",
+      "api.github.com",
+      "*.githubcopilot.com",
+      "copilot-proxy.githubusercontent.com",
+      "origin-tracker.githubusercontent.com",
+    ],
   },
 };
