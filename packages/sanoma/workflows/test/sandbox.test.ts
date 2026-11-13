@@ -391,7 +391,7 @@ describe("a sandbox run with a host declared", () => {
   });
 });
 
-describe("a sandbox run started by a scenario's visitor", () => {
+describe("a sandbox run started by a scenario's visitor or api token", () => {
   // Who started the run, as the workflow reads it.
   const whoami = defineWorkflow({
     name: "whoami",
@@ -415,11 +415,16 @@ describe("a sandbox run started by a scenario's visitor", () => {
       "    When whoami runs",
       "    Then the run succeeds",
       "",
+      "  Scenario: An api token",
+      '    Given an api token "cli" for "visitor:better-auth:ada" is acting',
+      "    When whoami runs",
+      "    Then the run succeeds",
+      "",
     ].join("\n"),
   });
   const app = useApp("sandbox-visitor", () => ({ workflows: [whoami], root }));
 
-  it("hands the run the email and GitHub login, as a public site's login would", async () => {
+  it("hands the run the email and GitHub login, as a public site's login would, and a token's subject", async () => {
     const scope = resolveConfig(app.config);
     const { scenarios, errors } = await loadScenarios(scope);
     expect(errors).toEqual([]);
@@ -432,6 +437,18 @@ describe("a sandbox run started by a scenario's visitor", () => {
     expect(outputs).toEqual([
       { id: "visitor:scenario:visitor", email: "hopper@example.com", github: "hopper" },
       { id: "visitor:scenario:visitor", email: "ada@example.com" },
+      { id: "token:cli", subject: "visitor:better-auth:ada" },
     ]);
+    // The token's row, made for the first run, serves a second; another subject for it is refused.
+    const [, , token] = scenarios;
+    const again = await runScenario(token!, { client: app.client, scope });
+    expect(await app.client.result(again.runId)).toEqual({ id: "token:cli", subject: "visitor:better-auth:ada" });
+    const other = {
+      ...token!,
+      startedBy: { id: "token:cli", groups: ["visitors"], subject: "visitor:better-auth:bob" },
+    };
+    await expect(runScenario(other, { client: app.client, scope })).rejects.toThrow(
+      'the api token "cli" acts for visitor:better-auth:ada on this database',
+    );
   });
 });

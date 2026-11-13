@@ -1,13 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  type CallContext,
-  defineDriver,
-  DriverError,
-  errorMessage,
-  retryableStatus,
-  vendorCodeOf,
-} from "sanoma/workflows";
-import { apiNameOf } from "sanoma/workflows/shared";
+import { type CallContext, cloudRun, defineDriver, DriverError } from "sanoma/workflows";
 import { z } from "zod";
 import { cloudOps } from "./connector.ts";
 import { type CloudApi, cloudOperations, type Company } from "./operations.ts";
@@ -49,12 +41,6 @@ async function tokenOf(call: CallContext): Promise<string> {
   );
 }
 
-/** An api refusal's body, as the app answers one: `{ error, code? }`. */
-const Problem = z.object({ error: z.string(), code: z.string().optional() });
-
-/** A start's answer. */
-const Started = z.object({ runId: z.string().min(1) });
-
 /** `cloud-available`'s output. */
 const Available = z.object({ available: z.boolean(), yours: z.boolean() });
 
@@ -78,74 +64,12 @@ const runIdOf = (call: CallContext, workflow: string) =>
  * result read (`<workflow>.result`, 20 s per request, `run_running` until the run ends), with the
  * token as a bearer.
  */
-function workflowsApi(call: CallContext, { timeoutMs, runTimeoutMs }: Required<CloudDriverOptions>): CloudApi {
-  /** Read once for the call, when its first request goes. */
+function workflowsApi(call: CallContext, options: CloudDriverOptions): CloudApi {
+  /** Read once for the call, when its first run starts. */
   let token: Promise<string> | undefined;
-  const at = new URL("/api/call", process.env.SANOMA_CLOUD_URL || DEFAULT_URL);
-
-  /** One request to the api: its answer, or a `DriverError` (`run_running` kept as its `vendorCode`). */
-  const send = async (workflow: string, body: { name: string; input?: unknown; id?: string }) => {
-    const bearer = await (token ??= tokenOf(call));
-    let res: Response;
-    try {
-      res = await fetch(at, {
-        method: "POST",
-        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify(body),
-        // A redirect is no answer of the api's, and would carry the token elsewhere.
-        redirect: "manual",
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (error) {
-      // No answer: the request may or may not have reached the Cloud.
-      const timedOut = (error as { name?: string } | null)?.name === "TimeoutError";
-      throw new DriverError(
-        `Sanoma Cloud: ${workflow}: ${timedOut ? `no reply in ${timeoutMs} ms` : `the request failed (${errorMessage(error)})`}`,
-        { retryable: true },
-      );
-    }
-    const text = await res.text();
-    let parsed: unknown;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      parsed = undefined;
-    }
-    if (res.ok && parsed !== undefined) return parsed;
-    const problem = Problem.safeParse(parsed).data;
-    const why =
-      res.status === 401
-        ? `${TOKEN} was refused: it is unknown or revoked`
-        : (problem?.error ?? (res.ok ? "the answer is not JSON" : `HTTP ${res.status}`));
-    throw new DriverError(`Sanoma Cloud: ${workflow}: ${why}`, {
-      retryable: retryableStatus(res.status),
-      status: res.status,
-      ...(problem?.code && { vendorCode: problem.code }),
-    });
-  };
-
   /** Starts `workflow` with `input` and answers its output once the run ends; a failed run fails the call. */
-  const run = async (workflow: string, input: unknown, id?: string) => {
-    const name = apiNameOf(workflow);
-    const started = Started.safeParse(await send(workflow, { name: `${name}.start`, input, ...(id && { id }) }));
-    if (!started.success)
-      throw new DriverError(`Sanoma Cloud: ${workflow}: its start answered no run`, { retryable: false });
-    const { runId } = started.data;
-    const until = Date.now() + runTimeoutMs;
-    for (;;) {
-      try {
-        return await send(workflow, { name: `${name}.result`, input: { runId } });
-      } catch (error) {
-        if (vendorCodeOf(error) !== "run_running") throw error;
-        if (Date.now() >= until) {
-          // Retried, the call resumes the same run.
-          throw new DriverError(`Sanoma Cloud: ${workflow}: run ${runId} has not ended in ${runTimeoutMs} ms`, {
-            retryable: true,
-          });
-        }
-      }
-    }
-  };
+  const run = (workflow: string, input: unknown, id?: string) =>
+    cloudRun(workflow, input, { ...options, token: (token ??= tokenOf(call)), ...(id && { id }) });
 
   /** A write's run: its id the call's, so each attempt of the call resumes the same run. */
   const resume = (workflow: string, input: unknown) => run(workflow, input, runIdOf(call, workflow));
@@ -171,10 +95,9 @@ function workflowsApi(call: CallContext, { timeoutMs, runTimeoutMs }: Required<C
  * See the README.
  */
 export function cloudDriver(options: CloudDriverOptions = {}) {
-  const settings = { timeoutMs: options.timeoutMs ?? 30_000, runTimeoutMs: options.runTimeoutMs ?? 15 * 60_000 };
   return defineDriver(
     cloudOps,
-    cloudOperations((call) => workflowsApi(call, settings)),
+    cloudOperations((call) => workflowsApi(call, options)),
     { env },
   );
 }

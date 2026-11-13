@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  CLOUD_TOKEN,
+  cloudRun,
   DriverError,
   type HostEnforcement,
   type PullRequest,
@@ -10,6 +12,7 @@ import {
   type SourceHost,
 } from "sanoma/workflows";
 import { z } from "zod";
+import { githubApp } from "./connector.ts";
 import {
   appJwtOf,
   branchPath,
@@ -27,7 +30,8 @@ export { appJwt, GITHUB_APP_SECRETS } from "./rest.ts";
 
 // GitHub's remote half: a repository's pull requests, the `sanoma` commit status, the rules on a
 // branch and the App's webhooks, over GitHub's REST API with plain `fetch`. It signs in as the
-// company's GitHub App when the App is installed on the owner, else with `GITHUB_TOKEN`.
+// company's GitHub App when the App is installed on the owner, else with `GITHUB_TOKEN`, else, on
+// Sanoma Cloud, with a token Sanoma's own App mints for the company's repository (`cloud-token`).
 
 /** A person's token, the one the resources' driver reads too. */
 const TOKEN = "GITHUB_TOKEN";
@@ -67,14 +71,27 @@ interface Minted {
   expiresAt?: number;
 }
 
-/** The token `githubToken` chooses (an installation token for the repository `name` alone, when given), with its expiry. */
+/**
+ * A token for the repository `<owner>/<name>` alone from Sanoma Cloud, whose control plane holds
+ * Sanoma's GitHub App and mints it (sanoma-ops's `cloud-token`), with its expiry.
+ */
+async function cloudToken(cloud: string, owner: string, name: string): Promise<Minted> {
+  const output = await cloudRun("cloud-token", { repository: `${owner}/${name}`, scope: "write" }, { token: cloud });
+  const minted = read(githubApp.repository.token.output, output, "Sanoma Cloud's cloud-token");
+  return { token: minted.token, expiresAt: Date.parse(minted.expiresAt) };
+}
+
+/**
+ * The token `githubToken` chooses (an installation token for the repository `name` alone, when
+ * given), with its expiry: then, with neither the App nor `GITHUB_TOKEN`, Sanoma Cloud's for it.
+ */
 async function mint(
   secrets: RemoteContext["secrets"],
   owner: string,
   prefer: "app" | "token",
   name?: string,
 ): Promise<Minted> {
-  const found = await secrets([TOKEN, GITHUB_APP_SECRETS.id, GITHUB_APP_SECRETS.pem]);
+  const found = await secrets([TOKEN, GITHUB_APP_SECRETS.id, GITHUB_APP_SECRETS.pem, CLOUD_TOKEN]);
   const token = found.get(TOKEN);
   if (prefer === "token" && token) return { token };
   const app = await appToken(found, owner, name).catch((err: unknown) => {
@@ -86,6 +103,8 @@ async function mint(
   });
   if (app) return app;
   if (token) return { token };
+  const cloud = found.get(CLOUD_TOKEN);
+  if (cloud && name !== undefined) return cloudToken(cloud, owner, name);
   throw new DriverError(`github: no ${TOKEN}, and the GitHub App is not installed on ${owner}`, {
     retryable: false,
     vendorCode: "no_token",

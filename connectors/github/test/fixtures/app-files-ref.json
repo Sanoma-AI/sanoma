@@ -1,0 +1,43 @@
+[
+  {
+    "method": "POST",
+    "path": "/app/installations/7/access_tokens",
+    "status": 201,
+    "body": {
+      "token": "ghs_recorded",
+      "expires_at": "2026-10-31T13:00:00Z",
+      "permissions": {
+        "administration": "write",
+        "contents": "write",
+        "metadata": "read"
+      },
+      "repository_selection": "selected"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops/commits/setup/acme",
+    "status": 200,
+    "body": {
+      "sha": "7638417db6d59f3c431d3e1f261cc637155684cd",
+      "node_id": "C_kwDO",
+      "commit": {
+        "message": "Set up acme"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops/contents/README.md?ref=7638417db6d59f3c431d3e1f261cc637155684cd",
+    "status": 200,
+    "body": {
+      "type": "file",
+      "encoding": "base64",
+      "size": 7,
+      "name": "README.md",
+      "path": "README.md",
+      "sha": "3d21ec53a331a6f037a91c368710b99387d012c1",
+      "content": "IyBhY21lCg==\n"
+    }
+  }
+]

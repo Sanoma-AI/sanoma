@@ -3,7 +3,7 @@ import { resolveConfig, type SanomaConfig } from "./config.ts";
 import type { Principal } from "./define.ts";
 import { type LedgerRecord, memoryLedger } from "./ledger.ts";
 import { type Check, check, drive, loadScenarios, type Scenario, type Scope } from "./scenario.ts";
-import { errorMessage } from "./shared.ts";
+import { errorMessage, isToken } from "./shared.ts";
 import { startWorker } from "./worker.ts";
 import { memorySecretStore } from "./secret-store.ts";
 
@@ -37,10 +37,15 @@ export async function runScenario(
   scenario: Scenario,
   { client, scope, startedBy = "scenarios", timeoutMs }: RunScenarioOptions,
 ): Promise<{ runId: string; run: RunSummary; ledger: LedgerRecord[]; checks: Check[] }> {
-  const runId = await client.start(scenario.workflow, scenario.input, {
-    startedBy: scenario.startedBy ?? startedBy,
-    sandbox: scenario.name,
-  });
+  const actor = scenario.startedBy ?? startedBy;
+  // An api token acting (`an api token … is acting`): its row, which a start reads the subject from.
+  if (typeof actor === "object" && isToken(actor) && actor.subject !== undefined) {
+    const id = actor.id.slice("token:".length);
+    const subject = await client.tokens.subjectOf(id);
+    if (subject === undefined) await client.tokens.mint({ id, subject: actor.subject, groups: actor.groups ?? [] });
+    else if (subject !== actor.subject) throw new Error(`the api token "${id}" acts for ${subject} on this database`);
+  }
+  const runId = await client.start(scenario.workflow, scenario.input, { startedBy: actor, sandbox: scenario.name });
   const run = await drive(client, runId, scenario, { timeoutMs });
   const ledger = await client.ledger(runId);
   return { runId, run, ledger, checks: await check(scope, scenario, ledger) };

@@ -164,6 +164,8 @@ function repoOf(repository: string) {
   return { path: repoPath(owner, name), name };
 }
 
+type Repo = ReturnType<typeof repoOf>;
+
 const Installation = z.object({
   id: z.number(),
   account: Account,
@@ -191,9 +193,49 @@ const refused = (reply: { status: number; body: any }, what: RegExp) =>
 const FILL_TRIES = 10;
 const FILL_WAIT_MS = 1000;
 
+/** The branch's head commit and its tree, or undefined when the branch is not there. */
+async function headOf(token: string, repo: Repo, branch: string) {
+  const path = `${repo.path}/branches/${branchPath(branch)}`;
+  const reply = await send(token, "GET", path);
+  // 409: an empty repository, as one just generated is until its template's copy lands.
+  if (reply.status === 404 || reply.status === 409) return undefined;
+  if (reply.status >= 300) throw failure("GET", path, reply);
+  const { commit } = read(Branch, reply.body, `GET ${path}`);
+  return { sha: commit.sha, tree: commit.commit.tree.sha, message: commit.commit.message };
+}
+
+/**
+ * The default branch's head, waited for, since a repository just generated fills from its template
+ * in the background; a retryable `DriverError` (`no_branch`) when it is still not there.
+ */
+async function defaultHead(token: string, repo: Repo, repository: string) {
+  const { default_branch } = await ok(token, "GET", repo.path, Repository.pick({ default_branch: true }));
+  for (let i = 0; i < FILL_TRIES; i++) {
+    if (i) await new Promise((resolve) => setTimeout(resolve, FILL_WAIT_MS));
+    const found = await headOf(token, repo, default_branch);
+    if (found) return found;
+  }
+  throw new DriverError(`github: ${repository} has no ${default_branch} yet`, {
+    retryable: true,
+    vendorCode: "no_branch",
+  });
+}
+
+/** The 409 GitHub answers for an empty repository, as one just generated is until its template's copy lands: tried again. */
+const emptyRepository = (repository: string) =>
+  new DriverError(`github: ${repository} is empty until its template's copy lands`, {
+    retryable: true,
+    status: 409,
+    vendorCode: "no_branch",
+  });
+
+/** A file's contents as GitHub answers them, base64 (up to 1 MB). */
+const Contents = z.object({ type: z.literal("file"), encoding: z.literal("base64"), content: z.string() });
+
 /**
  * The operations through the App, over GitHub's REST API: each mints an installation token from
- * the App's JWT when called (`installation.get` uses the JWT itself), which is never kept.
+ * the App's JWT when called (`installation.get` uses the JWT itself), which is never kept; only
+ * `repository.token` returns it.
  */
 const appDriver = defineDriver(githubApp, {
   installation: {
@@ -235,34 +277,9 @@ const appDriver = defineDriver(githubApp, {
     async commit({ installation, repository, branch, message, files }, call) {
       const repo = repoOf(repository);
       const token = await tokenFor(call, installation, repo.name);
-      /** The branch's head commit and its tree, or undefined when the branch is not there. */
-      const head = async (name: string) => {
-        const path = `${repo.path}/branches/${branchPath(name)}`;
-        const reply = await send(token, "GET", path);
-        // 409: an empty repository, as one just generated is until its template's copy lands.
-        if (reply.status === 404 || reply.status === 409) return undefined;
-        if (reply.status >= 300) throw failure("GET", path, reply);
-        const { commit } = read(Branch, reply.body, `GET ${path}`);
-        return { sha: commit.sha, tree: commit.commit.tree.sha, message: commit.commit.message };
-      };
-      /**
-       * The default branch's head, which a branch not there yet starts from; waited for, since a
-       * repository just generated fills from its template in the background.
-       */
-      const start = async () => {
-        const { default_branch } = await ok(token, "GET", repo.path, Repository.pick({ default_branch: true }));
-        for (let i = 0; i < FILL_TRIES; i++) {
-          if (i) await new Promise((resolve) => setTimeout(resolve, FILL_WAIT_MS));
-          const found = await head(default_branch);
-          if (found) return found;
-        }
-        throw new DriverError(`github: ${repository} has no ${default_branch} to start ${branch} from`, {
-          retryable: true,
-          vendorCode: "no_branch",
-        });
-      };
-      const existing = await head(branch);
-      const parent = existing ?? (await start());
+      // A branch not there yet starts from the default branch.
+      const existing = await headOf(token, repo, branch);
+      const parent = existing ?? (await defaultHead(token, repo, repository));
       const tree = await ok(token, "POST", `${repo.path}/git/trees`, Sha, {
         base_tree: parent.tree,
         tree: Object.entries(files).map(([path, content]) => ({ path, mode: "100644", type: "blob", content })),
@@ -286,16 +303,34 @@ const appDriver = defineDriver(githubApp, {
       const token = await tokenFor(call, installation, repo.name);
       const path = `${repo.path}/branches/${branchPath(branch)}`;
       const reply = await send(token, "GET", path);
-      // 409: an empty repository, as one just generated is until its template's copy lands: tried again.
-      if (reply.status === 409) {
-        throw new DriverError(`github: ${repository} is empty until its template's copy lands`, {
-          retryable: true,
-          status: 409,
-          vendorCode: "no_branch",
-        });
-      }
+      if (reply.status === 409) throw emptyRepository(repository);
       if (reply.status >= 300) throw failure("GET", path, reply);
       return { sha: read(Branch, reply.body, `GET ${path}`).commit.sha };
+    },
+    // Read at one commit, so the files are of the same moment: `ref`'s, else the default branch's head.
+    async files({ installation, repository, paths, ref }, call) {
+      const repo = repoOf(repository);
+      const token = await tokenFor(call, installation, repo.name);
+      let sha: string;
+      if (ref === undefined) sha = (await defaultHead(token, repo, repository)).sha;
+      else {
+        const path = `${repo.path}/commits/${branchPath(ref)}`;
+        const reply = await send(token, "GET", path);
+        if (reply.status === 409) throw emptyRepository(repository);
+        if (reply.status >= 300) throw failure("GET", path, reply);
+        sha = read(Sha, reply.body, `GET ${path}`).sha;
+      }
+      const found = await Promise.all(
+        paths.map(async (file) => {
+          const path = `${repo.path}/contents/${branchPath(file)}?ref=${sha}`;
+          const reply = await send(token, "GET", path);
+          if (reply.status === 404) return [];
+          if (reply.status >= 300) throw failure("GET", path, reply);
+          const { content } = read(Contents, reply.body, `GET ${path}`);
+          return [[file, Buffer.from(content, "base64").toString("utf8")] as const];
+        }),
+      );
+      return Object.fromEntries(found.flat());
     },
     async addDeployKey({ installation, repository, title, key, readOnly }, call) {
       const repo = repoOf(repository);
@@ -311,6 +346,15 @@ const appDriver = defineDriver(githubApp, {
         if (there) return { id: there.id };
       }
       throw failure("POST", path, reply);
+    },
+    async token({ installation, repository, permissions }, call) {
+      const { token, expiresAt } = await installationToken(
+        await jwtFor(call),
+        installation,
+        repoOf(repository).name,
+        permissions,
+      );
+      return { token, expiresAt: new Date(expiresAt).toISOString() };
     },
   },
 });

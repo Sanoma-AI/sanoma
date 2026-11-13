@@ -37,6 +37,7 @@ export {
   withSetup,
 } from "./op.ts";
 export { SanomaPackageField, vendorInfo } from "./vendor-info.ts";
+export { CLOUD_TOKEN, cloudRun, type CloudRunOptions } from "./cloud-run.ts";
 export {
   defineWorkflow,
   Principal,
@@ -338,12 +339,17 @@ export {
   LOGIN_AGENT,
   LOGIN_CODE_WORKFLOW,
   SCHEDULE_AGENT,
+  type Creator,
   credentialReady,
+  declareFounder,
+  declareName,
+  declareSlug,
   DEFAULT_SLEEP_NAME,
   ENDED_STATUSES,
   errorMessage,
   isEnded,
   isLoopback,
+  INFRA,
   isVisitor,
   mayDecide,
   problemAt,

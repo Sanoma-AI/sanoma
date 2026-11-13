@@ -14,14 +14,11 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { testDatabaseUrl } from "sanoma/testing";
-import { AGENTS, VISITORS } from "sanoma/workflows";
+import { AGENTS, declareFounder, declareName, declareSlug, VISITORS } from "sanoma/workflows";
 import { readPeople } from "sanoma/workflows/describe";
 import { groupNamesOf, principalIdsOf } from "sanoma/workflows/shared";
 import { afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
-  declareFounder,
-  declareName,
-  declareSlug,
   FIRST_COMMIT,
   packageManagerOf,
   packageName,

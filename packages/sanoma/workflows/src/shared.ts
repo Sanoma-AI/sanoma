@@ -53,6 +53,7 @@ export * from "./claims.ts";
 export * from "./import.ts";
 // A site's `site.ts` declares itself with it (`sanoma/site` calls it, typing its icon).
 export { defineSite, type SiteDefinition } from "./definitions.ts";
+export { type Creator, declareFounder, declareName, declareSlug, INFRA } from "./template-files.ts";
 
 /**
  * What a `ctx.sleep` without a `{ name }` is called, in its outline node and its ledger record
