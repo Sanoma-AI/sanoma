@@ -322,6 +322,16 @@ describe("the agent catalog's steps", () => {
       "Refused to start memo",
     );
     expect(stepLabel({ ...step("output-available", {}), type: "tool-drift" } as ToolPart)).toBe("Checked for drift");
+    // A run that started and then failed is neither refused nor simply started.
+    const failed = { output: { runId: "r", status: "failed", error: "the ledger is closed" } };
+    expect(stepLabel(step("output-available", { workflow: "memo" }, failed))).toBe("Started memo: the run failed");
+    expect(stepLabel({ ...step("output-available", {}, failed), type: "tool-drift" } as ToolPart)).toBe(
+      "Checked for drift: the run failed",
+    );
+    const cancelled = { output: { runId: "r", status: "cancelled", error: "Run r was cancelled" } };
+    expect(stepLabel(step("output-available", { workflow: "memo" }, cancelled))).toBe(
+      "Started memo: the run was cancelled",
+    );
     expect(stepLabel({ ...step("output-available", { runId: "r1" }), type: "tool-wait_run" } as ToolPart)).toBe(
       "Waited for the run r1",
     );

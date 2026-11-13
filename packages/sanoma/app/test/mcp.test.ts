@@ -27,6 +27,7 @@ import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
+import { CATALOG } from "../src/server/catalog.ts";
 import { actorOf, agentDescription, callApi } from "../src/server/core.ts";
 import { postMcp } from "../src/server/mcp.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
@@ -230,10 +231,18 @@ describe("tools/list", () => {
       for (const t of tools) {
         expect(t.title, t.name).toEqual(expect.any(String));
         expect(t.description, t.name).toEqual(expect.any(String));
+        // The shared text, then what is true of `/mcp` alone: its `id`, and a hold answered as an error.
+        expect(t.description, t.name).toContain(CATALOG[t.name as keyof typeof CATALOG].description);
         expect(t.annotations, t.name).toEqual(
           t.name === "start_run" ? { destructiveHint: true } : { readOnlyHint: true },
         );
       }
+      const described = (name: string) => tools.find((t) => t.name === name)!.description;
+      expect(described("lookup")).toContain("the error names the held run, which wait_run reads");
+      expect(described("lookup")).toContain("Retried with the same id and input, a held lookup is the same held run");
+      expect(described("drift")).toContain("Retried with the same id, it is the same run");
+      expect(described("start_run")).toContain("Retried with the same id, workflow and input");
+      expect(described("start_run")).toContain("Answers the run's id, for get_run and wait_run");
     });
   }
 

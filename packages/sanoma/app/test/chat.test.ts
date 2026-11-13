@@ -644,6 +644,9 @@ describe("the agent catalog in the chat", () => {
     expect(reply!.parts.at(-1)).toMatchObject({ type: "text", text: "Noted." });
     expect((await testApp.client.run(runId))?.startedBy).toEqual(chatForAda);
     expect((await testApp.client.ledger(runId))[0]).toMatchObject({ type: "run.started", actor: chatForAda });
+    // The stored reply records the turn that wrote it, which names its catalog calls (`settle`).
+    const stored = (await testApp.client.chats.load(id)) as ChatMessage[];
+    expect(stored.at(-1)).toMatchObject({ role: "assistant", metadata: { turn: await askedIn(id, "Note the visit") } });
 
     // The model uses the same tool-call id in the next turn (as some providers do): another call, another run.
     const history = (await testApp.client.chats.load(id)) as ChatMessage[];

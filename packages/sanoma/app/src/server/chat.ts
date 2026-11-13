@@ -1,5 +1,5 @@
 import { type Chat, ChatTurnInput, type Principal, type RunSummary, type SanomaClient } from "sanoma/workflows";
-import { CHAT_AGENT, heldCallRunId, isEnded } from "sanoma/workflows/shared";
+import { CHAT_AGENT, isEnded } from "sanoma/workflows/shared";
 import {
   createUIMessageStreamResponse,
   getToolName,
@@ -15,14 +15,18 @@ import {
   catalogCallId,
   type ChatMessage,
   enginesHere,
-  type HeldOutput,
+  heldPart,
   heldRunOf,
+  type LookupOutput,
   noModelText,
   onModelConnector,
+  type RunOutput,
   textOf,
+  turnOf,
   unfinished,
   written,
 } from "../lib/chat.ts";
+import { callRunId, catalogName, lookupOutput, runOutput } from "./catalog.ts";
 import { type ActorContext, appConfig, parse, requireActor, toApiError } from "./core.ts";
 import { chatModel } from "./models.ts";
 
@@ -209,15 +213,20 @@ export async function postSignInCode(request: Request, context: ActorContext): P
 }
 
 /**
- * The transcript of the chat `chat` with what a turn left unfinished settled: in any reply, a held
- * call's or start's result once its run has ended (still held while it waits); in the last, as a
- * stop or a restart cut it short, text and reasoning done, and a tool call with no result failed
- * as interrupted, unless it is one of the agent catalog's that leaves a run (`start_run`, `drift`,
- * a held `lookup`) and its run is there: found by the call's idempotency id (`catalogCallId`, of
- * the message whose turn wrote that reply: `turn`, which a resumed turn gives as its own, since its
- * history holds the message apart; without it, the person's last message in `messages`), the part
- * answers from it (`fromRun`), so the model is not led to start it again. A message it leaves as
- * it was is the same object, so the caller writes back only those it changed.
+ * The transcript of the chat `chat` with what a turn left unfinished settled. In any reply, a held
+ * call or start (its card shown while its turn waited, or answered past the wait that it still
+ * waits, `StillHeld`) is its run's present state once that is no longer waiting: the tool's own
+ * output for it (`runOutput`, `lookupOutput`), so the next turn's model has the run's id and what
+ * became of it; while the run waits the part stays as it was. In the last reply, as a stop or a
+ * restart cut it short, text and reasoning are done, and a tool call with no result failed as
+ * interrupted, unless it is one of the agent catalog's that leaves a run (`callRunId`: `start_run`,
+ * `drift`, a held `lookup`) and its run is there, found by the call's idempotency id
+ * (`catalogCallId`): then the part answers from it, so the model is not led to start it again. The
+ * id is of the message whose turn wrote the reply, which the reply records (`turnOf`, written by
+ * `persist`); a reply stored before it was recorded falls back to `turn` (a resumed turn gives its
+ * own message, since its history holds the message apart; without it, the person's last message
+ * in `messages`). A message it leaves as it was is the same object, so the caller writes back only
+ * those it changed.
  */
 export async function settle(
   client: SanomaClient,
@@ -225,10 +234,13 @@ export async function settle(
   chat: string,
   turn: string | undefined = messages.findLast((m) => m.role === "user")?.id,
 ): Promise<UIMessage[]> {
-  const callId = (toolCallId: string) => (turn === undefined ? undefined : catalogCallId(chat, turn, toolCallId));
   return Promise.all(
     messages.map(async (message, i) => {
-      if (message.role !== "assistant" || !message.parts.some(unfinished)) return message;
+      if (message.role !== "assistant" || !message.parts.some((part) => unfinished(part) || heldPart(part))) {
+        return message;
+      }
+      const wrote = turnOf(message) ?? turn;
+      const callId = (toolCallId: string) => (wrote === undefined ? undefined : catalogCallId(chat, wrote, toolCallId));
       const last = i === messages.length - 1;
       const parts = await Promise.all(message.parts.map((part) => settlePart(client, part, last, callId)));
       return parts.every((part, j) => part === message.parts[j]) ? message : { ...message, parts };
@@ -236,39 +248,34 @@ export async function settle(
   );
 }
 
-/** The catalog's tools that leave a run named by their idempotency id: a start's is its run, a held lookup's the chat's agent's held call (`heldCallRunId`). */
-const RUN_OF_CALL = new Map<string, (id: string) => string>([
-  ["start_run", (id) => id],
-  ["drift", (id) => id],
-  ["lookup", (id) => heldCallRunId(CHAT_AGENT, id)],
-]);
+type Part = UIMessage["parts"][number];
+type ToolPart = Extract<Part, { toolCallId: string }>;
 
 async function settlePart(
   client: SanomaClient,
-  part: UIMessage["parts"][number],
+  part: Part,
   last: boolean,
   callId: (toolCallId: string) => string | undefined,
-): Promise<UIMessage["parts"][number]> {
-  if (!unfinished(part)) return part;
+): Promise<Part> {
   if (isToolUIPart(part) && part.state === "output-available") {
     const runId = heldRunOf(part.output);
     const run = runId === undefined ? undefined : await client.run(runId);
-    // Still waiting: held as it was, for a later turn to settle once the run has ended.
-    if (run && !isEnded(run.status)) return part;
-    if (!run) return { ...part, preliminary: false };
-    return settledHeld(client, part, run.runId);
+    if (run) return fromRun(client, part, run);
+    // No run to answer from: a preliminary output is as far as it got.
+    return part.preliminary === true ? { ...part, preliminary: false } : part;
   }
+  if (!unfinished(part)) return part;
   // Only the last reply can have been cut short; an earlier one's own turn settled it.
   if (!last) return part;
   if (!isToolUIPart(part)) return { ...part, state: "done" } as typeof part;
   if (part.state !== "input-streaming" && part.state !== "input-available") return part;
   const name = getToolName(part);
-  const runOf = RUN_OF_CALL.get(name);
-  const id = runOf && callId(part.toolCallId);
-  const run = runOf && id !== undefined ? await client.run(runOf(id)) : undefined;
+  const id = callId(part.toolCallId);
+  const runId = id === undefined ? undefined : callRunId(name, id, CHAT_AGENT);
+  const run = runId === undefined ? undefined : await client.run(runId);
   // A call cut short while its input streamed has none.
   const called = { ...part, input: part.input ?? {} };
-  if (run) return fromRun(client, called, name, run);
+  if (run) return fromRun(client, called, run);
   return {
     ...called,
     state: "output-error",
@@ -276,43 +283,31 @@ async function settlePart(
   };
 }
 
-/** A held part's result, once its run `runId` ended: its output, or its failure. */
-async function settledHeld(
-  client: SanomaClient,
-  part: UIMessage["parts"][number],
-  runId: string,
-): Promise<UIMessage["parts"][number]> {
-  try {
-    return {
-      ...part,
-      preliminary: false,
-      output: { output: await client.result(runId) },
-    } as UIMessage["parts"][number];
-  } catch (err) {
-    const { preliminary: _, ...rest } = part as UIMessage["parts"][number] & { preliminary?: boolean };
-    const errorText = String((err as Error).message ?? err);
-    return { ...rest, state: "output-error", errorText, output: undefined } as UIMessage["parts"][number];
-  }
-}
+/** The tool part `part` answered with `output`, the tool's own (`RunOutput`, `LookupOutput`): final, or `preliminary` while its run is held. */
+const answered = (part: ToolPart, output: RunOutput | LookupOutput, preliminary = false): Part =>
+  ({ ...part, state: "output-available", output, preliminary }) as Part;
 
 /**
- * A catalog tool's part a restart cut short, answered from the run its call left: held while the
- * run waits for an approval (settled once it ends, as any held part); a lookup's held call's
- * result once it ended; a start's run by its id and status.
+ * A catalog tool's part answered from its run `run`, just read: the run a held part names, or the
+ * one a call a restart cut short left. A lookup's held call: held until it ended, then its result
+ * (`lookupOutput`), or its failure as the tool's error, as the tool itself throws it. A start's
+ * run (`start_run`, `drift`): held while it waits for an approval, then where it stands
+ * (`runOutput`), a failed one too. A part held already stays the same object while its run waits.
  */
-async function fromRun(
-  client: SanomaClient,
-  part: Extract<UIMessage["parts"][number], { toolCallId: string }>,
-  name: string,
-  run: RunSummary,
-): Promise<UIMessage["parts"][number]> {
-  const answered = { ...part, state: "output-available" as const };
-  if (run.status === "waiting" || (name === "lookup" && !isEnded(run.status))) {
-    const output = { held: { runId: run.runId } } satisfies HeldOutput;
-    return { ...answered, output, preliminary: true } as UIMessage["parts"][number];
+async function fromRun(client: SanomaClient, part: ToolPart, run: RunSummary): Promise<Part> {
+  const { runId } = run;
+  const lookup = catalogName(getToolName(part)) === "lookup";
+  if (lookup ? !isEnded(run.status) : run.status === "waiting") {
+    const held = part.state === "output-available" && heldRunOf(part.output) === runId;
+    return held ? part : answered(part, { held: { runId } }, true);
   }
-  if (name === "lookup") return settledHeld(client, answered as UIMessage["parts"][number], run.runId);
-  return { ...answered, output: { runId: run.runId, status: run.status } } as UIMessage["parts"][number];
+  if (!lookup) return answered(part, await runOutput(client, run));
+  try {
+    return answered(part, lookupOutput(await client.result(runId)));
+  } catch (err) {
+    const { preliminary: _, output: __, ...rest } = part as ToolPart & { preliminary?: boolean; output?: unknown };
+    return { ...rest, state: "output-error", errorText: String((err as Error).message ?? err) } as Part;
+  }
 }
 
 /** The person's chat `id` with its transcript; null when they have none of that id. */

@@ -14,12 +14,20 @@ import {
   type RunSummary,
   type SanomaConfig,
 } from "sanoma/workflows";
-import { approverLabel } from "sanoma/workflows/shared";
 import { chatAgentActing, type ConfigDescription, describeConfig, readPeople } from "sanoma/workflows/describe";
 import { tool } from "ai";
 import { z } from "zod";
-import { catalogCallId, type DraftCard, type HeldOutput } from "../../lib/chat.ts";
-import { CATALOG, type CatalogName, resultOf, runCatalog, startDrift } from "../../server/catalog.ts";
+import { catalogCallId, type DraftCard, type HeldOutput, type LookupOutput, type RunOutput } from "../../lib/chat.ts";
+import {
+  CATALOG,
+  type CatalogName,
+  describedOn,
+  lookupOutput,
+  runCatalog,
+  runOutput,
+  startDrift,
+  stillHeld,
+} from "../../server/catalog.ts";
 import { type CallHost, noRun, RESULT_WAIT_MS } from "../../server/core.ts";
 import { checks, drafting, mustAllow, openDraft, tellCommits } from "./checkout.ts";
 
@@ -278,26 +286,11 @@ const describedOf = (config: SanomaConfig) => {
   return description;
 };
 
-/** What a catalog tool answers while its call or start waits for an approval past its wait: whose decision too. */
-interface StillHeld extends HeldOutput {
-  runId: string;
-  status: "waiting for approval";
-  waitsFor: string[];
-}
-
-/** The catalog's tool `name`, as the AI SDK's `tool` takes it. */
+/** The catalog's tool `name`, as the AI SDK's `tool` takes it, described as the chat has it (`describedOn`: no `id` to send, a hold and a failed run as outputs). */
 const spec = <N extends CatalogName>(name: N) => {
-  const { title, description, input } = CATALOG[name];
-  return { title, description, inputSchema: input as (typeof CATALOG)[N]["input"] };
+  const { title, input } = CATALOG[name];
+  return { title, description: describedOn(name, "chat"), inputSchema: input as (typeof CATALOG)[N]["input"] };
 };
-
-/** A run that waits for its approvals, as the model is told it: whose decisions it waits for (`approverLabel`: a person's id, or "group <name>"). */
-const stillHeld = (run: RunSummary): StillHeld => ({
-  held: { runId: run.runId },
-  runId: run.runId,
-  status: "waiting for approval",
-  waitsFor: run.approvals.filter((a) => a.status === "pending").map(({ approver }) => approverLabel(approver)),
-});
 
 /**
  * The agent catalog (`server/catalog.ts`, the tools `/mcp` serves) as AI SDK tools for a turn of
@@ -308,9 +301,13 @@ const stillHeld = (run: RunSummary): StillHeld => ({
  * (`turn.message`) and the tool call, one call per tool call. A held lookup, or a start
  * (`start_run`, `drift`) whose run waits for an approval, shows the held output
  * (`{ held: { runId } }`, the chat's approval card) at once and waits up to `heldMs` for the
- * decision; past it, it answers that it waits, for whom, with the run's id. A started run that is
- * not held is waited for at most `RESULT_WAIT_MS`. Every wait here ends with the turn (its abort
- * signal): the tool's own polls, and `callApi`'s result wait, which is given the signal.
+ * decision; past it, it answers that it waits, for whom, with the run's id (`StillHeld`, which
+ * `settle` replaces with the run's state once it is decided). A started run that is not held is
+ * waited for at most `RESULT_WAIT_MS`. A start answers the one shape whatever became of its run
+ * (`RunOutput`, built by `runOutput`): a run that started and then failed is an output with its id
+ * and its error, never the tool's error, which is only for a call that left no run (a refusal, an
+ * input it does not take). Every wait here ends with the turn (its abort signal): the tool's own
+ * polls, and `wait_run`'s wait in `callApi`, which is given the signal.
  * HarnessAgent's engines run these on the host too, never in the box.
  */
 export function catalogTools(
@@ -353,42 +350,44 @@ export function catalogTools(
       await sleep(Math.min(wait, until - Date.now()), undefined, { signal });
     }
   };
-  /**
-   * `wait_run`'s answer for `run`, just read: an ended one's result fetched at once, one still
-   * going waited for up to `ms` more.
-   */
-  const answerOf = (run: RunSummary, ms: number, signal: AbortSignal | undefined) =>
-    isEnded(run.status)
-      ? resultOf(host(), actor(), run.workflow, run.runId, { waitMs: 0 })
-      : call("wait_run", { runId: run.runId, waitMs: ms }, { signal });
-  /**
-   * A started run watched for `startMs` (`RESULT_WAIT_MS` at most, and when not given), until it
-   * ends or waits for an approval; one that waits shows the held output, then is waited for up to
-   * `heldMs` for the decision, and once it is decided up to `DECIDED_WAIT_MS` more for its end.
-   * Its answer: `wait_run`'s, or that it waits.
-   */
-  async function* watched(runId: string, signal: AbortSignal | undefined, startMs = RESULT_WAIT_MS) {
-    const started = await poll(
+  /** The run `runId` read until it ends or waits for an approval, for `ms` at most. */
+  const settled = async (runId: string, ms: number, signal: AbortSignal | undefined) => {
+    const run = await poll(
       runId,
-      Date.now() + Math.min(startMs, RESULT_WAIT_MS),
+      Date.now() + ms,
       (r) => isEnded(r.status) || r.status === "waiting",
       signal,
       STARTED_POLL_MS,
     );
-    if (!started) throw noRun(runId);
-    if (started.status !== "waiting") return answerOf(started, 0, signal);
+    if (!run) throw noRun(runId);
+    return run;
+  };
+  /**
+   * A started run watched for `startMs` (`RESULT_WAIT_MS` at most, and when not given), until it
+   * ends or waits for an approval; one that waits shows the held output, then is waited for up to
+   * `heldMs` for the decision, and once it is decided up to `DECIDED_WAIT_MS` more for its end.
+   * Its answer is the run's, as it then stands (`runOutput`): finished with its output, failed with
+   * its error, still running, or still held.
+   */
+  async function* watched(
+    runId: string,
+    signal: AbortSignal | undefined,
+    startMs = RESULT_WAIT_MS,
+  ): AsyncGenerator<RunOutput, RunOutput> {
+    const started = await settled(runId, Math.min(startMs, RESULT_WAIT_MS), signal);
+    if (started.status !== "waiting") return runOutput(client, started);
     yield { held: { runId } } satisfies HeldOutput;
     const decided = await poll(runId, Date.now() + heldMs, (r) => r.status !== "waiting", signal);
     if (!decided) throw noRun(runId);
-    if (decided.status === "waiting") return stillHeld(decided);
-    return answerOf(decided, DECIDED_WAIT_MS, signal);
+    if (decided.status === "waiting" || isEnded(decided.status)) return runOutput(client, decided);
+    return runOutput(client, await settled(runId, DECIDED_WAIT_MS, signal));
   }
 
   return {
     describe: tool({ ...spec("describe"), execute: (args) => call("describe", args, {}) }),
     lookup: tool({
       ...spec("lookup"),
-      async *execute(args, { toolCallId, abortSignal }): AsyncGenerator<HeldOutput | { output: unknown }> {
+      async *execute(args, { toolCallId, abortSignal }): AsyncGenerator<LookupOutput> {
         let output: unknown;
         try {
           output = await call("lookup", args, { toolCallId });
@@ -403,7 +402,7 @@ export function catalogTools(
           }
           output = await client.result(runId);
         }
-        yield { output };
+        yield lookupOutput(output);
       },
     }),
     get_run: tool({ ...spec("get_run"), execute: (args) => call("get_run", args, {}) }),
@@ -413,7 +412,7 @@ export function catalogTools(
     }),
     drift: tool({
       ...spec("drift"),
-      async *execute({ waitMs }, { toolCallId, abortSignal }) {
+      async *execute({ waitMs }, { toolCallId, abortSignal }): AsyncGenerator<RunOutput> {
         // Started without waiting, then watched as a start is: a drift the policy holds shows at once.
         const { runId } = await startDrift(host(), actor(), idOf(toolCallId));
         yield yield* watched(runId, abortSignal, waitMs);
@@ -421,7 +420,7 @@ export function catalogTools(
     }),
     start_run: tool({
       ...spec("start_run"),
-      async *execute(args, { toolCallId, abortSignal }) {
+      async *execute(args, { toolCallId, abortSignal }): AsyncGenerator<RunOutput> {
         const { runId } = (await call("start_run", args, { toolCallId })) as { runId: string };
         yield yield* watched(runId, abortSignal);
       },

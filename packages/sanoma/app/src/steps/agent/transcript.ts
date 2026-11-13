@@ -1,4 +1,5 @@
 import type { Chat, ChatTurnContext, SanomaClient } from "sanoma/workflows";
+import { isRecord } from "sanoma/workflows/shared";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import type { ChatMessage } from "../../lib/chat.ts";
 
@@ -25,15 +26,21 @@ const BATCH_MS = 50;
  * snapshots (`readUIMessageStream`) to the chat's transcript at each change of shape (a part
  * started or finished, a tool's result, the draft's card) and at its end; then ends the chunks
  * (`Chats.end`), once the transcript has the whole reply. A write that fails is logged; the turn
- * goes on. The reply's message id, once it had one.
+ * goes on. Each snapshot records the turn that wrote it, the id of the person's message `turn`, as
+ * the reply's metadata `turn` (`turnOf`), which names its catalog calls when `settle` reads the
+ * reply later. The reply's message id, once it had one.
  */
 export async function persist(
   { client, runId }: ChatTurnContext,
   chat: Chat,
+  turn: string,
   stream: ReadableStream<UIMessageChunk>,
 ): Promise<string | undefined> {
   const [chunks, copy] = suggestedAsks(stream).tee();
-  const [, reply] = await Promise.all([writeChunks(client, chat, runId, chunks), writeTranscript(client, chat, copy)]);
+  const [, reply] = await Promise.all([
+    writeChunks(client, chat, runId, chunks),
+    writeTranscript(client, chat, turn, copy),
+  ]);
   await client.chats.end(chat.id, runId);
   return reply;
 }
@@ -148,13 +155,16 @@ async function writeChunks(client: SanomaClient, chat: Chat, turn: string, strea
 async function writeTranscript(
   { chats }: SanomaClient,
   chat: Chat,
+  turn: string,
   stream: ReadableStream<UIMessageChunk>,
 ): Promise<string | undefined> {
   let shape = "";
   let last: UIMessage | undefined;
   /** A snapshot of the reply, once it has its id. */
   const write = async (message: UIMessage) => {
-    if (message.id) await chats.upsert(chat.id, [message]);
+    if (!message.id) return;
+    const metadata = { ...(isRecord(message.metadata) ? message.metadata : {}), turn };
+    await chats.upsert(chat.id, [{ ...message, metadata }]);
   };
   try {
     for await (const message of readUIMessageStream({ stream })) {

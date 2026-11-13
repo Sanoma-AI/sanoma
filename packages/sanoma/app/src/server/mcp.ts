@@ -6,12 +6,13 @@ import { isRecord, isVisitor } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { ApiError } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { CATALOG, runCatalog } from "./catalog.ts";
+import { CATALOG, describedOn, runCatalog } from "./catalog.ts";
 import { type ActorContext, actingFor, requireActor, toApiError } from "./core.ts";
 
 // `/mcp`: the company's agent surface, an MCP server over Streamable HTTP, rendering the agent
 // catalog (`catalog.ts`, which the chat's engines take too): each tool registered with its title,
-// description, hint and input, the optional `id` added where the tool takes an idempotency id, and
+// description (`describedOn`: with what is true of `/mcp` alone, its `id` and a hold answered as an
+// error), hint and input, the optional `id` added where the tool takes an idempotency id, and
 // run by `runCatalog` as the person asking, or as the declared agent a loopback request names
 // acting for them (`actingFor`), so the policy and the ledger see who. A refusal is a tool error
 // carrying `callApi`'s error body.
@@ -96,7 +97,7 @@ function mcpServer(app: AppContext, actor: Principal): McpServer {
       spec.name,
       {
         title: spec.title,
-        description: spec.description,
+        description: describedOn(spec.name, "mcp"),
         inputSchema,
         annotations: spec.hint === "read" ? { readOnlyHint: true } : { destructiveHint: true },
       },

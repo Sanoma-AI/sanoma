@@ -10,7 +10,8 @@ import {
   VENDOR,
 } from "sanoma/workflows";
 import { readPeople } from "sanoma/workflows/describe";
-import { type ChatMessage, textOf } from "../../lib/chat.ts";
+import { getToolName, isToolUIPart } from "ai";
+import { type ChatMessage, runStateOf, textOf } from "../../lib/chat.ts";
 import { RESULT_WAIT_MS } from "../../server/core.ts";
 import { ASKS_LINE } from "./transcript.ts";
 
@@ -94,8 +95,8 @@ function atAGlance(
 /**
  * A coding agent's instructions for `principal`'s turn in `chat`: the rules (the agent catalog's
  * when it has it, `catalog`: HarnessAgent's engines do, a person's own agent over ACP does not),
- * who it acts for, and the chat's earlier messages (`history`, their text), since each turn starts
- * a new session of it.
+ * who it acts for, and the chat's earlier messages (`history`: their text, and the runs their
+ * tool calls left, `spoken`), since each turn starts a new session of it.
  */
 export function harnessInstructions(
   step: Pick<AppStepContext, "config" | "resolved">,
@@ -122,12 +123,23 @@ export function harnessInstructions(
   return sections.join("\n\n");
 }
 
-/** A message's text, and the checks its draft card shows. */
+/**
+ * A message's text, the runs its tool calls left or read (each by its tool, the run's id and where
+ * it stands as the transcript now has it, `runStateOf`: this history is text, so the agent would
+ * otherwise not know a run it started and start it again), and the checks its draft card shows.
+ */
 function spoken(message: ChatMessage): string {
   const checked = message.parts.findLast((part) => part.type === "data-draft")?.data.checks;
-  const text = textOf(message, "\n");
-  if (!checked) return text;
-  return `${text}\n[The draft's checks: ${checked.ok ? "passed" : `failed: ${checked.problems.join("; ")}`}]`;
+  const runs = message.parts.flatMap((part) => {
+    const run = isToolUIPart(part) && part.state === "output-available" ? runStateOf(part.output) : undefined;
+    if (!run || !isToolUIPart(part)) return [];
+    return `[${getToolName(part)}: run ${run.runId} is ${run.status}${run.error ? `: ${run.error}` : ""}]`;
+  });
+  return [
+    textOf(message, "\n"),
+    ...runs,
+    ...(checked ? [`[The draft's checks: ${checked.ok ? "passed" : `failed: ${checked.problems.join("; ")}`}]`] : []),
+  ].join("\n");
 }
 
 /** The loop's instructions for `principal`'s turn in `chat`. */

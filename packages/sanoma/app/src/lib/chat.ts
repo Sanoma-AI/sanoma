@@ -166,6 +166,60 @@ export interface HeldOutput {
 }
 
 /**
+ * What a held call or start answers once its wait for the decision is over and it still waits: the
+ * held output (so the chat keeps its card), with the run's id, that it waits and for whose
+ * decisions (`approverLabel`: a person's id, or "group <name>"). A final output, which `settle`
+ * still replaces with the run's state once it is decided.
+ */
+export interface StillHeld extends HeldOutput {
+  runId: string;
+  status: "waiting for approval";
+  waitsFor: string[];
+}
+
+/**
+ * What the chat's `start_run` and `drift` answer, whoever writes it (the tool as it runs, or
+ * `settle` from the run a call left; `runOutput` in `server/catalog.ts` builds every one but the
+ * first): held, shown at once; still held past the wait; or the run by its id and status, with its
+ * output once it finished and its error once it failed or was cancelled. A run that started and
+ * then failed is an output, never the tool's error, so its id is not lost and it is not started again.
+ */
+export type RunOutput =
+  | HeldOutput
+  | StillHeld
+  | { runId: string; status: "running" }
+  | { runId: string; status: "finished"; output: unknown }
+  | { runId: string; status: "failed" | "cancelled"; error: string };
+
+/** What the chat's `lookup` answers, whoever writes it: held, still held past the wait, or the operation's output (`lookupOutput` in `server/catalog.ts`). A lookup refused, or a held one rejected, is the tool's error. */
+export type LookupOutput = HeldOutput | StillHeld | { output: unknown };
+
+/**
+ * The run a tool part's output names and where it stands, when it names one (`RunOutput`, a held
+ * `LookupOutput`, `wait_run`'s answer): its id, its status as the output words it ("waiting for
+ * approval" for a held one) and its error. What a coding agent is told of an earlier turn's calls,
+ * and how the chat tells a run that failed from one that finished.
+ */
+export function runStateOf(output: unknown): { runId: string; status: string; error?: string } | undefined {
+  const { runId, status, error } = (output ?? {}) as { runId?: unknown; status?: unknown; error?: unknown };
+  if (typeof runId === "string" && typeof status === "string") {
+    return { runId, status, ...(typeof error === "string" && { error }) };
+  }
+  const held = heldRunOf(output);
+  return held === undefined ? undefined : { runId: held, status: "waiting for approval" };
+}
+
+/** The run a start's output says failed or was cancelled (`RunOutput`), with why. */
+export function failedRunOf(
+  output: unknown,
+): { runId: string; status: "failed" | "cancelled"; error: string } | undefined {
+  const run = runStateOf(output);
+  return run && (run.status === "failed" || run.status === "cancelled")
+    ? { runId: run.runId, status: run.status, error: run.error ?? "" }
+    : undefined;
+}
+
+/**
  * The idempotency id of the agent catalog's call `toolCallId` in the chat `chat`'s turn for the
  * person's message `message` (which names the turn's run): one call per tool call of one turn, a
  * tool-call id a model uses again in a later turn being another call. Letters, digits, `_` and
@@ -203,6 +257,16 @@ export function errorParts(text: string): { text: string; vendor?: string } {
  */
 export const isIntro = (message: UIMessage) => (message.metadata as { intro?: unknown } | undefined)?.intro === true;
 
+/**
+ * The id of the person's message whose turn wrote a reply: `persist` records it as the reply's
+ * metadata `turn`, so `settle` names the reply's catalog calls (`catalogCallId`) without inferring
+ * it from the transcript's order. A reply stored before it was recorded has none.
+ */
+export const turnOf = (message: UIMessage): string | undefined => {
+  const turn = (message.metadata as { turn?: unknown } | null | undefined)?.turn;
+  return typeof turn === "string" ? turn : undefined;
+};
+
 /** Whether the person has written in a chat: a message of theirs that is not the agent's cue (`isIntro`). */
 export const written = (messages: UIMessage[]) => messages.some((m) => m.role === "user" && !isIntro(m));
 
@@ -230,6 +294,10 @@ export const unfinished = (part: UIMessage["parts"][number]): boolean =>
       part.state === "input-available" ||
       (part.state === "output-available" && part.preliminary === true)
     : (part.type === "text" || part.type === "reasoning") && part.state === "streaming";
+
+/** Whether a tool part shows a held call or start, preliminary or past its wait (`StillHeld`): `settle` looks at its run again. */
+export const heldPart = (part: UIMessage["parts"][number]): boolean =>
+  isToolUIPart(part) && part.state === "output-available" && heldRunOf(part.output) !== undefined;
 
 /**
  * The chat's transport to `POST /api/chat` (`api`), as the chat column makes it: only the new

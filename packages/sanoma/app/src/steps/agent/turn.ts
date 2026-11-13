@@ -31,9 +31,11 @@ function engineRunning(name: string): Engine {
  * settled (`settle`), the person's message (`input.message`, by id) moved after it, and the reply
  * of the chat's engine, written as it streams (`persist`). The person's messages stored after this
  * one were sent while it waited, for turns of their own: they go after it, out of its history. A
- * turn the worker's restart cut short (`resumed`) settles its own reply instead, which `settle`
- * sees as the last and is told is this message's (the history holds the message apart), and runs
- * nothing again: the person sends "continue".
+ * turn the worker's restart cut short (`resumed`) settles what is there instead and runs nothing
+ * again: the person sends "continue". Whose turn wrote the last reply `settle` reads from the reply
+ * (`persist` records it): this turn's own, or the turn's before when the restart came before this
+ * one settled it. A reply stored before that was recorded is taken as this message's, since the
+ * history holds the message apart.
  */
 export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise<ChatTurnOutput> {
   const { chats } = step.client;
@@ -46,7 +48,7 @@ export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise
   // The rest is its history: a reply of the turn before may have been written after it.
   const next = stored.slice(at + 1).filter((m) => m.role === "user");
   const before = stored.filter((m) => m !== message && !next.includes(m));
-  // Resumed, the last reply there is this turn's own; else the turn before's, after its own message.
+  // For a reply that records no turn: resumed, the last reply there is taken as this turn's own; else the turn before's, after its own message.
   const history = (await settle(
     step.client,
     before,
@@ -66,6 +68,7 @@ export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise
   const reply = await persist(
     step,
     found,
+    input.message,
     engineRunning(found.engine)({ chat: found, messages: [...history, message], message: input.message, step }),
   );
   return reply === undefined ? {} : { reply };

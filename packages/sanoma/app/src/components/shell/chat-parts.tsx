@@ -22,7 +22,15 @@ import {
   TraceTitle,
 } from "#/components/ui/trace.tsx";
 import { actorHeaders } from "../../actor.ts";
-import { type ChatMessage, type DraftCard, heldRunOf, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
+import {
+  type ChatMessage,
+  type DraftCard,
+  failedRunOf,
+  heldRunOf,
+  pathOf,
+  type SignInCard,
+  textOf,
+} from "../../lib/chat.ts";
 import { CardHeading, Notice, TipButton } from "../kit.tsx";
 import { DraftCardView } from "./draft-card.tsx";
 
@@ -206,6 +214,9 @@ function stepState(step: ToolPart, live: boolean) {
     return { word: "Failed", status: "error" as const, icon: stopped, why: step.errorText };
   }
   if (step.approval?.approved === false) return { word: "Refused", icon: stopped, why: step.approval.reason };
+  // A run the step started that then failed (`RunOutput`): the step answered, and what it started did not go through.
+  const failed = step.state === "output-available" ? failedRunOf(step.output) : undefined;
+  if (failed) return { word: "Failed", status: "error" as const, icon: stopped, why: failed.error };
   if (step.state === "output-available" && !step.preliminary) {
     return { word: "Done", icon: <CheckIcon aria-hidden="true" /> };
   }
@@ -260,17 +271,25 @@ export function stepLabel(step: ToolPart): string {
     case "wait_run":
       return `Waited for the run ${String(input.runId ?? "")}`;
     case "drift":
-      return "Checked for drift";
+      return `Checked for drift${runEnd(step)}`;
     case "start_run":
+      // An error is a start that left no run (the policy's refusal, an input it does not take); a run that started and then failed is an output.
       return step.state === "output-error"
         ? `Refused to start ${String(input.workflow ?? "")}`
-        : `Started ${String(input.workflow ?? "")}`;
+        : `Started ${String(input.workflow ?? "")}${runEnd(step)}`;
     default: {
       if (step.title) return step.title;
       const file = pathOf(input);
       return file === undefined ? getToolName(step) : `${getToolName(step)} ${file}`;
     }
   }
+}
+
+/** What became of the run a step started, when it failed or was cancelled (`failedRunOf`): said after the step's own words. */
+function runEnd(step: ToolPart): string {
+  const failed = step.state === "output-available" ? failedRunOf(step.output) : undefined;
+  if (!failed) return "";
+  return failed.status === "cancelled" ? ": the run was cancelled" : ": the run failed";
 }
 
 /** `url` when it is an https link that parses (the vendor wrote it), else undefined. */
