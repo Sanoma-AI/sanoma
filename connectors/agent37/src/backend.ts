@@ -158,7 +158,8 @@ async function openOnce(
   // A box that exists keeps its image; a new one's may be registered first, outside the budget.
   const template = found ? undefined : (want.image ?? (await boxTemplate(api, key)));
   const deadline = Date.now() + budgetMs;
-  // Before it wakes, so it runs nothing with the network it had: one made before reached anywhere.
+  // Before it wakes, so a sleeping box wakes to its hosts (one made before reached anywhere); one
+  // still awake from an earlier turn takes them within seconds, Agent37 says.
   if (found && network && !reaches(found, network)) await retrying(deadline, () => api.network(found.id, network));
   const made =
     found ??

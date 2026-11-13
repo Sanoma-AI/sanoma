@@ -105,18 +105,19 @@ export function enginesOf(agents: AgentEntry[]): EngineOption[] {
 }
 
 /**
- * Whether a live instance declares no box for the coding agents, which run in one there
- * (`DECLARE_BOX`): no resource whose type meets the `sandbox` contract.
+ * Whether a live instance, or one people sign in to, declares no box for the coding agents, which
+ * run in one there (`DECLARE_BOX`): no resource whose type meets the `sandbox` contract. Only one
+ * person's own computer (the loopback login, on a database of its own) has the local box.
  */
-export const boxless = (config: Pick<AppConfig, "place" | "resources" | "resourceTypes">) =>
-  config.place === "live" &&
+export const boxless = (config: Pick<AppConfig, "place" | "loopbackLogin" | "resources" | "resourceTypes">) =>
+  (config.place === "live" || !config.loopbackLogin) &&
   !config.resources.some((r) =>
     config.resourceTypes.find((t) => t.id === `${r.vendor}.${r.type}`)?.capabilities?.includes("sandbox"),
   );
 
 /**
- * The engines a chat can open on here, in `enginesOf`'s order: on a live instance, no coding
- * agent while it declares no box (`boxless`), and no own plan whose sign-in runs once on the
+ * The engines a chat can open on here, in `enginesOf`'s order: no coding agent while the instance
+ * has no box (`boxless`), and on a live instance no own plan whose sign-in runs once on the
  * person's computer. A turn on any other fails, saying why.
  */
 export function enginesHere(config: AppConfig): EngineOption[] {

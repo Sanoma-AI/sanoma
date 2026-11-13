@@ -65,11 +65,13 @@ export type Place = z.infer<typeof PlaceSchema>;
 /**
  * What `getConfig` answers: the description, less the workflows' sources, and where this instance
  * is: its `place`, and its database's host (only the host, never the URL; none when it cannot be
- * read), which the bar's badge says as its tip; and the repo's content kinds, each with the front
- * matter keys its files hold (`contentFields`).
+ * read), which the bar's badge says as its tip; whether people act here by the loopback login
+ * (`loopbackLogin`, no login provider), which a local box needs; and the repo's content kinds,
+ * each with the front matter keys its files hold (`contentFields`).
  */
 export const AppConfigSchema = ConfigDescriptionSchema.extend({
   place: PlaceSchema,
+  loopbackLogin: z.boolean(),
   databaseHost: z.string().optional(),
   content: z.array(z.strictObject({ kind: z.string(), fields: z.array(z.string()) })),
 });
