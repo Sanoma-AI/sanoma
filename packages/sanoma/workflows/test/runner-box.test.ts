@@ -64,6 +64,7 @@ describe("the sandbox runner", () => {
       pid: runner.pid,
     });
     expect(await runnerHealth(url)).toEqual({ protocol: RUNNER_PROTOCOL, pid: runner.pid });
+    expect(await runnerHealth(`${url}/?a37_token=t`)).toEqual({ protocol: RUNNER_PROTOCOL, pid: runner.pid });
     expect(await runnerHealth(`${url}/other`)).toBeUndefined();
     expect((await fetch(`${url}/other`)).status).toBe(404);
   });

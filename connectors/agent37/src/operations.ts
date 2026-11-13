@@ -9,6 +9,14 @@ import { wanted } from "./connector.ts";
 export const noBox = (name: string) =>
   new DriverError(`agent37: there is no box ${name}`, { retryable: false, status: 404, vendorCode: "not_found" });
 
+/** The failure for opening the box `name` in `group` when it is in another group, or none. */
+export const otherGroup = (name: string, group: string) =>
+  new DriverError(`agent37: the box ${name} is not in the group ${group}`, {
+    retryable: false,
+    status: 409,
+    vendorCode: "other_group",
+  });
+
 /** What a declaration is bound by: there is no object at Agent37 to name it. */
 const BINDING = "agent37";
 

@@ -1,9 +1,8 @@
-import { randomBytes } from "node:crypto";
 import { RUNNER_PORT, RUNNER_PROTOCOL } from "sanoma/workflows";
 import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { agent37Ops } from "./connector.ts";
 import { EDGE } from "./backend.ts";
-import { instanceOperations, noBox } from "./operations.ts";
+import { instanceOperations, noBox, otherGroup } from "./operations.ts";
 
 interface FakeBox {
   id: string;
@@ -11,12 +10,6 @@ interface FakeBox {
   group: string;
   awake: boolean;
 }
-
-/** A link to the box `id`'s `port` for `ttl` seconds, as Agent37 mints one. */
-const link = (id: string, port: number, ttl: number) => ({
-  url: `${EDGE(id, port)}/?a37_token=${randomBytes(16).toString("hex")}`,
-  expiresAt: new Date(Date.now() + ttl * 1000).toISOString(),
-});
 
 /**
  * An Agent37 whose key works: it holds no instances for the instance type's operations, and its
@@ -26,15 +19,21 @@ export function fakeAgent37(options: FakeOptions = {}) {
   return defineFake(
     agent37Ops,
     {
-      initial: () => ({ boxes: [] as FakeBox[] }),
+      initial: () => ({ seq: 0, boxes: [] as FakeBox[] }),
       ops: (state) => {
         const named = (name: string) => state.boxes.find((box) => box.name === name);
+        /** A link to the box `id`'s `port` for `ttl` seconds, as Agent37 mints one. */
+        const link = (id: string, port: number, ttl: number) => ({
+          url: `${EDGE(id, port)}/?a37_token=token-${++state.seq}`,
+          expiresAt: new Date(Date.now() + ttl * 1000).toISOString(),
+        });
         return {
           ...instanceOperations(async () => []),
           box: {
             async open({ name, group, ttl }) {
               let box = named(name);
-              if (!box) state.boxes.push((box = { id: randomBytes(5).toString("hex"), name, group, awake: false }));
+              if (box && box.group !== group) throw otherGroup(name, group);
+              if (!box) state.boxes.push((box = { id: `box-${++state.seq}`, name, group, awake: false }));
               box.awake = true;
               return { id: box.id, ...link(box.id, RUNNER_PORT, ttl), protocol: RUNNER_PROTOCOL };
             },

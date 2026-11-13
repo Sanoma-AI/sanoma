@@ -3,7 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import {
-  type Box,
+  DriverError,
   errorMessage,
   installedSanoma,
   RUNNER_PORT,
@@ -17,6 +17,7 @@ import {
 import { slugged } from "sanoma/workflows/shared";
 import { agent37Api, type Agent37Api, type Instance, isCode } from "./api.ts";
 import { BASE, type Wanted, wanted } from "./connector.ts";
+import { otherGroup } from "./operations.ts";
 
 // The `Sandbox` backend on Agent37: a box is an instance, found by the name in its metadata,
 // made when there is none (from Sanoma's box image unless an image is declared), woken or started
@@ -79,15 +80,23 @@ export function agent37Backend(
     if (!key) throw new Error(`agent37 is not configured: ${KEY} is not set; set it on the connector page`);
     return key;
   };
-  /** The opens in flight, by name: a second open of a name waits for the first, so one instance is made. */
-  const opening = new Map<string, Promise<Box>>();
   return {
     async open({ name, image, size }) {
-      const before = opening.get(name) ?? Promise.resolve();
-      const box = before.catch(() => undefined).then(() => openBox(name, image, size));
-      opening.set(name, box);
-      void box.catch(() => undefined).then(() => opening.get(name) === box && opening.delete(name));
-      return box;
+      const key = await keyOf();
+      const api = agent37Api(key);
+      const id = await openInstance(api, key, { name, want: wanted(declared, { image, size }), edge, budgetMs });
+      const headers = { "X-Agent37-Key": key };
+      const { stop, ...box } = runnerBox({ url: edge(id, RUNNER_PORT), headers, id });
+      return {
+        ...box,
+        expose: async (port) => ({ url: edge(id, port), headers }),
+        async stop() {
+          // What runs in it is killed first, which a sleep would keep; a runner that cannot be
+          // reached, or does not answer in time, kills nothing, and the sleep goes ahead.
+          await Promise.race([stop().catch(() => undefined), delay(STOP_MS)]);
+          await asleep(api, id, Date.now() + budgetMs);
+        },
+      };
     },
     async discard({ name }) {
       // An open in flight may yet make the instance: wait for it, so this removes it.
@@ -96,28 +105,10 @@ export function agent37Backend(
       await Promise.all((await holding(api, BOX, name)).map(({ id }) => api.remove(id)));
     },
   };
-
-  async function openBox(name: string, image?: string, size?: number): Promise<Box> {
-    const want = wanted(declared, { image, size });
-    const key = await keyOf();
-    const api = agent37Api(key);
-    const { id, url, headers } = await openInstance(api, key, { name, want, edge, budgetMs });
-    const { stop, ...box } = runnerBox({ url, headers, id });
-    return {
-      ...box,
-      expose: async (port) => ({ url: edge(id, port), headers }),
-      async stop() {
-        // What runs in it is killed first, which a sleep would keep; a runner that cannot be
-        // reached, or does not answer in time, kills nothing, and the sleep goes ahead.
-        await Promise.race([stop().catch(() => undefined), delay(STOP_MS)]);
-        await asleep(api, id, Date.now() + budgetMs);
-      },
-    };
-  }
 }
 
 /** What `openInstance` opens: the box `name`, and what it is made as when there is none. */
-export interface Opening {
+interface Opening {
   name: string;
   want: Wanted;
   /** The group a new box is labelled with (`GROUP`), such as the company it is for. */
@@ -129,20 +120,35 @@ export interface Opening {
 }
 
 /**
+ * The opens in flight in this process, by box name: a second open of a name waits for the first,
+ * so one instance is made. Agent37 keeps metadata without reading it, so two opens of one name in
+ * different processes at once can each make an instance.
+ */
+export const opening = new Map<string, Promise<string>>();
+
+/**
  * Opens the box `name` with Agent37's API and edge, the key `key`: finds the instance whose
  * metadata holds its name or makes it (asleep when idle 15 minutes), wakes or starts it, starts
  * the runner in it unless it answers, and puts pnpm in it with exec. It leaves no connection open,
- * which would keep the box awake. The instance's id, and its runner's URL at the edge with the
- * headers it asks for.
+ * which would keep the box awake. The instance's id.
  */
-export async function openInstance(
+export function openInstance(api: Agent37Api, key: string, box: Opening): Promise<string> {
+  const before = opening.get(box.name) ?? Promise.resolve();
+  const opened = before.catch(() => undefined).then(() => openOnce(api, key, box));
+  opening.set(box.name, opened);
+  void opened.catch(() => undefined).then(() => opening.get(box.name) === opened && opening.delete(box.name));
+  return opened;
+}
+
+async function openOnce(
   api: Agent37Api,
   key: string,
   { name, want, group, network, edge, budgetMs }: Opening,
-): Promise<{ id: string; url: string; headers: Record<string, string> }> {
+): Promise<string> {
   const [found] = await holding(api, BOX, name);
+  if (found && group !== undefined && found.metadata?.[GROUP] !== group) throw otherGroup(name, group);
   // A box that exists keeps its image; a new one's may be registered first, outside the budget.
-  const template = found ? undefined : (want.image ?? (await boxTemplate(api)));
+  const template = found ? undefined : (want.image ?? (await boxTemplate(api, key)));
   const deadline = Date.now() + budgetMs;
   const made =
     found ??
@@ -161,9 +167,7 @@ export async function openInstance(
       Math.max(1, deadline - Date.now()),
     ));
   await running(api, made, deadline);
-  const url = edge(made.id, RUNNER_PORT);
-  const headers = { "X-Agent37-Key": key };
-  await runnerUp(api, made.id, url, headers, deadline);
+  await runnerUp(api, made.id, edge(made.id, RUNNER_PORT), { "X-Agent37-Key": key }, deadline);
   // On every open, so a box whose runner an earlier release started gets it too.
   const pnpm = await api.exec(made.id, PNPM, Math.max(1, deadline - Date.now()));
   if (pnpm.exit_code !== 0) {
@@ -171,12 +175,12 @@ export async function openInstance(
       `agent37: pnpm could not be put in the box ${made.id} (exit ${pnpm.exit_code}): ${pnpm.stderr.trim()}`,
     );
   }
-  return { id: made.id, url, headers };
+  return made.id;
 }
 
 /**
- * The box image's template asked for or registered in flight, by its name: opens at once make one
- * `GET` and at most one `POST`. It goes once settled, so each later new box asks again, and a
+ * The box image's template asked for or registered in flight, by workspace key and its name: opens
+ * at once make one `GET` and at most one `POST` in each workspace. It goes once settled, so each later new box asks again, and a
  * template deleted in Agent37's dashboard is registered again.
  */
 const registering = new Map<string, Promise<void>>();
@@ -187,12 +191,13 @@ const registering = new Map<string, Promise<void>>();
  * Agent37 takes a name), registered when the workspace has none. When it cannot be
  * had, a warning says why and the box is made from `BASE`: the image only spares the agents' installs.
  */
-async function boxTemplate(api: Agent37Api): Promise<string> {
+async function boxTemplate(api: Agent37Api, key: string): Promise<string> {
   const version = await installedSanoma(fileURLToPath(new URL("..", import.meta.url)));
   if (version === undefined) return instead("the installed sanoma's version, which tags its box image, is unknown");
   const image = `${BOX_IMAGE}:${version}`;
   const name = slugged(`sanoma-box-${version}`);
-  let had = registering.get(name);
+  const workspace = `${key}\n${name}`;
+  let had = registering.get(workspace);
   if (!had) {
     had = api.template(name).then(
       () => undefined,
@@ -201,8 +206,8 @@ async function boxTemplate(api: Agent37Api): Promise<string> {
         return api.register({ name, image_ref: image }, TEMPLATE_MS);
       },
     );
-    registering.set(name, had);
-    void had.catch(() => undefined).then(() => registering.delete(name));
+    registering.set(workspace, had);
+    void had.catch(() => undefined).then(() => registering.delete(workspace));
   }
   try {
     await had;
@@ -223,7 +228,7 @@ function instead(why: string): string {
  * templates have corepack but no pnpm. `~/.local/bin` comes first on their `PATH`, and a new box
  * has none.
  */
-export const PNPM = `set -e
+const PNPM = `set -e
 command -v pnpm >/dev/null && exit 0
 mkdir -p ~/.local/bin
 corepack enable --install-directory ~/.local/bin pnpm
@@ -323,7 +328,12 @@ async function running(api: Agent37Api, instance: Instance, deadline: number): P
     let { status } = instance;
     if (["failed", "deleting", "deleted"].includes(status)) {
       const reason = instance.status_reason?.message ? `: ${instance.status_reason.message}` : "";
-      throw new Error(`agent37: the instance ${instance.id} is ${status}${reason}; discard the box to make it again`);
+      throw new DriverError(
+        `agent37: the instance ${instance.id} is ${status}${reason}; discard the box to make it again`,
+        {
+          retryable: false,
+        },
+      );
     }
     if (status === "stopped" || status === "sleeping")
       ({ status } = await retrying(deadline, () => api.start(instance.id)));

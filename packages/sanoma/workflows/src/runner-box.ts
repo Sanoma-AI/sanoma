@@ -36,17 +36,18 @@ export async function runnerScript(): Promise<Uint8Array> {
  * answers as a runner: a backend starts one then, and replaces one of another `protocol`. The path
  * goes before the URL's query, which may carry its credential (a signed link's token).
  */
-export function runnerHealth(url: string, headers?: Record<string, string>): Promise<RunnerHealth | undefined> {
-  const at = new URL(url);
-  at.pathname = `${at.pathname.replace(/\/$/, "")}${RUNNER_HEALTH}`;
-  return fetch(at, { headers, signal: AbortSignal.timeout(5_000) })
-    .then(async (res) => {
-      const health = res.ok ? ((await res.json()) as Partial<RunnerHealth> | null) : null;
-      return typeof health?.protocol === "number" && typeof health.pid === "number"
-        ? { protocol: health.protocol, pid: health.pid }
-        : undefined;
-    })
-    .catch(() => undefined);
+export async function runnerHealth(url: string, headers?: Record<string, string>): Promise<RunnerHealth | undefined> {
+  try {
+    const at = new URL(url);
+    at.pathname = `${at.pathname.replace(/\/$/, "")}${RUNNER_HEALTH}`;
+    const res = await fetch(at, { headers, signal: AbortSignal.timeout(5_000) });
+    const health = res.ok ? ((await res.json()) as Partial<RunnerHealth> | null) : null;
+    return typeof health?.protocol === "number" && typeof health.pid === "number"
+      ? { protocol: health.protocol, pid: health.pid }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const encoder = new TextEncoder();

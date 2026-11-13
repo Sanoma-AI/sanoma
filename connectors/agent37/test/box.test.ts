@@ -87,6 +87,32 @@ describe("box operations", () => {
     await call("box.discard", { name: "sanoma-acme" });
   });
 
+  it("makes one box for opens of one name at once", async () => {
+    const [first, second] = await Promise.all([
+      call("box.open", { name: "sanoma-twice", group: "twice", ttl: 60 }),
+      call("box.open", { name: "sanoma-twice", group: "twice", ttl: 60 }),
+    ]);
+    expect(second.id).toBe(first.id);
+    expect(creates()).toHaveLength(1);
+    await call("box.discard", { group: "twice" });
+  });
+
+  it("refuses a box of the name outside the group, and keeps a group's list and discard to its own boxes", async () => {
+    const opened = await call("box.open", { name: "sanoma-ops", group: "ops", ttl: 60 });
+    // As sanoma-ops's own box is: no group.
+    delete vendor.instances.get(opened.id)!.metadata![GROUP];
+    await expect(call("box.open", { name: "sanoma-ops", group: "acme", ttl: 60 })).rejects.toMatchObject({
+      status: 409,
+      vendorCode: "other_group",
+      retryable: false,
+    });
+    expect(await call("box.list", { group: "ops" })).toEqual({ boxes: [] });
+    expect(await call("box.discard", { group: "ops" })).toEqual({ ids: [] });
+    expect(vendor.instances.has(opened.id)).toBe(true);
+    expect(creates()).toHaveLength(1);
+    await call("box.discard", { name: "sanoma-ops" });
+  });
+
   it("makes a new box with the network it is given", async () => {
     await call("box.open", { name: "sanoma-shut", group: "shut", network: ["registry.npmjs.org"], ttl: 60 });
     expect(creates()[0]!.body?.network).toEqual({ allow: ["registry.npmjs.org"] });
@@ -171,7 +197,7 @@ describe("fakeAgent37's boxes", () => {
     const fake = fakeAgent37();
     const ops = fake.driver.ops;
     const opened = await call("box.open", { name: "sanoma-acme", group: "acme", ttl: 60 }, ops);
-    expect(opened).toMatchObject({ id: expect.stringMatching(/^[0-9a-f]{10}$/), protocol: RUNNER_PROTOCOL });
+    expect(opened).toMatchObject({ id: "box-1", protocol: RUNNER_PROTOCOL });
     expect(opened.url).toContain(`${opened.id}-${RUNNER_PORT}.agent37.app/?a37_token=`);
     expect((await call("box.open", { name: "sanoma-acme", group: "acme", ttl: 60 }, ops)).id).toBe(opened.id);
     expect((await call("box.expose", { name: "sanoma-acme", port: 3000, ttl: 60 }, ops)).url).toContain(
@@ -179,6 +205,9 @@ describe("fakeAgent37's boxes", () => {
     );
     await expect(call("box.expose", { name: "sanoma-none", port: 3000, ttl: 60 }, ops)).rejects.toMatchObject({
       vendorCode: "not_found",
+    });
+    await expect(call("box.open", { name: "sanoma-acme", group: "other", ttl: 60 }, ops)).rejects.toMatchObject({
+      vendorCode: "other_group",
     });
     await call("box.open", { name: "sanoma-other", group: "other", ttl: 60 }, ops);
     expect(await call("box.sleep", { name: "sanoma-acme" }, ops)).toEqual({ ids: [opened.id] });
@@ -192,6 +221,7 @@ describe("fakeAgent37's boxes", () => {
       "agent37.box.open",
       "agent37.box.expose",
       "agent37.box.expose",
+      "agent37.box.open",
       "agent37.box.open",
       "agent37.box.sleep",
       "agent37.box.list",

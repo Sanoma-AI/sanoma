@@ -129,6 +129,8 @@ const link = {
   expiresAt: z.iso.datetime().describe("When the link stops working, ISO 8601"),
 };
 const ids = z.object({ ids: z.array(z.string()).describe("The instances it acted on") });
+const byName = ({ name }: { name: string }) => name;
+const byGroup = ({ group }: { group: string }) => `group/${group}`;
 
 /**
  * Boxes opened by a caller that holds the key for someone who must not (Sanoma's control plane, for
@@ -139,10 +141,11 @@ const boxSpecs = {
   open: {
     // It makes or wakes a box, and mints a link that reaches it.
     effect: "access",
-    // A retry finds the box made; each try mints another link.
+    // A retry finds the box made; each try mints another link. Opens of one name wait for each
+    // other in one process, not across processes.
     idempotent: true,
     description:
-      "Open the box `name` (find it or make it, labelled with `group`, wake it, start Sanoma's runner and put pnpm in it) and mint a signed link to its runner's port",
+      "Open the box `name` (find it or make it, labelled with `group`, wake it, start Sanoma's runner and put pnpm in it) and mint a signed link to its runner's port. A box of that name in another group, or in none, is refused. Opens of one name at once in two processes can make two boxes",
     input: z.object({
       name: boxName,
       group: groupName,
@@ -159,9 +162,9 @@ const boxSpecs = {
     output: z.object({
       id: z.string().describe("The box's instance"),
       ...link,
-      protocol: z.number().int().describe("The protocol of the runner the box runs, as its health answers"),
+      protocol: z.number().int().describe("The runner protocol of this release, which the box's runner now speaks"),
     }),
-    target: ({ name }: { name: string }) => name,
+    target: byName,
     // A link that opens the box: the ledger records that there was one, not what it was.
     opaque: ["url"],
   },
@@ -171,7 +174,7 @@ const boxSpecs = {
     description: "Mint a signed link to another port of the box `name`, such as an agent's bridge",
     input: z.object({ name: boxName, port: z.number().int().min(1).max(65_535).describe("The port"), ttl }),
     output: z.object(link),
-    target: ({ name }: { name: string }) => name,
+    target: byName,
     opaque: ["url"],
   },
   sleep: {
@@ -180,7 +183,7 @@ const boxSpecs = {
     description: "Put the box `name` to sleep, its memory kept; nothing when there is none",
     input: z.object({ name: boxName }),
     output: ids,
-    target: ({ name }: { name: string }) => name,
+    target: byName,
   },
   discard: {
     effect: "write",
@@ -203,11 +206,13 @@ const boxSpecs = {
         z.object({
           id: z.string(),
           name: z.string(),
-          awake: z.boolean().describe("It is neither asleep nor stopped: it counts toward the workspace's limit"),
+          awake: z
+            .boolean()
+            .describe("It is neither asleep, stopped nor failed: it counts toward the workspace's limit"),
         }),
       ),
     }),
-    target: ({ group }: { group: string }) => `group/${group}`,
+    target: byGroup,
   },
 } satisfies Record<string, OpSpec>;
 

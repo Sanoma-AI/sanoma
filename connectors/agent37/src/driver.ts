@@ -1,6 +1,6 @@
 import { defineDriver, DriverError, RUNNER_PORT, RUNNER_PROTOCOL } from "sanoma/workflows";
 import { z } from "zod";
-import { agent37Api, type Agent37Api } from "./api.ts";
+import { agent37Api } from "./api.ts";
 import {
   type Agent37BackendOptions,
   asleep,
@@ -10,6 +10,7 @@ import {
   GROUP,
   holding,
   KEY,
+  opening,
   openInstance,
 } from "./backend.ts";
 import { agent37Ops, wanted } from "./connector.ts";
@@ -34,12 +35,6 @@ const keyOf = () => {
   if (!key) throw new DriverError(`agent37: ${KEY} is not set`, { retryable: false });
   return key;
 };
-/** The instance of the box `name`: a `not_found` when there is none. */
-const boxOf = async (api: Agent37Api, name: string) => {
-  const [found] = await holding(api, BOX, name);
-  if (!found) throw noBox(name);
-  return found;
-};
 
 /**
  * The instance type's operations, which list the workspace's instances, and the boxes', each with
@@ -55,13 +50,15 @@ export function agent37Driver({ timeoutMs = 30_000, edge = EDGE, budgetMs = BUDG
         async open({ name, group, network, ttl }) {
           const key = keyOf();
           const api = agent37Api(key, timeoutMs);
-          const { id } = await openInstance(api, key, { name, want: wanted({}), group, network, edge, budgetMs });
+          const id = await openInstance(api, key, { name, want: wanted({}), group, network, edge, budgetMs });
           // The runner answered this release's protocol, or `openInstance` replaced it.
           return { id, ...(await api.signedUrl(id, RUNNER_PORT, ttl)), protocol: RUNNER_PROTOCOL };
         },
         async expose({ name, port, ttl }) {
           const api = apiOf();
-          return api.signedUrl((await boxOf(api, name)).id, port, ttl);
+          const [found] = await holding(api, BOX, name);
+          if (!found) throw noBox(name);
+          return api.signedUrl(found.id, port, ttl);
         },
         async sleep({ name }) {
           const api = apiOf();
@@ -70,6 +67,8 @@ export function agent37Driver({ timeoutMs = 30_000, edge = EDGE, budgetMs = BUDG
           return { ids: held.map(({ id }) => id) };
         },
         async discard({ name, group }) {
+          // An open in flight here may yet make the box: wait for it, so this removes it.
+          if (name !== undefined) await opening.get(name)?.catch(() => undefined);
           const api = apiOf();
           const held = await (name === undefined ? holding(api, GROUP, group!) : holding(api, BOX, name));
           await Promise.all(held.map(({ id }) => api.remove(id)));
