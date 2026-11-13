@@ -191,8 +191,11 @@ export function errorParts(text: string): { text: string; vendor?: string } {
  */
 export const isIntro = (message: UIMessage) => (message.metadata as { intro?: unknown } | undefined)?.intro === true;
 
-/** Whether the person has written in a chat: a message of theirs that is not the agent's cue (`isIntro`). */
-export const written = (messages: UIMessage[]) => messages.some((m) => m.role === "user" && !isIntro(m));
+/** The person's last message in a chat: their last that is not the agent's cue (`isIntro`). */
+export const lastWritten = (messages: UIMessage[]) => messages.findLast((m) => m.role === "user" && !isIntro(m));
+
+/** Whether the person has written in a chat (`lastWritten`). */
+export const written = (messages: UIMessage[]) => lastWritten(messages) !== undefined;
 
 /** A message's text, its text parts joined by `separator`. */
 export const textOf = (message: UIMessage, separator = "\n\n") =>

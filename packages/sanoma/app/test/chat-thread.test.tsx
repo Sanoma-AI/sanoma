@@ -4,19 +4,23 @@ import { type AiSdkChat, createChat } from "@shadcn/helpers/ai-sdk";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { type ReactNode, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { ActorContext } from "../src/actor.ts";
 import { DECLARE_BOX } from "../src/api.ts";
+import { ChatColumn } from "../src/components/shell/chat.tsx";
 import { Composer } from "../src/components/shell/composer.tsx";
 import { ConnectAgent } from "../src/components/shell/connect-agent.tsx";
 import sanoma from "../src/icon-small.svg?url";
 import { Thread } from "../src/components/shell/thread.tsx";
 import type { AppConfig } from "../src/api.ts";
-import { configQuery } from "../src/queries.ts";
+import { chatModelQuery, chatQuery, chatsQuery, configQuery } from "../src/queries.ts";
 import { type ChatMessage, engineName, engineOf, enginesHere, enginesOf } from "../src/lib/chat.ts";
 
 // The chat's thread on a scripted conversation (`createChat`) through the real `useChat`: no model,
-// no server and no database, so what the column draws of each part is what is under test.
+// no server and no database, so what the column draws of each part is what is under test. The
+// column itself, over a stored transcript, sends its turns to a stubbed `fetch`.
 // `chat.test.ts`, `harness.test.ts` and `acp.test.ts` drive the turn itself.
 
 // The server functions, which only Start's build keeps out of a browser module: the thread calls none.
@@ -36,6 +40,9 @@ vi.mock(
       },
     ),
 );
+
+// A public site's languages, from the build's virtual module, which the column's crumbs read: no site here.
+vi.mock("../src/lib/locales.ts", () => ({ siteOf: () => undefined }));
 
 beforeAll(async () => {
   // The reply's lazy renderer, loaded ahead so no test's wait is spent transforming it.
@@ -77,10 +84,9 @@ function Scripted({ script, onSend = () => {} }: { script: Script; onSend?: (tex
   );
 }
 
-/** Draws `page` in the app's router and query client, which holds `config` when given. */
-function draw(page: () => ReactNode, config?: AppConfig) {
+/** Draws `page` in the app's router and query client (`queryClient`), which holds `config` when given. */
+function draw(page: () => ReactNode, config?: AppConfig, queryClient = new QueryClient()) {
   const router = createRouter({ routeTree: createRootRoute({ component: page }), history: createMemoryHistory() });
-  const queryClient = new QueryClient();
   if (config) queryClient.setQueryData(configQuery().queryKey, config);
   render(
     <QueryClientProvider client={queryClient}>
@@ -428,5 +434,126 @@ describe("Connect your agent", () => {
     expect(await screen.findByText(`${DECLARE_BOX}.`)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Sign in with Claude" })).toBeNull();
     expect(screen.queryByText(/Other agents/)).toBeNull();
+  });
+});
+
+const ASK = "Change the price to 6 dollars";
+const asked: ChatMessage = { id: "m1", role: "user", parts: [{ type: "text", text: ASK }] };
+const intro: ChatMessage = { id: "m1", role: "user", parts: [{ type: "text", text: "" }], metadata: { intro: true } };
+const signedIn: ChatMessage = {
+  id: "m2",
+  role: "assistant",
+  parts: [{ type: "data-signIn", id: "sign-in", data: { agent: "Claude Code", state: "done" } }],
+};
+
+type Writer = Parameters<Parameters<typeof createUIMessageStream<ChatMessage>>[0]["execute"]>[0]["writer"];
+/** A reply that is `text`. */
+const says = (text: string) => (writer: Writer) => {
+  writer.write({ type: "text-start", id: "t" });
+  writer.write({ type: "text-delta", id: "t", delta: text });
+  writer.write({ type: "text-end", id: "t" });
+};
+/** A reply whose turn ended in the agent's sign-in, `state`. */
+const signsIn = (state: "done" | "failed") => (writer: Writer) =>
+  writer.write({ type: "data-signIn", id: "sign-in", data: { agent: "Claude Code", state, text: "it stopped" } });
+
+/**
+ * Opens the column on a chat of Claude Code on the person's plan, stored as `messages`; each turn
+ * the column sends is answered by the next of `replies`, then by "Done.". Returns what it sent,
+ * each request's body.
+ */
+function openColumn(messages: ChatMessage[], replies: ((writer: Writer) => void)[] = []) {
+  const send = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+    const reply = replies.shift() ?? says("Done.");
+    return createUIMessageStreamResponse({
+      stream: createUIMessageStream<ChatMessage>({ execute: ({ writer }) => reply(writer) }),
+    });
+  });
+  const chat = { id: "c1", person: "ada", engine: "acp-claude-code", title: "Change the price", createdAt: 0 };
+  // What the column reads, as read: none is asked again.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } } });
+  queryClient.setQueryData(chatsQuery().queryKey, [chat] as never);
+  queryClient.setQueryData(chatQuery(chat.id).queryKey, { chat, messages } as never);
+  queryClient.setQueryData(chatModelQuery().queryKey, { ready: true } as never);
+  draw(
+    () => (
+      <ActorContext.Provider value={{ actor: "ada", groups: [], fromServer: false, setActor: () => {} }}>
+        <ChatColumn engine={{ set: () => {} }} />
+      </ActorContext.Provider>
+    ),
+    config("this-computer", false),
+    queryClient,
+  );
+  return () =>
+    send.mock.calls
+      .filter(([url]) => url === "/api/chat")
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+}
+
+/** Types `text` in the composer and sends it. */
+async function write(text: string) {
+  const box = await screen.findByRole("textbox", { name: "Message the agent" });
+  fireEvent.change(box, { target: { value: text } });
+  fireEvent.keyDown(box, { key: "Enter" });
+}
+
+/** Long enough for a send the column started to reach `fetch`. */
+const settled = () => new Promise((resolve) => setTimeout(resolve, 250));
+
+describe("the chat column after a sign-in", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("sends the person's message again once the sign-in is done, once", async () => {
+    const sent = openColumn([], [signsIn("done"), says("Changed it to 6 dollars.")]);
+    await write(ASK);
+    expect(await screen.findByText("Changed it to 6 dollars.")).toBeTruthy();
+    await settled();
+    expect(sent()).toHaveLength(2);
+    expect(sent()[1]).toMatchObject({
+      id: "c1",
+      engine: "acp-claude-code",
+      message: { role: "user", parts: [{ type: "text", text: ASK }] },
+    });
+    expect(sent()[1]!.start).toBeUndefined();
+    // The card says it is signed in, and no more asks the person to send it again.
+    const card = within(screen.getByRole("region", { name: "Sign in to Claude Code" }));
+    expect(card.getByText("Signed in to Claude Code.")).toBeTruthy();
+    expect(card.queryByText(/again/)).toBeNull();
+    // The message as sent again, under the card.
+    expect(screen.getAllByText(ASK)).toHaveLength(2);
+  });
+
+  it("sends nothing for a sign-in the chat was opened on: it may be old, or sent again already", async () => {
+    const sent = openColumn([asked, signedIn]);
+    expect(await screen.findByText("Signed in to Claude Code.")).toBeTruthy();
+    await settled();
+    expect(sent()).toEqual([]);
+  });
+
+  it("lets the agent speak first again in a chat the person has not written in", async () => {
+    const sent = openColumn([intro, signedIn], [says("Hi, I make the changes.")]);
+    expect(await screen.findByText("Hi, I make the changes.")).toBeTruthy();
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]).toMatchObject({
+      engine: "acp-claude-code",
+      start: true,
+      message: { role: "user", parts: [{ type: "text", text: "" }], metadata: { intro: true } },
+    });
+  });
+
+  it("sends nothing after a sign-in that failed", async () => {
+    const sent = openColumn([], [signsIn("failed")]);
+    await write(ASK);
+    expect(await screen.findByText(/^The sign-in did not finish: it stopped\./)).toBeTruthy();
+    await settled();
+    expect(sent()).toHaveLength(1);
+  });
+
+  it("sends the message again only once when that turn ends in a sign-in too", async () => {
+    const sent = openColumn([], [signsIn("done"), signsIn("done")]);
+    await write(ASK);
+    await waitFor(() => expect(screen.getAllByText("Signed in to Claude Code.")).toHaveLength(2));
+    await settled();
+    expect(sent()).toHaveLength(2);
   });
 });
