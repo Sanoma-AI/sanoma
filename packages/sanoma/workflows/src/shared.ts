@@ -483,6 +483,25 @@ export const CHANGE_WORKFLOW = "change";
 /** What a draft's id may be (`ChangeInput.id`), the part of its branch and its change's run ids after `draft/` and `change:`. */
 export const DRAFT_ID = /^[\w-]{1,64}$/;
 
+/**
+ * What a call's id may be (the app's `CallRequest.id`, a page's `api` and `sanoma call --id`):
+ * letters, digits, `_` and `-`, never one of the runtime's own run ids (`call:<actor>:<id>`, `direct:…`).
+ */
+export const CALL_ID = /^[\w-]{1,200}$/;
+
+/**
+ * Who is asking, without a login: the page asks once and sends the name in this header with
+ * every server function call, which the default loopback login reads (`sanoma call` too).
+ */
+export const ACTOR_HEADER = "x-sanoma-actor";
+
+/**
+ * The declared agent (`sanoma.agent`) a call is made by, on behalf of the person the login names,
+ * on `/mcp` and `/api/call` (`sanoma call --agent`): read on the loopback login alone (`actingFor`),
+ * refused on a host, whose sign-in says who acts.
+ */
+export const AGENT_HEADER = "x-sanoma-agent";
+
 /** The draft a run id of `prefix` is of: `<prefix>:<id>` (its first run) or `<prefix>:<id>~<n>` (a later one); undefined for any other. */
 export const draftRunOf = (prefix: string) => {
   const run = new RegExp(`^${prefix}:(${DRAFT_ID.source.slice(1, -1)})(?:~\\d+)?$`);
@@ -631,6 +650,20 @@ export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   CONNECT_EXISTING_WORKFLOW,
   SAVE_DRAFT_WORKFLOW,
 ]);
+
+/** The runtime's own workflow `name` names, by its name or api name (`apiNameOf`); undefined for any other. */
+export const builtInNamed = (name: string): string | undefined =>
+  [...BUILT_IN_WORKFLOWS].find((workflow) => workflow === name || apiNameOf(workflow) === name);
+
+/** Why a start of the built-in `workflow` is refused where an agent starts the company's own (`/mcp`'s `start_run`, `sanoma call`). */
+export const builtInRefusal = (workflow: string): string =>
+  `${workflow} is the runtime's own workflow: the runtime's own workflows are not started here`;
+
+/**
+ * The reads of a workflow's runs a site's `api` and `POST /api/call` answer (`<api>.<read>`, the
+ * app's `callApi`), beside `.start`: they start nothing, so `sanoma call` sends them no id.
+ */
+export const RUN_READS = ["result", "latest", "runs", "approvals", "ledger"] as const;
 
 /**
  * Every run status, in the order a run may pass through them: waiting on the queue, running,

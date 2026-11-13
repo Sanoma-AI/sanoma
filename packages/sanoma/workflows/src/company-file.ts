@@ -49,34 +49,63 @@ export function scriptPath(script: string | undefined): string | undefined {
 /** Each directory's company root (the nearest one with a `sanoma.config.ts`, short of a `node_modules`), once found. */
 const roots = new Map<string, string>();
 
+/** Whether `dir` is a company's root: it holds a `sanoma.config.ts`, or a bundle registered its snapshot (`useRootSnapshot`). */
+function isCompany(dir: string): boolean {
+  const { existsSync } = builtin("node:fs")!;
+  return rootSnapshot(dir) !== undefined || existsSync(builtin("node:path")!.join(dir, "sanoma.config.ts"));
+}
+
 /**
- * The app a file is in: `<app>` for a file under `<root>/apps/<app>/`, where the root is the
- * nearest directory above it with a `sanoma.config.ts` (an app keeps its own `package.json`,
- * and its own config when merged from a company's repo: then the company is the one whose
- * `apps/` holds it; a `node_modules` ends the search: the file is a package's, not a company's);
- * undefined for a file at the root or outside any company. `defineWorkflow` and `collection()` name what they declare by it.
- * In a page, which has no files, the file is named from the root, and its app is read from that.
+ * The nearest of `dir` and its ancestors with a `sanoma.config.ts` (or a bundle's snapshot), where a
+ * `node_modules` ends the search (what is under it is a package's, not a company's): a company's
+ * root, or an app's in `apps/<app>/` that kept its own config. Undefined outside any, and where
+ * there is no Node (a page).
+ */
+export function configDirOf(dir: string): string | undefined {
+  const path = builtin("node:path");
+  if (!path) return undefined;
+  const { basename, resolve } = path;
+  return (
+    upFrom<string | null>(resolve(dir), (d) =>
+      basename(d) === "node_modules" ? null : isCompany(d) ? d : undefined,
+    ) ?? undefined
+  );
+}
+
+/**
+ * The root of the company `dir` is in: its `configDirOf`, unless that is an app merged from a
+ * company's repo, which keeps that repo's config: a root in `apps/<app>/` of a company is that
+ * company's. Undefined outside any company, and where there is no Node (a page).
+ */
+export function companyRootOf(dir: string): string | undefined {
+  const path = builtin("node:path");
+  if (!path) return undefined;
+  const { basename, dirname, resolve } = path;
+  dir = resolve(dir);
+  const known = roots.get(dir);
+  if (known !== undefined) return known;
+  let root = configDirOf(dir);
+  if (root === undefined) return undefined;
+  // An app merged from a company's repo keeps that repo's config: the company is the one above.
+  if (basename(dirname(root)) === APPS_DIR && isCompany(dirname(dirname(root)))) root = dirname(dirname(root));
+  // Found roots only: a directory that is no company's yet may become one (`sanoma` in an empty folder).
+  roots.set(dir, root);
+  return root;
+}
+
+/**
+ * The app a file is in: `<app>` for a file under `<root>/apps/<app>/`, where the root is its
+ * company's (`companyRootOf`: an app keeps its own `package.json`, and its own config when merged
+ * from a company's repo); undefined for a file at the root or outside any company. `defineWorkflow`
+ * and `collection()` name what they declare by it. In a page, which has no files, the file is named
+ * from the root, and its app is read from that.
  */
 export function appOfFile(file: string | undefined): string | undefined {
   if (file === undefined) return undefined;
   const path = builtin("node:path");
   // A page's file is named from the root (`apps/crm/resources/data.ts`), in a browser or in Node.
   if (!path?.isAbsolute(file)) return appOfPath(file);
-  const { existsSync } = builtin("node:fs")!;
-  const { basename, dirname, join, relative, resolve, sep } = path;
-  /** Whether `dir` is a company's root: it holds a `sanoma.config.ts`, or a bundle registered its snapshot (`useRootSnapshot`). */
-  const isCompany = (d: string) => rootSnapshot(d) !== undefined || existsSync(join(d, "sanoma.config.ts"));
-  const dir = dirname(resolve(file));
-  let root: string | null | undefined = roots.get(dir);
-  if (root === undefined) {
-    root =
-      upFrom<string | null>(dir, (d) => (basename(d) === "node_modules" ? null : isCompany(d) ? d : undefined)) ?? null;
-    // An app merged from a company's repo keeps that repo's config: the company is the one above.
-    if (root !== null && basename(dirname(root)) === APPS_DIR && isCompany(dirname(dirname(root)))) {
-      root = dirname(dirname(root));
-    }
-    // Found roots only: a directory that is no company's yet may become one (`sanoma` in an empty folder).
-    if (root !== null) roots.set(dir, root);
-  }
-  return root === null ? undefined : appOfPath(relative(root, file).split(sep).join("/"));
+  const { dirname, relative, resolve, sep } = path;
+  const root = companyRootOf(dirname(resolve(file)));
+  return root === undefined ? undefined : appOfPath(relative(root, file).split(sep).join("/"));
 }
