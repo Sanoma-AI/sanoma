@@ -1,7 +1,8 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import { randomUUID } from "node:crypto";
 import { testDatabaseUrl } from "sanoma/testing";
-import { sql } from "drizzle-orm";
-import { getTableName } from "drizzle-orm";
+import { getTableName, is, sql } from "drizzle-orm";
+import { PgTable } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
@@ -10,11 +11,15 @@ import {
   lazyDb,
   pgCode,
   prepareDatabase,
+  readRunChecks,
   spendInviteRequest,
   underPreparationLock,
+  writeRunChecks,
 } from "../src/db.ts";
+import * as companyModule from "../src/db/company.ts";
 import { inviteRequests, wakeup } from "../src/db/company.ts";
 import { applyMigrations, COMPANY_MIGRATIONS, migrationsApplied, WAKEUP_MIGRATIONS } from "../src/db/migrate.ts";
+import * as wakeupModule from "../src/db/wakeup.ts";
 import { wakeupAccounts, wakeupInstances } from "../src/db/wakeup.ts";
 
 const databaseUrl = testDatabaseUrl("db");
@@ -216,5 +221,83 @@ describe("underPreparationLock", () => {
       [getTableName(wakeupAccounts), getTableName(wakeupInstances)],
     );
     expect(rows.map((r) => r.t)).toEqual(["sanoma_wakeup_accounts", "sanoma_wakeup_instances"]);
+  });
+});
+
+describe("row-level security", () => {
+  it("is on, with no policy, on every table the migrations make: their owner reads and writes, another role granted everything reads no row and inserts, updates or deletes none", async () => {
+    // A login that is no superuser makes the tables and so owns them, as a hosted company's does
+    // (Neon's `neondb_owner`, Supabase's `postgres`); a second login is granted every privilege on
+    // them, as Supabase grants its API's roles. Schemas and roles only: dropping a database waits
+    // for a checkpoint.
+    const url = testDatabaseUrl("db_rls");
+    const name = decodeURIComponent(new URL(url).pathname.slice(1));
+    // Roles are the cluster's: named after the database, cut to fit Postgres's 63 bytes.
+    const [owner, other] = [`${name.slice(0, 57)}_owner`, `${name.slice(0, 57)}_other`];
+    const password = randomUUID();
+    const as = (role: string) => Object.assign(new URL(url), { username: role, password }).href;
+    const admin = await connectMaking(url);
+    const reset = async () => {
+      for (const role of [other, owner]) {
+        if ((await admin.query("SELECT FROM pg_roles WHERE rolname = $1", [role])).rowCount)
+          await admin.query(`DROP OWNED BY "${role}"; DROP ROLE "${role}"`);
+      }
+      await admin.query("DROP SCHEMA IF EXISTS public, drizzle, dbos CASCADE; CREATE SCHEMA public");
+    };
+    // Pools connect at their first query, once the roles are made.
+    const ownerPool = new Pool({ connectionString: as(owner) });
+    const otherPool = new Pool({ connectionString: as(other) });
+    try {
+      await reset();
+      for (const role of [owner, other]) await admin.query(`CREATE ROLE "${role}" LOGIN PASSWORD '${password}'`);
+      await admin.query(`GRANT CREATE ON DATABASE "${name}" TO "${owner}"; ALTER SCHEMA public OWNER TO "${owner}"`);
+
+      await prepareDatabase(as(owner));
+      // The wakeup service's tables, which may be in a company's database.
+      await underPreparationLock(as(owner), (locked) => applyMigrations(locked, WAKEUP_MIGRATIONS));
+
+      // Every table the migrations make has it on, owned by the login that made them, with no
+      // FORCE and no policy: a table added without it fails here.
+      const ours = [companyModule, wakeupModule]
+        .flatMap((tables) => Object.values(tables))
+        .filter((t) => is(t, PgTable))
+        .map((t) => getTableName(t));
+      const { rows: made } = await ownerPool.query<{ name: string; on: boolean; forced: boolean; owner: string }>(
+        `SELECT relname AS name, relrowsecurity AS on, relforcerowsecurity AS forced, pg_get_userbyid(relowner) AS owner
+         FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p') ORDER BY 1`,
+      );
+      expect(made.map((t) => t.name)).toEqual(ours.toSorted());
+      expect(made.filter((t) => !t.on || t.forced || t.owner !== owner)).toEqual([]);
+      expect((await ownerPool.query("SELECT FROM pg_policies")).rowCount).toBe(0);
+
+      // The owner reads and writes through the stores as ever.
+      const ownerDb = databaseOn(ownerPool);
+      const later = new Date(Date.now() + 60_000);
+      expect(await spendInviteRequest(ownerDb, "n-1", later)).toBe(true);
+      expect(await spendInviteRequest(ownerDb, "n-1", later)).toBe(false);
+      await writeRunChecks(ownerDb, "run-1", { error: "none yet" });
+      expect(await readRunChecks(ownerDb, "run-1")).toEqual({ error: "none yet" });
+
+      // Another role, granted every privilege, reads no row of any table and inserts, updates and
+      // deletes none (TRUNCATE, TRIGGER and REFERENCES are not row-level: a grant of them is not stopped).
+      await ownerPool.query(
+        `GRANT USAGE ON SCHEMA public TO "${other}"; GRANT ALL ON ALL TABLES IN SCHEMA public TO "${other}"`,
+      );
+      for (const table of ours) {
+        expect((await otherPool.query(`SELECT count(*)::int AS n FROM "${table}"`)).rows, table).toEqual([{ n: 0 }]);
+      }
+      await expect(
+        otherPool.query("INSERT INTO sanoma_invite_requests (nonce, expires_at) VALUES ('n-2', now())"),
+      ).rejects.toMatchObject({ code: "42501" });
+      expect((await otherPool.query("UPDATE sanoma_wakeup SET last_error = 'x'")).rowCount).toBe(0);
+      expect((await otherPool.query("DELETE FROM sanoma_run_checks")).rowCount).toBe(0);
+      // What it could not see is there, unchanged.
+      expect((await ownerPool.query("SELECT nonce FROM sanoma_invite_requests")).rows).toEqual([{ nonce: "n-1" }]);
+      expect((await ownerPool.query("SELECT last_error FROM sanoma_wakeup")).rows).toEqual([{ last_error: null }]);
+      expect(await readRunChecks(ownerDb, "run-1")).toEqual({ error: "none yet" });
+    } finally {
+      await Promise.all([ownerPool.end(), otherPool.end()]);
+      await reset().finally(() => admin.end());
+    }
   });
 });
