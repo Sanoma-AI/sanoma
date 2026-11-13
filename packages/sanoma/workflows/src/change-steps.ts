@@ -351,7 +351,7 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
  * field is the same: hide and show (with add and require) change the declaration alone, never
  * reach the records, and so constrain nothing.
  */
-function stillMade(fields: Readonly<Record<string, Field>>, changes: readonly ReshapeChange[]): boolean {
+export function stillMade(fields: Readonly<Record<string, Field>>, changes: readonly ReshapeChange[]): boolean {
   const made = new Map<string, ColumnType | "declared" | "gone">();
   for (const change of changes) {
     switch (change.kind) {

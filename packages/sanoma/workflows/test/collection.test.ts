@@ -11,6 +11,7 @@ import {
   isBatch,
   isHidden,
   linksIn,
+  linkValues,
   linkTarget,
   previewRequests,
   reshape,
@@ -410,6 +411,26 @@ describe("a column change's records", () => {
         { kind: "retype", field: "d", to: "text" },
       ]),
     ).toEqual(["companies", "people"]);
+    // The values each link matches, as the records hold them when it comes: what the driver reads the keys of.
+    expect(
+      linkValues(
+        [
+          { a: "acme", meta: { c: 7 } },
+          { a: "", old: "globex" },
+          { a: ["not", "a", "key"], meta: { c: "ada" } },
+        ],
+        [
+          { kind: "rename", from: "old", to: "a" },
+          { kind: "retype", field: "a", to: { link: "companies" } },
+          { kind: "convert", field: "meta", key: "c", to: "c", type: { link: "people" } },
+        ],
+      ),
+    ).toEqual(
+      new Map([
+        ["companies", new Set(["acme"])],
+        ["people", new Set(["7", "ada"])],
+      ]),
+    );
 
     const wontConvert = { count: 0, sample: [] };
     expect(

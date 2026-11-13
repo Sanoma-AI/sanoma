@@ -621,6 +621,38 @@ describe("links and free-form fields on Postgres", () => {
     ]);
     expect(await reshapeCall()).toMatchObject({ changed: 0, kept: 1 });
   });
+
+  it("matches a link a page at a time against the keys its values name, on every page", async () => {
+    // 1234 orders over three pages, each naming its own customer; only every other customer is there.
+    const db = await pool.db();
+    const keys = Array.from({ length: 1234 }, (_, i) => `c${String(i).padStart(4, "0")}`);
+    await db
+      .insert(data)
+      .values([
+        ...keys
+          .filter((_, i) => i % 2 === 0)
+          .map((id) => ({ collection: "customers", key: id, record: { id }, updatedBy: "leon" })),
+        ...keys.map((id) => ({ collection: "orders", key: id, record: { id, customer: id }, updatedBy: "leon" })),
+      ]);
+    const reshapeOp = recordsOps.records.reshape;
+    const changes = [{ kind: "retype", field: "customer", to: { link: "customers" }, decision: "clear" }];
+    const answer = await records.ops["records.reshape"]!(reshapeOp.input.parse({ collection: "orders", changes }), {
+      idempotencyKey: "t:pages",
+      runId: "t",
+      opId: reshapeOp.id,
+      attempt: 1,
+      secrets: memorySecrets(),
+    });
+    expect(reshapeOp.output.parse(answer)).toEqual({ rows: 1234, changed: 617, converted: 0, cleared: 617, kept: 0 });
+    const rows = await db
+      .select({ key: data.key, record: data.record })
+      .from(data)
+      .where(eq(data.collection, "orders"))
+      .orderBy(data.key);
+    expect(rows.every(({ key, record }, i) => (i % 2 === 0 ? record.customer === key : !("customer" in record)))).toBe(
+      true,
+    );
+  });
 });
 
 describe("a workflow reading and saving a record", () => {

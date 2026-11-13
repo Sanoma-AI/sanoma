@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeHost, testRepository } from "sanoma/testing/host";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { collection } from "../src/collection.ts";
@@ -12,6 +12,7 @@ import { data } from "../src/db/company.ts";
 import type { TableChangePlan } from "../src/description.ts";
 import type { Source } from "../src/source.ts";
 import { lintWorkflow } from "../src/lint.ts";
+import { stillMade } from "../src/change-steps.ts";
 import { CHANGE_MERGE, type ChangeReport, defineWorkflow, type LedgerRecord, memoryLedger } from "../src/index.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
 import { freshDatabase, pending, rootWith, testhostInfra, waitFor } from "./harness.ts";
@@ -29,7 +30,7 @@ export const bob = sanoma.person({ id: "bob" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 `;
 // A change that touches secret/ is denied, and so is a reshape of the archive's records, and of the
-// leads' by alice; a reshape of the ledger's is held for admin: anything else is allowed, but for
+// leads', the accounts' and the orders' by alice; a reshape of the ledger's is held for admin: anything else is allowed, but for
 // the runtime's own rule.
 const POLICY = `@id("no-secrets")
 @reason("A change to secret/ is refused")
@@ -43,6 +44,14 @@ forbid (principal, action == Sanoma::Action::"sanoma.records.reshape", resource 
 @id("leads-not-alice")
 @reason("alice may not bring the leads along")
 forbid (principal == Sanoma::Principal::"alice", action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:leads");
+
+@id("accounts-not-alice")
+@reason("alice may not bring the accounts along")
+forbid (principal == Sanoma::Principal::"alice", action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:accounts");
+
+@id("orders-not-alice")
+@reason("alice may not bring the orders along")
+forbid (principal == Sanoma::Principal::"alice", action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:orders");
 
 @id("ledger-held")
 @hold("admin")
@@ -62,15 +71,33 @@ const waits = defineWorkflow({
   },
 });
 
+/** Removing `legacy` for good from the collection `name`: what Try again's removals carry. */
+const removal = (name: string): TableChangePlan => ({
+  collection: name,
+  rows: 1,
+  changes: [{ kind: "remove", field: "legacy", filled: 1 }],
+});
+
 const merges = (records: LedgerRecord[]) =>
   records.filter((r) => r.type === "op.called" && r.op === CHANGE_MERGE && !r.error);
 const opsOf = (records: LedgerRecord[]) => records.flatMap((r) => (r.type === "op.called" ? [r.op] : []));
 
-/** The collections Try again's tests bring along: `prospects` as it was before a rename to `contacted`. */
+/**
+ * The collections Try again's tests bring along, as declared once their change merged: `prospects`
+ * as it was before a rename to `contacted`, `accounts` with `legacy` removed for good, `vendors`
+ * with a `legacy` declared again since its removal, and `orders` with `customer` linked to `accounts`.
+ */
 const collections = [
   collection({ name: "leads", key: "company", fields: { company: "text", contacted: "text" } }),
   collection({ name: "ledger", key: "company", fields: { company: "text", contacted: "text" } }),
   collection({ name: "prospects", key: "company", fields: { company: "text", touched: "text" } }),
+  collection({ name: "accounts", key: "company", fields: { company: "text" } }),
+  collection({
+    name: "vendors",
+    key: "company",
+    fields: { company: "text", legacy: { type: "number", optional: true } },
+  }),
+  collection({ name: "orders", key: "id", fields: { id: "text", customer: { link: "accounts", optional: true } } }),
 ];
 
 describe("the change workflow", () => {
@@ -457,6 +484,91 @@ describe("the change workflow", () => {
     );
   });
 
+  it("deletes a removed field's values on Try again, and refuses it once a column of that name is declared again", async () => {
+    const db = await pool.db();
+    await db.insert(data).values([
+      { collection: "accounts", key: "Acme", record: { company: "Acme", legacy: "L-1" }, updatedBy: "leon" },
+      { collection: "accounts", key: "Globex", record: { company: "Globex" }, updatedBy: "leon" },
+      { collection: "vendors", key: "Initech", record: { company: "Initech", legacy: 7 }, updatedBy: "leon" },
+    ]);
+    const merged = async (id: string) => {
+      const head = repo.edit(id, { [`notes/${id}.md`]: "\n" });
+      return app.client.result(
+        await app.client.openChange(
+          { id, title: id, page: page(id), save: head, plan: removal(id) },
+          { startedBy: "alice" },
+        ),
+      );
+    };
+    // Merged by alice, whom the policy refuses the accounts: the declaration is gone, the values are not.
+    expect(await merged("accounts")).toMatchObject({ outcome: "merged", reshaped: { error: expect.any(String) } });
+    const legacyOf = async (name: string, key: string) =>
+      (
+        await db
+          .select()
+          .from(data)
+          .where(and(eq(data.collection, name), eq(data.key, key)))
+      )[0]?.record.legacy;
+    expect(await legacyOf("accounts", "Acme")).toBe("L-1");
+    const retry = await app.client.reshapeChange("accounts", { startedBy: "ada" });
+    expect(await app.client.result(retry)).toEqual({ rows: 2, changed: 1, converted: 0, cleared: 1, kept: 0 });
+    expect(await legacyOf("accounts", "Acme")).toBeUndefined();
+
+    // `vendors` declares `legacy` again: replaying the removal would delete the new column's values.
+    expect(await merged("vendors")).toMatchObject({ outcome: "merged" });
+    // Its first call deleted the old values; the column declared since holds a new one.
+    await db
+      .update(data)
+      .set({ record: { company: "Initech", legacy: 7 } })
+      .where(and(eq(data.collection, "vendors"), eq(data.key, "Initech")));
+    await expect(app.client.result(await app.client.reshapeChange("vendors", { startedBy: "ada" }))).rejects.toThrow(
+      "The columns of vendors are no longer what the change of the draft vendors made them",
+    );
+    expect(await legacyOf("vendors", "Initech")).toBe(7);
+  });
+
+  it("links a column on Try again against the keys of the collection it links to, as the first call would have", async () => {
+    const db = await pool.db();
+    await db
+      .insert(data)
+      .values({ collection: "accounts", key: "Globex", record: { company: "Globex" }, updatedBy: "leon" })
+      .onConflictDoNothing();
+    await db.insert(data).values(
+      [
+        { id: "o1", customer: "Globex" },
+        { id: "o2", customer: "Nobody" },
+      ].map((record) => ({ collection: "orders", key: record.id, record, updatedBy: "leon" })),
+    );
+    const plan: TableChangePlan = {
+      collection: "orders",
+      rows: 2,
+      changes: [
+        {
+          kind: "retype",
+          field: "customer",
+          from: "text",
+          to: { link: "accounts" },
+          decision: "clear",
+          wontConvert: { count: 1, sample: [{ key: "o2", value: "Nobody" }] },
+        },
+      ],
+    };
+    const head = repo.edit("orders", { "notes/orders.md": "\n" });
+    const runId = await app.client.openChange(
+      { id: "orders", title: "Orders", page: page("orders"), save: head, plan },
+      { startedBy: "alice" },
+    );
+    expect(await app.client.result(runId)).toMatchObject({
+      outcome: "merged",
+      reshaped: { error: expect.any(String) },
+    });
+    // A key of accounts stays as it is; one that names no account is cleared, as chosen.
+    const retry = await app.client.reshapeChange("orders", { startedBy: "ada" });
+    expect(await app.client.result(retry)).toEqual({ rows: 2, changed: 1, converted: 0, cleared: 1, kept: 0 });
+    const rows = await db.select().from(data).where(eq(data.collection, "orders")).orderBy(data.key);
+    expect(rows.map((r) => r.record)).toEqual([{ id: "o1", customer: "Globex" }, { id: "o2" }]);
+  });
+
   it("reports a hold on the records Publish does not lift without waiting on it, and Try again waits for its approver", async () => {
     const db = await pool.db();
     await db
@@ -767,4 +879,55 @@ describe("a change whose deploy starts the worker again", () => {
       reload = () => void restarts.push(app.restart());
     }
   }, 90_000);
+});
+
+/** `stillMade` of `fields` and `changes`, written as plain data. */
+const made = (fields: Record<string, unknown>, changes: unknown[]) =>
+  stillMade(fields as Parameters<typeof stillMade>[0], changes as Parameters<typeof stillMade>[1]);
+
+describe("stillMade: whether Try again may replay a plan over the running declaration", () => {
+  it("takes a rename's new name declared and its old one not", () => {
+    const rename = [{ kind: "rename", from: "touched", to: "contacted" }];
+    expect(made({ contacted: "text" }, rename)).toBe(true);
+    expect(made({ contacted: "text", touched: "text" }, rename)).toBe(false);
+    expect(made({ touched: "text" }, rename)).toBe(false);
+    // Renamed, then retyped under its new name: judged by the last change that made it.
+    const renamedTyped = [...rename, { kind: "retype", field: "contacted", to: "date" }];
+    expect(made({ contacted: "date" }, renamedTyped)).toBe(true);
+    expect(made({ contacted: "text" }, renamedTyped)).toBe(false);
+  });
+
+  it("takes a retyped field of its new type, hidden or shown, and a link to the same collection", () => {
+    const toNumber = [{ kind: "retype", field: "seats", to: "number" }];
+    expect(made({ seats: "number" }, toNumber)).toBe(true);
+    expect(made({ seats: { type: "number", optional: true, hidden: true } }, toNumber)).toBe(true);
+    expect(made({ seats: "text" }, toNumber)).toBe(false);
+    expect(made({}, toNumber)).toBe(false);
+    const toLink = [{ kind: "retype", field: "customer", to: { link: "accounts" } }];
+    expect(made({ customer: { link: "accounts", optional: true } }, toLink)).toBe(true);
+    expect(made({ customer: { link: "vendors" } }, toLink)).toBe(false);
+    expect(made({ customer: "text" }, toLink)).toBe(false);
+    const toChoice = [{ kind: "retype", field: "stage", to: { enum: ["new", "won"] } }];
+    expect(made({ stage: { enum: ["new", "won"] } }, toChoice)).toBe(true);
+    expect(made({ stage: { enum: ["new", "lost"] } }, toChoice)).toBe(false);
+  });
+
+  it("takes a conversion's new column of its type, out of a field free-form still", () => {
+    const convert = [{ kind: "convert", field: "meta", key: "seats", to: "count", type: "number" }];
+    expect(made({ meta: { type: "json", optional: true }, count: { type: "number", optional: true } }, convert)).toBe(
+      true,
+    );
+    expect(made({ meta: "json" }, convert)).toBe(false);
+    expect(made({ meta: "json", count: "text" }, convert)).toBe(false);
+    expect(made({ meta: "text", count: "number" }, convert)).toBe(false);
+    // Its key's name is no column of it: only the new name counts.
+    expect(made({ meta: "json", count: "number", seats: "text" }, convert)).toBe(true);
+  });
+
+  it("takes a removed field undeclared: one declared again since, of any type, would lose its values", () => {
+    const remove = [{ kind: "remove", field: "legacy" }];
+    expect(made({ company: "text" }, remove)).toBe(true);
+    expect(made({ company: "text", legacy: { type: "text", optional: true, hidden: true } }, remove)).toBe(false);
+    expect(made({ company: "text", legacy: "number" }, remove)).toBe(false);
+  });
 });

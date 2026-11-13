@@ -65,8 +65,8 @@ function ChangePage() {
   if (!change) throw notFound();
   const { state } = change;
   // A change to a collection's columns carries its plan: reviewed as the table change it is, when
-  // it reads as one (a change's stored state is data: one opened by an earlier release carries a
-  // plan of another shape, such as a removal, and is reviewed as any change).
+  // it reads as one (a change's stored state is data: one opened by an earlier release may carry a
+  // plan of another shape, such as a conversion with no new name, and is reviewed as any change).
   const plan = TableChangePlanSchema.safeParse(state.plan).data;
   const { data: config } = useSuspenseQuery(configQuery());
   const tryAgain = useReshapeChange();

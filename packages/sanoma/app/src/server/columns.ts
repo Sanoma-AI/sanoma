@@ -5,7 +5,7 @@ import type { TableChangePlan } from "sanoma/workflows/description";
 import { LIST_LIMIT, PATCH_WORKFLOW, type Saved } from "sanoma/workflows/shared";
 import { createApi, type UntypedApi } from "../api-client.ts";
 import { ApiError, type ColumnPlanRequest, type ProposeColumnChange } from "../api.ts";
-import { declarationEdit, planOf, problemOf, targetOf } from "../components/grid/plan.ts";
+import { declarationEdit, leftOver, planOf, problemOf, targetOf } from "../components/grid/plan.ts";
 import type { AppContext } from "../context.ts";
 import { callApi } from "./core.ts";
 
@@ -33,8 +33,8 @@ async function everyRecord(api: UntypedApi, name: string, key: string): Promise<
  * The plan of `change` to the collection `name`, as `actor`, through `createApi` over `callApi`
  * as the page's own `api` is (`api`, for what follows): every one of its records read, and for a
  * change to a link every key of the collection it links to, and the plan drafted over them
- * (`planOf`). Refused (`invalid_input`) for a collection no data file declares and a change the
- * declaration cannot take (`problemOf`).
+ * (`planOf`). Refused (`invalid_input`) for a collection no data file declares, a change the
+ * declaration cannot take (`problemOf`), and a name its records still hold values under (`leftOver`).
  */
 async function planned(app: AppContext, actor: Principal, { collection: name, change }: ColumnPlanRequest) {
   const { collections } = app.snapshot.description;
@@ -50,6 +50,8 @@ async function planned(app: AppContext, actor: Principal, { collection: name, ch
   if (problem) throw refuse(problem);
   const api: UntypedApi = createApi((request) => callApi(app, actor, request));
   const rows = await everyRecord(api, name, collection.key);
+  const left = leftOver(rows, change);
+  if (left) throw refuse(left);
   // A change to a link: the values matched against the keys of the collection it links to.
   const type = change.kind === "retype" ? change.to : change.kind === "convert" ? change.type : undefined;
   const target = type && collections.find((c) => c.name === targetOf(name, type));

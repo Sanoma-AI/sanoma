@@ -128,6 +128,24 @@ export function keysIn(rows: readonly Saved[], field: string): { key: string; co
   return [...counts].map(([key, count]) => ({ key, count })).toSorted((a, b) => b.count - a.count);
 }
 
+/** The name a column takes by `change`: a new column's, a rename's or a conversion's; none for another change. */
+const nameOf = (change: ColumnChange): string | undefined =>
+  change.kind === "add" ? change.field : change.kind === "rename" || change.kind === "convert" ? change.to : undefined;
+
+/**
+ * Why `change` cannot give a column its name over `rows` (every record): records that still hold a
+ * value under it, which the column would take as its own (or, for a rename or a conversion, keep
+ * in place of what it moves), left by a column change whose records weren't brought along (a
+ * removal for good, or a rename, until Try again on its change) or saved in an earlier shape; none
+ * when no record holds one.
+ */
+export function leftOver(rows: readonly Saved[], change: ColumnChange): string | undefined {
+  const name = nameOf(change);
+  const holding = name === undefined ? 0 : rows.filter(({ record }) => Object.hasOwn(record, name)).length;
+  if (holding === 0) return undefined;
+  return `${records(holding)} still ${holding === 1 ? "holds a value" : "hold values"} under ${name}, left from a column change whose records weren't updated: try that change again first, or choose another name`;
+}
+
 /**
  * Why `change` cannot be proposed on `collection` as declared: a field it does not have, a name
  * it has already (a hidden column's too, until it is removed for good), the key (which names each
@@ -142,15 +160,7 @@ export function problemOf(
 ) {
   const named = "field" in change ? change.field : change.from;
   if (change.kind !== "add" && !Object.hasOwn(fields, named)) return `${named} is not a field of this collection`;
-  // The name a new column, a rename or a conversion takes.
-  const name =
-    change.kind === "add"
-      ? change.field
-      : change.kind === "rename"
-        ? change.to
-        : change.kind === "convert"
-          ? change.to
-          : undefined;
+  const name = nameOf(change);
   if (name !== undefined && isHidden(fields[name])) {
     return `${name} is taken by a hidden column: remove it for good, under Fields, to use the name`;
   }

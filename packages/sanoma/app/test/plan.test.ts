@@ -13,6 +13,7 @@ import {
   hiddenFields,
   keysIn,
   landed,
+  leftOver,
   planOf,
   problemOf,
   shownFields,
@@ -294,6 +295,26 @@ const one = (change: TableChangePlan["changes"][number]): TableChangePlan => ({
   changes: [change],
 });
 
+describe("a name records still hold values under", () => {
+  it("refuses a new column, a rename or a conversion to a name some record still holds a value under, and nothing else", () => {
+    // Left by a removal whose records weren't brought along: `legacyId` is no field, its values are there.
+    const left = [...rows, row("Echo Labs", { legacyId: "L-1" }), row("Fox & Co", { legacyId: null })];
+    const said =
+      "2 records still hold values under legacyId, left from a column change whose records weren't updated: try that change again first, or choose another name";
+    expect(leftOver(left, { kind: "add", field: "legacyId", type: "text", required: false })).toBe(said);
+    expect(leftOver(left, { kind: "rename", from: "contact", to: "legacyId" })).toBe(said);
+    expect(leftOver(left, { kind: "convert", field: "details", key: "source", to: "legacyId", type: "text" })).toBe(
+      said,
+    );
+    expect(leftOver(left.slice(0, -1), { kind: "add", field: "legacyId", type: "text", required: false })).toBe(
+      "1 record still holds a value under legacyId, left from a column change whose records weren't updated: try that change again first, or choose another name",
+    );
+    expect(leftOver(left, { kind: "add", field: "region", type: "text", required: false })).toBeUndefined();
+    expect(leftOver(left, { kind: "retype", field: "contact", to: "number" })).toBeUndefined();
+    expect(leftOver(left, { kind: "remove", field: "contact" })).toBeUndefined();
+  });
+});
+
 describe("free-form and link columns", () => {
   it("converts a free-form field's key to a column of its own, counting the records that hold it and the values that won't convert", () => {
     const change: ColumnChange = { kind: "convert", field: "details", key: "seats", to: "seatCount", type: "number" };
@@ -550,5 +571,32 @@ describe("TableChangeReview", () => {
     });
     expect(cards(done)[0]).toEqual(["The records", "Updated"]);
     expect(buttons(done)).not.toContain("Try again");
+  });
+
+  it("offers Try again over a removal, a conversion and a link as over any change, beside their own cards", async () => {
+    const error = { merged: { sha: "abc", at: 0, reshaped: { error: "the database said no" } } };
+    const tryAgain = { mutate: () => {}, isPending: false };
+    const wontConvert = { count: 0, sample: [] };
+    const plans = [
+      one({ kind: "remove", field: "legacyId", filled: 288 }),
+      one({ kind: "convert", field: "details", key: "seats", to: "seatCount", type: "number", filled: 2, wontConvert }),
+      one({ kind: "retype", field: "contact", from: "text", to: { link: "customers" }, wontConvert }),
+    ];
+    const titles = [
+      "Remove legacyId for good",
+      "Make seats of details the column seatCount, a number",
+      "Change contact from text to a link to customers",
+    ];
+    for (const [i, plan] of plans.entries()) {
+      const html = await render("finished", error, plan, { tryAgain });
+      expect(cards(html).map(([title]) => title)).toEqual(["The records weren't updated", titles[i]]);
+      expect(buttons(html)).toEqual(expect.arrayContaining(["Try again", "Copy the details"]));
+    }
+    // Once Try again deleted the removed column's values, said as the merge would have.
+    const reshaped = { rows: 312, changed: 288, converted: 0, cleared: 288, kept: 0 };
+    const retry = { runId: "reshape:ui-1234abcd", status: "finished", reshaped };
+    const done = await render("finished", error, plans[0], { tryAgain, retry });
+    expect(cards(done)[0]).toEqual(["The records", "Updated"]);
+    expect(done).toContain("288 legacyId values deleted.");
   });
 });

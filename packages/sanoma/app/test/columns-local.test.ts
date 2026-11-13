@@ -132,8 +132,8 @@ async function chrome(ctx: { skip: (note: string) => void }) {
  * item above (the Fields menu's last items by most).
  */
 const menusSettled = (tab: Page) =>
-  tab.waitForFunction(() =>
-    [...document.querySelectorAll('[role="menu"]')].every((menu) => menu.getAnimations({ subtree: true }).length === 0),
+  tab.waitForFunction(
+    `[...document.querySelectorAll('[role="menu"]')].every((menu) => menu.getAnimations({ subtree: true }).length === 0)`,
   );
 
 describe("a collection's columns with no remote", () => {
@@ -300,6 +300,32 @@ describe("a collection's columns with no remote", () => {
     });
     expect(readFileSync(join(root, "resources/data.ts"), "utf8")).not.toContain("notes");
     expect(await stored("Acme Plumbing")).not.toHaveProperty("notes");
+  });
+
+  it("refuses a new column under a name records still hold values under, writing nothing", async () => {
+    // A removal whose records weren't brought along leaves its values under a name no field has.
+    const db = await pool.db();
+    const cedar = and(eq(data.collection, "outbound"), eq(data.key, "Cedar & Finch"));
+    const [{ record }] = (await db.select({ record: data.record }).from(data).where(cedar)) as [
+      { record: Record<string, unknown> },
+    ];
+    await db
+      .update(data)
+      .set({ record: { ...record, legacyId: "L-1" } })
+      .where(cedar);
+    const file = readFileSync(join(root, "resources/data.ts"), "utf8");
+    const request = {
+      collection: "outbound",
+      change: { kind: "add", field: "legacyId", type: "text", required: false },
+    } as const;
+    const refusal = {
+      status: 400,
+      body: expect.objectContaining({ error: expect.stringContaining("1 record still holds a value under legacyId") }),
+    };
+    await expect(planColumnChange(await contextOf(), ada, request)).rejects.toMatchObject(refusal);
+    await expect(proposeColumnChange(await contextOf(), ada, request)).rejects.toMatchObject(refusal);
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toBe(file);
+    await db.update(data).set({ record }).where(cedar);
   });
 
   it("says in the panel's toast what became of the records, and that it shows once Sanoma starts again", async (ctx) => {
