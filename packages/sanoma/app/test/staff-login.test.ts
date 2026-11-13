@@ -25,16 +25,28 @@ export const cy = sanoma.person({ id: "cy" });
 export const dee = sanoma.person({ id: "dee", name: "Dee Park", email: "dee@acme.test" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 export const office = sanoma.group({ name: "office", members: [dee] });
+export const claudeCode = sanoma.agent({ id: "claude-code", client: "https://claude.ai/oauth/claude-code-client-metadata" });
 `,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-/** A login half that takes the cookie `who=<email>` as signed in, and mints invites `tok-<email>`. */
+/** Claude Code's client id, which the people file's `claude-code` agent stands for. */
+const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
+
+/**
+ * A login half that takes the cookie `who=<email>` as signed in, mints invites `tok-<email>`, and
+ * takes the bearer `at.<email>.<client>` as a token issued for that email to that client.
+ */
 function fakeHalf(methods: LoginMethod[]): LoginHalf {
   return {
     async verify(request) {
       const email = /who=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1];
       return email ? { subject: email, email } : null;
+    },
+    async bearer(request) {
+      const [, email, client] =
+        /^Bearer at\.([^ ]+?)\.(https:\S+)$/.exec(request.headers.get("authorization") ?? "") ?? [];
+      return email && client ? { subject: email, email, client } : null;
     },
     async handle(request) {
       return new URL(request.url).pathname.startsWith("/auth/better-auth/") ? new Response("half") : undefined;
@@ -49,17 +61,24 @@ function fakeHalf(methods: LoginMethod[]): LoginHalf {
   };
 }
 
-const request = (path: string, init: { cookie?: string; method?: string; body?: unknown; origin?: string } = {}) =>
+const request = (
+  path: string,
+  init: { cookie?: string; method?: string; body?: unknown; origin?: string; bearer?: string } = {},
+) =>
   new Request(new URL(path, APP), {
     method: init.method ?? (init.body === undefined ? "GET" : "POST"),
     headers: {
       host: "acme.example",
       "x-forwarded-proto": "https",
       ...(init.cookie && { cookie: init.cookie }),
+      ...(init.bearer && { authorization: `Bearer ${init.bearer}` }),
       ...(init.body !== undefined && { "content-type": "application/json", origin: init.origin ?? APP }),
     },
     ...(init.body !== undefined && { body: JSON.stringify(init.body) }),
   });
+
+/** A JSON-RPC request to `/mcp`, as a client posts one: no Origin, maybe a bearer. */
+const mcp = (bearer?: string) => request("/mcp", { method: "POST", ...(bearer && { bearer }) });
 
 describe("staffLogin", () => {
   /** The runtime's table of spent invite-request nonces, as the client keeps it. */
@@ -351,6 +370,93 @@ describe("staffLogin", () => {
     expect(back("/auth/login", "?error=x")).toBe("/");
     expect(back("//evil.example/login")).toBe("/evil.example/login");
     expect(back("///evil.example")).toBe("/evil.example");
+  });
+
+  describe("the agent surface's sign-in", () => {
+    const METADATA = `${APP}/.well-known/oauth-protected-resource/mcp`;
+
+    it("gives the half its OAuth: tokens for /mcp, and the agent each client stands for, as the files say", () => {
+      expect(context.staff!.oauth!.resource).toBe("/mcp");
+      expect(context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("claude-code");
+      expect(context.staff!.oauth!.agentOf("https://elsewhere.example/client.json")).toBeUndefined();
+    });
+
+    it("answers /mcp without a token or a session the 401 that starts a client's sign-in", async () => {
+      const refused = (await login.handle!(mcp()))!;
+      expect(refused.status).toBe(401);
+      expect(refused.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${METADATA}"`);
+      // Anywhere else, the sign-in page's answer as before, with no challenge.
+      const fn = (await login.handle!(request("/_serverFn/abc", { method: "POST" })))!;
+      expect([fn.status, fn.headers.get("www-authenticate")]).toEqual([401, null]);
+    });
+
+    it("takes a bearer at /mcp, as the declared agent for the person it was issued for", async () => {
+      const asked = mcp(`at.ada@acme.test.${CLAUDE_CODE}`);
+      expect(await login.handle!(asked)).toBeUndefined();
+      expect(await login.resolveActor(asked)).toEqual({ email: "ada@acme.test", client: CLAUDE_CODE });
+      const admitted = admitting(login, () => readPeople(root));
+      expect(await admitted.handle!(asked)).toBeUndefined();
+      expect(await admitted.resolveActor(asked)).toEqual({ id: "claude-code", groups: ["agents"], onBehalfOf: "ada" });
+      // Its bearer is what says who, never a cookie beside it.
+      const both = request("/mcp", {
+        method: "POST",
+        bearer: `at.dee@acme.test.${CLAUDE_CODE}`,
+        cookie: "who=ada@acme.test",
+      });
+      expect(await admitted.resolveActor(both)).toMatchObject({ id: "claude-code", onBehalfOf: "dee" });
+    });
+
+    it("answers a bearer it does not take 401 invalid_token, and takes none but at /mcp", async () => {
+      const refused = (await login.handle!(mcp("at.nothing")))!;
+      expect(refused.status).toBe(401);
+      expect(refused.headers.get("www-authenticate")).toMatch(
+        new RegExp(`^Bearer error="invalid_token", error_description="[^"]+", resource_metadata="${METADATA}"$`),
+      );
+      // A good bearer elsewhere is no sign-in: the page's 401.
+      const elsewhere = (await login.handle!(
+        request("/_serverFn/abc", { method: "POST", bearer: `at.ada@acme.test.${CLAUDE_CODE}` }),
+      ))!;
+      expect(elsewhere.status).toBe(401);
+    });
+
+    it("refuses a token for a client no agent declares, or for someone undeclared, 403 saying what to declare", async () => {
+      const admitted = admitting(login, () => readPeople(root));
+      const stranger = "https://elsewhere.example/client.json";
+      const undeclared = (await admitted.handle!(mcp(`at.ada@acme.test.${stranger}`)))!;
+      expect(undeclared.status).toBe(403);
+      expect(await undeclared.json()).toEqual({
+        code: "not_admitted",
+        error: expect.stringContaining(`declare one, sanoma.agent({ id: "<its name>", client: "${stranger}" })`),
+      });
+      const mallory = (await admitted.handle!(mcp(`at.mallory@acme.test.${CLAUDE_CODE}`)))!;
+      expect(mallory.status).toBe(403);
+    });
+
+    it("shows the consent page to someone signed in: the client, the agent it acts as, for whom", async () => {
+      const query = new URLSearchParams({ client_id: CLAUDE_CODE, scope: "offline_access", sig: "x" });
+      const page = (await login.handle!(request(`/auth/consent?${query}`, { cookie: "who=ada@acme.test" })))!;
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("Let claude-code act for you?");
+      expect(html).toContain(
+        `${CLAUDE_CODE} asks to work in Acme Plumbing as the agent <strong>claude-code</strong>, for Ada Lovelace.`,
+      );
+      expect(html).toContain("/auth/better-auth/oauth2/consent");
+      // Signed out, the sign-in page; a client no agent stands for, refused.
+      expect((await login.handle!(request(`/auth/consent?${query}`)))?.status).toBe(401);
+      const stranger = new URLSearchParams({ client_id: "https://elsewhere.example/client.json", sig: "x" });
+      expect((await login.handle!(request(`/auth/consent?${stranger}`, { cookie: "who=ada@acme.test" })))?.status).toBe(
+        403,
+      );
+    });
+
+    it("shows the sign-in page a client's sign-in sends someone to, signed in or not, which posts its signed request along", async () => {
+      const page = (await login.handle!(request("/auth/login?client_id=x&sig=y", { cookie: "who=ada@acme.test" })))!;
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("oauth_query:location.search.slice(1)");
+      expect(html).toContain("...oauth}");
+    });
   });
 
   it("listens on any host", () => {
