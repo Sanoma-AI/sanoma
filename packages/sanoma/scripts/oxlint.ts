@@ -94,7 +94,17 @@ const sites = {
         ].map((path) => ({ ...path, allowTypeImports: true })),
         patterns: [
           {
-            group: ["@dbos-inc/**", "pg/**", "drizzle-orm/**", "@tanstack/react-start/**"],
+            // TanStack Start's packages beside `@tanstack/react-start`: `start-client-core` and `start-fn-stubs` export its server builders too.
+            group: [
+              "@dbos-inc/**",
+              "pg/**",
+              "drizzle-orm/**",
+              "@tanstack/react-start/**",
+              "@tanstack/react-start-*",
+              "@tanstack/react-start-*/**",
+              "@tanstack/start-*",
+              "@tanstack/start-*/**",
+            ],
             message: SERVER,
           },
           {
@@ -106,9 +116,21 @@ const sites = {
             group: ["virtual:*", "virtual:*/**"],
             message: "A site reads content through `content` from `sanoma/site`.",
           },
+          {
+            regex: "^/",
+            message:
+              "A site imports its own files by a relative path (`../assets/logo.svg`). A file at a fixed address goes in the site's `public/` folder, and the page writes its URL.",
+          },
+          {
+            regex: "^#",
+            message:
+              "A site imports its own files by a relative path, never by a `#` import from `package.json`, which can reach code outside `sites/`.",
+          },
         ].map((pattern) => ({ ...pattern, allowTypeImports: true })),
       },
     ],
+    // The `^/` pattern above says it, with a site's remedy.
+    "import/no-absolute-path": "off",
     "no-restricted-globals": [
       "error",
       { name: "process", message: `A site runs in the browser and holds no credentials: ${REMEDY}` },

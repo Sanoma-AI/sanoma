@@ -29,6 +29,9 @@ import {
 import { useActor } from "../../actor.ts";
 import { useDensity } from "../density.tsx";
 import { useChatPrompt } from "./chat-prompt.ts";
+// `sanoma`'s version, as `RUNTIME_VERSION` reads it, but a named import: Vite then bundles only the
+// version, where `RUNTIME_VERSION`'s default import would bring the whole manifest to the browser.
+import { version } from "../../../../package.json";
 
 /**
  * Who you are, the theme and the density, at the foot of the bar: your initials, your name, your
@@ -37,7 +40,8 @@ import { useChatPrompt } from "./chat-prompt.ts";
  * window, the companies open there too (`useDesktopCompanies`), this one checked: another switches
  * the window to it, and Add company… shows the shell's start screen. Agent… opens the chat on the
  * agents to connect, to change which one a new chat opens on. The menu renders only once
- * opened, in the browser, so the stored theme never reaches the server's markup.
+ * opened, in the browser, so the stored theme never reaches the server's markup. Atop it, under
+ * who you are, the `sanoma` version the app runs.
  */
 export function NavUser() {
   const { actor, groups, onBehalfOf, fromServer, error, signOut, setActor } = useActor();
@@ -80,6 +84,7 @@ export function NavUser() {
             <span className="text-sm text-foreground">{name}</span>
             {member && <span className="font-normal text-foreground">{member}</span>}
             {status && <span className={cn("font-normal", error && "text-destructive")}>{status}</span>}
+            <span className="font-normal">Sanoma {version}</span>
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
