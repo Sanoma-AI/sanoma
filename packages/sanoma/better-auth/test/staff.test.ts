@@ -119,6 +119,25 @@ describe("the staff login", () => {
     signIns.length = 0;
   });
 
+  it("has row-level security on each of its tables, with no policy: only their owner, the worker's login, reads them", async () => {
+    const client = new Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      const { rows: tables } = await client.query<{ relname: string; relrowsecurity: boolean }>(
+        "SELECT relname, relrowsecurity FROM pg_class WHERE relnamespace = 'better_auth_staff'::regnamespace AND relkind = 'r' ORDER BY 1",
+      );
+      expect(tables).toEqual(
+        ["account", "rate_limit", "session", "user", "verification"].map((relname) => ({
+          relname,
+          relrowsecurity: true,
+        })),
+      );
+      expect((await client.query("SELECT 1 FROM pg_policies WHERE schemaname = 'better_auth_staff'")).rowCount).toBe(0);
+    } finally {
+      await client.end();
+    }
+  });
+
   it("offers a code and invites, and GitHub only with the company's client", async () => {
     expect(half.methods).toEqual(["code", "invite"]);
     const github = betterAuthStaffLogin({

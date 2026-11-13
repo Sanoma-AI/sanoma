@@ -150,6 +150,18 @@ describe("login", () => {
     expect(first).not.toBe(second);
     await Promise.all([first(databaseUrl), second(databaseUrl)]);
     expect(await tables()).toEqual(TABLES);
+    // Row-level security on each, with no policy: only their owner, the worker's login, reads them.
+    const client = new Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      const { rows } = await client.query<{ relname: string }>(
+        "SELECT relname FROM pg_class WHERE relnamespace = 'better_auth'::regnamespace AND relkind = 'r' AND relrowsecurity ORDER BY 1",
+      );
+      expect(rows.map((r) => r.relname)).toEqual(TABLES);
+      expect((await client.query("SELECT 1 FROM pg_policies WHERE schemaname = 'better_auth'")).rowCount).toBe(0);
+    } finally {
+      await client.end();
+    }
   });
 
   it("is prepared again on the migrated schema, the same tables", async () => {

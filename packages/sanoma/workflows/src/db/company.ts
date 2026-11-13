@@ -25,6 +25,12 @@ import type { MoveItemAction, MoveItemKind, MoveItemState, MovePhase } from "../
 // in `drizzle/company.config.ts`). A change here is a new migration: `pnpm --filter
 // sanoma generate` writes it under `drizzle/company/`, and CI refuses a schema
 // whose migration was not generated.
+//
+// Every table has row-level security on and no policy (`enableRLS`, never FORCE): a floor, not
+// the policy, which the runtime decides per call. The runtime's login makes the tables, so it
+// owns them and passes; any other role (Supabase's `anon` and `authenticated` among them) reads
+// no row and writes none, whatever it was granted. A role that serves the runtime must own them:
+// one holding grants alone would read nothing. `db.test.ts` fails on a table without it.
 
 const when = () => timestamp({ withTimezone: true });
 
@@ -43,7 +49,7 @@ export const credentials = pgTable(
       .$onUpdate(() => sql`now()`),
   },
   (t) => [primaryKey({ columns: [t.namespace, t.name] })],
-);
+).enableRLS();
 
 /**
  * The Postgres ledger's records. `n` is the write order, `id` the record's, which the first write
@@ -67,7 +73,7 @@ export const ledger = pgTable(
       .on(t.target)
       .where(sql`${t.target} is not null`),
   ],
-);
+).enableRLS();
 
 /** The collections' records (`collection.ts`): one row per collection and key, the record as JSON. */
 export const data = pgTable(
@@ -80,7 +86,7 @@ export const data = pgTable(
     updatedBy: text().notNull(),
   },
   (t) => [primaryKey({ columns: [t.collection, t.key] })],
-);
+).enableRLS();
 
 /**
  * The instance's side of its wakeup: one row, made with the table (`0001_wakeup_row.sql`). `at`
@@ -96,7 +102,7 @@ export const wakeup = pgTable(
     lastError: text(),
   },
   (t) => [check("sanoma_wakeup_one_row", sql`${t.id} = 1`)],
-);
+).enableRLS();
 
 /** The operator agent's chats (`chats.ts`): who each is for, its engine, its draft and the turn last begun (its run's id). */
 export const chats = pgTable(
@@ -111,7 +117,7 @@ export const chats = pgTable(
     turn: text(),
   },
   (t) => [index("sanoma_chats_person").on(t.person, t.createdAt)],
-);
+).enableRLS();
 
 /** Each chat's messages, the AI SDK's UI messages as JSON, in `seq` order. */
 export const chatMessages = pgTable(
@@ -125,7 +131,7 @@ export const chatMessages = pgTable(
     message: jsonb().$type<UIMessage>().notNull(),
   },
   (t) => [primaryKey({ columns: [t.chatId, t.id] })],
-);
+).enableRLS();
 
 /**
  * The reply a chat turn streams, as the worker writes it (`Chats.append`): its UI message stream's
@@ -143,7 +149,7 @@ export const chatChunks = pgTable(
     chunk: jsonb().$type<UIMessageChunk>(),
   },
   (t) => [primaryKey({ columns: [t.runId, t.seq] }), index("sanoma_chat_chunks_chat").on(t.chatId)],
-);
+).enableRLS();
 
 /** The api tokens (`tokens.ts`): each one's SHA-256, never the token, whom it acts for, its groups, and when it was revoked. */
 export const apiTokens = pgTable("sanoma_api_tokens", {
@@ -153,7 +159,7 @@ export const apiTokens = pgTable("sanoma_api_tokens", {
   groups: jsonb().$type<string[]>().notNull(),
   createdAt: when().notNull().defaultNow(),
   revokedAt: when(),
-});
+}).enableRLS();
 
 /**
  * The api tokens' one-time handoffs (`Tokens.handoff`): each code's SHA-256, never the code, the
@@ -167,13 +173,13 @@ export const tokenHandoffs = pgTable("sanoma_token_handoffs", {
   challenge: text().notNull(),
   expiresAt: when().notNull(),
   redeemedAt: when(),
-});
+}).enableRLS();
 
 /** The nonces of sealed invite requests spent (`spendInviteRequest`), each until it expires. */
 export const inviteRequests = pgTable("sanoma_invite_requests", {
   nonce: text().primaryKey(),
   expiresAt: when().notNull(),
-});
+}).enableRLS();
 
 /** The connected accounts (`connection.ts`): metadata only, never an authentication value. */
 export const connections = pgTable("sanoma_connections", {
@@ -194,7 +200,7 @@ export const connections = pgTable("sanoma_connections", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => sql`now()`),
-});
+}).enableRLS();
 
 /** Each connection's last health check. */
 export const connectionHealth = pgTable("sanoma_connection_health", {
@@ -206,7 +212,7 @@ export const connectionHealth = pgTable("sanoma_connection_health", {
   checkedAt: when().notNull().defaultNow(),
   /** When the verified credential stops working, as its verifier said; null for none given. */
   expiresAt: when(),
-});
+}).enableRLS();
 
 /** The receipts of a connection's setup, one per revision. */
 export const connectionSetups = pgTable(
@@ -217,7 +223,7 @@ export const connectionSetups = pgTable(
     credentialVersion: text().notNull(),
   },
   (t) => [primaryKey({ columns: [t.connectionId, t.revision] })],
-);
+).enableRLS();
 
 /**
  * An OAuth consent attempt (`oauth.ts`), from Connect to the exchange: the state's hash and the
@@ -241,7 +247,7 @@ export const connectionAttempts = pgTable("sanoma_connection_attempts", {
   receivedAt: when(),
   consumedAt: when(),
   createdAt: when().notNull().defaultNow(),
-});
+}).enableRLS();
 
 /**
  * Each OAuth connection's renewal (`renewal.ts`): the lease one process holds while it renews the
@@ -257,7 +263,7 @@ export const connectionRenewals = pgTable("sanoma_connection_renewals", {
   refreshedAt: when(),
   outcome: text().$type<RenewalOutcome>(),
   dueAt: when(),
-});
+}).enableRLS();
 
 /**
  * How far each app taken from a source is behind it, as the worker last checked (`writeAppsBehind`):
@@ -272,7 +278,7 @@ export const appBehind = pgTable(
     checkedAt: when().notNull().defaultNow(),
   },
   (t) => [check("sanoma_app_behind_one_answer", sql`(${t.behind} IS NULL) <> (${t.error} IS NULL)`)],
-);
+).enableRLS();
 
 /** Each sandbox run's checks against its scenario, as the worker last ran them (`recordChecks` in sandbox.ts): one row per run. */
 export const runChecks = pgTable(
@@ -284,7 +290,7 @@ export const runChecks = pgTable(
     checkedAt: when().notNull().defaultNow(),
   },
   (t) => [check("sanoma_run_checks_one_answer", sql`(${t.checks} IS NULL) <> (${t.error} IS NULL)`)],
-);
+).enableRLS();
 
 /**
  * A move of the company's secrets from one store to another (`store-move.ts`, the built-in
@@ -316,7 +322,7 @@ export const secretMoves = pgTable(
     retiredAt: when(),
   },
   (t) => [index("sanoma_secret_moves_source").on(t.sourceStore, t.sourceNamespace)],
-);
+).enableRLS();
 
 /**
  * Each secret a move carries, by its logical name: where it is at both ends, what kind of value
@@ -342,4 +348,4 @@ export const secretMoveItems = pgTable(
     state: text().$type<MoveItemState>().notNull().default("pending"),
   },
   (t) => [primaryKey({ columns: [t.moveId, t.name] })],
-);
+).enableRLS();
