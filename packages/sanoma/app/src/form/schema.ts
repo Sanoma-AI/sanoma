@@ -55,11 +55,17 @@ export function fieldsOf(schema: Schema): Field[] | undefined {
   return propertiesOf(schema, 0);
 }
 
+/**
+ * An object's properties as fields, but an optional one marked `deprecated`: a collection's field
+ * hidden for everyone (`isHidden`, which `collection()` marks so), wherever its record is embedded.
+ */
 function propertiesOf(schema: Schema, depth: number): Field[] {
   const required = new Set(Array.isArray(schema.required) ? schema.required.map(String) : []);
-  return Object.entries(schema.properties as Schema).map(([key, raw]) =>
-    fieldOf(key, isRecord(raw) ? raw : {}, required.has(key), depth),
-  );
+  return Object.entries(schema.properties as Schema).flatMap(([key, raw]) => {
+    const prop = isRecord(raw) ? raw : {};
+    if (prop.deprecated === true && !required.has(key)) return [];
+    return [fieldOf(key, prop, required.has(key), depth)];
+  });
 }
 
 function fieldOf(key: string, prop: Schema, required: boolean, depth: number): Field {

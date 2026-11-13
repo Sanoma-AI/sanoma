@@ -9,11 +9,13 @@ import {
   issueTarget,
   toLocalInput,
 } from "../src/form/schema.ts";
+import { collection, recordSchemaOf } from "../../workflows/src/collection.ts";
 import { describeConfig } from "../../workflows/src/describe.ts";
 import { jsonSchemaOf } from "../../workflows/src/define.ts";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
 
-// The start form's logic, on the JSON Schema describeConfig sends. No database, no build.
+// The start form's logic, on the JSON Schema describeConfig sends (a collection's hidden field left
+// out, in its record and wherever the record is embedded). No database, no build.
 
 const input = z.object({
   title: z.string().min(1).describe("What to call it"),
@@ -79,6 +81,23 @@ describe("fieldsOf", () => {
     expect(field("count")).toMatchObject({ default: 1 });
     expect(field("channel")).toMatchObject({ options: ["blog", "email"] });
     expect(field("people")).toMatchObject({ item: { kind: "object", fields: [{ key: "name" }, { key: "email" }] } });
+  });
+
+  it("leaves out a collection's field hidden for everyone, in its record form and in a run form that embeds the record", () => {
+    const deals = collection({
+      name: "deals",
+      key: "company",
+      fields: { company: "text", seats: { type: "number", optional: true, hidden: true }, notes: "text" },
+    });
+    const [entry] = describeConfig({ workflows: [], connectors: [], collections: [deals] }).collections;
+    expect(fieldsOf(entry!.record)!.map((f) => f.key)).toEqual(["company", "notes"]);
+    const run = fieldsOf(jsonSchemaOf(z.object({ deal: recordSchemaOf(deals), why: z.string() })))!;
+    expect(run.map((f) => [f.key, f.kind === "object" ? f.fields.map((g) => g.key) : f.kind])).toEqual([
+      ["deal", ["company", "notes"]],
+      ["why", "string"],
+    ]);
+    // A required property stays, whatever marks it: the form could not send the input without it.
+    expect(fieldsOf(jsonSchemaOf(z.object({ old: z.string().meta({ deprecated: true }) })))!).toHaveLength(1);
   });
 
   it("gives nothing for an input that is not an object with properties, so the form takes the whole input as JSON", () => {
