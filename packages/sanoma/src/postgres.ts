@@ -1,4 +1,4 @@
-import { execFile, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
@@ -7,7 +7,6 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -16,11 +15,11 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
 import { Client } from "pg";
 import { UsageError } from "sanoma/workflows/shared";
+import { alive, mainCheckout } from "./app-file.ts";
 import { postgresBin } from "./postgres-bin.ts";
 import { system32 } from "./windows.ts";
 
@@ -187,17 +186,7 @@ const paths = (dir: string): Cluster => ({
  * `.sanoma/drafts/<id>`) finds the same cluster; `root` itself outside git.
  */
 export async function clusterDir(root: string): Promise<string> {
-  const real = realpathSync(root);
-  const [common, top] = await promisify(execFile)(
-    "git",
-    ["rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"],
-    { cwd: real },
-  ).then(
-    ({ stdout }) => stdout.trim().split("\n"),
-    () => [],
-  );
-  const main = common && top && basename(common) === ".git" ? join(dirname(common), relative(top, real)) : real;
-  return join(main, ".sanoma", "postgres");
+  return join(await mainCheckout(root), ".sanoma", "postgres");
 }
 
 const urlOf = ({ password }: Cluster, port: number) =>
@@ -253,17 +242,6 @@ export function mayBePostgres(
   }
   const ps = run("ps", ["-o", "comm=", "-p", String(pid)]);
   return Boolean(ps.error) || /(^|\/)postgres$/.test(ps.stdout.trim());
-}
-
-/** Whether a process runs as `pid` (another user's too). */
-function alive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 /**

@@ -25,7 +25,15 @@ import { type CallContext, type Connector, type DriverFn, indexConnectors, maker
 import { resourceTypesOf } from "./resource.ts";
 import type { World } from "./scenario.ts";
 import { memorySecrets, type Secrets } from "./secret.ts";
-import { ANONYMOUS_PRINCIPAL, apiNameOf, DATA_VENDOR, errorMessage, isEnded, type RunStatus } from "./shared.ts";
+import {
+  ANONYMOUS_PRINCIPAL,
+  apiNameOf,
+  CALL_ID,
+  DATA_VENDOR,
+  errorMessage,
+  isEnded,
+  type RunStatus,
+} from "./shared.ts";
 
 // A company's workflows run inside a browser page (`sanoma/workflows/page`): the base of a
 // static demo. Every vendor is its connector's fake and every collection is in memory, so
@@ -418,7 +426,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
   return {
     async transport({ name, input, id }) {
       // As the app's `CallRequest` takes it: never a run id of the page's own (`page:<n>`).
-      if (id !== undefined && !/^[\w-]{1,200}$/.test(id)) {
+      if (id !== undefined && !CALL_ID.test(id)) {
         throw new SanomaError("invalid_input", "An id is letters, digits, _ and -", { id });
       }
       const op = ops.get(name);
