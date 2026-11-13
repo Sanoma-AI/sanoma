@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "sanoma/testing";
-import { eq, getTableName, inArray } from "drizzle-orm";
+import { eq, getTableName, inArray, sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { collection, recordsOps } from "../src/collection.ts";
@@ -430,18 +430,72 @@ describe("sanoma.records.reshape on Postgres", () => {
     expect(await reshapeCall({ collection: "deals", changes: keep })).toMatchObject({ changed: 0, kept: 1 });
   });
 
-  it("writes a collection larger than one statement's chunk whole", async () => {
-    const many = Array.from({ length: 1234 }, (_, i) => ({ company: `c${String(i).padStart(4, "0")}`, seats: `${i}` }));
+  /** `length` deals keyed `c0000`, `c0001`, …, their seats as text. */
+  const insertMany = async (length: number) => {
+    const many = Array.from({ length }, (_, i) => ({ company: `c${String(i).padStart(4, "0")}`, seats: `${i}` }));
     await (
       await pool.db()
     )
       .insert(data)
       .values(many.map((record) => ({ collection: "deals", key: record.company, record, updatedBy: "leon" })));
-    expect(
-      await reshapeCall({ collection: "deals", changes: [{ kind: "retype", field: "seats", to: "number" }] }),
-    ).toMatchObject({ rows: 1234, changed: 1234, converted: 1234 });
+  };
+  const toNumber = [{ kind: "retype", field: "seats", to: "number" }];
+
+  it("writes a collection larger than a page whole, a page at a time", async () => {
+    await insertMany(1234);
+    expect(await reshapeCall({ collection: "deals", changes: toNumber })).toMatchObject({
+      rows: 1234,
+      changed: 1234,
+      converted: 1234,
+    });
     const rows = await rowsOf("deals");
     expect(rows.every(({ record }, i) => record.seats === i && typeof record.seats === "number")).toBe(true);
+  });
+
+  it("is all or none: a failure on a later page leaves the pages before it as they were", async () => {
+    await insertMany(1234);
+    const db = await pool.db();
+    // A write the database refuses, on the third page's first key.
+    await db.execute(sql`CREATE OR REPLACE FUNCTION sanoma_test_refuse() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'refused %', NEW.key; END $$`);
+    await db.execute(sql`CREATE TRIGGER sanoma_test_refuse BEFORE UPDATE ON ${data} FOR EACH ROW
+      WHEN (NEW.collection = 'deals' AND NEW.key = 'c1000') EXECUTE FUNCTION sanoma_test_refuse()`);
+    onTestFinished(async () => {
+      await db.execute(sql`DROP TRIGGER IF EXISTS sanoma_test_refuse ON ${data}`);
+      await db.execute(sql`DROP FUNCTION IF EXISTS sanoma_test_refuse()`);
+    });
+    await expect(reshapeCall({ collection: "deals", changes: toNumber })).rejects.toThrow("refused c1000");
+    expect(
+      (await rowsOf("deals")).every(
+        ({ record, updatedBy }) => typeof record.seats === "string" && updatedBy === "leon",
+      ),
+    ).toBe(true);
+  });
+
+  it("is safe to call again after a part of it landed: what is brought along already is left alone", async () => {
+    // Part of the collection brought along already (an earlier call, or saves in the new shape), and
+    // records in the old shape besides, written after it: the call again brings along only those.
+    await insertMany(1234);
+    const renamed = [
+      { kind: "rename", from: "seats", to: "count" },
+      { kind: "retype", field: "count", to: "number" },
+    ];
+    const first = await reshapeCall({ collection: "deals", changes: renamed });
+    expect(first).toMatchObject({ rows: 1234, changed: 1234, converted: 1234 });
+    const db = await pool.db();
+    await db.insert(data).values([
+      { collection: "deals", key: "late", record: { company: "late", seats: "7" }, updatedBy: "leon" },
+      // Saved in the new shape with the old field left in it: the rename does not overwrite it.
+      { collection: "deals", key: "both", record: { company: "both", seats: "1", count: 2 }, updatedBy: "leon" },
+    ]);
+    const again = await reshapeCall({ collection: "deals", changes: renamed });
+    expect(again).toEqual({ rows: 1236, changed: 1, converted: 1, cleared: 0, kept: 0 });
+    const rows = new Map((await rowsOf("deals")).map((row) => [row.key, row]));
+    expect(rows.get("late")).toEqual({ key: "late", record: { company: "late", count: 7 }, updatedBy: "run:t" });
+    expect(rows.get("both")!.record).toEqual({ company: "both", seats: "1", count: 2 });
+    expect(rows.get("c0042")!.record).toEqual({ company: "c0042", count: 42 });
+    // And once more: nothing left.
+    expect(await reshapeCall({ collection: "deals", changes: renamed })).toMatchObject({ rows: 1236, changed: 0 });
   });
 });
 

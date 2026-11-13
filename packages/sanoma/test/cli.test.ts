@@ -74,7 +74,7 @@ describe("sanoma serve", () => {
       expect(res.status).toBe(200);
       const html = await res.text();
       const rows = html.matchAll(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/([^"?]+)"/g);
-      // The company's workflow, and the change and call workflows and the app's actions every config has.
+      // The company's workflow, and the change (with its Try again) and call workflows and the app's actions every config has.
       expect([...rows].map(([, name]) => name)).toEqual([
         "adopt",
         "call",
@@ -87,6 +87,7 @@ describe("sanoma serve", () => {
         "go-live-host",
         "hello",
         "patch",
+        "reshape",
         "save-draft",
       ]);
       // On a config without problems: startApp warns about any it finds in the files before it listens.
