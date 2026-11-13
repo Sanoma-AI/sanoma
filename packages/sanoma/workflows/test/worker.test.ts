@@ -118,12 +118,13 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       applyQueueName: "sanoma:sanoma:apply",
     });
     // The config's workflow, drift and apply for the resource type a connector declares
-    // (`resend.domain`), the change workflow, follow, the app's actions and the chat every config has, and call for the listing of apps.
+    // (`resend.domain`), the change workflow and its Try again, follow, the app's actions and the chat every config has, and call for the listing of apps.
     expect([...resolved.workflows].map(([name]) => name)).toEqual([
       "announce",
       "drift",
       "apply",
       "change",
+      "reshape",
       "follow",
       "adopt",
       "patch",

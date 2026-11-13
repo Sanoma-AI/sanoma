@@ -516,6 +516,15 @@ export const changeIdOf = draftRunOf("change");
  */
 export const SAVE_DRAFT_WORKFLOW = "save-draft";
 
+/**
+ * A merged change's records brought along again (`change-workflow.ts`), when the change could not
+ * bring them (`ChangeState.merged.reshaped` an error): started by `SanomaClient.reshapeChange` as
+ * the person who asks, one run at a time per draft, `reshape:<id>` (`~<n>` after an ended one), over
+ * the plan the change carries. With change and patch, the one workflow that may call
+ * `sanoma.records.reshape`.
+ */
+export const RESHAPE_WORKFLOW = "reshape";
+
 /** A commit's full id, as git names it (SHA-1, or SHA-256). */
 export const COMMIT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 
@@ -629,12 +638,13 @@ export const IMPORT_WORKFLOW = "import";
 /** The `recv` topic a turn's run is told on (`ChatTell`): a stop, a sign-in code, its own turn's end. */
 export const CHAT_TOPIC = "chat:tell";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow, chat, import, connect, migrate-store and the app's actions. */
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, reshape, login-code, follow, chat, import, connect, migrate-store and the app's actions. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
   CHANGE_WORKFLOW,
+  RESHAPE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
   FOLLOW_WORKFLOW,
   CHAT_WORKFLOW,

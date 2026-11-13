@@ -105,9 +105,10 @@ describe("the people types", () => {
       "sanoma.storeMigration.retire",
       "sanoma.storeMigration.cancel",
     ]);
-    // No drift or apply: the change workflow, follow, the app's actions, and call for the listing of apps, in every config.
+    // No drift or apply: the change workflow and its Try again, follow, the app's actions, and call for the listing of apps, in every config.
     expect([...resolved.workflows.keys()]).toEqual([
       "change",
+      "reshape",
       "follow",
       "adopt",
       "patch",

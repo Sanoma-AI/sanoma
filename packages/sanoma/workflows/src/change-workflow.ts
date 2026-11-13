@@ -4,16 +4,18 @@ import type {
   ChangeEvent,
   ChangeFacts,
   ChangeReport,
+  ChangeReshaped,
   ChangeState,
   ChangeVerified,
   changeOps,
   MergeInput,
 } from "./change.ts";
-import { ADMIN, ChangeInput, initialChangeState } from "./change.ts";
+import { ADMIN, ChangeInput, initialChangeState, ReshapeChangeInput } from "./change.ts";
 import type { recordsOps } from "./collection.ts";
 import { type Approver, defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { errorCode, isRunControlError, reported, type SanomaError } from "./errors.ts";
-import { approverLabel, type CHANGE_WORKFLOW, errorMessage, reshapeOf } from "./shared.ts";
+import { approverLabel, type CHANGE_WORKFLOW, errorMessage, type RESHAPE_WORKFLOW, reshapeOf } from "./shared.ts";
+import type { ReshapeInput } from "./description.ts";
 import type { CheckResult } from "./source.ts";
 
 // The built-in `change` workflow: the life of a change to the company's repository, from its
@@ -51,6 +53,17 @@ export interface ChangeSteps {
   closeDraft(id: string): Promise<void>;
   /** Publishes where the change is (`CHANGE_EVENT`), for the app. */
   publish(state: ChangeState): Promise<void>;
+  /**
+   * Why the policy would hold `sanoma.records.reshape` of `reshaping` now, in words (its title,
+   * else whom it waits for); undefined when it would not. An approved Publish covers it for
+   * Publish's approver; a change merged on the host had none, and a hold for anyone else is not lifted by it.
+   */
+  held(reshaping: ReshapeInput): Promise<string | undefined>;
+  /**
+   * What bringing the records of the draft `id`'s change along takes (`reshapeOf` its plan): its
+   * latest change, merged, carrying a plan that brings records along; thrown otherwise.
+   */
+  reshaping(id: string): Promise<ReshapeInput>;
 }
 
 /** What the change workflow uses: its four operations, `sanoma.records.reshape`, and `approval`. */
@@ -93,7 +106,9 @@ function reviewOf(decision: ChangeDecision, facts: ChangeFacts): { state: "pendi
  *
  * Once merged (here, or on the host), a change carrying a column change's plan brings the records
  * along (`sanoma.records.reshape`, `reshapeOf` its plan: by its decisions, a missing one keeping the
- * values), its counts or its failure reported on the change (`merged.reshaped`), never the run's.
+ * values), its counts or its failure reported on the change (`merged.reshaped`), never the run's;
+ * a hold on it Publish does not lift is such a failure (`steps.held`), which the built-in `reshape`
+ * (`reshapeWorkflow`, Try again) asks again as whoever asks.
  * Then the deploy (`steps.deploy`): the checkout follows `main`, then apply on the
  * declared hosts, as a run this one waits for, then drift on them (`steps.verify`). A `merged` or
  * `closed` event someone told is checked on the host as it is read (`steps.next`, `steps.queued`); one it does not bear
@@ -193,8 +208,13 @@ export function changeWorkflow(
         if (event.kind === "merged") {
           await show({ phase: "deploying" });
           // The records follow the merged declaration before the deploy: merged, a failure is the change's to report.
+          // A hold Publish does not lift (merged on the host, or held for another approver) is reported too,
+          // never waited for: a run waiting here, `deploying`, would hold back every deploy of main
+          // (`changeDeploying`). The records then wait for Try again (`reshape`), as whoever asks.
           const reshaping = reshapeOf(input.plan);
-          const reshaped = reshaping && (await ctx.sanoma.records.reshape(reshaping).catch(reported));
+          const held = reshaping && (await steps.held(reshaping));
+          const reshaped =
+            reshaping && (held ? { error: held } : await ctx.sanoma.records.reshape(reshaping).catch(reported));
           const deploy = await steps.deploy(event.sha);
           const verified = await steps.verify(deploy);
           await steps.closeDraft(input.id);
@@ -223,5 +243,29 @@ export function changeWorkflow(
       }
       return report;
     },
+  });
+}
+
+/**
+ * The built-in `reshape` workflow over `records` (`recordsOps`) and `steps`: Try again, on a merged
+ * change whose records were not brought along (`ChangeState.merged.reshaped` an error). It calls
+ * `sanoma.records.reshape` for the plan the draft `id`'s change carries (`steps.reshaping`), as the
+ * run's actor, the person who asked (`SanomaClient.reshapeChange`), so the policy decides it as
+ * them, a hold waits in the Inbox, and the ledger records it under them. Its output is what became
+ * of the records, counts or why it failed, as the change reports it; the call is idempotent, so
+ * asking again after part of it landed brings along only what is left.
+ */
+export function reshapeWorkflow(
+  records: typeof recordsOps,
+  steps: Pick<ChangeSteps, "reshaping">,
+): WorkflowDefinition<readonly [typeof recordsOps.records.reshape], typeof ReshapeChangeInput> {
+  return defineWorkflow({
+    name: "reshape" satisfies typeof RESHAPE_WORKFLOW,
+    title: "Bring a change's records along",
+    trigger: "manual",
+    input: ReshapeChangeInput,
+    uses: [records.records.reshape],
+    run: async (ctx, { id }): Promise<ChangeReshaped> =>
+      ctx.sanoma.records.reshape(await steps.reshaping(id)).catch(reported),
   });
 }

@@ -122,6 +122,10 @@ interface CompanyApi {
     } | "none")[];
     other: unknown;
   }, unknown>;
+  /** Bring a change's records along: the workflow `reshape`, built in. */
+  reshape: WorkflowFn<{
+    id: string;
+  }, unknown>;
   /** Save a draft: the workflow `save-draft`, built in. */
   saveDraft: WorkflowFn<{
     id: string;
