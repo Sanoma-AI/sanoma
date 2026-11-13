@@ -596,6 +596,135 @@ describe("readSites", () => {
     ]);
   });
 
+  it("marks a page that reaches api or RunForm other than by a named import, or imports code it cannot follow", () => {
+    const root = tree("reaching", {
+      // Re-exported from sanoma/site, by name or all of it, for a page to import.
+      "sites/www/lib/named.ts": 'export { api } from "sanoma/site";\n',
+      "sites/www/lib/all.ts": 'export * from "sanoma/site";\n',
+      "sites/www/lib/form.ts": 'export { RunForm as Form } from "sanoma/site";\n',
+      // Types only, or what makes no call: none.
+      "sites/www/lib/typed.ts": 'export { type api, content } from "sanoma/site";\nexport type * from "sanoma/site";\n',
+      "sites/www/routes/named.tsx": page("/sites/www/named", 'import { api } from "../lib/named.ts";', "return api;"),
+      "sites/www/routes/all.tsx": page("/sites/www/all", 'import { api } from "../lib/all.ts";', "return api;"),
+      "sites/www/routes/form.tsx": page(
+        "/sites/www/form",
+        'import { Form } from "../lib/form.ts";',
+        'return <Form workflow="hello" />;',
+      ),
+      "sites/www/routes/typed.tsx": page(
+        "/sites/www/typed",
+        'import { content } from "../lib/typed.ts";',
+        "return content;",
+      ),
+      "sites/www/routes/namespace.tsx": page(
+        "/sites/www/namespace",
+        'import * as site from "sanoma/site";',
+        'return site.api.hello.start({ who: "x" });',
+      ),
+      "sites/www/routes/dynamic.tsx": page("/sites/www/dynamic", "", 'return import("sanoma/site");'),
+      // Code it cannot follow: a worker, a dotted name outside the site, a package's import, the folder above.
+      "sites/www/components/x.ts": "export const x = 1;\n",
+      "sites/www/routes/worker.tsx": page(
+        "/sites/www/worker",
+        'import Worker from "../components/x.ts?worker";',
+        "return Worker;",
+      ),
+      "sites/www/routes/dotted.tsx": page(
+        "/sites/www/dotted",
+        'import { data } from "../../../lib/data.client";',
+        "return data;",
+      ),
+      "sites/www/routes/hash.tsx": page("/sites/www/hash", 'import { y } from "#lib/y";', "return y;"),
+      "sites/www/routes/up.tsx": page("/sites/www/up", 'import { z } from "..";', "return z;"),
+      // Assets: none, as is a script's source read as text.
+      "sites/www/routes/assets.tsx": page(
+        "/sites/www/assets",
+        'import data from "../data.json";\nimport font from "../fonts/a.woff2";\nimport raw from "../components/x.ts?raw";',
+        "return [data, font, raw];",
+      ),
+    });
+    expect(describeConfig(config(root)).sites.map(({ pages }) => pages)).toEqual([
+      [
+        { path: "/sites/www/all", calls: true },
+        { path: "/sites/www/assets" },
+        { path: "/sites/www/dotted", calls: true },
+        { path: "/sites/www/dynamic", calls: true },
+        { path: "/sites/www/form", calls: true },
+        { path: "/sites/www/hash", calls: true },
+        { path: "/sites/www/named", calls: true },
+        { path: "/sites/www/namespace", calls: true },
+        { path: "/sites/www/typed" },
+        { path: "/sites/www/up", calls: true },
+        { path: "/sites/www/worker", calls: true },
+      ],
+    ]);
+  });
+
+  it("takes a page only from a file under routes/ the router reads, and reads no test, spec or story", () => {
+    const root = tree("stray", {
+      "sites/www/routes/index.tsx": page("/sites/www/", "", "return null;"),
+      // Not under routes/, or under a `-` folder or file there: no page.
+      "sites/www/stories/demo.stories.tsx": page("/sites/www/demo", "", "return null;"),
+      "sites/www/drafts/old.tsx": page("/sites/www/old", "", "return null;"),
+      "sites/www/routes/-components/card.tsx": page("/sites/www/card", "", "return null;"),
+      "sites/www/routes/blog/-helper.tsx": page("/sites/www/blog/helper", "", "return null;"),
+      // Read for its calls, still: a call from it is a call of the site.
+      "sites/www/drafts/calling.tsx": page(
+        "/sites/www/calling",
+        'import { api } from "sanoma/site";',
+        "return api.gone();",
+      ),
+      // Not read.
+      "sites/www/e2e/a.spec.ts": 'import { api } from "sanoma/site";\n\nexport const a = () => api.gone();\n',
+      "sites/www/components/card.stories.tsx":
+        'import { api } from "sanoma/site";\n\nexport const b = () => api.gone();\n',
+    });
+    const [www] = describeConfig(config(root)).sites;
+    expect(www!.pages).toEqual([{ path: "/sites/www" }]);
+    expect(www!.calls.map(({ file, target }) => [file, target])).toEqual([["sites/www/drafts/calling.tsx", "gone"]]);
+  });
+
+  it("marks the pages under a calling layout by its route's id: an index's only its own, a pathless or group layout's only those under it", () => {
+    const calls = 'import { api } from "sanoma/site";';
+    const root = tree("layouts", {
+      // A calling home page: its sibling is not under it.
+      "sites/home/routes/index.tsx": page("/sites/home/", calls, "return api.hello();"),
+      "sites/home/routes/about.tsx": page("/sites/home/about", "", "return null;"),
+      // A calling index: its layout and the page beside it are not.
+      "sites/home/routes/shop.tsx": page("/sites/home/shop", "", "return null;"),
+      "sites/home/routes/shop.index.tsx": page("/sites/home/shop/", calls, "return api.hello();"),
+      "sites/home/routes/shop.cart.tsx": page("/sites/home/shop/cart", "", "return null;"),
+      "sites/www/routes/index.tsx": page("/sites/www/", "", "return null;"),
+      "sites/www/routes/about.tsx": page("/sites/www/about", "", "return null;"),
+      // A calling pathless layout and a group's: the pages under each, not the home page at their path.
+      "sites/www/routes/_auth.tsx": page("/sites/www/_auth", calls, "return api.hello();"),
+      "sites/www/routes/_auth.profile.tsx": page("/sites/www/_auth/profile", "", "return null;"),
+      "sites/www/routes/(app)/route.tsx": page("/sites/www/(app)", calls, "return api.hello();"),
+      "sites/www/routes/(app)/dash.tsx": page("/sites/www/(app)/dash", "", "return null;"),
+      // A calling layout: the page under it, not one un-nested from it.
+      "sites/www/routes/posts.tsx": page("/sites/www/posts", calls, "return api.hello();"),
+      "sites/www/routes/posts.$id.tsx": page("/sites/www/posts/$id", "", "return null;"),
+      "sites/www/routes/posts_.$id.edit.tsx": page("/sites/www/posts_/$id/edit", "", "return null;"),
+    });
+    expect(describeConfig(config(root)).sites.map(({ pages }) => pages)).toEqual([
+      [
+        { path: "/sites/home", calls: true },
+        { path: "/sites/home/about" },
+        { path: "/sites/home/shop", calls: true },
+        { path: "/sites/home/shop/cart" },
+      ],
+      [
+        { path: "/sites/www" },
+        { path: "/sites/www/about" },
+        { path: "/sites/www/dash", calls: true },
+        { path: "/sites/www/posts", calls: true },
+        { path: "/sites/www/posts/$id", calls: true },
+        { path: "/sites/www/posts/$id/edit" },
+        { path: "/sites/www/profile", calls: true },
+      ],
+    ]);
+  });
+
   it("reads a page its route keeps out of the sitemap, written out, its index deciding over its layout", () => {
     const off = "staticData: { crumb: 'Off', sitemap: false }";
     const root = tree("unlisted", {
