@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { collection, collectionsFake, recordIssues } from "../src/collection.ts";
-import { converts, isBatch, previewRequests, reshape, reshaped, reshapeOf } from "../src/shared.ts";
+import { z } from "zod";
+import { collection, collectionsFake, recordIssues, recordSchemaOf } from "../src/collection.ts";
+import { jsonSchemaOf } from "../src/define.ts";
+import { converts, isBatch, isHidden, previewRequests, reshape, reshaped, reshapeOf } from "../src/shared.ts";
 import { describeConfig } from "../src/describe.ts";
 import type { ColumnType } from "../src/description.ts";
 import { defineConnector, memorySecrets, type Op, resolveConfig } from "../src/index.ts";
@@ -88,6 +90,22 @@ describe("collection()", () => {
     expect(recordIssues(deals, { company: "Acme", seats: "12" })).toEqual([
       { path: ["seats"], message: expect.any(String) },
     ]);
+    expect([isHidden(deals.fields.seats), isHidden(deals.fields.company), isHidden(undefined)]).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    // Its schema is marked deprecated, wherever the record is embedded: a form drawn from it leaves it out.
+    const embedded = jsonSchemaOf(z.object({ deal: recordSchemaOf(deals) }));
+    expect(embedded).toMatchObject({
+      properties: {
+        deal: {
+          properties: { company: { type: "string" }, seats: { type: "number", deprecated: true } },
+          required: ["company"],
+        },
+      },
+    });
+    expect(jsonSchemaOf(recordSchemaOf(outbound))).not.toHaveProperty(["properties", "seats", "deprecated"]);
   });
 
   it("makes six operations of the vendor data, each with its effect and target", () => {
@@ -282,6 +300,11 @@ describe("a column change's records", () => {
     });
     expect(reshaped({ ...record, region: "US" }, { ...size, key: "region" }).did).toBeUndefined();
     expect(reshaped(record, { ...size, field: "company" }).record).toBe(record);
+    // A removed field's value deleted, counted as cleared when it held one; nothing to delete, left alone.
+    const { seats: ___, ...noSeats } = record;
+    expect(reshaped(record, { kind: "remove", field: "seats" })).toEqual({ record: noSeats, did: "cleared" });
+    expect(reshaped(record, { kind: "remove", field: "notes" })).toEqual({ record: noNotes });
+    expect(reshaped(noSeats, { kind: "remove", field: "seats" }).record).toBe(noSeats);
   });
 
   it("count what became of the records, and plan the call from the changes that move values", () => {
@@ -311,6 +334,8 @@ describe("a column change's records", () => {
           { kind: "retype", field: "seats", from: "text", to: "number", wontConvert, decision: "clear" },
           { kind: "convert", field: "extra", key: "size", type: "number", wontConvert },
           { kind: "hide", field: "notes", filled: 2 },
+          { kind: "show", field: "owner", filled: 1 },
+          { kind: "remove", field: "legacy", filled: 3 },
         ],
       }),
     ).toEqual({
@@ -319,6 +344,7 @@ describe("a column change's records", () => {
         { kind: "rename", from: "a", to: "b" },
         { kind: "retype", field: "seats", to: "number", decision: "clear" },
         { kind: "convert", field: "extra", key: "size", type: "number" },
+        { kind: "remove", field: "legacy" },
       ],
     });
     expect(reshapeOf(undefined)).toBeUndefined();

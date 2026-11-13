@@ -289,9 +289,16 @@ export function checkCollection(declaration: { name?: unknown; key?: unknown; fi
 }
 
 /**
+ * Whether a declared field is hidden: marked `hidden: true` (always optional), removed from the
+ * app's grid and forms for everyone, its values kept. The one rule: `collection()` marks such a
+ * field's schema `deprecated` by it, and the app's grid, filters, import and forms read it.
+ */
+export const isHidden = (field: unknown): boolean => isRecord(field) && field.hidden === true;
+
+/**
  * Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, or an
- * enum of distinct strings; an optional one may be marked `hidden: true` (removed by a person: its
- * values kept, the app leaves it out of the grid and the forms; to the runtime an optional field).
+ * enum of distinct strings; an optional one may be marked `hidden: true` (`isHidden`: removed by
+ * a person, its values kept; to the runtime an optional field), so no hidden field is required.
  */
 function checkField(where: string, field: string, kind: unknown): void {
   const refused = (why: string) => new Error(`${where}: the field "${field}" ${why}`);
@@ -364,7 +371,8 @@ export const converts = (value: unknown, type: ColumnType): boolean => asType(va
 
 /**
  * What a reshape did to one record's value: moved to a new name, converted to the new type,
- * cleared or kept as it was because it cannot convert; none when it left the record alone.
+ * cleared (it cannot convert, or its field is removed) or kept as it was because it cannot
+ * convert; none when it left the record alone.
  */
 type Reshaping = "moved" | "converted" | "cleared" | "kept";
 
@@ -384,8 +392,9 @@ function without(from: Readonly<Record<string, unknown>>, key: string): Record<s
  * of it, and one that cannot convert is cleared or left as it is, by `decision` (absent: keep); a
  * conversion moves the key `key` out of the free-form object in `field` to a field of its own, only
  * where that field is empty, converted, and one that cannot convert is cleared from the object or
- * left in it. An empty value (`""`, `null`) the new type does not hold is no value to convert: it
- * is dropped, with no `did`. Pure: the app's draft counts, the driver and its tests agree through it.
+ * left in it; a removal deletes the field's value, wherever it is present. An empty value (`""`,
+ * `null`) the new type does not hold, or a removal deletes, is no value: it is dropped, with no
+ * `did`. Pure: the app's draft counts, the driver and its tests agree through it.
  */
 export function reshaped(
   record: Readonly<Record<string, unknown>>,
@@ -416,6 +425,11 @@ export function reshaped(
       if (isEmpty(value)) return { record: rest };
       return change.decision === "clear" ? { record: rest, did: "cleared" } : { record, did: "kept" };
     }
+    case "remove": {
+      if (!Object.hasOwn(record, change.field)) return { record };
+      const rest = without(record, change.field);
+      return isEmpty(record[change.field]) ? { record: rest } : { record: rest, did: "cleared" };
+    }
   }
 }
 
@@ -444,8 +458,9 @@ export function reshape(
 
 /**
  * What `sanoma.records.reshape` is called with for `plan`: its collection and its changes that bring
- * the records along (renames, retypes and conversions), each by names, target type and decision;
- * undefined for no plan or one with none (add, require, hide and link change the declaration alone).
+ * the records along (renames, retypes, conversions and removals), each by names, target type and
+ * decision; undefined for no plan or one with none (add, require, hide, show and link change the
+ * declaration alone).
  */
 export function reshapeOf(plan: TableChangePlan | undefined): ReshapeInput | undefined {
   const changes = (plan?.changes ?? []).flatMap((change): ReshapeChange[] => {
@@ -460,6 +475,8 @@ export function reshapeOf(plan: TableChangePlan | undefined): ReshapeInput | und
         const { field, key, type, decision } = change;
         return [{ kind: "convert", field, key, type, ...(decision && { decision }) }];
       }
+      case "remove":
+        return [{ kind: "remove", field: change.field }];
       default:
         return [];
     }

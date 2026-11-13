@@ -430,6 +430,36 @@ describe("sanoma.records.reshape on Postgres", () => {
     expect(await reshapeCall({ collection: "deals", changes: keep })).toMatchObject({ changed: 0, kept: 1 });
   });
 
+  it("deletes a removed field's values from every record in the same call, once, as the rest of the change", async () => {
+    const db = await pool.db();
+    await db.insert(data).values(
+      [
+        { company: "Acme", seats: "12", legacyId: "L-1" },
+        { company: "Brightwater", legacyId: "" },
+        { company: "Cedar", seats: "about 40" },
+      ].map((record) => ({ collection: "deals", key: record.company, record, updatedBy: "leon" })),
+    );
+    const removing = [
+      { kind: "retype", field: "seats", to: "number", decision: "clear" },
+      { kind: "remove", field: "legacyId" },
+    ];
+    // The empty value is no value: deleted, not counted.
+    expect(await reshapeCall({ collection: "deals", changes: removing })).toEqual({
+      rows: 3,
+      changed: 3,
+      converted: 1,
+      cleared: 2,
+      kept: 0,
+    });
+    expect(await rowsOf("deals")).toEqual([
+      { key: "Acme", record: { company: "Acme", seats: 12 }, updatedBy: "run:t" },
+      { key: "Brightwater", record: { company: "Brightwater" }, updatedBy: "run:t" },
+      { key: "Cedar", record: { company: "Cedar" }, updatedBy: "run:t" },
+    ]);
+    // Again: nothing left to delete.
+    expect(await reshapeCall({ collection: "deals", changes: removing })).toMatchObject({ changed: 0, cleared: 0 });
+  });
+
   it("writes a collection larger than one statement's chunk whole", async () => {
     const many = Array.from({ length: 1234 }, (_, i) => ({ company: `c${String(i).padStart(4, "0")}`, seats: `${i}` }));
     await (

@@ -21,6 +21,7 @@ import {
   DATA_VENDOR,
   type Deleted,
   type FIELD_TYPES,
+  isHidden,
   LIST_LIMIT,
   type ListQuery,
   qualified,
@@ -39,7 +40,8 @@ export type FieldType = (typeof FIELD_TYPES)[number];
 /**
  * A field of a collection: its type, the type marked optional, or one of a list of strings. An
  * optional one may be `hidden: true`: removed by a person, its values kept, left out of the app's
- * grid and forms; to the runtime it is an optional field like any other.
+ * grid and forms; to the runtime it is an optional field like any other, its schema marked
+ * `deprecated`, so a form drawn from any schema that embeds the record leaves it out too.
  */
 export type Field =
   | FieldType
@@ -142,6 +144,7 @@ export function collectionIn<
     Object.fromEntries(
       Object.entries(fields).map(([field, kind]) => {
         const value = field === key ? z.string().min(1) : valueSchema(kind);
+        if (isHidden(kind)) return [field, value.optional().meta({ deprecated: true })];
         return [field, isObject(kind) && kind.optional ? value.optional() : value];
       }),
     ),
@@ -301,7 +304,7 @@ export const recordsOps = defineConnector("sanoma", {
       effect: "write",
       idempotent: true,
       description:
-        "Bring a collection's records along with a change to its columns: values moved to a renamed field, converted to a new type, or cleared or kept where they cannot convert",
+        "Bring a collection's records along with a change to its columns: values moved to a renamed field, converted to a new type, cleared or kept where they cannot convert, or deleted with a removed field",
       input: ReshapeInputSchema,
       output: ReshapeOutputSchema,
       target: ({ collection: name }: { collection: string }) => `${DATA_VENDOR}:${name}`,

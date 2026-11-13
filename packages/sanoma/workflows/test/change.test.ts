@@ -301,7 +301,7 @@ describe("the change workflow", () => {
       {
         collection: "deals",
         key: "Acme",
-        record: { company: "Acme", seats: "12", touched: "2026-01-02" },
+        record: { company: "Acme", seats: "12", touched: "2026-01-02", legacy: "L-1" },
         updatedBy: "leon",
       },
       { collection: "deals", key: "Cedar", record: { company: "Cedar", seats: "about 40" }, updatedBy: "leon" },
@@ -319,6 +319,7 @@ describe("the change workflow", () => {
           to: "number",
           wontConvert: { count: 1, sample: [{ key: "Cedar", value: "about 40" }] },
         },
+        { kind: "remove", field: "legacy", filled: 1 },
       ],
     };
     const head = repo.edit("deals", { "notes/deals.md": "\n" });
@@ -326,7 +327,8 @@ describe("the change workflow", () => {
       { id: "deals", title: "Deal columns", page: page("deals"), save: head, plan },
       { startedBy: "alice" },
     );
-    const reshaped = { rows: 2, changed: 1, converted: 1, cleared: 0, kept: 1 };
+    // The removed field's value deleted with the rest, as cleared.
+    const reshaped = { rows: 2, changed: 1, converted: 1, cleared: 1, kept: 1 };
     expect(await app.client.result(runId)).toMatchObject({ outcome: "merged", reshaped, deploy: { follow: {} } });
     expect((await app.client.change("deals"))!.state).toMatchObject({ plan, merged: { reshaped } });
     // After the merge, under the run; a value that cannot convert is kept (no decision).
