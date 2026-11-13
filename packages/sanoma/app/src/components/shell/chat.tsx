@@ -24,10 +24,11 @@ import {
   enginesHere,
   enginesOf,
   isBusy,
-  isIntro,
+  lastWritten,
   MODEL_CONNECTOR,
   onModelConnector,
   textOf,
+  written,
 } from "../../lib/chat.ts";
 import { CHATS_KEY, chatModelQuery, chatQuery, chatsQuery, configQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
@@ -237,20 +238,19 @@ function Conversation({
   const lastId = last?.id ?? "";
   // The chat goes on by itself once each time the last message changes: the agent speaks first in
   // the person's first chat while it is in view (not one a page opened with a prompt), and after a
-  // sign-in it asked for, the turn is asked again, unless the turn before it ended in a sign-in too
-  // (a sign-in that does not hold would ask forever). Again means the person's last message, which
-  // the sign-in's turn did not answer, and only after a sign-in that finished here: one the chat
-  // was opened on may be old, or sent again already (in another tab, or before it was opened
-  // again). In a chat they have not written in, the agent speaks first.
+  // sign-in it asked for, the turn is asked again. Not after two sign-ins in a row (one that does
+  // not hold would ask forever), nor, once the person has written, for a card the chat was opened
+  // on (it may be old, or sent again already, in another tab or before the chat was opened again).
   const greet = first && fresh && !openedOn && !opening && model !== undefined && !cards;
-  const asked = messages.findLast((message) => message.role === "user" && !isIntro(message));
   const signedIn =
-    signedInBy(last) && !signedInBy(messages.at(-3)) && (asked === undefined || lastId !== initial.at(-1)?.id);
+    signedInBy(last) && !signedInBy(messages.at(-3)) && (lastId !== initial.at(-1)?.id || !written(messages));
   const cue = !busy && !error && (greet || signedIn);
   const acted = useRef<string>(undefined);
   const act = useEffectEvent(() => {
     if (greet && !document.getElementById("chat")?.checkVisibility()) return;
     acted.current = lastId;
+    // The person's last message, which the sign-in's turn did not answer; else the agent's cue.
+    const asked = lastWritten(messages);
     if (asked) send(textOf(asked));
     else speak(engine);
   });
