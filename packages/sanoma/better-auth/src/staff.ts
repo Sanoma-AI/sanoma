@@ -6,7 +6,9 @@ import {
   sameOrigin,
   type SignInMethod,
 } from "sanoma/workflows";
+import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import { createAuthMiddleware } from "better-auth/api";
+import { verifyJwsAccessToken } from "better-auth/oauth2";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createHash } from "node:crypto";
 import {
@@ -20,6 +22,7 @@ import {
   type User,
   withSignOutBody,
 } from "./instance.ts";
+import { declaredMetadataFetch, oauthPlugins } from "./oauth.ts";
 
 /** Says nothing: a listener for a checked-out client's `error`, whose query fails on its own. */
 const quiet = () => undefined;
@@ -49,8 +52,44 @@ const ROUTES = new Set([
   "/get-session",
 ]);
 
+const AUTHORIZE = "/oauth2/authorize";
+const TOKEN = "/oauth2/token";
+/**
+ * The OAuth provider's routes, with the app's OAuth context only (`staff.oauth`): authorize (a
+ * browser's GET), the consent the app's page posts, the token endpoint and the signing keys'
+ * public half. Not registration (no client registers: a declared agent names it), introspection,
+ * revocation or userinfo, which the provider would answer to a client's own credentials, and
+ * which no public client here has.
+ */
+const OAUTH_ROUTES = new Set([AUTHORIZE, "/oauth2/consent", TOKEN, "/jwks"]);
+
+/**
+ * The one route a non-browser client POSTs to without an `Origin`: the token endpoint (RFC 6749
+ * §3.2), its form a code and its PKCE verifier, or a refresh token, never a cookie. Every other
+ * change keeps the same-origin rule.
+ */
+const NO_ORIGIN = new Set([TOKEN]);
+
 /** The routes of the email code, which answer only when the app can send one. */
 const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
+
+/** RFC 9728's metadata for a resource at `path`: its well-known path, with the resource's path appended. */
+const RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
+/** RFC 8414's metadata for the issuer, `<origin>/auth/better-auth`: the issuer's path appended to the well-known one. */
+const SERVER_METADATA = `/.well-known/oauth-authorization-server${BASE_PATH}`;
+
+/** The app's OAuth context (`LoginContext.staff.oauth`). */
+type OAuthContext = NonNullable<NonNullable<LoginContext["staff"]>["oauth"]>;
+
+/** What `betterAuthStaffLogin` takes besides the app's context. */
+export interface StaffLoginOptions {
+  /**
+   * How a declared client's metadata document is fetched; by default `declaredMetadataFetch()`,
+   * `fetch` with redirects refused, which a Worker can do. `sanoma serve` passes
+   * `@better-auth/cimd/node`'s, which also pins the address it resolved.
+   */
+  fetchClientMetadata?: ClientMetadataResourceFetch;
+}
 
 /** What the hooks read of Better Auth's endpoint context: the route, and the rows. */
 interface HookContext {
@@ -94,9 +133,13 @@ const METHOD_OF: Record<string, SignInMethod> = {
  * (any POST) to its routes must come from the page's own origin. It runs on the pool the app
  * gives each request (`database`), and keeps nothing between requests.
  */
-export function betterAuthStaffLogin({ database, key, sendCode, staff }: LoginContext): LoginHalf {
+export function betterAuthStaffLogin(
+  { database, key, sendCode, staff }: LoginContext,
+  { fetchClientMetadata = declaredMetadataFetch() }: StaffLoginOptions = {},
+): LoginHalf {
   if (!staff) throw new Error("better-auth: the staff login needs the app's staff context");
   const github = staff.social.github;
+  const oauth = staff.oauth;
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
   const minted = new Map<string, string>();
   /** The login GitHub's profile names, by the request it came in, until `keepLogin` writes it. */
@@ -157,7 +200,12 @@ export function betterAuthStaffLogin({ database, key, sendCode, staff }: LoginCo
           },
         },
       }),
+      // The JWT plugin's own route (a session's JWT) is no client's: off, as Better Auth's docs set it.
+      disabledPaths: ["/token"],
       plugins: [
+        // Always there, for one shape of the API; without the app's OAuth context no client is
+        // declared and `handle` serves none of the provider's routes.
+        ...oauthPlugins({ agentOf: oauth?.agentOf ?? (() => undefined), fetchClientMetadata }),
         magicLink({
           expiresIn: INVITE_SECONDS,
           storeToken: "hashed",
@@ -199,6 +247,104 @@ export function betterAuthStaffLogin({ database, key, sendCode, staff }: LoginCo
     ...(github ? (["github"] as const) : []),
     "invite",
   ];
+
+  /**
+   * The well-known metadata, with the app's OAuth context: RFC 9728's for the resource (at its
+   * path, and at the root for a client that looks there), naming this login, on the request's
+   * own host, as its one authorization server; and RFC 8414's for that issuer, which the
+   * provider answers itself. Undefined for any other well-known path.
+   */
+  async function discovery(request: Request, pathname: string): Promise<Response | undefined> {
+    const { issuer, resource } = oauthOrigin(request, oauth!);
+    if (pathname === `${RESOURCE_METADATA}${oauth!.resource}` || pathname === RESOURCE_METADATA) {
+      if (request.method !== "GET" && request.method !== "HEAD")
+        return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+      return Response.json(
+        { resource, authorization_servers: [issuer], bearer_methods_supported: ["header"] },
+        { headers: { "cache-control": "public, max-age=300" } },
+      );
+    }
+    if (pathname === SERVER_METADATA) return (await authFor(request)).handler(request);
+    return undefined;
+  }
+
+  /**
+   * What authorize refuses before the provider sees it: a method but a browser's GET; a client no
+   * declared agent stands for (whose document is then never fetched), with what to declare; a
+   * resource other than this host's own. Otherwise the resource's row is made, and undefined.
+   */
+  async function authorizing(request: Request, surface: OAuthContext): Promise<Response | undefined> {
+    if (request.method !== "GET") return new Response(null, { status: 405, headers: { allow: "GET" } });
+    const query = new URL(request.url).searchParams;
+    const client = query.get("client_id") ?? "";
+    if (surface.agentOf(client) === undefined) {
+      return refusalPage(
+        403,
+        `This company declares no agent for the client ${client || "this request names"}.`,
+        `To let it act for its people, declare an agent for it in <code>resources/people.ts</code>: ` +
+          `<code>sanoma.agent({ id: "&lt;its name&gt;", client: ${escape(JSON.stringify(client))} })</code>, ` +
+          `then sign in again.`,
+      );
+    }
+    const { resource } = oauthOrigin(request, surface);
+    if (query.get("resource") !== resource) {
+      return refusalPage(
+        400,
+        "This sign-in asks for a resource this company does not serve.",
+        `Its agent surface is <code>${escape(resource)}</code>: ask for it as the <code>resource</code>.`,
+      );
+    }
+    await ensureResource(request, resource);
+    return undefined;
+  }
+
+  /**
+   * What the token endpoint refuses before the provider: a client no declared agent stands for
+   * any more (a refresh token outlives a declaration); otherwise this host's resource's row is
+   * there for the provider, and undefined.
+   */
+  async function tokenFor(request: Request, surface: OAuthContext): Promise<Response | undefined> {
+    if (request.method !== "POST") return undefined;
+    const form = new URLSearchParams(
+      await request
+        .clone()
+        .text()
+        .catch(() => ""),
+    );
+    const client = form.get("client_id");
+    if (client !== null && surface.agentOf(client) === undefined) {
+      return Response.json(
+        {
+          error: "invalid_client",
+          error_description: `No agent in this company's resources/people.ts stands for the client ${client}`,
+        },
+        { status: 400, headers: { "cache-control": "no-store" } },
+      );
+    }
+    await ensureResource(request, oauthOrigin(request, surface).resource);
+    return undefined;
+  }
+
+  /**
+   * The provider's row for `identifier`, this host's own `/mcp`, made the first time it is asked
+   * for: the provider issues a token only for a resource it has a row for, and which hosts the
+   * app answers on is the request's to say, so the rows are made as they are asked, each one this
+   * instance's own resource. Two at once make one (the identifier is unique).
+   */
+  async function ensureResource(request: Request, identifier: string): Promise<void> {
+    const { adapter } = await (await authFor(request)).$context;
+    const where = [{ field: "identifier", value: identifier }];
+    if (await adapter.findOne({ model: "oauthResource", where })) return;
+    const now = new Date();
+    await adapter
+      .create({
+        model: "oauthResource",
+        data: { identifier, name: "Agent surface", createdAt: now, updatedAt: now },
+      })
+      .catch(async (err: unknown) => {
+        if (!(await adapter.findOne({ model: "oauthResource", where }))) throw err;
+      });
+  }
 
   /** The mints of this process, one after another. */
   let mints: Promise<unknown> = Promise.resolve();
@@ -255,15 +401,58 @@ export function betterAuthStaffLogin({ database, key, sendCode, staff }: LoginCo
     },
     async handle(request) {
       const { pathname } = new URL(request.url);
+      if (oauth && pathname.startsWith("/.well-known/")) return discovery(request, pathname);
       if (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`)) return undefined;
       const route = pathname.slice(BASE_PATH.length);
-      if (!ROUTES.has(route) || (!sendCode && CODE_ROUTES.has(route)))
-        return new Response("Not found", { status: 404 });
-      if (request.method !== "GET" && !sameOrigin(request)) return new Response("Forbidden", { status: 403 });
+      const served = ROUTES.has(route) || (oauth !== undefined && OAUTH_ROUTES.has(route));
+      if (!served || (!sendCode && CODE_ROUTES.has(route))) return new Response("Not found", { status: 404 });
+      if (request.method !== "GET" && !NO_ORIGIN.has(route) && !sameOrigin(request))
+        return new Response("Forbidden", { status: 403 });
       // Any host is allowed, so Better Auth trusts any redirect: only a path on this host is taken.
       if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
+      if (oauth && route === AUTHORIZE) {
+        const refused = await authorizing(request, oauth);
+        if (refused) return refused;
+      }
+      if (oauth && route === TOKEN) {
+        const refused = await tokenFor(request, oauth);
+        if (refused) return refused;
+      }
       return (await authFor(request)).handler(withSignOutBody(request, SIGN_OUT));
     },
+    ...(oauth && {
+      async bearer(request: Request) {
+        const token = /^Bearer ([\w-]+\.[\w-]+\.[\w-]+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
+        if (!token) return null;
+        const own = await authFor(request);
+        const { issuer, resource } = oauthOrigin(request, oauth);
+        // This login's public keys, from its table (never over HTTP): a failure to read them is the
+        // app's to report, not a bad token.
+        const keys = await own.api.getJwks({ headers: request.headers });
+        let payload: Awaited<ReturnType<typeof verifyJwsAccessToken>>;
+        try {
+          // Signed with one of those keys, for this host's issuer and this host's resource alone,
+          // unexpired: jose checks `exp` and `nbf`.
+          payload = await verifyJwsAccessToken(token, {
+            jwksFetch: async () => keys,
+            verifyOptions: {
+              issuer,
+              audience: resource,
+              typ: "at+jwt",
+              requiredClaims: ["sub", "azp", "exp", "iat"],
+            },
+          });
+        } catch {
+          return null;
+        }
+        // A sender-constrained (DPoP) token is not a bearer.
+        if (payload.cnf !== undefined || typeof payload.sub !== "string" || typeof payload.azp !== "string")
+          return null;
+        // Who it is for, as their row says now: a user since removed holds nothing.
+        const user = await (await own.$context).internalAdapter.findUserById(payload.sub);
+        return user ? { subject: payload.sub, ...identityOf(user as User), client: payload.azp } : null;
+      },
+    }),
     signOut: SIGN_OUT,
     methods,
     invite: mint,
@@ -278,6 +467,24 @@ export function betterAuthStaffLogin({ database, key, sendCode, staff }: LoginCo
       return { email, path: `${BASE_PATH}/magic-link/verify?${query}` };
     },
   };
+}
+
+/** The issuer and the resource on the request's own origin: `<origin>/auth/better-auth` and `<origin><resource>`. */
+function oauthOrigin(request: Request, oauth: { resource: string }) {
+  const origin = `${protocolOf(request)}://${new URL(request.url).host}`;
+  return { issuer: `${origin}${BASE_PATH}`, resource: `${origin}${oauth.resource}` };
+}
+
+const escape = (text: string) =>
+  text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+/** A refusal a person reads in the browser they signed in with: no redirect to a client not yet checked. */
+function refusalPage(status: number, title: string, body: string): Response {
+  return new Response(
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<title>Sign-in refused</title></head><body><main><h1>${escape(title)}</h1><p>${body}</p></main></body></html>`,
+    { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
+  );
 }
 
 /** A token as the magic link plugin stores it (`storeToken: "hashed"`): SHA-256, base64url without padding. */

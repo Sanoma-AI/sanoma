@@ -491,6 +491,11 @@ export interface LoginIdentity {
   id?: string;
   email?: string;
   github?: string;
+  /**
+   * The OAuth client an access token was issued to (`LoginHalf.bearer`): the request is then the
+   * declared agent that stands for that client, acting for the person the rest names.
+   */
+  client?: string;
 }
 
 /**
@@ -560,6 +565,13 @@ export interface LoginContext {
     social: SocialClients;
     /** Tells the app of a sign-in by `method` of the person `identity` names, which the ledger records. Must not throw. */
     record(method: SignInMethod, identity: LoginIdentity): Promise<void>;
+    /**
+     * The agent surface's OAuth, when the app serves it: the path on the request's own origin
+     * that an access token is for (`/mcp`, its resource), and the declared agent that stands for
+     * an OAuth client, by the client's id (`agentOfClient`). The login is then the surface's
+     * authorization server, and refuses a client no agent stands for (`LoginHalf.bearer`).
+     */
+    oauth?: { resource: string; agentOf(client: string): string | undefined };
   };
 }
 
@@ -608,6 +620,14 @@ export interface LoginHalf {
   verify(request: Request): Promise<{ subject: string; email?: string; github?: string } | null>;
   /** Answers its own routes, `/auth/<vendor>/*`; undefined for any other request. */
   handle(request: Request): Promise<Response | undefined>;
+  /**
+   * For a login with `staff.oauth`: the access token a request carries (`Authorization: Bearer`),
+   * as the login checked it (its signature, its issuer and its audience the request's own
+   * resource, unexpired): the person it was issued for, as `verify` says one, and the OAuth
+   * client it was issued to. Null without one or for one that is not good here; never throws for
+   * a bad one.
+   */
+  bearer?(request: Request): Promise<{ subject: string; email?: string; github?: string; client: string } | null>;
   /** The path a page POSTs to sign out, which `handle` serves; the app's own Sign out POSTs it with no body. */
   signOut?: string;
   /** How a person may sign in now: what the sign-in page offers. */
