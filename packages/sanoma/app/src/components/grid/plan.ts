@@ -10,7 +10,7 @@ import {
   type TableChangePlan,
   type WontConvert,
 } from "sanoma/workflows/description";
-import { isHidden, isRecord, type LinkedKeys, linkTarget, reshaped, type Saved } from "sanoma/workflows/shared";
+import { isHidden, isRecord, type LinkedKeys, linkTarget, reshaped, type Saved, typeOf } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 // A change to a collection's columns, as a person proposes it from the grid (`ColumnChange`) and
@@ -53,19 +53,6 @@ export type ColumnChange = z.infer<typeof ColumnChange>;
 
 /** A field as `collection()` declares it. */
 type Field = CollectionEntry["fields"][string];
-
-/** A declared field's type. */
-export const typeOf = (field: Field): ColumnType =>
-  typeof field === "string"
-    ? field
-    : "enum" in field
-      ? { enum: [...field.enum] }
-      : "link" in field
-        ? { link: field.link }
-        : field.type;
-
-/** Whether a declared field is free-form (`json`): the grid shows it, the record form edits it, and nothing filters or sorts by it. */
-export const isFreeForm = (field: Field | undefined): boolean => field !== undefined && typeOf(field) === "json";
 
 /** The collection a column of `type` in `collection` links to, as the runtime names it (`linkTarget`); none for another type. */
 export const targetOf = (collection: string, type: ColumnType): string | undefined =>

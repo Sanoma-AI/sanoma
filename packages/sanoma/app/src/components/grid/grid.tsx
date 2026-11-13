@@ -1,5 +1,5 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
-import { errorMessage, linkOf, linkTarget, type ListQuery, type Saved } from "sanoma/workflows/shared";
+import { errorMessage, isFreeForm, linkOf, linkTarget, type ListQuery, type Saved } from "sanoma/workflows/shared";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useNavigate } from "@tanstack/react-router";
@@ -38,7 +38,7 @@ import { isNew, type RecordsView, savedIn, withValue } from "./collection.ts";
 import { BY, ColumnMenu, HEADS, NewColumnLink, readWidths, UPDATED, writeWidths } from "./columns.tsx";
 import { type Conflict, conflictId, ConflictRow } from "./conflicts.tsx";
 import { useGestures } from "./gestures.ts";
-import { isFreeForm, shownFields } from "./plan.ts";
+import { shownFields } from "./plan.ts";
 import { typedCharacter, useGridKeys } from "./keys.ts";
 import { HeldBar, ReviewCard, STAGED_FIRST, StagedBar, StagedNote, useStagedChange } from "./staged.tsx";
 

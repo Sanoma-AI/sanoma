@@ -21,14 +21,18 @@ import {
   DATA_VENDOR,
   type Deleted,
   type FIELD_TYPES,
+  isFreeForm,
   isHidden,
   isRecord,
   linkOf,
   linkTarget,
   LIST_LIMIT,
+  type MissingLink,
+  missingText,
   type ListQuery,
   qualified,
   type Saved,
+  typeOf,
 } from "./shared.ts";
 
 // A company's own records: a collection is declared with plain values (a name, a key and typed
@@ -452,10 +456,6 @@ export interface Listing {
   limit: number;
 }
 
-/** Whether a declared field is free-form (`json`). */
-const isFreeForm = (kind: Field) =>
-  kind === "json" || (typeof kind === "object" && "type" in kind && kind.type === "json");
-
 /** What a field's values are in JSON: `number`, `boolean`, or a `string` (text, a date, a person, an enum value, a link). */
 export type JsonType = "string" | "number" | "boolean";
 
@@ -463,8 +463,8 @@ export type JsonType = "string" | "number" | "boolean";
 export const jsonTypesOf = (c: Collection): Record<string, JsonType> =>
   Object.fromEntries(
     Object.entries(c.fields).flatMap(([name, kind]) => {
-      if (isFreeForm(kind)) return [];
-      const type = typeof kind === "string" ? kind : "type" in kind ? kind.type : "text";
+      const type = typeOf(kind);
+      if (type === "json") return [];
       return [[name, type === "number" || type === "boolean" ? type : "string"]];
     }),
   );
@@ -493,14 +493,6 @@ export function linkedKeys(c: Collection, records: readonly Record<string, unkno
   return wanted;
 }
 
-/** A link of a record whose record is not there: the record's key, the field, the key it links to, and the collection. */
-export interface MissingLink {
-  key: string;
-  field: string;
-  value: string;
-  target: string;
-}
-
 /** Each link of `records` whose record `found` lacks (the keys there, by collection). */
 export function missingLinks(
   c: Collection,
@@ -516,9 +508,6 @@ export function missingLinks(
     }),
   );
 }
-
-/** A missing link, as a sentence: what a save refusal and a read's issue say. */
-const missingText = ({ value, target }: MissingLink) => `${target} has no record "${value}"`;
 
 /**
  * The refusal of a save whose links name records that are not there, carrying each (`missing`):

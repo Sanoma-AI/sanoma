@@ -2,7 +2,8 @@ import type { AuthenticationStoreProblem } from "./authentication.ts";
 import type { RunSummary } from "./client.ts";
 import type { CredentialStatus } from "./env.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
-import type { OpEntry, WorkflowEntry } from "./describe.ts";
+import type { CollectionEntry, OpEntry, WorkflowEntry } from "./describe.ts";
+import type { Field } from "./collection.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Effect } from "./op.ts";
 import type { PreviewRequest } from "./policy.ts";
@@ -312,6 +313,31 @@ export function linkTarget(collection: string, link: string): string {
 export const linkOf = (field: unknown): string | undefined =>
   isRecord(field) && typeof field.link === "string" ? field.link : undefined;
 
+/** A link of a record whose record is not there: the record's key, the field, the key it links to, and the collection. */
+export interface MissingLink {
+  key: string;
+  field: string;
+  value: string;
+  target: string;
+}
+
+/** A missing link, as a sentence: what a save refusal, an import's refused row and a read's issue say. */
+export const missingText = ({ value, target }: MissingLink) => `${target} has no record "${value}"`;
+
+/** A declared field's type, as a column change names it: what the runtime's replay guard and the app's column panel compare. */
+export const typeOf = (field: Field | CollectionEntry["fields"][string]): ColumnType =>
+  typeof field === "string"
+    ? field
+    : "enum" in field
+      ? { enum: [...field.enum] }
+      : "link" in field
+        ? { link: field.link }
+        : field.type;
+
+/** Whether a declared field is free-form (`json`): `list` neither compares nor sorts by it, and the grid edits it in the record form. */
+export const isFreeForm = (field: Field | CollectionEntry["fields"][string] | undefined): boolean =>
+  field !== undefined && typeOf(field) === "json";
+
 /**
  * Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, an
  * enum of distinct strings, or a link to another collection by its name (`{ link }`, a collection
@@ -515,6 +541,7 @@ export function linkValues(
   changes: readonly ReshapeChange[],
 ): Map<string, Set<string>> {
   const asked = new Map(linksIn(changes).map((link) => [link, new Set<string>()]));
+  if (!asked.size) return asked;
   const keys: LinkedKeys = new Map(
     [...asked].map(([link, values]) => [link, { has: (value: string) => values.add(value).has(value) }]),
   );

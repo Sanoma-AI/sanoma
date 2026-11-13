@@ -1,7 +1,7 @@
 import type { PatchOutput } from "sanoma/workflows";
 import type { CollectionEntry } from "sanoma/workflows/describe";
 import type { ColumnType, ConvertDecision, TableChangePlan } from "sanoma/workflows/description";
-import { changeIdOf, errorMessage, FIELD_NAME, type Saved } from "sanoma/workflows/shared";
+import { changeIdOf, errorMessage, FIELD_NAME, linkTarget, type Saved, typeOf } from "sanoma/workflows/shared";
 import { deepEquals } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -39,18 +39,7 @@ import {
 } from "../../queries.ts";
 import { ButtonLink, CardHeading, Notice, plural, ToneBadge } from "../common.tsx";
 import { FROM } from "../data-grid.tsx";
-import {
-  ColumnChange,
-  DECIDED,
-  DOES,
-  happens,
-  keysIn,
-  landed,
-  problemOf,
-  requiredOf,
-  typeOf,
-  typeWords,
-} from "./plan.ts";
+import { ColumnChange, DECIDED, DOES, happens, keysIn, landed, problemOf, requiredOf, typeWords } from "./plan.ts";
 import { WontConvertSample } from "./review.tsx";
 
 // A collection's columns from its grid: each field's menu on its heading (Rename, Change type,
@@ -297,11 +286,10 @@ export function ColumnPanel({
   }[column.change];
   const parsed = ColumnChange.safeParse(intent);
   const problem = parsed.success ? problemOf(collection, parsed.data, tables) : parsed.error.issues[0]?.message;
-  // The tables a link may link to: those of the collection's folder, by name as written.
-  const folder = collection.app === undefined ? "" : `${collection.app}.`;
+  // The tables a link may link to: those of the collection's folder, by name as written (`linkTarget`'s inverse).
   const linkable = tables.flatMap((table) => {
-    const written = table.slice(folder.length);
-    return table.startsWith(folder) && !written.includes(".") ? [written] : [];
+    const written = table.slice(table.lastIndexOf(".") + 1);
+    return linkTarget(collection.name, written) === table ? [written] : [];
   });
   const unchanged =
     (column.change === "rename" && name === field) ||

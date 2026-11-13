@@ -6,6 +6,7 @@ import {
   CALL_WORKFLOW,
   errorMessage,
   isEnded,
+  isFreeForm,
   isHidden,
   LIST_LIMIT,
   type ListQuery,
@@ -79,7 +80,7 @@ import {
   startRunFn,
 } from "./functions.ts";
 import type { UntypedApi } from "./api-client.ts";
-import { type ColumnChange, isFreeForm } from "./components/grid/plan.ts";
+import type { ColumnChange } from "./components/grid/plan.ts";
 import { api } from "./site-api.ts";
 
 /**

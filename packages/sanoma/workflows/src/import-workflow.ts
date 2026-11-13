@@ -12,7 +12,15 @@ import {
   mappingProblems,
 } from "./import.ts";
 import type { Op } from "./op.ts";
-import { type Deleted, type IMPORT_WORKFLOW, LIST_LIMIT, type Saved, writtenName } from "./shared.ts";
+import {
+  type Deleted,
+  type IMPORT_WORKFLOW,
+  LIST_LIMIT,
+  type MissingLink,
+  missingText,
+  type Saved,
+  writtenName,
+} from "./shared.ts";
 
 // The built-in `import` workflow: a sheet's rows into a collection, as a run of the person who
 // started it (the app's Import pages). Its rows are read the way the page read them (`importRows`
@@ -62,12 +70,10 @@ function refusedBy(err: unknown): Map<string, string> | undefined {
   const { data, conflicts, missing } = (err ?? {}) as {
     data?: { deniedFor?: Record<string, string> };
     conflicts?: { key: string }[];
-    missing?: { key: string; field: string; value: string; target: string }[];
+    missing?: MissingLink[];
   };
   if (vendorCodeOf(err) === "link_missing" && missing?.length) {
-    return new Map(
-      missing.map(({ key, field, value, target }) => [key, `${field}: ${target} has no record "${value}"`]),
-    );
+    return new Map(missing.map((m) => [m.key, `${m.field}: ${missingText(m)}`]));
   }
   if (errorCode(err) === "policy_denied" && data?.deniedFor) {
     return new Map(Object.entries(data.deniedFor).map(([key, why]) => [key, `the policy denies saving it: ${why}`]));

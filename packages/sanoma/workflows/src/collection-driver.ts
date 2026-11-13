@@ -57,15 +57,8 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
       );
     /** The rows as `get` and `list` answer them: a link to a record that is not there among their issues. */
     const answered = async (db: Db, rows: Row[]) => {
-      const found = linked
-        ? await foundOn(
-            db,
-            linkedKeys(
-              c,
-              rows.map((row) => row.record),
-            ),
-          )
-        : undefined;
+      const records = rows.map((row) => row.record);
+      const found = linked ? await foundOn(db, linkedKeys(c, records)) : undefined;
       return rows.map((row) => saved(row, found));
     };
     /**
@@ -79,10 +72,8 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
     };
     const here = (key: string) => and(eq(data.collection, c.name), eq(data.key, key));
     /** The record on `db`, as `get` answers it and a refused save or delete carries it (`current`). */
-    const getOn = async (db: Db, key: string) => {
-      const [row] = await db.select(COLUMNS).from(data).where(here(key));
-      return row ? saved(row) : null;
-    };
+    const getOn = async (db: Db, key: string) =>
+      (await answered(db, await db.select(COLUMNS).from(data).where(here(key))))[0] ?? null;
     /** One save on `db`, as `save` makes it and a batch makes each of its records. */
     const saveOn = async (db: Db, { record, ifAbsent, ifRecord }: SaveInput, by: string) => {
       const key = record[c.key] as string;
@@ -129,11 +120,7 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
       throw recordChanged(current);
     };
     const ops: Record<string, (input: any, call: CallContext) => Promise<unknown>> = {
-      get: async ({ key }: { key: string }) => {
-        const db = await store.db();
-        const rows = await db.select(COLUMNS).from(data).where(here(key));
-        return (await answered(db, rows))[0] ?? null;
-      },
+      get: async ({ key }: { key: string }) => getOn(await store.db(), key),
       list: async (listing: Listing) => {
         const { where, order } = listClauses(c, listing);
         const db = await store.db();

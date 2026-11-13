@@ -49,15 +49,18 @@ async function planned(app: AppContext, actor: Principal, { collection: name, ch
   );
   if (problem) throw refuse(problem);
   const api: UntypedApi = createApi((request) => callApi(app, actor, request));
-  const rows = await everyRecord(api, name, collection.key);
-  const left = leftOver(rows, change);
-  if (left) throw refuse(left);
-  // A change to a link: the values matched against the keys of the collection it links to.
+  // A change to a link: the values matched against the keys of the collection it links to, read beside the records.
   const type = change.kind === "retype" ? change.to : change.kind === "convert" ? change.type : undefined;
   const target = type && collections.find((c) => c.name === targetOf(name, type));
+  const [rows, linked] = await Promise.all([
+    everyRecord(api, name, collection.key),
+    target && everyRecord(api, target.name, target.key),
+  ]);
+  const left = leftOver(rows, change);
+  if (left) throw refuse(left);
   const keys =
-    target && typeof type === "object" && "link" in type
-      ? new Map([[type.link, new Set((await everyRecord(api, target.name, target.key)).map((row) => row.key))]])
+    linked && typeof type === "object" && "link" in type
+      ? new Map([[type.link, new Set(linked.map((row) => row.key))]])
       : undefined;
   return { api, collection, at: declared.at, plan: planOf(collection, rows, change, keys) };
 }

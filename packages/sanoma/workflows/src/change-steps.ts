@@ -39,6 +39,7 @@ import {
   errorMessage,
   mayDecide,
   reshapeOf,
+  typeOf,
 } from "./shared.ts";
 import type { CheckResult, RemoteHalf } from "./source.ts";
 
@@ -374,15 +375,6 @@ export function stillMade(fields: Readonly<Record<string, Field>>, changes: read
   return [...made].every(([name, wanted]) => {
     const field = Object.hasOwn(fields, name) ? fields[name] : undefined;
     if (wanted === "gone" || field === undefined) return wanted === "gone" && field === undefined;
-    if (wanted === "declared") return true;
-    const type =
-      typeof field === "string"
-        ? field
-        : "enum" in field
-          ? { enum: [...field.enum] }
-          : "link" in field
-            ? { link: field.link }
-            : field.type;
-    return isDeepStrictEqual(type, wanted);
+    return wanted === "declared" || isDeepStrictEqual(typeOf(field), wanted);
   });
 }
