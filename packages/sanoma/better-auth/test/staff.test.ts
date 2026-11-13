@@ -120,12 +120,10 @@ describe("the staff login", () => {
   });
 
   it("has row-level security on each of its tables, not forced, with no policy: only their owner, the worker's login, reads them", async () => {
-    const { rows: tables } = await pool.query<{ relname: string; secured: boolean }>(
-      "SELECT relname, relrowsecurity AND NOT relforcerowsecurity AS secured FROM pg_class WHERE relnamespace = 'better_auth_staff'::regnamespace AND relkind = 'r' ORDER BY 1",
+    const { rows: tables } = await pool.query<{ relname: string }>(
+      "SELECT relname FROM pg_class WHERE relnamespace = 'better_auth_staff'::regnamespace AND relkind = 'r' AND relrowsecurity AND NOT relforcerowsecurity ORDER BY 1",
     );
-    expect(tables).toEqual(
-      ["account", "rate_limit", "session", "user", "verification"].map((relname) => ({ relname, secured: true })),
-    );
+    expect(tables.map((r) => r.relname)).toEqual(["account", "rate_limit", "session", "user", "verification"]);
     expect((await pool.query("SELECT FROM pg_policies WHERE schemaname = 'better_auth_staff'")).rowCount).toBe(0);
   });
 

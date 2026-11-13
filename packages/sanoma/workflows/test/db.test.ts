@@ -225,14 +225,15 @@ describe("underPreparationLock", () => {
 });
 
 describe("row-level security", () => {
-  it("is on, with no policy, on every table the migrations make: their owner reads and writes, another role granted everything reads no row and changes none", async () => {
+  it("is on, with no policy, on every table the migrations make: their owner reads and writes, another role granted everything reads no row and inserts, updates or deletes none", async () => {
     // A login that is no superuser makes the tables and so owns them, as a hosted company's does
     // (Neon's `neondb_owner`, Supabase's `postgres`); a second login is granted every privilege on
     // them, as Supabase grants its API's roles. Schemas and roles only: dropping a database waits
     // for a checkpoint.
     const url = testDatabaseUrl("db_rls");
     const name = decodeURIComponent(new URL(url).pathname.slice(1));
-    const [owner, other] = [`${name}_owner`, `${name}_other`];
+    // Roles are the cluster's: named after the database, cut to fit Postgres's 63 bytes.
+    const [owner, other] = [`${name.slice(0, 57)}_owner`, `${name.slice(0, 57)}_other`];
     const password = randomUUID();
     const as = (role: string) => Object.assign(new URL(url), { username: role, password }).href;
     const admin = await connectMaking(url);
@@ -278,7 +279,7 @@ describe("row-level security", () => {
       expect(await readRunChecks(ownerDb, "run-1")).toEqual({ error: "none yet" });
 
       // Another role, granted every privilege, reads no row of any table and inserts, updates and
-      // deletes none (TRUNCATE is not row-level, so a grant of it is not stopped).
+      // deletes none (TRUNCATE, TRIGGER and REFERENCES are not row-level: a grant of them is not stopped).
       await ownerPool.query(
         `GRANT USAGE ON SCHEMA public TO "${other}"; GRANT ALL ON ALL TABLES IN SCHEMA public TO "${other}"`,
       );
@@ -296,8 +297,7 @@ describe("row-level security", () => {
       expect(await readRunChecks(ownerDb, "run-1")).toEqual({ error: "none yet" });
     } finally {
       await Promise.all([ownerPool.end(), otherPool.end()]);
-      await reset();
-      await admin.end();
+      await reset().finally(() => admin.end());
     }
   });
 });
