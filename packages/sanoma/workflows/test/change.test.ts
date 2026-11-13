@@ -62,7 +62,7 @@ describe("the change workflow", () => {
   const databaseUrl = freshDatabase("change");
   const app = useTestApp(
     { workflows: [waits], connectors: [remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl, source: repo.source },
+    { databaseUrl, source: repo.source, app: repo.app },
   );
   const pool = lazyDb(databaseUrl, "change test");
   afterAll(async () => {
@@ -410,12 +410,16 @@ describe("the change workflow", () => {
     await app.client.result(runId);
   });
 
-  it("reports failing checks on the host, and still asks Publish", async () => {
+  it("reports failing checks on the host, and still asks Publish: no box for the check is one problem, shown", async () => {
     const head = repo.edit("unchecked", { "notes/unchecked.md": "\n" });
-    repo.checks("unchecked", { ok: false, problems: [], warnings: [] });
+    // As the app's check answers on a live instance that declares no box: a result, not a failed run.
+    const noBox = { ok: false, problems: ["sanoma check: this company declares no box"], warnings: [] };
+    repo.checks("unchecked", noBox);
     const runId = await open("unchecked");
     await waitFor(pending(() => app.client, runId));
-    expect((await app.client.change("unchecked"))!.state.facts).toMatchObject({ checksOk: false });
+    const { state } = (await app.client.change("unchecked"))!;
+    expect(state.facts).toMatchObject({ checksOk: false });
+    expect(state.check).toEqual(noBox);
     expect(remote.statuses.at(-1)).toMatchObject({
       sha: head,
       state: "failure",
@@ -442,7 +446,7 @@ describe("the change workflow on a repository with no remote", () => {
   const repo = memorySource({ root: here });
   const app = useTestApp(
     { workflows: [], connectors: [], ledger: memoryLedger(), root },
-    { databaseUrl: freshDatabase("change-local"), source: repo.source },
+    { databaseUrl: freshDatabase("change-local"), source: repo.source, app: repo.app },
   );
   afterAll(() => repo.remove());
 
@@ -461,7 +465,7 @@ describe("the change workflow's deploy on a declared host", () => {
   const repo = memorySource({ root: here, remote });
   const app = useTestApp(
     { workflows: [], connectors: [host.connector, remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl: freshDatabase("change-deploy"), source: repo.source },
+    { databaseUrl: freshDatabase("change-deploy"), source: repo.source, app: repo.app },
   );
   beforeAll(() => source.commit());
   afterAll(async () => {
@@ -541,7 +545,7 @@ describe("a change whose deploy starts the worker again", () => {
   const databaseUrl = freshDatabase("change-reload");
   const app = useTestApp(
     { workflows: [], connectors: [host.connector, remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl, source: moving, reload: () => reload() },
+    { databaseUrl, source: moving, app: repo.app, reload: () => reload() },
   );
   const pool = lazyDb(databaseUrl, "change reload test");
   beforeAll(() => source.commit());

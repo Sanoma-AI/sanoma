@@ -4,6 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  type AppSteps,
   type CheckResult,
   defineConnector,
   draftBranch,
@@ -261,8 +262,8 @@ export type FakeRemote = ReturnType<typeof fakeRemote>;
  * A company's repository in memory, at `root` (its live checkout, where nothing is written), its
  * `origin` the fake host's `url` (none when `remote` is not given). Each draft is a directory of
  * its own holding the files `edit` writes, on the branch `draft/<id>`, its head moved by each edit;
- * `diff` names the files edited. `push` puts a branch's head on the host; `check` answers `checks`
- * (ok by default) and counts each; `follow` and `closeDraft` record their calls, and `follow`
+ * `diff` names the files edited. `push` puts a branch's head on the host; `app`, the app's steps
+ * a worker over it is given, has `check` alone, which answers `checks` (ok by default) and counts each; `follow` and `closeDraft` record their calls, and `follow`
  * answers `followed` (the host's branch, by default; a draft's branch moves the draft's head to it);
  * `behind` answers what `behindBy` holds for an app (0 by default; an error, thrown).
  */
@@ -326,10 +327,6 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
       closed.push(id);
       drafts.delete(id);
     },
-    async check(id) {
-      checked.push(id);
-      return checks.get(id) ?? { ok: true, problems: [], warnings: [] };
-    },
     remoteUrl: async () => remote?.url,
     async follow(target) {
       follows.push(target);
@@ -348,8 +345,17 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
     },
   };
 
+  // The app's check of a draft, as the box would answer it; the worker's other app steps are never run.
+  const app = {
+    async check(_step, { id }) {
+      checked.push(id);
+      return checks.get(id) ?? { ok: true, problems: [], warnings: [] };
+    },
+  } as Pick<AppSteps, "check"> as AppSteps;
+
   return {
     source,
+    app,
     checked,
     follows,
     closed,

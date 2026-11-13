@@ -4,11 +4,13 @@ import {
   harnessStateDirectoryPath,
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
-import { type AppStepContext, type Box, type Process, valueAt } from "sanoma/workflows";
+import { type AppStepContext, type Box, type CheckResult, type Process, valueAt } from "sanoma/workflows";
+import { errorMessage } from "sanoma/workflows/shared";
 import { DECLARE_BOX } from "../../api.ts";
-import { noKeyText } from "../../lib/chat.ts";
+import { errorParts, noKeyText } from "../../lib/chat.ts";
 import { placeOf } from "../../loopback.ts";
 import { secretValues } from "../../server/secrets.ts";
+import { boxTurn, carryIn, checkFailed, checkIn } from "./carrier.ts";
 import { agentHome, boxName, inCheckout, type RealPaths, realIn, under, within } from "./checkout.ts";
 import { localBackend } from "./local-box.ts";
 
@@ -77,6 +79,35 @@ export async function personBox(
   if (placeOf(resolved.databaseUrl) === "live") throw new Error(NO_BOX);
   // This machine is the local box's image and size.
   return { name, open: () => localBackend(agentHome(step, "boxes")).open({ name }) };
+}
+
+/**
+ * `sanoma check` on the draft `id` in the box of the person `step` is run by (`personBox`), once
+ * that box is free: the draft carried into its clone (`carryIn`), then checked there (`checkIn`),
+ * never on this instance. Publish's (`AppSteps.check`) and our loop's `run_checks`; a coding
+ * agent's turn checks in the box it already has. No box (`NO_BOX`), or one that fails, is a
+ * result of one problem saying why. `step.signal` stops it.
+ */
+export async function checkDraft(
+  step: Pick<AppStepContext, "source" | "resolved" | "by" | "client"> & { signal?: AbortSignal },
+  { id }: { id: string },
+): Promise<CheckResult> {
+  const { signal } = step;
+  try {
+    const person = await personBox(step);
+    return await boxTurn(
+      person.name,
+      person.open,
+      async (box) => {
+        await carryIn(box, step.source, id, { home: await homeOf(box), signal });
+        return checkIn(box, { signal });
+      },
+      { wait: true },
+    );
+  } catch (err) {
+    // The connector page `NO_BOX` names is the chat's to link.
+    return checkFailed(errorParts(errorMessage(err)).text);
+  }
 }
 
 /** The box's home, `$HOME` as its commands see it. */

@@ -86,7 +86,13 @@ describe("carrying built-in runs onto a new version", () => {
 
   /** A worker on `config`, the app's latest: a deploy's worker is the newest version. */
   const start = async (config: SanomaConfig, options: { logLevel?: string } = {}) => {
-    const worker = await startTestWorker(config, { databaseUrl, source: repo.source, promote: true, ...options });
+    const worker = await startTestWorker(config, {
+      databaseUrl,
+      source: repo.source,
+      app: repo.app,
+      promote: true,
+      ...options,
+    });
     workers.push(worker);
     return worker;
   };

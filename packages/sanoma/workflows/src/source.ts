@@ -81,12 +81,6 @@ export interface Source {
    * a fast-forward that leaves what the checkout holds uncommitted in place. The branch's head after.
    */
   unbundle?(id: string, bytes: Uint8Array): Promise<{ head: string }>;
-  /**
-   * `sanoma check` on the draft `id`, as a child in its checkout, one at a time in the process. A
-   * check that gives no result (a config that does not load, no install, a timeout) is a result
-   * of one problem saying why.
-   */
-  check?(id: string): Promise<CheckResult>;
   /** The URL of the repository this one was cloned from (`origin`); undefined when it has none. */
   remoteUrl?(): Promise<string | undefined>;
   /**

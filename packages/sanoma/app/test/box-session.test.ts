@@ -17,7 +17,7 @@ import {
 } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { acpEngine } from "../src/steps/agent/acp.ts";
-import { boxSession, homeOf, NO_BOX, personBox } from "../src/steps/agent/box-session.ts";
+import { boxSession, checkDraft, homeOf, NO_BOX, personBox } from "../src/steps/agent/box-session.ts";
 import { boxName } from "../src/steps/agent/checkout.ts";
 import { harnessEngine } from "../src/steps/agent/harness.ts";
 import { freePort, localBackend } from "../src/steps/agent/local-box.ts";
@@ -253,13 +253,19 @@ describe("personBox", () => {
     expect(await homeOf(await chosen.open())).toBe(join(base, ".sanoma/agent-home/boxes", boxName("acme", "ada")));
   });
 
-  it("refuses both engines' turns on a live instance that declares none, saying what to declare, before any draft", async () => {
+  it("refuses both engines' turns on a live instance that declares none, saying what to declare, before any draft, and makes its check one problem", async () => {
     // Pi's and Copilot's connectors, which give the engines their agents.
     const resolved = resolveConfig({ workflows: [], connectors: [pi, github], root: company(), databaseUrl: LIVE });
     await expect(personBox({ resolved, by, client: undefined as never })).rejects.toThrow(NO_BOX);
-    expect(NO_BOX).toBe(
-      "Coding agents work in a box of their own on a live instance, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY [connector:agent37]",
-    );
+    const declare =
+      "Coding agents work in a box of their own on a live instance, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY";
+    expect(NO_BOX).toBe(`${declare} [connector:agent37]`);
+    // Publish's check and run_checks: a result the cards show, never run here.
+    expect(await checkDraft({ resolved, by, client: undefined as never }, { id: "d1" })).toEqual({
+      ok: false,
+      problems: [`sanoma check: ${declare}`],
+      warnings: [],
+    });
     const step = { resolved, by, signal: new AbortController().signal } as unknown as ChatTurnContext;
     const turn = { step, chat: { id: "c" } as Chat, messages: [] };
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

@@ -191,8 +191,7 @@ async function dropDatabases() {
   const client = new Client({ connectionString: url.href, connectionTimeoutMillis: 10_000, query_timeout: 120_000 });
   await client.connect();
   try {
-    for (const db of [name, `${name}_check`])
-      await client.query(`DROP DATABASE IF EXISTS "${db.replaceAll('"', '""')}" WITH (FORCE)`);
+    await client.query(`DROP DATABASE IF EXISTS "${name.replaceAll('"', '""')}" WITH (FORCE)`);
   } finally {
     await client.end();
   }

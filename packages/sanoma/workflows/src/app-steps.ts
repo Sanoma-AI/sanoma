@@ -1,14 +1,15 @@
-import { DBOS } from "@dbos-inc/dbos-sdk";
+import { DBOS, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import type { ApplyReport } from "./apply.ts";
 import type { AppAction, AppRunner, AppStepContext, AppSteps } from "./app-workflows.ts";
 import type { ResolvedConfig, SanomaConfig } from "./config.ts";
-import { child } from "./change-steps.ts";
+import { causes, isRunControlError } from "./errors.ts";
 import { type Run, runNow } from "./run.ts";
-import { APPLY_WORKFLOW } from "./shared.ts";
+import { APPLY_WORKFLOW, errorMessage } from "./shared.ts";
 
 // The app's built-ins' steps (`app-workflows.ts` is held to the workflow lint and imports no
 // DBOS): each app step in a DBOS step of its own, given what the worker has (`WorkerState.appSteps`),
-// and the apply after it started as a child run. Each reads its run from `currentRun`.
+// and the apply after it started as a child run (`child`, the change workflow's deploy's too).
+// Each reads its run from `currentRun`.
 
 /** What a worker started with the app's steps keeps for them (`WorkerState.appSteps`). */
 export interface WorkerApp {
@@ -26,6 +27,35 @@ export function appStepsOf(run: Run, missing: string): WorkerApp {
   const app = run.state.appSteps;
   if (!app) throw new Error(missing);
   return app;
+}
+
+/**
+ * Starts a run of the built-in `name` as a child of this one, with the id `<run>:<suffix>` (so a
+ * replay finds it), as the run's own actor, and waits for its output, counted as a wait for
+ * another run: undefined and the error's message when it failed, or was cancelled (a worker on a
+ * new version cancels an apply started on other code, `carryBuiltInRuns`).
+ */
+export async function child(
+  run: Run,
+  name: string,
+  suffix: string,
+  input: unknown,
+): Promise<{ runId: string; output?: unknown; error?: string }> {
+  const runId = `${run.id}:${suffix}`;
+  const handle = await run.state.startRun(name, runId, {
+    input,
+    startedBy: run.actor,
+    ...(run.sandbox !== undefined && { sandbox: run.sandbox }),
+  });
+  try {
+    return { runId, output: await run.state.deadlines.waiting(run.id, { kind: "run" }, () => handle.getResult()) };
+  } catch (err) {
+    // The child's cancellation, not this run's own (`DBOSWorkflowCancelledError`, which ends it).
+    if (causes(err).some((e) => e instanceof DBOSErrors.DBOSAwaitedWorkflowCancelledError))
+      return { runId, error: "it was cancelled: the worker restarted on a new version before it ended" };
+    if (isRunControlError(err)) throw err;
+    return { runId, error: errorMessage(err) };
+  }
 }
 
 /** What the run's app step is given (`AppStepContext`): the worker's own client, connected on first use, and what the worker has. */

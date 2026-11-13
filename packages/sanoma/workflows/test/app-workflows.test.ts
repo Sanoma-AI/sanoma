@@ -130,6 +130,9 @@ describe("on a worker given the app's steps", () => {
       if (input.title === "Refused") throw new SanomaError("invalid_input", "No draft of yours is d1");
       return { revision: "1111111111111111", files: ["workflows/welcome.ts"], running: true };
     },
+    check: async () => {
+      throw new Error("No checks here");
+    },
     chat: async () => {
       throw new Error("No chat turns here");
     },

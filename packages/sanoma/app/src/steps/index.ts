@@ -1,4 +1,5 @@
 import type { AppSteps } from "sanoma/workflows";
+import { checkDraft } from "./agent/box-session.ts";
 import { chat } from "./agent/turn.ts";
 import { connectExisting } from "./connect.ts";
 import { goLive, goLiveHost } from "./go-live.ts";
@@ -20,5 +21,6 @@ export const appSteps: AppSteps = {
   pushCloud,
   connectExisting,
   saveDraft,
+  check: checkDraft,
   chat,
 };

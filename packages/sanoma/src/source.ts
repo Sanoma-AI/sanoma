@@ -17,7 +17,6 @@ import { promisify } from "node:util";
 import {
   type AppMerge,
   appSourceOf,
-  type CheckResult,
   type Draft,
   draftBranch,
   draftOf,
@@ -26,7 +25,6 @@ import {
   type Source,
 } from "sanoma/workflows";
 import { APP_NAME, COMMIT_ID } from "sanoma/workflows/shared";
-import type { SanomaEvent } from "./events.ts";
 
 const run = promisify(execFile);
 
@@ -254,8 +252,7 @@ async function keepOurs(cwd: string, paths: string[]): Promise<void> {
  * repository by its URL with a token, and follows one there (a fast-forward). A draft is a git
  * worktree at `<root>/.sanoma/drafts/<id>` on the branch `draft/<id>`, with the root's
  * `node_modules` linked into it; `git worktree list` is the one record of which are open. A
- * draft's `sanoma check` runs on `<databaseUrl>_check` (the launcher's database when it is not given).
- * A draft takes an app (`git merge --allow-unrelated-histories` of its source) and updates one
+ * draft takes an app (`git merge --allow-unrelated-histories` of its source) and updates one
  * (a merge of its source's default branch); `behind` fetches an app's source into the checkout.
  * A draft's branch travels to an agent box's clone and back as a git bundle (`bundle`, `unbundle`).
  * A draft is saved (`merge`) at the commit given as one commit on the checked-out branch, its
@@ -264,7 +261,7 @@ async function keepOurs(cwd: string, paths: string[]): Promise<void> {
  * closed in the same git write; a saved commit is undone (`revert`) by a `git revert` committed in
  * a draft, saved the same way; `pushOrigin` pushes the checked-out branch with git's own sign-in.
  */
-export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: string } = {}): Source {
+export function localGitSource(root: string): Source {
   const git = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(root, args, env);
   /** The commit `ref` names, in the checkout at `cwd` (the root's by default). */
   const head = (ref = "HEAD", cwd = root) => gitIn(cwd, ["rev-parse", "--verify", `${ref}^{commit}`]);
@@ -320,10 +317,9 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         throw err;
       }),
     follow: async ({ url, token, ref }) => {
-      // A draft's branch is checked out in the draft's own checkout, and moves under no check running in it.
+      // A draft's branch is checked out in the draft's own checkout.
       const id = draftOf(ref);
       const cwd = id !== undefined && DRAFT_ID.test(id) && (await listed()).get(id) ? draftAt(id) : root;
-      await checkingAt.get(cwd);
       return serial(async () => {
         const gitHere = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(cwd, args, env);
         const on = await gitHere(["branch", "--show-current"]);
@@ -407,11 +403,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         },
       };
     },
-    closeDraft: async (id) => {
-      // Not under a check still running in it.
-      await checkingAt.get(draftAt(id));
-      return serial(() => close(id));
-    },
+    closeDraft: (id) => serial(() => close(id)),
     async bundle(id, { since } = {}) {
       const ref = `refs/heads/${branchOf(id)}`;
       // A commit the clone says it has, by its id alone, that this repository has too; else the whole branch.
@@ -435,8 +427,6 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
     async unbundle(id, bytes) {
       const [branch, at] = [branchOf(id), draftAt(id)];
       if (!(await listed()).get(id)) throw new Error(`The draft ${id} is not open`);
-      // Its branch moves under no check running in it.
-      await checkingAt.get(at);
       return inTemp(async (file) => {
         await writeFile(file, bytes);
         return serial(async () => {
@@ -454,7 +444,6 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         });
       });
     },
-    check: async (id) => checks(draftAt(id), databaseUrl, async () => (await listed()).get(id) === true),
     async behind(folder) {
       const url = appSourceOf(root, folder);
       const from = await fetchSource(root, url);
@@ -475,8 +464,6 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       return { files: pathsOf(names), summary, head: tip };
     },
     async merge(id, { head: tip, title, author, run: save }) {
-      // Not under a check still running in it.
-      await checkingAt.get(draftAt(id));
       return serial(async () => {
         // Read once the agent's commits can no longer land: what is merged and closed is `tip`, or nothing.
         if ((await head(`refs/heads/${branchOf(id)}`)) !== tip) {
@@ -522,7 +509,6 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         throw new Error(`${sha.slice(0, 7)} is not in this repository yet: undo it once main has it`);
       });
       const { root: at } = await source.draft!(id);
-      await checkingAt.get(at);
       return serial(async () => {
         // A merge is undone as what it brought into its first parent.
         const mainline = parents.split(" ").length > 2 ? ["-m", "1"] : [];
@@ -554,89 +540,4 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
     },
   };
   return source;
-}
-
-/** How long a check may take before it is stopped and its result is that. */
-const CHECK_TIMEOUT_MS = 15 * 60_000;
-
-/**
- * `sanoma check` on the draft at `root` (a `Source.draft`'s), as a child in it: the `sanoma` its
- * `node_modules` holds, with this Node, an environment of `PATH`, `HOME` and `databaseUrl` alone
- * (no credential of this process, no `.env`: a draft has none), and `SANOMA_EVENTS=1` for its
- * result. One at a time in the process, whichever the draft and whichever source asks (the app's
- * and the worker's): every check runs its scenarios on the one `<database>_check`. A check that
- * gives no result (a draft not open when its turn comes, a config that does not load, no install,
- * the timeout) is a result of one problem, saying why.
- */
-function checks(root: string, databaseUrl: string | undefined, open: () => Promise<boolean>): Promise<CheckResult> {
-  const done = checking.then(async () => {
-    if (!(await open())) return failed(`the draft at ${root} is not open`);
-    return checkNow(root, databaseUrl).catch((err: unknown) => failed(errorMessage(err)));
-  });
-  checking = done;
-  checkingAt.set(root, done);
-  void done.then(() => checkingAt.get(root) === done && checkingAt.delete(root));
-  return done;
-}
-
-/** The last check queued, if any. */
-let checking: Promise<unknown> = Promise.resolve();
-/** Each draft's last check queued, by its checkout, until it ends: what closing it waits for. */
-const checkingAt = new Map<string, Promise<CheckResult>>();
-
-const failed = (why: string): CheckResult => ({ ok: false, problems: [`sanoma check: ${why}`], warnings: [] });
-
-interface Ran {
-  stdout: string;
-  stderr: string;
-  killed?: boolean;
-  code?: unknown;
-}
-
-/**
- * What a draft's check keeps of this process's environment: `PATH` and `HOME`, and on Windows what
- * a process needs there (Node's sockets and crypto fail without `SystemRoot`) and its home's names.
- */
-const CHECK_ENV = ["PATH", "HOME", "SystemRoot", "USERPROFILE", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA"];
-
-async function checkNow(root: string, databaseUrl: string | undefined): Promise<CheckResult> {
-  // The company's own install (linked into the draft).
-  const sanoma = join(root, "node_modules", "sanoma");
-  const { bin } = JSON.parse(await readFile(join(sanoma, "package.json"), "utf8")) as {
-    bin: string | { sanoma: string };
-  };
-  const env: NodeJS.ProcessEnv = { SANOMA_EVENTS: "1", ...(databaseUrl && { SANOMA_DATABASE_URL: databaseUrl }) };
-  for (const name of CHECK_ENV) if (process.env[name]) env[name] = process.env[name];
-  const ran: Ran = await promisify(execFile)(
-    process.execPath,
-    [join(sanoma, typeof bin === "string" ? bin : bin.sanoma), "check"],
-    {
-      cwd: root,
-      env,
-      maxBuffer: 64 * 1024 * 1024,
-      timeout: CHECK_TIMEOUT_MS,
-    },
-  ).catch((err: Ran & { message: string }) => ({ ...err, stderr: err.stderr || err.message }));
-  if (ran.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return failed("it printed more than its 64 MiB");
-  if (ran.killed) return failed(`stopped after ${CHECK_TIMEOUT_MS / 60_000} minutes`);
-  // Beside the lines a person reads (and DBOS's), each event is a line of its own. The last one
-  // counts: the draft's own code, which the check imports, prints on the same stdout before it.
-  let result: CheckResult | undefined;
-  let error: string | undefined;
-  for (const line of ran.stdout.split("\n")) {
-    if (!line.startsWith('{"sanoma":1,')) continue;
-    let event: SanomaEvent & { sanoma: 1 };
-    try {
-      event = JSON.parse(line) as typeof event;
-    } catch {
-      continue; // Not the launcher's: printed by the draft's own code.
-    }
-    if (event.event === "checked") {
-      // Every field of the result, the grid among them.
-      const { sanoma: _, event: __, ...fields } = event;
-      result = fields;
-    }
-    if (event.event === "error") error = event.message;
-  }
-  return result ?? failed(error ?? (ran.stderr.trim().split("\n").at(-1) || "it gave no result"));
 }
