@@ -306,7 +306,7 @@ export const checkFailed = (why: string): CheckResult => ({
  * event.
  */
 const CHECK = `cd ${CLONE}
-[ -f pnpm-lock.yaml ] && [ -e node_modules/.bin/sanoma ] || { echo "the draft installs no sanoma in your box (it needs a pnpm-lock.yaml)"; exit 0; }
+[ -e node_modules/.bin/sanoma ] || { echo "the draft installs no sanoma in your box (it has no pnpm-lock.yaml)"; exit 0; }
 node_modules/.bin/sanoma check 2>.git/sanoma-check.err | tail -c ${CHECK_OUTPUT_BYTES}
 echo
 tail -n 1 .git/sanoma-check.err`;
