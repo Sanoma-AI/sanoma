@@ -237,6 +237,16 @@ describe("the staff login's discovery", () => {
     expect(metadata.registration_endpoint).toBeUndefined();
   });
 
+  it("serves from each instance the login makes, as a Worker makes one per request: here one per protocol", async () => {
+    for (const proto of ["http", "https"]) {
+      const path = "/.well-known/oauth-authorization-server/auth/better-auth";
+      const asked = new Request(`http://${HOST}${path}`, { headers: { host: HOST, "x-forwarded-proto": proto } });
+      const answered = (await half.handle(asked))!;
+      expect(answered.status, proto).toBe(200);
+      expect(await answered.json(), proto).toMatchObject({ issuer: `${proto}://${HOST}/auth/better-auth` });
+    }
+  });
+
   it("serves no metadata without the app's OAuth context", async () => {
     const plain = betterAuthStaffLogin({ ...context, staff: { ...context.staff!, oauth: undefined } });
     expect(await plain.handle(request("/.well-known/oauth-protected-resource/mcp", { origin: null }))).toBeUndefined();

@@ -1,13 +1,14 @@
-import { cimd } from "@better-auth/cimd";
+import { createCimdClientDiscovery } from "@better-auth/cimd";
 import { type ClientMetadataResourceFetch, oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins/jwt";
 
 // The staff login as an OAuth 2.1 authorization server for the agent surface (`/mcp`), whose
 // resource server is the app: Better Auth's oauth-provider, its JWT plugin (the access tokens
 // are JWTs, signed with keys kept in the schema's `jwks` table, so an instance per request on a
-// Worker signs with the keys every other one does) and its Client ID Metadata Document plugin (a
-// client is the HTTPS URL of its metadata document, as Claude Code's is). No dynamic client
-// registration: a client is admitted only as the declared agent that stands for it.
+// Worker signs with the keys every other one does) and the Client ID Metadata Document discovery
+// of `@better-auth/cimd` (a client is the HTTPS URL of its metadata document, as Claude Code's
+// is). No dynamic client registration: a client is admitted only as the declared agent that
+// stands for it.
 
 /** The app's sign-in page, where the provider sends someone not signed in, with the signed request. */
 export const LOGIN_PAGE = "/auth/login";
@@ -26,10 +27,20 @@ export interface OAuthSetup {
 
 /**
  * The plugins, in the order Better Auth takes them: made once per login, never per request, so
- * the provider's own memos (its resources, keyed by its options) and the CIMD plugin's document
- * cache hold across the instances made for each pool and protocol.
+ * the provider's own memos and the CIMD discovery's document cache hold across the instances made
+ * for each pool and protocol (on a Worker, one per request). The CIMD discovery is the provider's
+ * own extension, not the `cimd()` plugin: that plugin registers it on each instance's start with
+ * an object of its own, which the provider's shared options then refuse the second time.
  */
 export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
+  const discovery = createCimdClientDiscovery({
+    fetchClientMetadataResource: fetchClientMetadata,
+    metadataProfile: "mcp-2026-07-28",
+    // Only a document a declared agent names is ever fetched: the URL is the company's choice,
+    // never a caller's (`handle` refuses any other client before the provider sees it; this
+    // holds for the token endpoint too, which may fetch the document again).
+    isMetadataDocumentUrlAllowed: (url) => agentOf(url) !== undefined,
+  });
   return [
     // The access tokens' keys, in the `jwks` table; no JWT on a session's responses.
     jwt({ disableSettingJwtHeader: true }),
@@ -41,14 +52,7 @@ export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
       // The resource is this instance's own `/mcp` on the host asked (`ensureResource` in
       // staff.ts), one row per host, every one this instance's: a client is not linked to each.
       enforcePerClientResources: false,
-    }),
-    cimd({
-      fetchClientMetadataResource: fetchClientMetadata,
-      metadataProfile: "mcp-2026-07-28",
-      // Only a document a declared agent names is ever fetched: the URL is the company's choice,
-      // never a caller's (`handle` refuses any other client before the provider sees it; this
-      // holds for the token endpoint too, which may fetch the document again).
-      isMetadataDocumentUrlAllowed: (url) => agentOf(url) !== undefined,
+      extensions: [{ clientDiscovery: discovery }],
     }),
   ];
 }
