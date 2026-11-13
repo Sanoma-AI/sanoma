@@ -40,6 +40,10 @@ export const all = [calculateInvoice, renderInvoice, declareSlug];
   mkdirSync(join(dir, "sites/x/components"));
   writeFileSync(join(dir, "sites/x/components/card.tsx"), "export const Card = 1;\n");
   writeFileSync(
+    join(dir, "sites/x/components/later.ts"),
+    'export const a = import("/later.ts");\nexport const b = import("#later");\n',
+  );
+  writeFileSync(
     join(dir, "sites/x/routes/index.tsx"),
     `import { createFileRoute } from "sanoma/site";
 import { Button } from "sanoma/ui";
@@ -62,7 +66,10 @@ import { hello } from "../../../workflows/hello";
 import { handler } from "sanoma/app/build";
 import { Badge } from "sanoma/internal/bridge";
 import kinds from "virtual:sanoma/content";
-export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, secret, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, Badge, kinds, process.env.KEY];
+import logo from "/logo.svg";
+import { lib } from "#lib";
+import * as start from "@tanstack/start-client-core";
+export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, secret, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, Badge, kinds, logo, lib, start, process.env.KEY];
 export const pg = require("pg");
 export type Types = [Ctx<[]>, typeof Hello];
 `,
@@ -154,6 +161,13 @@ describe("the shipped oxlint.json", () => {
     const server = /A site has no server code: call an operation or start a workflow through `api` from `sanoma\/site`/;
     expect(found.filter((f) => f.file.startsWith("sites/"))).toEqual([
       {
+        file: "sites/x/components/later.ts",
+        line: 1,
+        rule: imports,
+        text: expect.stringMatching(/^'\/later\.ts'.*by a relative path/),
+      },
+      { file: "sites/x/components/later.ts", line: 2, rule: imports, text: expect.stringMatching(/^'#later'/) },
+      {
         file: "sites/x/routes/a.server.ts",
         line: 1,
         rule: site,
@@ -206,8 +220,16 @@ describe("the shipped oxlint.json", () => {
         rule: imports,
         text: expect.stringMatching(/^'virtual:sanoma\/content'.*through `content` from `sanoma\/site`/),
       },
-      { file: index, line: 22, rule: globals, text: expect.stringMatching(/'process'.*no credentials/) },
-      { file: index, line: 23, rule: globals, text: expect.stringMatching(/'require'.*imports with `import`/) },
+      {
+        file: index,
+        line: 22,
+        rule: imports,
+        text: expect.stringMatching(/^'\/logo\.svg'.*by a relative path.*`public\/` folder/),
+      },
+      { file: index, line: 23, rule: imports, text: expect.stringMatching(/^'#lib'.*by a relative path/) },
+      { file: index, line: 24, rule: imports, text: expect.stringMatching(server) },
+      { file: index, line: 25, rule: globals, text: expect.stringMatching(/'process'.*no credentials/) },
+      { file: index, line: 26, rule: globals, text: expect.stringMatching(/'require'.*imports with `import`/) },
     ]);
   });
 });
