@@ -45,6 +45,7 @@ import {
   getChat,
   getChatModel,
   getChats,
+  getCloudAddress,
   getColumnPlan,
   getCompanyState,
   getConfig,
@@ -62,6 +63,7 @@ import {
   getRemote,
   getRun,
   getRuns,
+  getSanomaSignIn,
   getSaves,
   getScenarios,
   getPeopleSignIns,
@@ -406,6 +408,30 @@ export const companyStateQuery = ({ force = false } = {}) =>
       return data?.state === "live" && data.host?.healthy === false ? POLL_MS : false;
     },
     refetchOnWindowFocus: !force,
+  });
+
+/**
+ * Whether a Cloud token is stored, under the credentials' key, so storing one refreshes it: asked
+ * again every 2 s only while a sign-in to Sanoma is being made in the browser.
+ */
+export const sanomaSignInQuery = () =>
+  queryOptions({
+    queryKey: ["credentials", "sanoma-sign-in"],
+    queryFn: () => getSanomaSignIn(),
+    refetchInterval: (query) => (query.state.data?.pending ? POLL_MS : false),
+  });
+
+/**
+ * Whether `slug` at Sanoma Cloud can be the company's address: the same answer for 30 s, and not
+ * asked again as the window comes back, since each ask is a run at the Cloud.
+ */
+export const cloudAddressQuery = (slug: string) =>
+  queryOptions({
+    queryKey: ["cloud-address", slug],
+    queryFn: () => getCloudAddress({ data: { slug } }),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 
 /** Home's setup card: under RUNS_KEY, so a run that finishes ticks it; fresh for 5 s. */

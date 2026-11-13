@@ -1,0 +1,12 @@
+[
+  { "id": "claude-code", "packages": ["@agentclientprotocol/claude-agent-acp@0.95.0"], "bin": "claude-agent-acp" },
+  { "id": "codex", "packages": ["@agentclientprotocol/codex-acp@2.2.2"], "bin": "codex-acp" },
+  { "id": "copilot", "packages": ["@github/copilot@1.0.103"], "bin": "copilot" },
+  {
+    "id": "opencode",
+    "packages": ["opencode-ai@1.19.4"],
+    "setup": "node_modules/opencode-ai/postinstall.mjs",
+    "bin": "opencode"
+  },
+  { "id": "pi", "packages": ["pi-acp@0.0.34", "@earendil-works/pi-coding-agent@1.4.0"], "bin": "pi-acp" }
+]

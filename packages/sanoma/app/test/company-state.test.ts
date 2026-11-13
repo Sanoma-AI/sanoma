@@ -35,6 +35,19 @@ describe("a company's state", () => {
       ["its host bound, whatever an earlier run did", { bound: [HOST], run: run("failed") }, "live"],
       ["a hosted instance, nothing bound in its files", { place: "live" }, "live"],
       ["going live failed", { run: run("failed", { error: "boom" }) }, "failed"],
+      [
+        "going live on Sanoma Cloud, pushing before its apply",
+        { run: run("running", { runId: "go", workflow: "go-live-cloud" }) },
+        "deploying",
+      ],
+      [
+        "going live on Sanoma Cloud failed after an apply that left the host undone",
+        {
+          run: run("failed", { runId: "go", workflow: "go-live-cloud", error: "Apply did not finish" }),
+          bound: [STORE],
+        },
+        "failed",
+      ],
       ["going live cancelled", { run: run("cancelled") }, "failed"],
       [
         "going live finished with the host's step failed",

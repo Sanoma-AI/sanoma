@@ -1,7 +1,7 @@
 import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
-import type { Box, OwnAgent, Principal, Process } from "sanoma/workflows";
+import { type Box, IMAGE_AGENTS, type OwnAgent, type Principal, type Process } from "sanoma/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "sanoma/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
@@ -27,12 +27,13 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // this client of ours, in the box's clone of the chat's draft, on that person's own subscription.
 // The agent runs in the person's box (`personBox`, the harness engine's too) with `.acp` under the
 // box's home as its HOME (`OWN_AGENTS_DIR`, out of a company-key session's reach), installed on
-// first use there (`.acp/<agent>`), so a sign-in lives in the box and nowhere else, and nothing of
-// ours reads it (on the local backend a box is a directory of this machine and every person's
-// agent runs as its user: what an agent runs itself can reach other people's). One process per
-// turn: the box opened (one turn in it at a time), the chat's draft carried into its clone
-// (`carryIn`), the agent started there, told the chat's earlier messages as text, prompted,
-// killed, what it changed committed in the box and carried back (`carryOut`), the box stopped.
+// first use there (`.acp/<agent>`) unless the box's image carries it (`IMAGE_AGENTS`), so a sign-in
+// lives in the box and nowhere else, and nothing of ours reads it (on the local backend a box is a
+// directory of this machine and every person's agent runs as its user: what an agent runs itself
+// can reach other people's). One process per turn: the box opened (one turn in it at a time), the
+// chat's draft carried into its clone (`carryIn`), the agent started there, told the chat's earlier
+// messages as text, prompted, killed, what it changed committed in the box and carried back
+// (`carryOut`), the box stopped.
 // Its permission requests, file reads and writes are answered by the checkout rule; the commands
 // it runs through our terminal are its own, in the box. A sign-in it asks for is shown in the chat
 // as the vendor's own flow.
@@ -141,12 +142,11 @@ async function runTurn(agent: TurnAgent<"own">, engineTurn: EngineTurn, writer: 
         const boxHome = await homeOf(box);
         // The person's own agents' HOME, kept across turns in the box: their installs and sign-ins.
         const home = join(boxHome, OWN_AGENTS_DIR);
-        const dir = join(home, agent.id);
         // A first install under way is waited for even by a new message (it has a time limit of its
         // own): the box's stop would end it.
         const [cloned, installed, shimmed] = await Promise.allSettled([
           carryIn(box, step.source, chat.id, { home: boxHome, signal }),
-          install(box, agent, dir),
+          install(box, agent, home),
           shims(box, home),
         ]);
         if (cloned.status === "rejected") throw cloned.reason;
@@ -161,7 +161,7 @@ async function runTurn(agent: TurnAgent<"own">, engineTurn: EngineTurn, writer: 
           root: cloned.value.root,
           home,
           shimsDir: shimmed.value,
-          bins: join(dir, "node_modules", ".bin"),
+          bins: join(installed.value, "node_modules", ".bin"),
         });
         const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
         await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
@@ -677,20 +677,27 @@ const commandLine = (command: string, args: readonly string[]) => `exec ${quoted
 const exitText = (exitCode: number) => `exit code ${exitCode}`;
 
 /**
- * Installs `agent` into `dir` in `box`, once: its packages at their versions by the `pnpm` on the
- * box's `PATH`, as the HarnessAgent bridges run it (the desktop shell ships no npm), with the
- * agents' HOME (`dir`'s parent) as its `HOME`, so pnpm's store and config are theirs, in the box,
- * outside the company's workspace, and with no install script run but the vendor's own `setup`, as
- * `installed.json` records; stopped after `INSTALL_WAIT`. The
- * last install's `node_modules` goes first: pnpm refuses one made from another store (the repo
- * moved) or by another major version. Another turn waits for an install under way; a failed one is
- * tried again by the next.
+ * The directory that holds `agent`'s install in `box`: the image's (`IMAGE_AGENTS`) when its
+ * `installed.json` is the packages wanted, which installs nothing; else `<home>/<agent>`, installed
+ * there once: its packages at their versions by the `pnpm` on the box's `PATH`, as the HarnessAgent
+ * bridges run it (the desktop shell ships no npm), with `home`, the agents' HOME, as its `HOME`, so
+ * pnpm's store and config are theirs, in the box, outside the company's workspace, and with no
+ * install script run but the vendor's own `setup`, as `installed.json` records; stopped after
+ * `INSTALL_WAIT`. The last install's `node_modules` goes first: pnpm refuses one made from another
+ * store (the repo moved) or by another major version. Another turn waits for an install under
+ * way; a failed one is tried again by the next.
  */
-export async function install(box: Box, agent: OwnAgent, dir: string): Promise<void> {
-  const marker = join(dir, "installed.json");
+export async function install(box: Box, agent: OwnAgent & { id: string }, home: string): Promise<string> {
   const wanted = JSON.stringify(agent.packages);
-  const found = await box.read(marker);
-  if (found && utf8.decode(found) === wanted) return;
+  const holds = async (at: string) => {
+    const found = await box.read(join(at, "installed.json"));
+    return found !== null && utf8.decode(found) === wanted;
+  };
+  const image = join(IMAGE_AGENTS, agent.id);
+  const dir = join(home, agent.id);
+  const [inImage, inHome] = await Promise.all([holds(image), holds(dir)]);
+  if (inImage) return image;
+  if (inHome) return dir;
   const key = `${box.id} ${dir}`;
   let running = installs.get(key);
   if (!running) {
@@ -698,13 +705,13 @@ export async function install(box: Box, agent: OwnAgent, dir: string): Promise<v
       await box.write(join(dir, "package.json"), utf8.encode('{ "private": true }\n'));
       const pnpm = ["add", "--ignore-scripts", "--ignore-workspace", "--loglevel=error", ...agent.packages];
       // As its agent's HOME, so pnpm's store and config are theirs; stopped if it hangs.
-      const options = { env: { HOME: dirname(dir) }, signal: AbortSignal.timeout(INSTALL_WAIT) };
+      const options = { env: { HOME: home }, signal: AbortSignal.timeout(INSTALL_WAIT) };
       await ran(box, `rm -rf node_modules && ${commandLine("pnpm", pnpm)}`, { cwd: dir, ...options });
       if (agent.setup) {
         const setup = join(dir, agent.setup);
         await ran(box, commandLine("node", [basename(setup)]), { cwd: dirname(setup), ...options });
       }
-      await box.write(marker, utf8.encode(wanted));
+      await box.write(join(dir, "installed.json"), utf8.encode(wanted));
     })();
     installs.set(key, running);
     void running.then(
@@ -713,6 +720,7 @@ export async function install(box: Box, agent: OwnAgent, dir: string): Promise<v
     );
   }
   await running;
+  return dir;
 }
 
 /** A file's text in the box, as `BoxSession` reads it too, and back. */

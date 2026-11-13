@@ -66,6 +66,10 @@ interface CompanyApi {
     host?: string;
     port: number;
   }, unknown>;
+  /** Go live on Sanoma Cloud: the workflow `go-live-cloud`, built in. */
+  goLiveCloud: WorkflowFn<{
+    address?: string;
+  }, unknown>;
   /** Push and run the host: the workflow `go-live-host`, built in. */
   goLiveHost: WorkflowFn<{}, unknown>;
   /** Import a spreadsheet: the workflow `import`, built in. */

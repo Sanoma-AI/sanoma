@@ -109,11 +109,14 @@ export {
   type ChatTurnContext,
   ConnectExistingInput,
   type ConnectExistingOutput,
+  type CloudReady,
+  GoLiveCloudInput,
   GoLiveHostInput,
   GoLiveInput,
   type GoLiveOutput,
   PatchInput,
   type PatchOutput,
+  type PushCloudInput,
   SaveDraftInput,
   type SaveDraftOutput,
   type Written,
@@ -265,6 +268,7 @@ export {
 } from "./database.ts";
 export {
   type Box,
+  IMAGE_AGENTS,
   type Process,
   type SandboxBackend,
   type SandboxCapabilities,

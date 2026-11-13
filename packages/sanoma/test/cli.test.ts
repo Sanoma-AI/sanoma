@@ -56,6 +56,7 @@ describe("sanoma serve", () => {
         "connect-existing",
         "follow",
         "go-live",
+        "go-live-cloud",
         "go-live-host",
         "hello",
         "patch",

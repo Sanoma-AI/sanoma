@@ -144,7 +144,7 @@ async function imported(resolved: ResolvedConfig, type: string, id: string) {
 const execGit = promisify(execFile);
 
 /** Git in `root`, when it is a git checkout: each call's output, trimmed. */
-async function gitAt(root: string) {
+export async function gitAt(root: string) {
   const run = async (...args: string[]) =>
     (await execGit("git", args, { cwd: root, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } })).stdout.trim();
   return (await run("rev-parse", "--is-inside-work-tree").catch(() => "")) === "true" ? run : undefined;
