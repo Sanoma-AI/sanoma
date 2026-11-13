@@ -1,18 +1,19 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { RUNNER_HEALTH, RUNNER_PORT } from "sanoma/workflows";
 
 // Agent37 on this machine, for the backend's tests: its Sandbox API as a `fetch` that answers
 // `https://api.agent37.com/v1` from memory (every other URL goes out), its exec `sh -c` here, each
 // instance's home a directory of its own, and its edge a port of this machine per instance's port:
-// the runner the backend starts with exec listens on one of its own (`SANOMA_RUNNER_PORT`). A
-// stop, a delete and `close` end what an instance's execs left running, as a fresh boot would; a
-// sleep keeps it. The edge answers `/health` itself, on every port, as Agent37's does. `answer`
-// puts a reply ahead of the next request.
+// the runner the backend starts with exec listens on one of its own (`SANOMA_RUNNER_PORT`). Its
+// workspace templates are names in memory, an image registered at once. Its `PATH` is a template's:
+// no pnpm, but a corepack that makes one. A stop, a delete and `close` end what an instance's execs
+// left running, as a fresh boot would; a sleep keeps it. The edge answers `/health` itself, on every
+// port, as Agent37's does. `answer` puts a reply ahead of the next request.
 
 export const KEY = "sk_live_test";
 
@@ -42,6 +43,8 @@ const problem = (status: number, code: string) => json(status, { error: { code, 
 export async function fakeAgent37Vendor() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-agent37-")));
   const instances = new Map<string, FakeInstance>();
+  /** The workspace's templates, by name: what was registered. */
+  const templates = new Map<string, { name: string; image_ref: string }>();
   /** Each instance's runner port, and the process groups its execs led. */
   const runners = new Map<string, { port: number; groups: number[] }>();
   const sent: Sent[] = [];
@@ -49,6 +52,20 @@ export async function fakeAgent37Vendor() {
   const answers: { method: string; path: string; status: number; body: unknown }[] = [];
   let seq = 0;
   const home = (id: string) => join(root, id);
+  // The template's own programs: node, and corepack as far as the backend uses it.
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  symlinkSync(process.execPath, join(bin, "node"));
+  writeFileSync(
+    join(bin, "corepack"),
+    `#!/bin/sh
+[ "$1 $2 $4" = "enable --install-directory pnpm" ] || { echo "corepack: not faked: $*" >&2; exit 1; }
+printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
+`,
+    { mode: 0o755 },
+  );
+  /** This machine's `PATH` but where a pnpm is, as a template has none. */
+  const searched = (process.env.PATH ?? "").split(":").filter((dir) => dir && !existsSync(join(dir, "pnpm")));
 
   /**
    * Ends what the instance's execs left running (its runner, which ends what it started), and
@@ -79,7 +96,7 @@ export async function fakeAgent37Vendor() {
       cwd: "/",
       env: {
         HOME: home(id),
-        PATH: [dirname(process.execPath), process.env.PATH].join(":"),
+        PATH: [join(home(id), ".local/bin"), bin, ...searched].join(":"),
         SANOMA_RUNNER_HOST: "127.0.0.1",
         SANOMA_RUNNER_PORT: String(runner.port),
       },
@@ -111,6 +128,17 @@ export async function fakeAgent37Vendor() {
       return json(status, reply);
     }
     if (method === "GET" && path === "/instances") return json(200, { data: [...instances.values()].toReversed() });
+    if (method === "POST" && path === "/templates") {
+      if (templates.has(body!.name)) return problem(409, "template_conflict");
+      const made = { name: body!.name, image_ref: body!.image_ref };
+      templates.set(made.name, made);
+      return json(201, made);
+    }
+    const template = path.match(/^\/templates\/([^/]+)$/)?.[1];
+    if (method === "GET" && template) {
+      const found = templates.get(template);
+      return found ? json(200, found) : problem(404, "not_found");
+    }
     if (method === "POST" && path === "/instances") {
       const id = `fake${String(++seq).padStart(6, "0")}`;
       const made: FakeInstance = { ...body!, id, status: "running", metadata: body!.metadata ?? null } as FakeInstance;
@@ -173,6 +201,7 @@ export async function fakeAgent37Vendor() {
 
   return {
     instances,
+    templates,
     sent,
     headersSeen,
     fetch,

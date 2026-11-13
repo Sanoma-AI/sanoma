@@ -199,7 +199,7 @@ git push origin <sha>:refs/heads/release/<version>
 gh workflow run release.yml --ref release/<version>   # or Actions → Release → Run workflow
 ```
 
-The workflow requires a `release/*` branch, a commit on `main` with passing CI, and a passing release check. Its job summary lists the commit and versions it will publish. It runs `pnpm publish -r` in dependency order and skips versions already on npm. Once they are public it pushes the runtime image, and `packages/sanoma/template` to [Sanoma-AI/company-template](https://github.com/Sanoma-AI/company-template)'s `main` at the released versions with a lockfile, which Sanoma Cloud's sign-up makes companies from; that job needs the `COMPANY_TEMPLATE_TOKEN` secret, a fine-grained token with contents write on that repository alone.
+The workflow requires a `release/*` branch, a commit on `main` with passing CI, and a passing release check. Its job summary lists the commit and versions it will publish. It runs `pnpm publish -r` in dependency order and skips versions already on npm. Once they are public it pushes the runtime image and the box image, and `packages/sanoma/template` to [Sanoma-AI/company-template](https://github.com/Sanoma-AI/company-template)'s `main` at the released versions with a lockfile, which Sanoma Cloud's sign-up makes companies from; that job needs the `COMPANY_TEMPLATE_TOKEN` secret, a fine-grained token with contents write on that repository alone.
 
 If one package fails to publish, publishing stops. Check the publish log to see which versions reached npm, fix the failure and rerun the workflow on the same branch. It publishes the remaining versions from the same commit. Changing a package that is already public requires a new version.
 
@@ -260,9 +260,19 @@ npx wrangler containers push sanoma-runtime:<version>
 
 Declare the image reference Wrangler prints (`registry.cloudflare.com/<account id>/sanoma-runtime:<version>`). Apply uses that reference directly.
 
-On Cloudflare, the company's Worker serves public sites on their own domains without a login. Pages are prerendered or rendered on the Worker using the company's database. A page only wakes the container when it starts a workflow run. See [public sites on the Worker](connectors/cloudflare/README.md#the-worker).
+On Cloudflare, the company's Worker serves public sites on their own domains. A page that shows everyone the same content is prerendered at deploy, with or without a site login; any other page is rendered on the Worker using the company's database. A page only wakes the container when it starts a workflow run. See [public sites on the Worker](connectors/cloudflare/README.md#the-worker).
 
 The container's worker builds the app bundle for a deploy's revision, in a checkout of its own (`GET /__sanoma/app-bundle?revision=<commit>`, [the worker's port](packages/sanoma/README.md#the-workers-port)), using `buildAppBundle` from `sanoma/app/bundle`. The build needs `workerd`, which `sanoma/app` installs alongside `wrangler` and `@cloudflare/vite-plugin`.
+
+### Publish the box image
+
+Agent37 boxes are made by default from the public [box image](packages/sanoma/README.md#the-box-image) at `ghcr.io/sanoma-ai/box`, which [the connector](connectors/agent37/README.md#the-box-image) registers as a template of the company's workspace. It has one linux/amd64 manifest and is tagged with the `sanoma` version, never `latest`. After the npm packages publish, `release.yml` pushes it if its tag is missing, as it does the runtime image; tags are never replaced, so changes to `packages/sanoma/box/` require a new `sanoma` version. After its first push, make the `box` package public once in GitHub's package settings, as the runtime's was: Agent37 pulls it with no credentials, so until then it cannot copy it and new boxes are made from `agent37-base`.
+
+To publish manually, run `docker login ghcr.io`, check that `docker buildx imagetools inspect ghcr.io/sanoma-ai/box:<version>` finds no tag, then:
+
+```sh
+docker buildx build --platform linux/amd64 --provenance=false -t ghcr.io/sanoma-ai/box:<version> --push packages/sanoma/box
+```
 
 ## License
 

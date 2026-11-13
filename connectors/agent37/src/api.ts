@@ -1,8 +1,8 @@
 import { DriverError, retryableStatus } from "sanoma/workflows";
 import { z } from "zod";
 
-// Agent37's Sandbox API (https://www.agent37.com/docs/agents-api/instances), cut to the calls the
-// connector makes, on `fetch`: there is no SDK. Every failure is a `DriverError` carrying
+// Agent37's Sandbox API (https://www.agent37.com/docs/agents-api/instances, and /templates), cut to
+// the calls the connector makes, on `fetch`: there is no SDK. Every failure is a `DriverError` carrying
 // Agent37's status and its error's `code` as `vendorCode`.
 
 const API = "https://api.agent37.com/v1";
@@ -96,6 +96,14 @@ export function agent37Api(key: string, timeoutMs = 30_000) {
      */
     exec: (id: string, command: string) =>
       send<{ exit_code: number; stdout: string; stderr: string }>("POST", `/instances/${id}/exec`, { command }),
+    /** The workspace's template `name`: `not_found` when it has none. */
+    template: (name: string) => send<{ name: string }>("GET", `/templates/${name}`),
+    /**
+     * Registers the image `image_ref` as the workspace's template `name`. Agent37 copies the image
+     * before it answers, which takes up to `ms`; a template of that name there already is done.
+     */
+    register: (body: { name: string; image_ref: string }, ms: number) =>
+      send("POST", "/templates", body, ms).then(() => undefined, unless("template_conflict")),
   };
 }
 

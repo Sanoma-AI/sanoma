@@ -32,13 +32,24 @@ export interface SandboxOutputs {
 export interface SandboxSpec {
   capabilities: SandboxCapabilities;
   inputs: {
-    /** The image a box runs. */
+    /**
+     * The image a box runs: it holds `bash`, `git`, `node` (22 or later) and `pnpm` on its `PATH`,
+     * which the agents and their installs run, or its backend puts them there at `open`. It may
+     * carry coding agents installed (`IMAGE_AGENTS`), as Sanoma's box image does.
+     */
     image: string;
     /** A box's size, in vCPUs: its memory follows the vendor's shapes. */
     size: string;
   };
   outputs: (state: Record<string, unknown>) => SandboxOutputs;
 }
+
+/**
+ * Where an image may carry a person's own coding agents installed, outside the box's home (which a
+ * vendor may mount over): `<IMAGE_AGENTS>/<agent id>`, laid out as the app installs one in the home
+ * (`node_modules/.bin`, and `installed.json` holding the packages), which the app then runs instead.
+ */
+export const IMAGE_AGENTS = "/opt/sanoma/agents";
 
 /** A process `Box.run` started: `bash -c <command>`. */
 export interface Process {

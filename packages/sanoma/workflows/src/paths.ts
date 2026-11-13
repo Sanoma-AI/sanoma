@@ -45,11 +45,17 @@ export const isDirectory = (path: string): boolean => statSync(path, { throwIfNo
 /** The files under `dir` whose name `keep` takes, sorted, outside `node_modules`; none when `dir` is not a directory. */
 export function filesUnder(dir: string, keep: (name: string) => boolean): string[] {
   if (!isDirectory(dir)) return [];
-  return readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((d) => d.isFile() && keep(d.name))
-    .map((d) => join(d.parentPath, d.name))
-    .filter((path) => !relative(dir, path).split(sep).includes("node_modules"))
-    .toSorted();
+  const walk = (at: string): string[] =>
+    readdirSync(at, { withFileTypes: true }).flatMap((d) =>
+      d.isDirectory()
+        ? d.name === "node_modules"
+          ? []
+          : walk(join(at, d.name))
+        : d.isFile() && keep(d.name)
+          ? [join(at, d.name)]
+          : [],
+    );
+  return walk(dir).toSorted();
 }
 
 export { APPS_DIR, appOfPath };

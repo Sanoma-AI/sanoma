@@ -6,14 +6,15 @@ import {
   type OpSpec,
   vendorInfo,
 } from "sanoma/workflows";
-import { DOMAIN_NAME, SITE_KEY, slugged } from "sanoma/workflows/shared";
+import { CLOUD_SLUG, CLOUD_SLUG_RULE, DOMAIN_NAME, SITE_KEY, slugged } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 /*
  * Sanoma Cloud: the company's database and host in Sanoma's own accounts, a vendor the company's
- * repository declares like any other. Its API is four of sanoma-ops's workflows (`cloud-signup`,
- * `cloud-list`, `cloud-deploy`, `cloud-close`), started over the public api of www.sanoma.work
- * with the company's Cloud token; the schemas are a cut of their fields, by hand.
+ * repository declares like any other. Its API is sanoma-ops's workflows (`cloud-signup`,
+ * `cloud-list`, `cloud-deploy`, `cloud-close`, and for going live from a computer
+ * `cloud-available` and `cloud-invite`), started over the public api of www.sanoma.work with the
+ * company's Cloud token; the schemas are a cut of their fields, by hand.
  */
 
 /**
@@ -22,14 +23,8 @@ import { z } from "zod";
  */
 export const REGIONS = ["us-east", "us-west", "eu-central", "eu-west", "ap-southeast"] as const;
 
-/**
- * A company's slug, its address `<slug>.sanoma.work`: as sanoma-ops's sign-up checks it, lower
- * case letters, digits and dashes, a dash at neither end, one of them or 3 to 40 (`SLUG_RULE`).
- */
-export const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
-
-/** `SLUG` in words. */
-export const SLUG_RULE = "a slug: lower case letters, digits and dashes, a dash at neither end, one of them or 3 to 40";
+/** A company's slug (`CLOUD_SLUG`), its address `<slug>.sanoma.work`, in words. */
+export const SLUG_RULE = `a slug: ${CLOUD_SLUG_RULE}`;
 
 /** The port the runtime listens on in a Cloud host: the Cloud's, whatever is declared. */
 export const PORT = 3000;
@@ -65,7 +60,7 @@ export function hostSlug(desired: { name?: unknown; source?: unknown; domains?: 
   return repository ? slugged(repository.name) : "";
 }
 
-const slugField = z.string().regex(SLUG, SLUG_RULE);
+const slugField = z.string().regex(CLOUD_SLUG, SLUG_RULE);
 
 const databaseSchema = z.object({
   name: slugField
@@ -201,6 +196,11 @@ export const host = defineResource({
     derives: true,
     // `domains` is the type's own, not the contract's: its `app` is the company's address, no public site.
     inputs: { source: "source", ref: "ref", hostname: "hostname", database: "database" },
+    account: {
+      repository: "cloud.company.repository",
+      available: "cloud.company.available",
+      invite: "cloud.company.invite",
+    },
     revision: "revision",
     outputs: (state) => ({
       url: String(state.url ?? ""),
@@ -233,22 +233,70 @@ const storeUrlSpec = {
   },
 } satisfies Record<string, OpSpec>;
 
-const types = defineConnector("cloud", { database, host }, vendorInfo(import.meta.url));
-const store = defineConnector("cloud", { database: storeUrlSpec });
+/**
+ * The account's operations, which going live from a computer calls (the host's `account`): whether
+ * an address is free, the company's repository made by the Sanoma.work GitHub App, and a one-use
+ * link that signs the account's own email in on the company's host.
+ */
+const companySpecs = {
+  available: {
+    effect: "read",
+    idempotent: true,
+    description:
+      "Whether the address <slug>.sanoma.work is free, or already the account's own company (cloud-available)",
+    input: z.object({ slug: slugField.describe("The company's slug") }),
+    output: z.object({
+      available: z.boolean().describe("Nobody holds it: going live takes it"),
+      yours: z.boolean().describe("The token's account holds it already"),
+    }),
+    target: ({ slug }: { slug: string }) => slug,
+  },
+  repository: {
+    effect: "write",
+    // Made once: a retry finds the one made.
+    idempotent: true,
+    description:
+      "Make the company's repository, empty, with the Sanoma.work GitHub App in the account it is installed on, unless the company has one (cloud-signup, part repository); its owner and name",
+    input: z.object({ slug: slugField.describe("The company's slug") }),
+    output: z.object({
+      owner: z.string().regex(/^[\w-]+$/, "a GitHub owner"),
+      name: z.string().regex(/^(?!\.\.?$)[\w.-]+$/, "a GitHub repository's name"),
+    }),
+    target: ({ slug }: { slug: string }) => slug,
+  },
+  invite: {
+    effect: "access",
+    // Each try mints another link, and the host's newest for an email replaces the last.
+    idempotent: true,
+    description:
+      "A one-use link that signs the account's own email in on the company's host, minted by the Cloud (cloud-invite)",
+    input: z.object({ slug: slugField.describe("The company's slug"), email: z.email() }),
+    output: z.object({ url: z.string().describe("The one-use invite link") }),
+    target: ({ slug }: { slug: string }) => slug,
+    // A link that signs someone in: the ledger records that there was one, not what it was.
+    opaque: ["url"],
+  },
+} satisfies Record<string, OpSpec>;
 
-/** The connector's specs: both types' operations, and `storeUrl` in the database's group. */
+const types = defineConnector("cloud", { database, host }, vendorInfo(import.meta.url));
+const store = defineConnector("cloud", { database: storeUrlSpec, company: companySpecs });
+
+/** The connector's specs: both types' operations, `storeUrl` in the database's group, and the account's. */
 type CloudSpecs = {
   database: (typeof database)["ops"] & typeof storeUrlSpec;
   host: (typeof host)["ops"];
+  company: typeof companySpecs;
 };
 
 /**
  * The connector's operations: each type's (`read`, `import`, `plan`, `create`, `update`,
- * `delete`) and `database.storeUrl` in the database's group (Supabase's pattern).
+ * `delete`), `database.storeUrl` in the database's group (Supabase's pattern), and the account's
+ * (`company.available`, `.repository`, `.invite`).
  */
 export const cloudOps = {
   ...types,
   database: { ...types.database, ...store.database },
+  company: store.company,
 } as unknown as Connector<"cloud", CloudSpecs>;
 
 /** The connector's type: both types, with `database.storeUrl`. */

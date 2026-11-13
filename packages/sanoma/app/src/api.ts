@@ -24,6 +24,8 @@ import { ConfigDescriptionSchema } from "sanoma/workflows/description";
 import type { RunCheck, Scenario } from "sanoma/workflows/scenario";
 import {
   CALL_ID,
+  CLOUD_SLUG,
+  CLOUD_SLUG_RULE,
   COMMIT_ID,
   DRAFT_ID,
   EFFECTS,
@@ -443,6 +445,13 @@ export const SETUP_VENDORS: readonly {
       "Optional: an API key, so that coding agents work for the live company in a box of their own at Agent37. Connect it before choosing where the company goes, which declares the box.",
   },
   {
+    vendor: "cloud",
+    title: "Sanoma Cloud",
+    tokens: ["SANOMA_CLOUD_TOKEN"],
+    about:
+      "A Cloud token (sca_…), so the company goes live on Sanoma Cloud. Signing in to Sanoma on Hosting stores one; paste one from your account at sanoma.work instead.",
+  },
+  {
     vendor: "sanoma",
     title: "Wakeup service",
     tokens: ["SANOMA_WAKEUP_URL", "SANOMA_WAKEUP_ACCOUNT_TOKEN"],
@@ -554,8 +563,10 @@ export interface HostDerived {
 
 /** How far going live is (`getGoLiveProgress`): told from the files, the lockfile and the runs, so a reload picks it up. */
 export interface GoLiveProgress {
-  /** `resources/sanoma/infra.ts`, once written. */
+  /** `resources/sanoma/infra.ts`, once written; none while it declares Sanoma Cloud with nothing bound, which going live replaces (`replaces`). */
   infra: string | null;
+  /** `infra.ts` declares Sanoma Cloud with nothing bound: going live on the company's own accounts writes it again. */
+  replaces: boolean;
   /** What the first apply makes, of what `infra.ts` declares: the repository, its deploy key and the database. */
   beforeHost: string[];
   /** Whether those are all bound in the lockfile, and whether the host is. */
@@ -591,6 +602,27 @@ export interface CompanyState {
    * asks (`force`), so the badge never wakes a host that stops when idle.
    */
   host: { url: string; healthy?: boolean } | null;
+}
+
+/** Signed in to Sanoma or not (`getSanomaSignIn`): never the token. */
+export interface SanomaSignIn {
+  /** A Cloud token (`sca_…`) is stored. */
+  signedIn: boolean;
+  /** A sign-in was started and has not come back nor expired: the page asks again every 2 s. */
+  pending: boolean;
+  /** Where the stored value is: the app's store, or this company's environment (`.env`), which the app cannot change. */
+  source?: "stored" | "environment";
+  setBy?: string;
+  setAt?: string;
+}
+
+/** An address at Sanoma Cloud as the pages take it: a slug (`CLOUD_SLUG`). */
+export const CloudSlug = z.string().regex(CLOUD_SLUG, `An address is ${CLOUD_SLUG_RULE}`);
+
+/** Whether an address at Sanoma Cloud can be the company's (`getCloudAddress`): free, its account's own, or someone else's. */
+export interface CloudAddress {
+  slug: string;
+  status: "available" | "yours" | "taken";
 }
 
 /** Home's setup card, in its order: each step ticked from facts (`setupProgress`). */

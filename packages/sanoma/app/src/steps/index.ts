@@ -2,6 +2,7 @@ import type { AppSteps } from "sanoma/workflows";
 import { chat } from "./agent/turn.ts";
 import { connectExisting } from "./connect.ts";
 import { goLive, goLiveHost } from "./go-live.ts";
+import { goLiveCloud, pushCloud } from "./go-live-cloud.ts";
 import { adopt, patch, saveDraft } from "./writes.ts";
 
 // `sanoma/app/steps`: the app's own actions on the company's repository and the chat's turn
@@ -10,4 +11,14 @@ import { adopt, patch, saveDraft } from "./writes.ts";
 // git and the coding agents' children; the app's handler never imports them.
 
 /** The app's steps, one per built-in workflow of the app's (`AppSteps`). */
-export const appSteps: AppSteps = { adopt, patch, goLive, goLiveHost, connectExisting, saveDraft, chat };
+export const appSteps: AppSteps = {
+  adopt,
+  patch,
+  goLive,
+  goLiveHost,
+  goLiveCloud,
+  pushCloud,
+  connectExisting,
+  saveDraft,
+  chat,
+};

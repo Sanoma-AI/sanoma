@@ -161,6 +161,17 @@ export const SitePageSchema = z.strictObject({
    * pathless or group layout's says nothing.
    */
   sitemap: z.literal(false).optional(),
+  /**
+   * `true` when it may make a call (`SiteCall`), so what it shows may depend on who asks and it is
+   * not built once as a file: one of its route's files may, or a layout's above it by route id (a
+   * pathless or group layout's over the pages under it alone, an index's over its own page alone),
+   * or a file of the site one of them imports, directly or through others (statically or by
+   * `import()`). A file may when it imports, re-exports or `import()`s `api` or `RunForm` from
+   * `sanoma/site` (by name, a namespace or `export *`), or code that is not read: outside the
+   * site's folder, an `import()` not written out, `import.meta.glob`, a package's `#import`, a path from the root (`/…`), a bare `.` or `..`. An
+   * asset's import (a stylesheet, an image, `?url` or `?raw`) is none.
+   */
+  calls: z.literal(true).optional(),
 });
 export type SitePage = z.infer<typeof SitePageSchema>;
 

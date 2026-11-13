@@ -119,6 +119,7 @@ const NAMES = [
   "SANOMA_WAKEUP_ACCOUNT_TOKEN",
   "SANOMA_WAKEUP_TOKEN",
   "RESEND_API_KEY",
+  "SANOMA_CLOUD_TOKEN",
 ];
 let app: App;
 let client: SanomaClient;
@@ -524,6 +525,28 @@ describe("Connect Cloudflare and Neon", () => {
   });
 });
 
+describe("Connect Sanoma Cloud", () => {
+  it("asks for a Cloud token where the config has the Cloud connector, and stores only one that is a Cloud token", async () => {
+    const declared = defineConfig({ ...config, connectors: [githubConnector, cloud] });
+    const clouded: AppContext = { ...ctx, resolved: resolveConfig(declared) };
+    expect((await setupStatus(clouded)).tokens).toContainEqual(
+      expect.objectContaining({ name: "SANOMA_CLOUD_TOKEN", status: "missing" }),
+    );
+    expect((await setupStatus(ctx)).tokens.some((token) => token.name === "SANOMA_CLOUD_TOKEN")).toBe(false);
+    await expect(
+      setSetupToken(clouded, { id: "alice" }, { name: "SANOMA_CLOUD_TOKEN", value: "ghp_not-cloud" }),
+    ).rejects.toThrow("That is not a Cloud token: one starts with sca_");
+    await setSetupToken(clouded, { id: "alice" }, { name: "SANOMA_CLOUD_TOKEN", value: "sca_pasted-token" });
+    const status = await setupStatus(clouded);
+    expect(status.tokens).toContainEqual(
+      expect.objectContaining({ name: "SANOMA_CLOUD_TOKEN", status: "set", source: "stored", setBy: "alice" }),
+    );
+    expect(JSON.stringify(status)).not.toContain("sca_pasted-token");
+    // Signed out again, for Hosting's tests below.
+    await client.clearSecret("SANOMA_CLOUD_TOKEN", { by: "alice" });
+  });
+});
+
 /** A page of an app, as the browser gets it from the server: React's text separators left out. */
 const html = async (path: string, url = app.url) =>
   (await (await fetch(new URL(path, url))).text()).replaceAll("<!-- -->", "");
@@ -692,7 +715,12 @@ export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", 
       const page = await html("/hosting", started.url);
       expect(page).toContain(">Local</span>");
       expect(page).toContain(">Ready to go live</h2>");
-      expect(page).toContain("answering at <code>acme.sanoma.work</code>");
+      // Its address, the slug infra.ts declares, to check or change; not signed in, Go live signs in first.
+      expect(page).toMatch(/<input[^>]*id="go-live-address"[^>]*value="acme"/);
+      expect(page).toContain(">.sanoma.work</span>");
+      expect(page).toContain("Not signed in: Go live opens Sanoma in your browser first");
+      expect(page).toMatch(/>Go live<\/button>/);
+      expect(page).toContain('href="/hosting/connect"');
       expect(page).toContain('href="/hosting?own=true"');
       expect(page).not.toContain(">1. Connect</h2>");
       // The declared database and host in their cards, unbound, the host's address once applied.

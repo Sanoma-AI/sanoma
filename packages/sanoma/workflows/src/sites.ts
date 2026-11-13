@@ -1,12 +1,12 @@
 import { existsSync, readdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, posix } from "node:path";
 import { z } from "zod";
 import { childrenOf, keyName, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
-import { stringValue, unwrap } from "./outline.ts";
+import { moduleSpecifier, stringValue, unwrap } from "./outline.ts";
 import { exportsOf, loadModules } from "./load.ts";
-import { APPS_DIR, appFolders, filesUnder, isDirectory, relPath, SITE_ENTRIES } from "./paths.ts";
+import { APPS_DIR, appFolders, filesUnder, isDirectory, RELATIVE, relPath, SITE_ENTRIES } from "./paths.ts";
 import { isObject } from "./resource.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { START } from "./schema.ts";
@@ -32,8 +32,6 @@ import {
 
 export type { SiteCall, SiteEntry, SitePage };
 
-/** Where a site's code is: its pages and its components. */
-const SITE_DIRS = ["routes", "components"];
 const KIND_NAMES = { workflow: "workflow", collection: "collection", op: "operation" } as const;
 /** What a route's loader and head name its path's parameters by. */
 const PARAMS: ReadonlySet<string> = new Set(["params"]);
@@ -43,9 +41,9 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
 /**
  * The sites under `root` (`sitesUnder`): each folder of `sites/`, then of each app's
  * `apps/<app>/sites/`, with a `routes/` whose name is a URL segment, by key (as
- * `sanoma/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
- * `components/**` (`.ts` and `.tsx`, less tests and declarations) of each with oxc, never running
- * them: each page (`SitePage`, from a route's id), each `<RunForm workflow="…" />` and each use of `api`, both imported from `sanoma/site`,
+ * `sanoma/app/build`'s `sitesOf` mounts them). Reads every file of each (`.ts` and `.tsx`, less
+ * declarations, and tests, specs and stories outside `routes/`) with oxc, never running them: each page (`SitePage`, from the
+ * route's id of a file under `routes/`), each `<RunForm workflow="…" />` and each use of `api`, both imported from `sanoma/site`,
  * called or passed on (`queryFn: api.data.leads.list`):
  * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` (an app's
  * `api.data.<app>.<collection>.<op>`) a collection,
@@ -135,7 +133,7 @@ export function readSites(
     const read = readSiteFiles(root, dir);
     const written = read.flatMap((file) => file.uses.filter((use) => !isAppCollection(use)));
     const resolved = written.filter((use) => !isDescribe(use)).map(resolve);
-    const pages = pagesOf(read);
+    const pages = pagesOf(read, callingFiles(read));
     // Its declared domain is the production host's to attach (`siteDomains`): where the site answers
     // is `domain`, which only the app sets, from the `SANOMA_DOMAINS` that host hands it.
     const { problems: optionProblems, domain: _declared, ...options } = siteDefinitionOf(root, dir, connectors);
@@ -171,31 +169,75 @@ export function readSites(
  */
 type Says = { listed: boolean; rank: number };
 
-/** A route file's page, with what its route says of the sitemap. */
-type FileRoute = Omit<SitePage, "sitemap"> & { says?: Says };
+/** A route file's page, with its route's id and what its route says of the sitemap. */
+type FileRoute = Omit<SitePage, "sitemap" | "calls"> & { id: string; says?: Says };
 
-/** A site's pages, by path, from its files: a layout's and its index's (one path) merged, the most its own route that says deciding `sitemap`. */
-function pagesOf(read: readonly { route?: FileRoute }[]): Map<string, SitePage> {
+/**
+ * A site's pages, by path, from its files: a layout's and its index's (one path) merged, the most
+ * its own route that says deciding `sitemap`, and `calls` (`SitePage.calls`) on each page whose
+ * route is one of the `calling` files' or under one by its id (an index's id ends in `/`, so it
+ * has none under it; `posts_` is not under `posts`).
+ */
+function pagesOf(read: readonly SiteFile[], calling: ReadonlySet<string> = new Set()): Map<string, SitePage> {
+  const callers = read.flatMap(({ file, route }) => (route && calling.has(file) ? [route.id] : []));
   const pages = new Map<string, SitePage>();
   const own = new Map<string, Says>();
   for (const { route } of read) {
     if (!route) continue;
-    const { says, ...page } = route;
-    pages.set(page.path, { ...pages.get(page.path), ...page });
+    const { id, says, ...page } = route;
+    // A pathless or group layout is no page of its own, though it has its parent's path.
+    const calls =
+      !isPathless(id.split("/").at(-1)!) && callers.some((caller) => id === caller || id.startsWith(`${caller}/`));
+    pages.set(page.path, { ...pages.get(page.path), ...page, ...(calls && { calls: true as const }) });
     if (says && says.rank > (own.get(page.path)?.rank ?? 0)) own.set(page.path, says);
   }
   for (const [path, { listed }] of own) if (!listed) pages.get(path)!.sitemap = false;
   return pages;
 }
 
-/** Each file of the site in `dir` (relative to `root`), as `readSiteFile` reads it, by path. */
+/** What an import Vite gives as data or a URL, never run: by its extension (before any query), or by `?url` or `?raw`. */
+const ASSET = /\.(?:css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot|json|md|txt)(?:\?.*)?$|\?(?:url|raw)$/i;
+
+/**
+ * The files of a site that may call (`SitePage.calls`): one that may itself (`SiteFile.calls`), or
+ * that imports one, directly or through others. An import names the file as written, else with
+ * `.ts` or `.tsx`, else its folder's `index`; one that names no file of the site and is no asset
+ * (`ASSET`) is code that is not read, so its importer may call.
+ */
+function callingFiles(read: readonly SiteFile[]): Set<string> {
+  const files = new Set(read.map(({ file }) => file));
+  const importers = new Map<string, string[]>();
+  const calling = new Set<string>();
+  for (const { file, calls, imports } of read) {
+    if (calls) calling.add(file);
+    for (const path of imports) {
+      const imported = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"]
+        .map((end) => path + end)
+        .find((f) => files.has(f));
+      if (imported === undefined) {
+        if (!ASSET.test(path)) calling.add(file);
+      } else if (importers.has(imported)) importers.get(imported)!.push(file);
+      else importers.set(imported, [file]);
+    }
+  }
+  // A set's iteration reaches what is added to it as it goes.
+  for (const file of calling) for (const importer of importers.get(file) ?? []) calling.add(importer);
+  return calling;
+}
+
+/**
+ * Each file of the site in `dir` (relative to `root`), as `readSiteFile` reads it, by path: a page
+ * only under `routes/`, outside a file or folder whose name starts with `-`, which the router skips.
+ * A test, spec or story is read only there, where the router makes it a route (`news.stories.tsx`).
+ */
 const readSiteFiles = (root: string, dir: string) =>
-  SITE_DIRS.flatMap((sub) => filesUnder(join(root, dir, sub), isSource))
-    .toSorted()
-    .flatMap((path) => {
-      const file = readSource(path);
-      return typeof file === "string" ? [] : [readSiteFile(file, relPath(root, path))];
-    });
+  filesUnder(join(root, dir), isSource).flatMap((path) => {
+    const [top, ...under] = relPath(join(root, dir), path).split("/");
+    const routed = top === "routes" && !under.some((s) => s.startsWith("-"));
+    if (!routed && /\.(?:test|spec|stories)\.tsx?$/.test(path)) return [];
+    const file = readSource(path);
+    return typeof file === "string" ? [] : [readSiteFile(file, relPath(root, path), routed)];
+  });
 
 /**
  * Each site's pages under `root` whose entries are a content kind's (`SitePage.content`), path to
@@ -298,23 +340,33 @@ const isDescribe = ({ kind, name, method }: Written): boolean =>
   kind === "workflow" && `${name}.${method}` === DESCRIBE_CALL;
 
 /**
- * What one file holds: its uses, in its order, and the page it is, from its route's id, with the
- * content kind whose entry its one parameter names (`SitePage.content`) and whether its route's
- * options keep it out of the sitemap (`SitePage.sitemap`). A file under `routes/` is read whole;
- * any other only when it imports `api` or `RunForm`.
+ * One file of a site, from the root (`sites/www/routes/index.tsx`): its uses, in its order,
+ * whether it may itself call (`calls`, `SitePage.calls`), what it imports by a relative path,
+ * statically or by `import()` (type-only imports left out), as a path from the root as written
+ * (`sites/www/components/cloud.ts`, or with no extension), and, for a route file, the
+ * page it is, from its route's id, with the content kind whose entry its one parameter names
+ * (`SitePage.content`) and whether its route's options keep it out of the sitemap (`SitePage.sitemap`).
  */
-function readSiteFile(
-  { program, at }: SourceFile,
-  file: string,
-): { uses: Written[]; route?: FileRoute; warning?: LintProblem & { file: string } } {
+type SiteFile = {
+  file: string;
+  uses: Written[];
+  calls: boolean;
+  imports: string[];
+  route?: FileRoute;
+  warning?: LintProblem & { file: string };
+};
+
+/** What one file holds (`SiteFile`), a page only when it is a route file (`routed`). */
+function readSiteFile({ program, at }: SourceFile, file: string, routed: boolean): SiteFile {
   const api = importedAs(program, SITE_ENTRIES, "api");
   const runForm = importedAs(program, SITE_ENTRIES, "RunForm");
   const content = importedAs(program, SITE_ENTRIES, "content");
-  if (!api.size && !runForm.size && !file.includes("/routes/")) return { uses: [] };
+  const imports: string[] = [];
+  let calls = false;
   const found: Omit<Written, "page">[] = [];
   /** Each `content.<kind>.get(arg)`: its kind, its argument and where it is. */
   const gets: { kind: string; arg: Node; start: number }[] = [];
-  let page: string | undefined;
+  let id: string | undefined;
   let says: Says | undefined;
   const visit = (node: Node) => {
     if (!node) return;
@@ -327,19 +379,25 @@ function readSiteFile(
       // `createFileRoute(id)({ … })`: its page, and what its options say of the sitemap.
       const maker = callee?.type === "CallExpression" ? unwrap(callee.callee) : undefined;
       const madeId =
-        maker?.type === "Identifier" && ROUTE_MAKERS.has(maker.name) && page === undefined
+        maker?.type === "Identifier" && ROUTE_MAKERS.has(maker.name) && routed && id === undefined
           ? stringValue(callee.arguments[0])
           : undefined;
       if (madeId !== undefined) {
-        page = pageOf(madeId);
+        id = madeId;
         const listed = maker.name === "createFileRoute" ? sitemapOf(node.arguments[0]) : undefined;
         const rank = madeId.endsWith("/") ? 2 : isPathless(madeId.split("/").at(-1)!) ? 0 : 1;
         if (listed !== undefined && rank) says = { listed, rank };
       }
-      if (callee?.type === "Identifier" && ROUTE_MAKERS.has(callee.name) && page === undefined) {
-        const id = stringValue(node.arguments[0]);
-        if (id !== undefined) page = pageOf(id);
+      if (callee?.type === "Identifier" && ROUTE_MAKERS.has(callee.name) && routed && id === undefined) {
+        id = stringValue(node.arguments[0]);
       }
+      // Vite's `import.meta.glob(…)`: the modules it imports are not followed.
+      if (
+        callee?.type === "MemberExpression" &&
+        callee.object.type === "MetaProperty" &&
+        keyName(callee.property) === "glob"
+      )
+        calls = true;
       const kind = contentKind(callee, content);
       if (kind !== undefined) gets.push({ kind, arg: unwrap(node.arguments[0]), start: node.start });
     } else if (node.type === "JSXOpeningElement" && node.name.type === "JSXIdentifier" && runForm.has(node.name.name)) {
@@ -349,16 +407,29 @@ function readSiteFile(
       const value = attribute?.value?.type === "JSXExpressionContainer" ? attribute.value.expression : attribute?.value;
       const name = stringValue(value);
       if (name !== undefined) found.push({ kind: "workflow", name, via: "RunForm", file, ...at(node.start) });
+    } else if (node.importKind !== "type" && node.exportKind !== "type") {
+      const source = moduleSpecifier(node);
+      if (source !== undefined && RELATIVE.test(source))
+        imports.push(posix.join(posix.dirname(file), source).replace(/\/$/, ""));
+      // An `import()` not written out, a package's `#import`, a root's `/…` or a bare `.` or `..` (not followed), or `api` or `RunForm` taken.
+      else if (
+        source === undefined
+          ? node.type === "ImportExpression"
+          : /^(?:#|\/|\.\.?$)/.test(source) || (SITE_ENTRIES.has(source) && takesCallers(node))
+      )
+        calls = true;
     }
     for (const child of childrenOf(node)) visit(child);
   };
   visit(program);
+  const page = id === undefined ? undefined : pageOf(id);
   const uses = found.map((use) => (page === undefined ? use : { ...use, page }));
-  if (page === undefined) return { uses };
-  const route: FileRoute = { path: page, ...(says && { says }) };
+  const read = { file, uses, calls, imports };
+  if (page === undefined) return read;
+  const route: FileRoute = { path: page, id: id!, ...(says && { says }) };
   // The one parameter's name (not a splat's), and the kinds whose `get` is given it (`params.slug`, or `slug` destructured).
   const params = page.split("/").filter((segment) => segment.startsWith("$"));
-  if (params.length !== 1 || params[0] === "$") return { uses, route };
+  if (params.length !== 1 || params[0] === "$") return { ...read, route };
   const param = params[0]!.slice(1);
   const kinds = new Set(
     gets
@@ -369,14 +440,14 @@ function readSiteFile(
       )
       .map(({ kind }) => kind),
   );
-  if (kinds.size === 1) return { uses, route: { ...route, content: [...kinds][0]! } };
+  if (kinds.size === 1) return { ...read, route: { ...route, content: [...kinds][0]! } };
   // A read by the parameter in a form the sitemap does not follow (`params.id.toLowerCase()`, two kinds).
   const unfollowed = gets.find(({ arg }) => mentions(arg, param));
-  if (!unfollowed) return { uses, route };
+  if (!unfollowed) return { ...read, route };
   const message =
     `the sitemap lists none of this page's entries: it reads content by the page's parameter in a way it cannot follow. ` +
     `Read one kind by it as written, \`content.<kind>.get(params.${param})\` (or \`${param}\` destructured)`;
-  return { uses, route, warning: { file, ...at(unfollowed.start), message } };
+  return { ...read, route, warning: { file, ...at(unfollowed.start), message } };
 }
 
 /** A route's `options`' `staticData: { sitemap }`, each written out, `sitemap` a boolean; undefined for any other. */
@@ -442,6 +513,23 @@ function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" |
   if (path.length > 2) return undefined;
   return { kind: "workflow", name: first, ...(second !== undefined && { method: second }) };
 }
+
+/** What makes a call from a site: `api` and `RunForm`, from `sanoma/site`. */
+const CALLERS: ReadonlySet<string> = new Set(["api", "RunForm"]);
+
+/**
+ * Whether an import, a re-export or an `import()` of `sanoma/site`, not of types only, may take
+ * `api` or `RunForm`: an `import()`, an `export *` or a namespace takes all of it, or a specifier
+ * names one.
+ */
+const takesCallers = (node: Node): boolean =>
+  node.type === "ImportExpression" ||
+  node.type === "ExportAllDeclaration" ||
+  node.specifiers.some((s: Node) => {
+    if (s.type === "ImportNamespaceSpecifier") return true;
+    const name = s.type === "ImportSpecifier" ? s.imported : s.type === "ExportSpecifier" ? s.local : undefined;
+    return s.importKind !== "type" && s.exportKind !== "type" && name !== undefined && CALLERS.has(keyName(name)!);
+  });
 
 /** The local names `imported` has in the file, imported as a value from one of `sources`. */
 function importedAs(program: Node, sources: ReadonlySet<string>, imported: string): Set<string> {
@@ -577,5 +665,5 @@ const pageOf = (id: string): string =>
 /** A route id's segment the router's path leaves out: a `(group)` or a `_pathless` one. */
 const isPathless = (segment: string): boolean => /^\(.*\)$/.test(segment) || segment.startsWith("_");
 
-/** A site's source file: `.ts` or `.tsx`, but a test or a declaration. */
-const isSource = (name: string) => /\.tsx?$/.test(name) && !/\.(test|d)\.tsx?$/.test(name);
+/** A site's source file: `.ts` or `.tsx`, but a declaration. */
+const isSource = (name: string) => /\.tsx?$/.test(name) && !/\.d\.tsx?$/.test(name);

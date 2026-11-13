@@ -16,7 +16,7 @@ import { checkSandbox } from "sanoma/testing/sandbox";
 import type { Box } from "sanoma/workflows";
 import { agent37Api, isCode } from "../src/api.ts";
 import { agent37Backend, BOX, KEY } from "../src/backend.ts";
-import { DEFAULTS, instance } from "../src/connector.ts";
+import { BASE, DEFAULTS, instance } from "../src/connector.ts";
 
 const key = process.env[KEY];
 const repo = process.argv[2];
@@ -26,6 +26,8 @@ if (process.env.SANOMA_LIVE !== "1" || !key || !repo) {
   );
   process.exit(2);
 }
+/** The template its boxes run: Agent37's plain one, or `AGENT37_TEST_IMAGE` (a workspace template, such as the box image's). */
+const IMAGE = process.env.AGENT37_TEST_IMAGE ?? BASE;
 const NAME = `sanoma-live-${Date.now().toString(36)}`;
 const backend = agent37Backend({ secrets: async () => new Map([[KEY, key]]), declared: {} });
 const api = agent37Api(key);
@@ -51,7 +53,7 @@ async function sh(box: Box, command: string) {
 let failed = false;
 try {
   const box = await timed("create to ready (made, running, the runner started)", () =>
-    backend.open({ name: NAME, image: DEFAULTS.image, size: DEFAULTS.size }),
+    backend.open({ name: NAME, image: IMAGE, size: DEFAULTS.size }),
   );
 
   // The company repo, as the instance hands a box its draft: a bundle the box clones.
@@ -82,7 +84,7 @@ try {
     }
   }
   console.log(`checkpoint written (sleep to a start it takes): ${seconds(waking - asleep)}`);
-  const woken = await backend.open({ name: NAME, image: DEFAULTS.image, size: DEFAULTS.size });
+  const woken = await backend.open({ name: NAME, image: IMAGE, size: DEFAULTS.size });
   console.log(`wake from sleep (start to the runner answering): ${seconds(Date.now() - waking)}`);
   if (!(await sh(woken, "test -d repo/node_modules && echo kept")).includes("kept")) {
     throw new Error("node_modules did not survive the sleep");
@@ -94,7 +96,7 @@ try {
     backend,
     capabilities: instance.sandbox!.capabilities,
     name: `${NAME}-kit`,
-    image: DEFAULTS.image,
+    image: IMAGE,
     size: DEFAULTS.size,
     timeoutMs: 5 * 60_000,
   });

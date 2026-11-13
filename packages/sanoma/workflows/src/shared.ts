@@ -551,13 +551,24 @@ export const LOGIN_CODE_WORKFLOW = "login-code";
 /**
  * The app's own actions on the company's repository, each a built-in workflow the app starts and
  * the worker runs with the app's steps (`WorkerOptions.app`, `app-workflows.ts`): Adopt (a drifted
- * field's value at the vendor into its data file), a form's Save, going live (`infra.ts` written,
- * then the push and the host's apply) and connecting an existing repository or database.
+ * field's value at the vendor into its data file), a form's Save, going live on the company's own
+ * accounts (`infra.ts` written, then the push and the host's apply), going live on a host in its
+ * vendor's account (Sanoma Cloud's: the repository made there, the push, and the declared
+ * database's and host's apply) and connecting an existing repository or database.
  */
 export const ADOPT_WORKFLOW = "adopt";
 export const PATCH_WORKFLOW = "patch";
 export const GO_LIVE_WORKFLOW = "go-live";
 export const GO_LIVE_HOST_WORKFLOW = "go-live-host";
+export const GO_LIVE_CLOUD_WORKFLOW = "go-live-cloud";
+
+/**
+ * A company's slug at Sanoma Cloud, its address `<slug>.sanoma.work`, as sanoma-ops's sign-up
+ * checks it: lower case letters, digits and dashes, a dash at neither end, one of them or 3 to 40.
+ */
+export const CLOUD_SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
+/** `CLOUD_SLUG` in words. */
+export const CLOUD_SLUG_RULE = "lower case letters, digits and dashes, a dash at neither end: one of them, or 3 to 40";
 export const CONNECT_EXISTING_WORKFLOW = "connect-existing";
 
 /**
@@ -634,6 +645,7 @@ export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   PATCH_WORKFLOW,
   GO_LIVE_WORKFLOW,
   GO_LIVE_HOST_WORKFLOW,
+  GO_LIVE_CLOUD_WORKFLOW,
   CONNECT_EXISTING_WORKFLOW,
   SAVE_DRAFT_WORKFLOW,
 ]);

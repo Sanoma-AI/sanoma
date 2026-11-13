@@ -48,13 +48,19 @@ function installedCopy(): string {
  * A GET to `url` with `host` as its Host, which fetch does not let a caller set, and so with no
  * need for `*.localhost` to resolve (it does not on every Linux).
  */
-function rawGet(url: string, host: string): Promise<{ status: number; body: string }> {
+function rawGet(url: string, host: string): Promise<{ status: number; body: string; location?: string }> {
   const { hostname, port, pathname } = new URL(url);
   return new Promise((done, fail) => {
     httpRequest({ host: hostname, port, path: pathname, headers: { host, accept: "text/html" } }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (chunk: Buffer) => chunks.push(chunk));
-      res.on("end", () => done({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
+      res.on("end", () =>
+        done({
+          status: res.statusCode ?? 0,
+          body: Buffer.concat(chunks).toString(),
+          ...(res.headers.location && { location: res.headers.location }),
+        }),
+      );
     })
       .on("error", fail)
       .end();
@@ -302,7 +308,11 @@ describe("sanoma with sites: the dev server", () => {
     ]);
     const own = await rawGet(`${url}/demo/mount.js`, `hello.localhost:${new URL(url).port}`);
     expect([own.status, own.body]).toEqual([200, text]);
-    expect((await rawGet(`${url}/sites/hello/demo/mount.js`, `hello.localhost:${new URL(url).port}`)).status).toBe(404);
+    // Its path on the app's host is sent to the root there; Vite's modules under /sites/ are not.
+    const sent = await rawGet(`${url}/sites/hello/demo/mount.js`, `hello.localhost:${new URL(url).port}`);
+    expect([sent.status, sent.location]).toEqual([308, "/demo/mount.js"]);
+    const module = await rawGet(`${url}/sites/hello/routes/index.tsx`, `hello.localhost:${new URL(url).port}`);
+    expect([module.status, module.location]).toEqual([200, undefined]);
     // A link is not followed, as the build leaves it out: a folder linked to outside the site is no public file.
     symlinkSync(join(repo, "workflows"), join(repo, "sites/hello/public/linked"));
     expect((await fetch(`${url}/sites/hello/linked/hello.ts`)).status).not.toBe(200);

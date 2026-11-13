@@ -10,6 +10,8 @@ import { agent37 } from "@sanoma-ai/connector-agent37";
 import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 import { github } from "@sanoma-ai/connector-github";
 import { resend } from "@sanoma-ai/connector-resend";
+import { cloud } from "@sanoma-ai/connector-sanoma-cloud";
+import { fakeCloud } from "@sanoma-ai/connector-sanoma-cloud/fake";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
 import { testDatabaseUrl, waitFor, withFake } from "sanoma/testing";
@@ -153,7 +155,8 @@ const config: SanomaConfig = {
     },
   },
   workflows: [],
-  connectors: [withFake(github, githubFake), supabaseFake, host.connector],
+  // Sanoma Cloud's too, which the template's infra.ts declares: going live on the company's own accounts replaces it.
+  connectors: [withFake(github, githubFake), supabaseFake, host.connector, withFake(cloud, fakeCloud())],
   connections: [supabaseInfra],
   ledger: memoryLedger(),
   root,
@@ -285,6 +288,7 @@ describe("going live", () => {
     });
     expect(await goLiveProgress(await now())).toEqual({
       infra: null,
+      replaces: false,
       beforeHost: [`${INFRA}#repo`, `${INFRA}#store`],
       bound: { beforeHost: false, host: false },
       run: null,
@@ -458,6 +462,13 @@ describe("going live", () => {
   });
 
   it("goes from the choices to a host answering at its URL", async () => {
+    // The template's file, declaring Sanoma Cloud with nothing of it bound: going live here writes it again.
+    mkdirSync(join(root, "resources", "sanoma"), { recursive: true });
+    const template = new URL("../../template/resources/sanoma/infra.ts", import.meta.url);
+    writeFileSync(join(root, INFRA), readFileSync(template, "utf8").replaceAll("company", "acme-ops"));
+    git("add", INFRA);
+    git("commit", "--quiet", "-m", "The template's infra.ts");
+    expect(await goLiveProgress(await now())).toMatchObject({ infra: null, replaces: true });
     // Steps 3 and 4: infra.ts committed, with the owner, apply on the repository, its deploy key and the database.
     const first = await pageApi(await now(), alice).goLive(choices());
     const sourceKey = (await app.client.secrets(["SANOMA_SOURCE_KEY"])).get("SANOMA_SOURCE_KEY")!.value;
