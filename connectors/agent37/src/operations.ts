@@ -1,9 +1,13 @@
-import type { PlanAction } from "sanoma/workflows";
+import { DriverError, type PlanAction } from "sanoma/workflows";
 import { wanted } from "./connector.ts";
 
 // The instance type's operations, a declaration's record: apply makes nothing at Agent37, since a
 // box is made when someone first opens it. The driver's list instances with the key, so a read
 // says whether it works; the fake's answer at once. Both go through `instanceOperations`.
+
+/** The failure for a box `name` there is none of, the driver's and the fake's. */
+export const noBox = (name: string) =>
+  new DriverError(`agent37: there is no box ${name}`, { retryable: false, status: 404, vendorCode: "not_found" });
 
 /** What a declaration is bound by: there is no object at Agent37 to name it. */
 const BINDING = "agent37";

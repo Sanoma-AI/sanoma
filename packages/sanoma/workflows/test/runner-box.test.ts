@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { checkSandbox } from "sanoma/testing/sandbox";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { runnerBox, runnerHealth, runnerScript } from "../src/runner-box.ts";
 import { RUNNER_HEALTH, RUNNER_PROTOCOL } from "../src/runner-protocol.ts";
 import type { Box, SandboxBackend } from "../src/sandbox-contract.ts";
@@ -66,6 +66,27 @@ describe("the sandbox runner", () => {
     expect(await runnerHealth(url)).toEqual({ protocol: RUNNER_PROTOCOL, pid: runner.pid });
     expect(await runnerHealth(`${url}/other`)).toBeUndefined();
     expect((await fetch(`${url}/other`)).status).toBe(404);
+  });
+
+  it("asks for its health ahead of the URL's query, which a signed link's token rides in", async () => {
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", async (input: URL) => {
+      asked.push(String(input));
+      return Response.json({ protocol: RUNNER_PROTOCOL, pid: 1 });
+    });
+    try {
+      const health = { protocol: RUNNER_PROTOCOL, pid: 1 };
+      expect(await runnerHealth("https://ab12cd34ef-7700.agent37.app/?a37_token=t")).toEqual(health);
+      expect(await runnerHealth("https://ab12cd34ef-7700.agent37.app?a37_token=t")).toEqual(health);
+      expect(await runnerHealth("https://box.example/base/?a=1&b=2")).toEqual(health);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(asked).toEqual([
+      "https://ab12cd34ef-7700.agent37.app/runner/health?a37_token=t",
+      "https://ab12cd34ef-7700.agent37.app/runner/health?a37_token=t",
+      "https://box.example/base/runner/health?a=1&b=2",
+    ]);
   });
 
   it("passes the sandbox conformance kit through runnerBox", async () => {

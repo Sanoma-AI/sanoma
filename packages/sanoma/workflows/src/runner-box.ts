@@ -33,10 +33,13 @@ export async function runnerScript(): Promise<Uint8Array> {
 
 /**
  * What the runner at `url` (asked with `headers`) answers at `RUNNER_HEALTH`, or undefined when nothing
- * answers as a runner: a backend starts one then, and replaces one of another `protocol`.
+ * answers as a runner: a backend starts one then, and replaces one of another `protocol`. The path
+ * goes before the URL's query, which may carry its credential (a signed link's token).
  */
-export const runnerHealth = (url: string, headers?: Record<string, string>): Promise<RunnerHealth | undefined> =>
-  fetch(`${url}${RUNNER_HEALTH}`, { headers, signal: AbortSignal.timeout(5_000) })
+export function runnerHealth(url: string, headers?: Record<string, string>): Promise<RunnerHealth | undefined> {
+  const at = new URL(url);
+  at.pathname = `${at.pathname.replace(/\/$/, "")}${RUNNER_HEALTH}`;
+  return fetch(at, { headers, signal: AbortSignal.timeout(5_000) })
     .then(async (res) => {
       const health = res.ok ? ((await res.json()) as Partial<RunnerHealth> | null) : null;
       return typeof health?.protocol === "number" && typeof health.pid === "number"
@@ -44,6 +47,7 @@ export const runnerHealth = (url: string, headers?: Record<string, string>): Pro
         : undefined;
     })
     .catch(() => undefined);
+}
 
 const encoder = new TextEncoder();
 

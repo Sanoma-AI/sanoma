@@ -5,7 +5,7 @@ import { installedSanoma, RUNNER_PORT, runnerHealth } from "sanoma/workflows";
 import { slugged } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { agent37Api } from "../src/api.ts";
-import { agent37Backend, BOX, BOX_IMAGE, labelOf } from "../src/backend.ts";
+import { agent37Backend, BOX, BOX_IMAGE, labelOf, PNPM } from "../src/backend.ts";
 import { BASE, instance } from "../src/connector.ts";
 import { fakeAgent37Vendor, KEY } from "./vendor.ts";
 
@@ -35,7 +35,9 @@ const api = agent37Api(KEY);
 const templateCalls = () => vendor.sent.filter((s) => s.path.startsWith("/templates"));
 const madeFrom = () =>
   vendor.sent.filter((s) => s.method === "POST" && s.path === "/instances").map((s) => s.body?.template);
-const execs = (id: string) => vendor.sent.filter((s) => s.path === `/instances/${id}/exec`).length;
+/** The execs that wrote the runner in and started it: every open puts pnpm in with one more. */
+const execs = (id: string) =>
+  vendor.sent.filter((s) => s.path === `/instances/${id}/exec` && s.body?.command !== PNPM).length;
 
 describe("agent37Backend", () => {
   it("passes the sandbox conformance kit", async () => {
