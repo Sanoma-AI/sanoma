@@ -27,7 +27,8 @@ import type { Db } from "./db.ts";
 import { data } from "./db/company.ts";
 import { isObject } from "./resource.ts";
 import { type CallContext, defineDriver, type Driver, type DriverImpl } from "./op.ts";
-import { BATCH, type Deleted, linksIn, linkTarget, reshape } from "./shared.ts";
+import type { ReshapeOutput } from "./description.ts";
+import { BATCH, type Deleted, linkTarget, linkValues, reshape } from "./shared.ts";
 
 // The collections' driver: their records as rows of the `data` table, in the config's database,
 // and `sanoma.records.reshape`'s. Apart from `collection.ts`, which declares them and fakes them in
@@ -210,50 +211,64 @@ async function foundOn(db: Db, wanted: KeysByCollection, lock = false): Promise<
   return found;
 }
 
-/** How many records one statement of a reshape updates. */
-const RESHAPE_CHUNK = 500;
+/** How many records a reshape reads, locks and brings along at a time: one page, one statement to write it. */
+const RESHAPE_PAGE = 500;
 
 /**
  * `sanoma.records.reshape`'s driver, on the `data` table of the database `db` opens: in one
- * transaction, the collection's rows read and locked (`for update`), each brought along by
- * `reshape` (`shared.ts`, the one rule the app's counts use too), and only the rows that changed
- * written back, `RESHAPE_CHUNK` a statement, saved now by the call's actor (`updatedBy`). From the
- * input's names and types alone: the declaration the worker loaded may still be the one before.
+ * transaction, the collection's rows a page at a time (`RESHAPE_PAGE`, in key order, each page
+ * after the last key of the one before, read and locked `for update`), each brought along by
+ * `reshape` (`shared.ts`, the one rule the app's counts use too; a link's values against the keys
+ * of the page's values that its target has, `linkValues`, read in the same transaction), and only
+ * the rows that changed written back, in one statement per page, saved now by the call's actor
+ * (`updatedBy`). So it holds one page in memory, never the collection nor a link's target, and is all or none: a failure on any page rolls back
+ * every page before it. Each row stays locked from its page's read to the commit, so a save of a
+ * row already read waits for the end of the reshape; a new key is not waited for, nor seen once
+ * its place is passed. From the input's names and types alone: the declaration the worker loaded
+ * may still be the one before.
  */
 export function recordsDriver(db: () => Promise<Db>): Driver {
   return defineDriver(recordsOps, {
     records: {
       reshape: async ({ collection, changes }, call) =>
         (await db()).transaction(async (tx) => {
-          const rows = await tx
-            .select({ key: data.key, record: data.record })
-            .from(data)
-            .where(eq(data.collection, collection))
-            .orderBy(data.key)
-            .for("update");
-          // A retype or a conversion to a link matches the values against the keys it links to.
-          const keys = new Map<string, Set<string>>();
-          for (const link of linksIn(changes)) {
-            const target = linkTarget(collection, link);
-            const there = await tx.select({ key: data.key }).from(data).where(eq(data.collection, target));
-            keys.set(link, new Set(there.map((row) => row.key)));
-          }
-          const { changed, counts } = reshape(
-            rows.map((row) => row.record),
-            changes,
-            keys,
-          );
-          const updates = [...changed].map(([i, record]) => ({ key: rows[i]!.key, record }));
+          const counts: ReshapeOutput = { rows: 0, changed: 0, converted: 0, cleared: 0, kept: 0 };
           const by = updatedBy(call);
-          for (let at = 0; at < updates.length; at += RESHAPE_CHUNK) {
-            // The rows as one JSON parameter, read back as a table to join on.
-            const chunk = JSON.stringify(updates.slice(at, at + RESHAPE_CHUNK));
-            await tx.execute(sql`
-              UPDATE ${data} SET record = v.record, updated_at = now(), updated_by = ${by}
-              FROM jsonb_to_recordset(${chunk}::jsonb) AS v(key text, record jsonb)
-              WHERE ${data.collection} = ${collection} AND ${data.key} = v.key`);
+          for (let after: string | undefined; ;) {
+            // By the primary key's own order, which the key's comparison follows, so each page starts where the last ended.
+            const rows = await tx
+              .select({ key: data.key, record: data.record })
+              .from(data)
+              .where(
+                and(eq(data.collection, collection), after === undefined ? undefined : drizzle.gt(data.key, after)),
+              )
+              .orderBy(data.key)
+              .limit(RESHAPE_PAGE)
+              .for("update");
+            const records = rows.map((row) => row.record);
+            // A retype or a conversion to a link matches the page's values against the keys it links
+            // to: only those its values name, read and locked (`for key share`) so none is deleted under it.
+            const wanted: KeysByCollection = new Map();
+            const links = [...linkValues(records, changes)].map(([link, values]) => {
+              const target = linkTarget(collection, link);
+              if (values.size) wanted.set(target, values);
+              return [link, target] as const;
+            });
+            const found = await foundOn(tx, wanted, true);
+            const keys = new Map(links.map(([link, target]) => [link, found.get(target) ?? new Set<string>()]));
+            const page = reshape(records, changes, keys);
+            for (const count of Object.keys(counts) as (keyof ReshapeOutput)[]) counts[count] += page.counts[count];
+            if (page.changed.size) {
+              // The page's changed rows as one JSON parameter, read back as a table to join on.
+              const updates = JSON.stringify([...page.changed].map(([i, record]) => ({ key: rows[i]!.key, record })));
+              await tx.execute(sql`
+                UPDATE ${data} SET record = v.record, updated_at = now(), updated_by = ${by}
+                FROM jsonb_to_recordset(${updates}::jsonb) AS v(key text, record jsonb)
+                WHERE ${data.collection} = ${collection} AND ${data.key} = v.key`);
+            }
+            if (rows.length < RESHAPE_PAGE) return counts;
+            after = rows.at(-1)!.key;
           }
-          return counts;
         }),
     },
   });

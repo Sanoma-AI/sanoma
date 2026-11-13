@@ -1,8 +1,10 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
 import type { TableChange, TableChangePlan, WontConvert } from "sanoma/workflows/description";
-import type { ChangeReshaped } from "sanoma/workflows/shared";
+import { type ChangeReshaped, isEnded } from "sanoma/workflows/shared";
+import type { UseMutationResult } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
@@ -26,12 +28,14 @@ import {
 
 // A table change's review on its change's page (`routes/changes/$id.tsx`), from the plan the
 // change carries (`ChangeState.plan`): once it merged, what became of the records
-// (`ChangeState.merged.reshaped`); a card per change in its kind's words and tone (Safe, Clears or
-// Keeps the values that won't convert, with a sample of them and the choice made where the change
-// was proposed, Keeps the data, Deletes n values for a column removed for good), Try it first, The details (the data file's lines), and Couldn't
-// apply this change over a run that failed before merging. Its decision is the change's own, in
-// the table change's words (`TABLE_VERBS`). It reads nothing of the app itself (the page gives it
-// the collection as main declares it), so a test renders it on its own.
+// (`ChangeState.merged.reshaped`, or its latest Try again's, `ChangeView.retry`), with Try again
+// and Copy the details when they weren't brought along; a card per change in its kind's words and
+// tone (Safe, Clears or Keeps the values that won't convert, with a sample of them and the choice
+// made where the change was proposed, Keeps the data, Deletes n values for a column removed for
+// good), Try it first, The details (the data file's lines), and Couldn't apply this change over a
+// run that failed before merging. Its decision is the change's own, in the table change's words
+// (`TABLE_VERBS`). It reads nothing of the app itself (the page gives it the collection as main
+// declares it, and Try again's mutation), so a test renders it on its own.
 
 /** A table change's Publish and Reject, as its review calls them. */
 export const TABLE_VERBS: Verbs = { approve: "Approve and apply", reject: "Send back" };
@@ -236,25 +240,70 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
   }
 }
 
+/** Try again on a change merged without its records: the page's mutation (`useReshapeChange`), by the draft's id. */
+type TryAgain = Pick<UseMutationResult<unknown, Error, string>, "mutate" | "isPending">;
+
 /**
- * What became of the records once the change merged (`reshaped`): the counts in words, or, when
- * bringing them along failed, that the change is published and the records are as they were,
- * with the run to see why.
+ * What became of the records once the change merged: the counts in words, or, when bringing them
+ * along failed, that the change is published and the records are as they were, with Try again
+ * (`tryAgain`, the page's; none, none drawn) and Copy the details. Its latest Try again (`retry`)
+ * says what became of them since, once it finished, and while it runs, that it does.
  */
-function Reshaped({ runId, plan, reshaped }: { runId: string; plan: TableChangePlan; reshaped: ChangeReshaped }) {
+function Reshaped({
+  change: { runId, state, retry },
+  reshaped,
+  plan,
+  tryAgain,
+}: {
+  change: Pick<ChangeDetail, "runId" | "state" | "retry">;
+  reshaped: ChangeReshaped;
+  plan: TableChangePlan;
+  tryAgain: TryAgain | undefined;
+}) {
   if ("error" in reshaped) {
+    const trying = tryAgain?.isPending || (retry !== undefined && !isEnded(retry.status));
+    const details = [
+      `The records of ${plan.collection} weren't brought along: ${reshaped.error}`,
+      `Change: ${state.title} (${runId})`,
+      ...(retry ? [`Tried again: ${retry.runId}, ${retry.status}${retry.error ? `: ${retry.error}` : ""}`] : []),
+    ].join("\n");
     return (
       <Card size="sm" role="status" aria-label="The records" className="ring-tone-bad-foreground/40">
         <CardHeader className="flex flex-wrap items-center gap-x-2.5">
           <CardHeading>The records weren't updated</CardHeading>
           <ToneBadge tone="bad">Published without them</ToneBadge>
         </CardHeader>
-        <CardContent className="text-sm">
-          The change is published, but its records weren't brought along: {reshaped.error}. They hold what they held
-          before.{" "}
-          <Link to="/runs/$id" params={{ id: runId }} className="underline underline-offset-4">
-            See the run
-          </Link>
+        <CardContent className="flex flex-col items-start gap-2.5 text-sm">
+          <p>
+            The change is published, but its records weren't brought along: {reshaped.error}. They hold what they held
+            before.{" "}
+            <Link to="/runs/$id" params={{ id: retry?.runId ?? runId }} className="underline underline-offset-4">
+              See the run
+            </Link>
+          </p>
+          {retry?.status === "waiting" && <p>Trying again waits for an approval in the Inbox.</p>}
+          {retry?.status === "failed" && <p>Trying again failed: {retry.error ?? "see the run"}.</p>}
+          <div className="flex flex-wrap gap-2">
+            {tryAgain && (
+              <Button disabled={trying} onClick={() => tryAgain.mutate(state.id)}>
+                {trying ? "Trying again…" : "Try again"}
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              onClick={() =>
+                // No clipboard on a page served over plain HTTP, or one the browser refuses: say so.
+                void Promise.resolve()
+                  .then(() => navigator.clipboard.writeText(details))
+                  .then(
+                    () => toast.success("Copied"),
+                    () => toast.error("Could not copy"),
+                  )
+              }
+            >
+              Copy the details
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
@@ -280,10 +329,12 @@ export function TableChangeReview({
   change,
   plan,
   collection,
+  tryAgain,
 }: {
-  change: Pick<ChangeDetail, "runId" | "status" | "state">;
+  change: Pick<ChangeDetail, "runId" | "status" | "state" | "retry">;
   plan: TableChangePlan;
   collection: CollectionEntry | undefined;
+  tryAgain?: TryAgain;
 }) {
   const [details, setDetails] = useState(false);
   const keyField = collection?.key ?? "key";
@@ -291,7 +342,9 @@ export function TableChangeReview({
   const reshaped = change.state.merged?.reshaped;
   return (
     <section aria-label="The table change" className="flex flex-col gap-3">
-      {reshaped && <Reshaped runId={change.runId} plan={plan} reshaped={reshaped} />}
+      {reshaped && (
+        <Reshaped change={change} reshaped={change.retry?.reshaped ?? reshaped} plan={plan} tryAgain={tryAgain} />
+      )}
       {change.status === "failed" && !change.state.merged && (
         <Card size="sm" role="status" aria-label="Couldn't apply this change" className="ring-tone-bad-foreground/40">
           <CardHeader className="flex flex-wrap items-center gap-x-2.5">

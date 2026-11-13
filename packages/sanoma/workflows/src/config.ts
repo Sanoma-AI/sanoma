@@ -31,7 +31,7 @@ import { changeDriver, changeOps, reservedFor } from "./change.ts";
 import { appRunner } from "./app-steps.ts";
 import { appWorkflows } from "./app-workflows.ts";
 import { changeSteps } from "./change-steps.ts";
-import { changeWorkflow } from "./change-workflow.ts";
+import { changeWorkflow, reshapeWorkflow } from "./change-workflow.ts";
 import { chatSteps } from "./chat-steps.ts";
 import { chatWorkflow } from "./chat-workflow.ts";
 import { followSteps } from "./follow-steps.ts";
@@ -95,6 +95,7 @@ import {
   CONNECT_WORKFLOW,
   MIGRATE_STORE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
+  RESHAPE_WORKFLOW,
   errorMessage,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
@@ -575,7 +576,10 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     const { resources, bindings } = await declaredOf("host");
     return resources.filter((r) => r.id in bindings).map((r) => r.id);
   };
-  names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, recordsOps, changeSteps({ remotes, hosts })));
+  const changing = changeSteps({ remotes, hosts });
+  names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, recordsOps, changing));
+  // Built-in, in every config: Try again, on a merged change whose records were not brought along.
+  names.set(RESHAPE_WORKFLOW, reshapeWorkflow(recordsOps, changing));
   // Built-in, in every config: what a git host's webhook says happened, which the worker with the checkout follows.
   names.set(FOLLOW_WORKFLOW, followWorkflow(followSteps({ remotes, hosts })));
   // Built-in, in every config: the app's own actions on the repository, which a worker given the app's steps runs.
