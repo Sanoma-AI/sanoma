@@ -75,12 +75,13 @@ function CollectionPage() {
     () => (config: ConfigDescription) => ({
       collection: collectionNamed(name)(config),
       people: personsOf(config.resources).map((person) => person.id),
+      tables: config.collections.map((c) => c.name),
       ...usedBy(name)(config),
     }),
     [name],
   );
   const {
-    data: { collection, people, workflows, sites },
+    data: { collection, people, tables, workflows, sites },
   } = useSuspenseQuery({ ...configQuery(), select });
   // The loader found it; a config that no longer has it reads as not found.
   if (!collection) throw notFound();
@@ -210,6 +211,7 @@ function CollectionPage() {
               key={JSON.stringify(column)}
               collection={collection}
               column={column}
+              tables={tables}
             />
           )}
           {formOpen && (

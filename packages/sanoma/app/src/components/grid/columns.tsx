@@ -1,7 +1,7 @@
 import type { PatchOutput } from "sanoma/workflows";
 import type { CollectionEntry } from "sanoma/workflows/describe";
 import type { ColumnType, ConvertDecision, TableChangePlan } from "sanoma/workflows/description";
-import { changeIdOf, errorMessage, type Saved } from "sanoma/workflows/shared";
+import { changeIdOf, errorMessage, FIELD_NAME, linkTarget, type Saved, typeOf } from "sanoma/workflows/shared";
 import { deepEquals } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -25,6 +25,7 @@ import {
 } from "#/components/ui/dropdown-menu.tsx";
 import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
+import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { proposeColumnChangeFn } from "../../functions.ts";
@@ -36,30 +37,18 @@ import {
   refreshColumns,
   remoteQuery,
 } from "../../queries.ts";
-import { ButtonLink, CardHeading, Notice, ToneBadge } from "../common.tsx";
+import { ButtonLink, CardHeading, Notice, plural, ToneBadge } from "../common.tsx";
 import { FROM } from "../data-grid.tsx";
-import {
-  ColumnChange,
-  DECIDED,
-  DOES,
-  happens,
-  keysIn,
-  landed,
-  problemOf,
-  requiredOf,
-  takenToday,
-  typeOf,
-  typeWords,
-  UNAVAILABLE,
-} from "./plan.ts";
+import { ColumnChange, DECIDED, DOES, happens, keysIn, landed, problemOf, requiredOf, typeWords } from "./plan.ts";
 import { WontConvertSample } from "./review.tsx";
 
 // A collection's columns from its grid: each field's menu on its heading (Rename, Change type,
 // Hide for me, a free-form field's keys to make columns of, Remove for everyone), New column, and
-// the panel each opens beside the grid (`?column=`), which proposes the change
-// (`proposeColumnChangeFn`) after saying what will happen, planned by the server over every
-// record (`columnPlanQuery`), and asks what becomes of the values a type change cannot convert. A
-// column's width is this browser's.
+// the panel each opens beside the grid (`?column=`), as do Show again and Remove for good under
+// Fields' Hidden columns (`data-grid.tsx`), which proposes the change (`proposeColumnChangeFn`)
+// after saying what will happen, planned by the server over every record (`columnPlanQuery`), and
+// asks what becomes of the values a type change cannot convert, or confirms the values a removal
+// for good deletes. A column's width is this browser's.
 
 /** The columns after the fields, by ids no field can have. */
 export const UPDATED = "@updated";
@@ -169,11 +158,14 @@ function KeysIn({
   return (
     <DropdownMenuGroup>
       <DropdownMenuSeparator />
-      <DropdownMenuLabel>Convert to column: found in this free-form column</DropdownMenuLabel>
+      <DropdownMenuLabel className="flex flex-col">
+        Convert to column
+        <span className="font-normal">Found in this free-form column. Pick one to make it a column of its own.</span>
+      </DropdownMenuLabel>
       {keys.map(({ key, count }) => (
         <DropdownMenuItem key={key} onClick={() => open({ change: "convert", field, key })}>
           <code className="text-xs">{key}</code>
-          <span className="ml-auto text-xs text-muted-foreground">in {count}</span>
+          <span className="ml-auto text-xs text-muted-foreground">in {plural(count, "record")}</span>
         </DropdownMenuItem>
       ))}
     </DropdownMenuGroup>
@@ -206,7 +198,11 @@ const TYPES: { label: string; type: ColumnType | typeof CHOICES }[] = [
 ];
 const isChoice = (type: ColumnType): type is Extract<ColumnType, { enum: unknown }> =>
   typeof type === "object" && "enum" in type;
-const sameChip = (a: ColumnType | typeof CHOICES, b: ColumnType) => (a === CHOICES ? isChoice(b) : deepEquals(a, b));
+// Of the object types: a string has a `link` method of its own.
+const isLink = (type: ColumnType | typeof CHOICES): type is Extract<Exclude<ColumnType, string>, { link: unknown }> =>
+  typeof type === "object" && "link" in type;
+const sameChip = (a: ColumnType | typeof CHOICES, b: ColumnType) =>
+  a === CHOICES ? isChoice(b) : isLink(a) ? isLink(b) : deepEquals(a, b);
 
 /** The panel's heading for each change. */
 function titleOf(collection: CollectionEntry, { change, field, key }: ColumnSearch) {
@@ -221,6 +217,10 @@ function titleOf(collection: CollectionEntry, { change, field, key }: ColumnSear
       return `Make ${key} of ${field} a column`;
     case "hide":
       return `Remove ${field} for everyone`;
+    case "show":
+      return `Show ${field} again`;
+    case "remove":
+      return `Remove ${field} for good`;
   }
 }
 
@@ -229,26 +229,45 @@ const SETTLE_MS = 400;
 
 /**
  * The column panel beside the grid: what `column` changes, with the fields it takes (a name, a
- * type of the chips, its choices, Optional), What will happen over every record (the server's
+ * type of the chips, its choices or the table a link links to, of the company's `tables`, by the
+ * runtime's names, Optional), What will happen over every record (the server's
  * plan, `columnPlanQuery`, read once the form settles) in plain words, for a type change with
  * values that won't convert those values and what becomes of them (the plan's `decision`, asked
- * before it goes on, for the count it was asked on), and Review the change, which proposes it: a
- * change to review, or, with no remote, the data file written and what became of the records. A
- * `clear` sent once the records changed is refused with the plan as it is now (`recounted`),
- * which the panel shows, asking again.
+ * before it goes on, for the count it was asked on), for removing a hidden column for good a
+ * confirmation that its values are deleted (for the count it was confirmed on), and Review the
+ * change, which proposes it: a change to review, or, with no remote, the data file written and
+ * what became of the records. A `clear` or a removal sent once the records changed is refused
+ * with the plan as it is now (`recounted`), which the panel shows, asking again.
  */
-export function ColumnPanel({ collection, column }: { collection: CollectionEntry; column: ColumnSearch }) {
+export function ColumnPanel({
+  collection,
+  column,
+  tables,
+}: {
+  collection: CollectionEntry;
+  column: ColumnSearch;
+  tables: readonly string[];
+}) {
   const navigate = useNavigate({ from: FROM });
   const queryClient = useQueryClient();
   const remote = useQuery(remoteQuery()).data;
   const declared = column.field === undefined ? undefined : collection.fields[column.field];
-  const [name, setName] = useState(column.change === "rename" ? (column.field ?? "") : "");
+  // A conversion's column is named as its key, when that is a name a column can have.
+  const [name, setName] = useState(
+    column.change === "rename"
+      ? (column.field ?? "")
+      : column.change === "convert" && FIELD_NAME.test(column.key ?? "")
+        ? column.key!
+        : "",
+  );
   const [type, setType] = useState<ColumnType>(declared && column.change === "retype" ? typeOf(declared) : "text");
   const [choices, setChoices] = useState(isChoice(type) ? type.enum.join("\n") : "");
   const [optional, setOptional] = useState(true);
   // The choice for the values that won't convert, and how many there were when it was made.
   const [decided, setDecided] = useState<{ choice: ConvertDecision; of: number }>();
-  // Whether a `clear` was refused since the records changed: the count is new, and asked again.
+  // How many values a removal for good was confirmed to delete.
+  const [confirmed, setConfirmed] = useState<number>();
+  // Whether a `clear` or a removal was refused since the records changed: the count is new, and asked again.
   const [recounted, setRecounted] = useState(false);
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string>();
@@ -260,11 +279,18 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
     add: { kind: "add", field: name, type: typed, required: !optional },
     rename: { kind: "rename", from: field, to: name },
     retype: { kind: "retype", field, to: typed },
-    convert: { kind: "convert", field, key: column.key ?? "", type: typed },
+    convert: { kind: "convert", field, key: column.key ?? "", to: name, type: typed },
     hide: { kind: "hide", field },
+    show: { kind: "show", field },
+    remove: { kind: "remove", field },
   }[column.change];
   const parsed = ColumnChange.safeParse(intent);
-  const problem = parsed.success ? problemOf(collection, parsed.data) : parsed.error.issues[0]?.message;
+  const problem = parsed.success ? problemOf(collection, parsed.data, tables) : parsed.error.issues[0]?.message;
+  // The tables a link may link to: those of the collection's folder, by name as written (`linkTarget`'s inverse).
+  const linkable = tables.flatMap((table) => {
+    const written = table.slice(table.lastIndexOf(".") + 1);
+    return linkTarget(collection.name, written) === table ? [written] : [];
+  });
   const unchanged =
     (column.change === "rename" && name === field) ||
     (column.change === "retype" && declared !== undefined && deepEquals(typed, typeOf(declared)));
@@ -293,6 +319,10 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
     setDecided(choice && wont ? { choice, of: wont.count } : undefined);
     setRecounted(false);
   };
+  // The values a removal for good deletes: it goes on once confirmed for this count.
+  const deletes = planned?.kind === "remove" ? planned.filled : undefined;
+  const confirms = deletes !== undefined && deletes > 0;
+  const sure = confirms && confirmed === deletes;
 
   async function propose() {
     if (!settled) return;
@@ -300,7 +330,7 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
     setFailed(undefined);
     try {
       const change = decision ? { ...settled, decision } : settled;
-      const clears = decision === "clear" ? wont?.count : undefined;
+      const clears = decision === "clear" ? wont?.count : deletes;
       const answer = await proposeColumnChangeFn({ data: { collection: collection.name, change, clears } });
       if ("recounted" in answer) {
         queryClient.setQueryData(columnPlanQuery(collection.name, settled).queryKey, answer.recounted);
@@ -348,7 +378,7 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
             void propose();
           }}
         >
-          {(column.change === "add" || column.change === "rename") && (
+          {(column.change === "add" || column.change === "rename" || column.change === "convert") && (
             <Field>
               <FieldLabel htmlFor="column-name">Name</FieldLabel>
               <Input id="column-name" autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
@@ -361,7 +391,6 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
               <div className="flex flex-wrap gap-1.5">
                 {TYPES.map((chip) => {
                   const on = sameChip(chip.type, type);
-                  const offered = chip.type === CHOICES || takenToday(chip.type);
                   return (
                     <Button
                       key={chip.label}
@@ -369,8 +398,6 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
                       size="sm"
                       variant={on ? "default" : "outline"}
                       aria-pressed={on}
-                      disabled={!offered}
-                      title={offered ? undefined : UNAVAILABLE}
                       onClick={() => {
                         setType(chip.type === CHOICES ? { enum: [] } : chip.type);
                         // Another type, other values that won't convert: what becomes of them is asked again.
@@ -383,6 +410,30 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
                 })}
               </div>
             </FieldSet>
+          )}
+          {isLink(type) && (
+            <Field>
+              <FieldLabel htmlFor="column-link">Links to</FieldLabel>
+              <NativeSelect
+                id="column-link"
+                className="w-full"
+                value={type.link}
+                onChange={(e) => {
+                  setType({ link: e.target.value });
+                  ask();
+                }}
+              >
+                <NativeSelectOption value="" disabled>
+                  Choose a table…
+                </NativeSelectOption>
+                {linkable.map((table) => (
+                  <NativeSelectOption key={table} value={table}>
+                    {table}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <FieldDescription>Each value is the key of one of its records.</FieldDescription>
+            </Field>
           )}
           {isChoice(type) && (
             <Field>
@@ -446,11 +497,44 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
               now. Choose again.
             </Notice>
           )}
+          {confirms && (
+            <Field orientation="horizontal">
+              <Checkbox
+                id="column-remove-sure"
+                checked={sure}
+                onCheckedChange={(checked) => {
+                  setConfirmed(checked ? deletes : undefined);
+                  setRecounted(false);
+                }}
+              />
+              <FieldContent>
+                <FieldLabel htmlFor="column-remove-sure">
+                  Delete {deletes === 1 ? "this value" : `these ${deletes} values`} for good
+                </FieldLabel>
+                <FieldDescription>This can't be undone.</FieldDescription>
+              </FieldContent>
+            </Field>
+          )}
+          {recounted && confirms && !sure && (
+            <Notice>
+              The records changed since you confirmed: {deletes === 1 ? "1 value" : `${deletes} values`} would be
+              deleted now. Confirm again.
+            </Notice>
+          )}
           {failed && <Notice variant="destructive">{failed}</Notice>}
           <div className="flex items-center gap-2">
             {remote && <ToneBadge tone="waiting">Waits for admin</ToneBadge>}
-            <Button type="submit" className="ml-auto" disabled={!plan || unchanged || (asks && !decision) || sending}>
-              {sending ? "Opening the change…" : "Review the change"}
+            <Button
+              type="submit"
+              className="ml-auto"
+              variant={column.change === "remove" ? "destructive" : "default"}
+              disabled={!plan || unchanged || (asks && !decision) || (confirms && !sure) || sending}
+            >
+              {sending
+                ? "Opening the change…"
+                : column.change === "remove" && !remote
+                  ? "Remove for good"
+                  : "Review the change"}
             </Button>
           </div>
         </form>

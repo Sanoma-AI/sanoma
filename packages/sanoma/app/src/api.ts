@@ -663,8 +663,9 @@ export const ColumnPlanRequest = z.object({ collection: z.string().min(1), chang
 export type ColumnPlanRequest = z.infer<typeof ColumnPlanRequest>;
 
 /**
- * What `proposeColumnChangeFn` takes: the change, and with a `clear` decision `clears`, how many
- * values the person was shown it leaves empty (`getColumnPlan`'s count of those that won't convert).
+ * What `proposeColumnChangeFn` takes: the change, and for one that deletes values `clears`, how
+ * many the person was shown it deletes (`getColumnPlan`'s count): with a `clear` decision those
+ * that won't convert, removing a column for good those it holds.
  */
 export const ProposeColumnChange = ColumnPlanRequest.extend({ clears: z.number().int().min(0).optional() });
 export type ProposeColumnChange = z.infer<typeof ProposeColumnChange>;

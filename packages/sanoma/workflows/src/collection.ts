@@ -21,10 +21,18 @@ import {
   DATA_VENDOR,
   type Deleted,
   type FIELD_TYPES,
+  isFreeForm,
+  isHidden,
+  isRecord,
+  linkOf,
+  linkTarget,
   LIST_LIMIT,
+  type MissingLink,
+  missingText,
   type ListQuery,
   qualified,
   type Saved,
+  typeOf,
 } from "./shared.ts";
 
 // A company's own records: a collection is declared with plain values (a name, a key and typed
@@ -36,22 +44,38 @@ import {
 
 export type FieldType = (typeof FIELD_TYPES)[number];
 
+/** What a free-form field (`json`) holds: anything JSON does. */
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 /**
- * A field of a collection: its type, the type marked optional, or one of a list of strings. An
- * optional one may be `hidden: true`: removed by a person, its values kept, left out of the app's
- * grid and forms; to the runtime it is an optional field like any other.
+ * A field of a collection: its type, the type marked optional, one of a list of strings, or a link
+ * to another collection of the same folder by its name (`{ link: "customers" }`): the key of one of
+ * its records, which a save checks is there (the database does not keep it so: a record deleted
+ * since reads as a link to fix, in `issues`). An optional one may be `hidden: true`: removed by a
+ * person, its values kept, left out of the app's grid and forms; to the runtime it is an optional
+ * field like any other, its schema marked `deprecated`, so a form drawn from any schema that
+ * embeds the record leaves it out too.
  */
 export type Field =
   | FieldType
   | { type: FieldType; optional?: true; hidden?: true }
-  | { enum: readonly [string, ...string[]]; optional?: true; hidden?: true };
+  | { enum: readonly [string, ...string[]]; optional?: true; hidden?: true }
+  | { link: string; optional?: true; hidden?: true };
 
-type ValueOfType<T> = T extends "number" ? number : T extends "boolean" ? boolean : string;
+type ValueOfType<T> = T extends "number"
+  ? number
+  : T extends "boolean"
+    ? boolean
+    : T extends "json"
+      ? JsonValue
+      : string;
 type ValueOf<F> = F extends { enum: readonly (infer E)[] }
   ? E
-  : F extends { type: infer T }
-    ? ValueOfType<T>
-    : ValueOfType<F>;
+  : F extends { link: string }
+    ? string
+    : F extends { type: infer T }
+      ? ValueOfType<T>
+      : ValueOfType<F>;
 type OptionalKeys<F> = { [K in keyof F]: F[K] extends { optional: true } ? K : never }[keyof F];
 type Flat<T> = { [K in keyof T]: T[K] };
 
@@ -141,7 +165,8 @@ export function collectionIn<
   const record = z.strictObject(
     Object.fromEntries(
       Object.entries(fields).map(([field, kind]) => {
-        const value = field === key ? z.string().min(1) : valueSchema(kind);
+        const value = field === key ? z.string().min(1) : valueSchema(name, kind);
+        if (isHidden(kind)) return [field, value.optional().meta({ deprecated: true })];
         return [field, isObject(kind) && kind.optional ? value.optional() : value];
       }),
     ),
@@ -171,11 +196,36 @@ const DATE = z.union([z.iso.date(), z.iso.datetime({ offset: true })]).meta({ fo
  */
 const PERSON = z.string().min(1).meta({ format: "person" });
 
-/** The schema of a field's value, required. */
-function valueSchema(kind: Field): z.ZodType {
+/**
+ * Anything JSON holds: a free-form field's value, `{}` in its JSON Schema (as zod's own `z.json()`
+ * is not: it writes a `$ref` into `$defs` for each field), so a form enters it as JSON text.
+ */
+const JSON_VALUE = z.custom<JsonValue>(isJson, "Needs a value: text, a number, yes or no, a list or a group of values");
+
+/** Whether `value` is one JSON holds as it is: null, text, a finite number, yes or no, a list or a plain object of them. */
+function isJson(value: unknown): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJson);
+  if (!isRecord(value)) return false;
+  const proto: unknown = Object.getPrototypeOf(value);
+  return (proto === Object.prototype || proto === null) && Object.values(value).every(isJson);
+}
+
+/** The schema of a field's value in the collection `name`, required: a link's says the collection it links to (`linkTarget`) in its JSON Schema's `description`. */
+function valueSchema(name: string, kind: Field): z.ZodType {
   if (typeof kind === "object" && "enum" in kind) return z.enum(kind.enum);
+  if (typeof kind === "object" && "link" in kind) {
+    const target = linkTarget(name, kind.link);
+    return z
+      .string()
+      .min(1)
+      .meta({ description: `The key of a record of ${target}.` });
+  }
   const type = typeof kind === "string" ? kind : kind.type;
-  return { text: z.string(), person: PERSON, date: DATE, number: z.number(), boolean: z.boolean() }[type];
+  return { text: z.string(), person: PERSON, date: DATE, number: z.number(), boolean: z.boolean(), json: JSON_VALUE }[
+    type
+  ];
 }
 
 /**
@@ -205,11 +255,13 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
     .refine((input) => !(input.ifAbsent && input.ifRecord !== undefined), {
       message: "Choose ifAbsent or ifRecord, not both",
     });
-  const names = Object.keys(fields);
+  // A free-form field is neither compared nor sorted by: its values are of any kind.
+  const compared = Object.entries(fields).filter(([, kind]) => !isFreeForm(kind));
+  const names = compared.map(([field]) => field);
   const where = z.strictObject(
     Object.fromEntries(
-      Object.entries(fields).map(([field, kind]) => {
-        const value = valueSchema(kind);
+      compared.map(([field, kind]) => {
+        const value = valueSchema(name, kind);
         const range = z.strictObject({ gt: value, gte: value, lt: value, lte: value }).partial();
         return [field, z.union([value, range]).optional()];
       }),
@@ -227,7 +279,7 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
     list: {
       effect: "read",
       idempotent: true,
-      description: `List records of ${name}: fields equal to a value or within a range, sorted, at most \`limit\``,
+      description: `List records of ${name}: fields equal to a value or within a range, sorted, at most \`limit\`; never by a free-form field`,
       input: z.object({
         where: where.optional(),
         order: z.enum([...names, ...names.map((n) => `-${n}`)] as [string, ...string[]]).optional(),
@@ -301,7 +353,7 @@ export const recordsOps = defineConnector("sanoma", {
       effect: "write",
       idempotent: true,
       description:
-        "Bring a collection's records along with a change to its columns: values moved to a renamed field, converted to a new type, or cleared or kept where they cannot convert",
+        "Bring a collection's records along with a change to its columns: values moved to a renamed field, converted to a new type, cleared or kept where they cannot convert, or deleted with a removed field",
       input: ReshapeInputSchema,
       output: ReshapeOutputSchema,
       target: ({ collection: name }: { collection: string }) => `${DATA_VENDOR}:${name}`,
@@ -330,9 +382,17 @@ export function recordIssues(c: Collection, record: unknown): NonNullable<Saved[
 export type Stored = Omit<Saved, "issues">;
 export type DataOps = Record<string, Record<string, OpSpec>>;
 
-/** The record as `get`, `list` and `save` answer it: with its issues, when it has any. */
-export function answer(c: Collection, stored: Stored): Saved {
-  const issues = recordIssues(c, stored.record);
+/**
+ * The record as `get`, `list` and `save` answer it: with its issues, when it has any, a link to a
+ * record that is not there among them when `found` says which are (the keys there, by collection:
+ * `get` and `list` read them; a save has just checked them).
+ */
+export function answer(c: Collection, stored: Stored, found?: KeysByCollection): Saved {
+  const missing = found ? missingLinks(c, [stored.record], found) : [];
+  const issues = [
+    ...recordIssues(c, stored.record),
+    ...missing.map((m) => ({ path: [m.field], message: missingText(m) })),
+  ];
   return issues.length ? { ...stored, issues } : stored;
 }
 
@@ -396,16 +456,78 @@ export interface Listing {
   limit: number;
 }
 
-/** What a field's values are in JSON: `number`, `boolean`, or a `string` (text, a date, a person, an enum value). */
+/** What a field's values are in JSON: `number`, `boolean`, or a `string` (text, a date, a person, an enum value, a link). */
 export type JsonType = "string" | "number" | "boolean";
 
-/** Each field's `JsonType`, by name: what `list` compares its values as. */
+/** Each field's `JsonType`, by name, but a free-form field's (`list` takes none): what `list` compares its values as. */
 export const jsonTypesOf = (c: Collection): Record<string, JsonType> =>
   Object.fromEntries(
-    Object.entries(c.fields).map(([name, kind]) => {
-      const type = typeof kind === "string" ? kind : "type" in kind ? kind.type : "text";
-      return [name, type === "number" || type === "boolean" ? type : "string"];
+    Object.entries(c.fields).flatMap(([name, kind]) => {
+      const type = typeOf(kind);
+      if (type === "json") return [];
+      return [[name, type === "number" || type === "boolean" ? type : "string"]];
     }),
+  );
+
+/** A collection's link fields, each with the collection it links to (`linkTarget`). */
+export const linksOf = (c: Collection): { field: string; target: string }[] =>
+  Object.entries(c.fields).flatMap(([field, kind]) => {
+    const link = linkOf(kind);
+    return link === undefined ? [] : [{ field, target: linkTarget(c.name, link) }];
+  });
+
+/**
+ * A collection's links a save checks and a read flags: every one but a hidden field's, whose values
+ * are kept as they are and which no form shows, so a record whose hidden link names a deleted
+ * record can still be saved; shown again, it is checked again.
+ */
+export const checkedLinks = (c: Collection) => linksOf(c).filter(({ field }) => !isHidden(c.fields[field]));
+
+/** The keys of records of other collections, by collection: those links name, or those found. */
+export type KeysByCollection = Map<string, Set<string>>;
+
+/** The keys `records`' links name, by the collection each links to: what a save checks are there, and a read whether they are. */
+export function linkedKeys(c: Collection, records: readonly Record<string, unknown>[]): KeysByCollection {
+  const wanted: KeysByCollection = new Map();
+  for (const { field, target } of checkedLinks(c)) {
+    for (const record of records) {
+      const value = record[field];
+      if (typeof value !== "string") continue;
+      const keys = wanted.get(target) ?? new Set();
+      wanted.set(target, keys.add(value));
+    }
+  }
+  return wanted;
+}
+
+/** Each link of `records` whose record `found` lacks (the keys there, by collection). */
+export function missingLinks(
+  c: Collection,
+  records: readonly Record<string, unknown>[],
+  found: KeysByCollection,
+): MissingLink[] {
+  return checkedLinks(c).flatMap(({ field, target }) =>
+    records.flatMap((record) => {
+      const value = record[field];
+      return typeof value === "string" && !found.get(target)?.has(value)
+        ? [{ key: String(record[c.key]), field, value, target }]
+        : [];
+    }),
+  );
+}
+
+/**
+ * The refusal of a save whose links name records that are not there, carrying each (`missing`):
+ * non-retryable, status 422, `vendorCode` `"link_missing"`. A batch's names every record it refuses.
+ */
+export const linksMissing = (missing: MissingLink[]) =>
+  Object.assign(
+    new DriverError(missing.map((m) => `${m.field}: ${missingText(m)}`).join("; "), {
+      retryable: false,
+      status: 422,
+      vendorCode: "link_missing",
+    }),
+    { missing },
   );
 
 /**
@@ -484,7 +606,17 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
         list.map((c) => {
           const records = () => state[c.name]!;
           const types = jsonTypesOf(c);
-          const saved = (stored: Stored) => answer(c, structuredClone(stored));
+          // The keys of the collections its links name, as they are now: what a read answers missing links by.
+          const found = (): KeysByCollection =>
+            new Map(linksOf(c).map(({ target }) => [target, new Set(Object.keys(state[target] ?? {}))]));
+          const saved = (stored: Stored, links?: KeysByCollection) => answer(c, structuredClone(stored), links);
+          /** Refuses `written` (and puts back what was there before, `restore`) when a link names a record that is not there. */
+          const checkLinks = (written: readonly Record<string, unknown>[], restore: () => void) => {
+            const missing = missingLinks(c, written, found());
+            if (!missing.length) return;
+            restore();
+            throw linksMissing(missing);
+          };
           const stored = (key: string) => (Object.hasOwn(records(), key) ? records()[key] : undefined);
           const matching = (where: Record<string, unknown> = {}) =>
             Object.values(records()).filter((s) => matches(s.record, where, types));
@@ -518,12 +650,26 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
           const ops: Record<string, (input: any, call: CallContext) => Promise<unknown>> = {
             get: async ({ key }: { key: string }) => {
               const s = stored(key);
-              return s ? saved(s) : null;
+              return s ? saved(s, found()) : null;
             },
-            list: async ({ where, order, limit }: Listing) =>
-              matching(where).toSorted(byOrder(order, types)).slice(0, limit).map(saved),
+            list: async ({ where, order, limit }: Listing) => {
+              const links = found();
+              return matching(where)
+                .toSorted(byOrder(order, types))
+                .slice(0, limit)
+                .map((s) => saved(s, links));
+            },
             count: async ({ where }: Pick<Listing, "where">) => ({ count: matching(where).length }),
-            save: async (input: SaveInput, call) => save(input, updatedBy(call)),
+            save: async (input: SaveInput, call) => {
+              const key = input.record[c.key] as string;
+              const before = stored(key);
+              const answered = save(input, updatedBy(call));
+              checkLinks([input.record], () => {
+                if (before) records()[key] = before;
+                else delete records()[key];
+              });
+              return answered;
+            },
             // All or none, as the driver's transaction: a failure puts back every entry made before it.
             [BATCH]: async ({ records: saves, deletes }: Batch, call) => {
               const by = updatedBy(call);
@@ -551,9 +697,16 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
                 restore();
                 throw err;
               }
-              if (!conflicts.length) return results;
-              restore();
-              throw recordsChanged(conflicts);
+              if (conflicts.length) {
+                restore();
+                throw recordsChanged(conflicts);
+              }
+              // After every entry, as the driver's transaction: a record the batch saves may be one another links to.
+              checkLinks(
+                saves.map((e) => e.record),
+                restore,
+              );
+              return results;
             },
             delete: async (input: DeleteInput, call) => remove(input, call.attempt > 1),
           };

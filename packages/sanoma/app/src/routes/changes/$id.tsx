@@ -22,7 +22,15 @@ import { filesOf, groupFiles, isSettled, phaseLabel, ruleOf } from "#/lib/change
 import { diffGrids } from "#/lib/grid-diff.ts";
 import { CHANGE_TONE } from "#/lib/tone.ts";
 import { type ChangeDetail, runName, starterName } from "#/api.ts";
-import { changeQuery, collectionNamed, configQuery, permissionsQuery, runLink, workflowTitles } from "#/queries.ts";
+import {
+  changeQuery,
+  collectionNamed,
+  configQuery,
+  permissionsQuery,
+  runLink,
+  useReshapeChange,
+  workflowTitles,
+} from "#/queries.ts";
 
 export const Route = createFileRoute("/changes/$id")({
   // The change, and main's Permissions grid, which its branch's is diffed against.
@@ -57,10 +65,11 @@ function ChangePage() {
   if (!change) throw notFound();
   const { state } = change;
   // A change to a collection's columns carries its plan: reviewed as the table change it is, when
-  // it reads as one (a change's stored state is data: one opened by an earlier release carries a
-  // plan of another shape, such as a removal, and is reviewed as any change).
+  // it reads as one (a change's stored state is data: one opened by an earlier release may carry a
+  // plan of another shape, such as a conversion with no new name, and is reviewed as any change).
   const plan = TableChangePlanSchema.safeParse(state.plan).data;
   const { data: config } = useSuspenseQuery(configQuery());
+  const tryAgain = useReshapeChange();
   return (
     <>
       <CrumbHeader>
@@ -95,7 +104,12 @@ function ChangePage() {
           <Refusal change={change} />
           <Stranded change={change} />
           {plan && (
-            <TableChangeReview change={change} plan={plan} collection={collectionNamed(plan.collection)(config)} />
+            <TableChangeReview
+              change={change}
+              plan={plan}
+              collection={collectionNamed(plan.collection)(config)}
+              tryAgain={tryAgain}
+            />
           )}
           <WhatChanged change={change} />
           <WhoMayDoWhat change={change} />

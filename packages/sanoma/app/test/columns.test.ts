@@ -102,8 +102,8 @@ describe("a collection's columns", () => {
       "Date",
       "A person",
       "A choice",
-      "Link to another table (off)",
-      "Free-form (off)",
+      "Link to another table",
+      "Free-form",
     ]);
     expect(html).toContain("existing records stay valid with it empty");
     // No name yet: What will happen says what is missing, and Review the change waits for it.
