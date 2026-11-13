@@ -108,7 +108,7 @@ function ChangePage() {
               change={change}
               plan={plan}
               collection={collectionNamed(plan.collection)(config)}
-              tryAgain={{ start: () => tryAgain.mutate(id), starting: tryAgain.isPending }}
+              tryAgain={tryAgain}
             />
           )}
           <WhatChanged change={change} />

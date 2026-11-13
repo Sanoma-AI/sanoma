@@ -166,10 +166,11 @@ export interface WorkerOptions {
 }
 
 /**
- * The async context as this module loaded, in no run: a worker started from inside a run's step (a
- * change's deploy asks the worker to start again, `WorkerOptions.reload`) starts in it, else DBOS
- * would take its calls for the step's (`resumeWorkflows` refuses one in a step) and the worker's
- * timers would keep the step's context for good.
+ * The async context as this module loaded, in no run. A reload is asked from inside a step (a
+ * change's deploy, `app:reload`), and a worker may be started from one (the test harness): both run
+ * in it, else DBOS would take the new worker's calls for the step's (`resumeWorkflows` refuses one
+ * in a step), and what the host starts in its reload (`sanoma serve`'s timer, worker and app) would
+ * keep the step's context for good.
  */
 const OUTSIDE_ANY_RUN = AsyncLocalStorage.snapshot();
 
@@ -233,6 +234,7 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
   };
   // Each write waits for the one before it to settle, failed or not.
   const serially = oneAtATime();
+  const reload = options.reload && (() => OUTSIDE_ANY_RUN(options.reload!));
   const state: WorkerState = {
     app: resolved.appName,
     connections: resolved.connections,
@@ -241,7 +243,7 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
     fakes: resolved.fakes,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     ...(options.source && { source: options.source }),
-    ...(options.reload && { reload: options.reload }),
+    ...(reload && { reload }),
     ...(appSteps && { appSteps }),
     client: () =>
       (client ??= SanomaClient.connect(config, { appVersion: resolved.version }).catch((err: unknown) => {
@@ -257,7 +259,7 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
         if ("revision" in moved) {
           refreshAppsBehind();
           // The checkout moved: the worker and the app start again on its files (a merged column change's declaration among them).
-          if (moved.revision !== before) options.reload?.();
+          if (moved.revision !== before) reload?.();
         }
         return moved;
       }),

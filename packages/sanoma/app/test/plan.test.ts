@@ -58,10 +58,9 @@ const rows = [
 const refused = (change: ColumnChange) => problemOf(outbound, change);
 /** What `change` writes into outbound's declaration. */
 const edit = (change: ColumnChange) => declarationEdit(outbound.fields, change);
-/** Each card's title and what it says it is, in order. */
 /** The labels of the buttons in `html`, in order. */
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(([, label]) => label);
-
+/** Each card's title and what it says it is, in order. */
 const cards = (html: string) =>
   [...html.matchAll(/<h2>([^<]*)<\/h2>(?:(?!<h2>)[\s\S])*?data-slot="badge"[^>]*>([^<]*)</g)].map(([, title, said]) => [
     title,
@@ -234,7 +233,7 @@ describe("TableChangeReview", () => {
     change: { runId: string; status: string; state: { merged?: object }; retry?: object };
     plan: TableChangePlan;
     collection: CollectionEntry | undefined;
-    tryAgain?: { start(): void; starting: boolean };
+    tryAgain?: { mutate(id: string): void; isPending: boolean };
   }) => ReactNode;
   const load = (path: string) => import(new URL(path, import.meta.url).href) as Promise<{ TableChangeReview: Review }>;
 
@@ -243,7 +242,7 @@ describe("TableChangeReview", () => {
     status: string,
     state: { merged?: object } = {},
     plan = TABLE_CHANGE_PLAN,
-    more: { retry?: object; tryAgain?: { start(): void; starting: boolean } } = {},
+    more: { retry?: object; tryAgain?: { mutate(id: string): void; isPending: boolean } } = {},
   ) => {
     const { TableChangeReview } = await load("../src/components/grid/review.tsx");
     const change = {
@@ -330,12 +329,12 @@ describe("TableChangeReview", () => {
 
   it("offers Try again when the records weren't brought along, and follows the run it starts", async () => {
     const error = { merged: { sha: "abc", at: 0, reshaped: { error: "the database said no" } } };
-    const tryAgain = { start: () => {}, starting: false };
+    const tryAgain = { mutate: () => {}, isPending: false };
     const offered = await render("finished", error, TABLE_CHANGE_PLAN, { tryAgain });
     expect(buttons(offered)).toContain("Try again");
     expect(offered).not.toMatch(/<button[^>]* disabled=""[^>]*>Try again</);
     // Starting, or its run under way: no second one.
-    expect(await render("finished", error, TABLE_CHANGE_PLAN, { tryAgain: { ...tryAgain, starting: true } })).toMatch(
+    expect(await render("finished", error, TABLE_CHANGE_PLAN, { tryAgain: { ...tryAgain, isPending: true } })).toMatch(
       /<button[^>]* disabled=""[^>]*>Trying again…</,
     );
     const retry = { runId: "reshape:ui-1234abcd", status: "waiting" };

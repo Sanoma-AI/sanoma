@@ -1336,7 +1336,7 @@ export class SanomaClient {
   /** The latest Try again of a change merged without its records (`reshapeChange`), started since it merged; undefined for none. */
   private async retryOf({ id, merged }: ChangeState): Promise<ReshapeView | undefined> {
     if (!merged?.reshaped || !("error" in merged.reshaped)) return undefined;
-    const [row] = (await this.draftRuns(RESHAPE_WORKFLOW, id, { load: true })).filter((r) => r.createdAt >= merged.at);
+    const row = (await this.draftRuns(RESHAPE_WORKFLOW, id, { load: true })).find((r) => r.createdAt >= merged.at);
     if (!row) return undefined;
     return {
       ...(await this.summarize(row)),
