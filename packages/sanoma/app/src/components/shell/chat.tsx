@@ -137,7 +137,7 @@ export function ChatColumn({
 const signedInBy = (message?: ChatMessage) =>
   message?.parts.some((part) => part.type === "data-signIn" && part.data.state === "done") === true;
 
-/** What a conversation is opened with besides its chat:the prompt that opened it, whether it is the person's first, and the engine a new one opens on. */
+/** What a conversation is opened with besides its chat: the prompt that opened it, whether it is the person's first, and the engine a new one opens on. */
 interface Opened {
   opening?: Prompt;
   first?: boolean;
@@ -179,8 +179,9 @@ function ChatPane({ id, known, ...opened }: { id: string; known: boolean } & Ope
  * own, `openedOn`, else the one chosen for a new chat) needs the model connector and it has no
  * key. A new chat's thread starts with the agents to connect while so (or when Agent… opened it);
  * and the agent speaks first in the person's first chat once its engine is connected, and when a
- * card chose a plan of their own. Once a sign-in the agent asked for is done, the person's last
- * message is sent again (in a chat they have not written in, the agent speaks first).
+ * card chose a plan of their own. Once a sign-in the agent asked for finishes while the chat is
+ * open, the person's last message is sent again (in a chat they have not written in, the agent
+ * speaks first).
  */
 function Conversation({
   id,
@@ -237,17 +238,19 @@ function Conversation({
   // The chat goes on by itself once each time the last message changes: the agent speaks first in
   // the person's first chat while it is in view (not one a page opened with a prompt), and after a
   // sign-in it asked for, the turn is asked again, unless the turn before it ended in a sign-in too
-  // (a sign-in that does not hold would ask forever).
+  // (a sign-in that does not hold would ask forever). Again means the person's last message, which
+  // the sign-in's turn did not answer, and only after a sign-in that finished here: one the chat
+  // was opened on may be old, or sent again already (in another tab, or before it was opened
+  // again). In a chat they have not written in, the agent speaks first.
   const greet = first && fresh && !openedOn && !opening && model !== undefined && !cards;
-  const signedIn = signedInBy(last) && !signedInBy(messages.at(-3));
+  const asked = messages.findLast((message) => message.role === "user" && !isIntro(message));
+  const signedIn =
+    signedInBy(last) && !signedInBy(messages.at(-3)) && (asked === undefined || lastId !== initial.at(-1)?.id);
   const cue = !busy && !error && (greet || signedIn);
   const acted = useRef<string>(undefined);
   const act = useEffectEvent(() => {
     if (greet && !document.getElementById("chat")?.checkVisibility()) return;
     acted.current = lastId;
-    // The person's last message, which the sign-in's turn did not answer; in a chat they have not
-    // written in, the agent's cue.
-    const asked = messages.findLast((message) => message.role === "user" && !isIntro(message));
     if (asked) send(textOf(asked));
     else speak(engine);
   });
