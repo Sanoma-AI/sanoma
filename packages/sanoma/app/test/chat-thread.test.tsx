@@ -4,19 +4,23 @@ import { type AiSdkChat, createChat } from "@shadcn/helpers/ai-sdk";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { type ReactNode, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { ActorContext } from "../src/actor.ts";
 import { DECLARE_BOX } from "../src/api.ts";
+import { ChatColumn } from "../src/components/shell/chat.tsx";
 import { Composer } from "../src/components/shell/composer.tsx";
 import { ConnectAgent } from "../src/components/shell/connect-agent.tsx";
 import sanoma from "../src/icon-small.svg?url";
 import { Thread } from "../src/components/shell/thread.tsx";
 import type { AppConfig } from "../src/api.ts";
-import { configQuery } from "../src/queries.ts";
+import { chatModelQuery, chatQuery, chatsQuery, configQuery } from "../src/queries.ts";
 import { type ChatMessage, engineName, engineOf, enginesHere, enginesOf } from "../src/lib/chat.ts";
 
 // The chat's thread on a scripted conversation (`createChat`) through the real `useChat`: no model,
-// no server and no database, so what the column draws of each part is what is under test.
+// no server and no database, so what the column draws of each part is what is under test. The
+// column itself, over a stored transcript, sends its turns to a stubbed `fetch`.
 // `chat.test.ts`, `harness.test.ts` and `acp.test.ts` drive the turn itself.
 
 // The server functions, which only Start's build keeps out of a browser module: the thread calls none.
@@ -36,6 +40,9 @@ vi.mock(
       },
     ),
 );
+
+// A public site's languages, from the build's virtual module, which the column's crumbs read: no site here.
+vi.mock("../src/lib/locales.ts", () => ({ siteOf: () => undefined }));
 
 beforeAll(async () => {
   // The reply's lazy renderer, loaded ahead so no test's wait is spent transforming it.
@@ -77,10 +84,9 @@ function Scripted({ script, onSend = () => {} }: { script: Script; onSend?: (tex
   );
 }
 
-/** Draws `page` in the app's router and query client, which holds `config` when given. */
-function draw(page: () => ReactNode, config?: AppConfig) {
+/** Draws `page` in the app's router and query client (`queryClient`), which holds `config` when given. */
+function draw(page: () => ReactNode, config?: AppConfig, queryClient = new QueryClient()) {
   const router = createRouter({ routeTree: createRootRoute({ component: page }), history: createMemoryHistory() });
-  const queryClient = new QueryClient();
   if (config) queryClient.setQueryData(configQuery().queryKey, config);
   render(
     <QueryClientProvider client={queryClient}>
@@ -428,5 +434,99 @@ describe("Connect your agent", () => {
     expect(await screen.findByText(`${DECLARE_BOX}.`)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Sign in with Claude" })).toBeNull();
     expect(screen.queryByText(/Other agents/)).toBeNull();
+  });
+});
+
+const asked: ChatMessage = {
+  id: "m1",
+  role: "user",
+  parts: [{ type: "text", text: "Change the price to 6 dollars" }],
+};
+const intro: ChatMessage = { id: "m1", role: "user", parts: [{ type: "text", text: "" }], metadata: { intro: true } };
+/** A reply whose turn ended in the agent's sign-in, `state`. */
+const signIn = (id: string, state: "done" | "failed" = "done"): ChatMessage => ({
+  id,
+  role: "assistant",
+  parts: [{ type: "data-signIn", id: "sign-in", data: { agent: "Claude Code", state, text: "it stopped" } }],
+});
+
+/** Opens the column on a chat of Claude Code on the person's plan, stored as `messages`; each turn's reply is `answer`. */
+function openColumn(messages: ChatMessage[], answer = "Done.") {
+  const send = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    createUIMessageStreamResponse({
+      stream: createUIMessageStream({
+        execute: ({ writer }) => {
+          writer.write({ type: "text-start", id: "t" });
+          writer.write({ type: "text-delta", id: "t", delta: answer });
+          writer.write({ type: "text-end", id: "t" });
+        },
+      }),
+    }),
+  );
+  const chat = { id: "c1", person: "ada", engine: "acp-claude-code", title: "Change the price", createdAt: 0 };
+  // What the column reads, as read: none is asked again.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } } });
+  queryClient.setQueryData(chatsQuery().queryKey, [chat] as never);
+  queryClient.setQueryData(chatQuery(chat.id).queryKey, { chat, messages } as never);
+  queryClient.setQueryData(chatModelQuery().queryKey, { ready: true } as never);
+  draw(
+    () => (
+      <ActorContext.Provider value={{ actor: "ada", groups: [], fromServer: false, setActor: () => {} }}>
+        <ChatColumn engine={{ set: () => {} }} />
+      </ActorContext.Provider>
+    ),
+    config("this-computer", false),
+    queryClient,
+  );
+  /** What the column sent, each request's body. */
+  const sent = () => send.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+  return sent;
+}
+
+describe("the chat column after a sign-in", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("sends the person's message again once the sign-in is done, once", async () => {
+    const sent = openColumn([asked, signIn("m2")], "Changed it to 6 dollars.");
+    expect(await screen.findByText("Changed it to 6 dollars.")).toBeTruthy();
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]).toMatchObject({
+      id: "c1",
+      engine: "acp-claude-code",
+      message: { role: "user", parts: [{ type: "text", text: "Change the price to 6 dollars" }] },
+    });
+    expect(sent()[0]!.start).toBeUndefined();
+    // The card says it is signed in, and no more asks the person to send it again.
+    const card = within(screen.getByRole("region", { name: "Sign in to Claude Code" }));
+    expect(card.getByText("Signed in to Claude Code.")).toBeTruthy();
+    expect(card.queryByText(/again/)).toBeNull();
+    // The message as sent again, under the card.
+    expect(screen.getAllByText("Change the price to 6 dollars")).toHaveLength(2);
+  });
+
+  it("lets the agent speak first again in a chat the person has not written in", async () => {
+    const sent = openColumn([intro, signIn("m2")], "Hi, I make the changes.");
+    expect(await screen.findByText("Hi, I make the changes.")).toBeTruthy();
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]).toMatchObject({
+      engine: "acp-claude-code",
+      start: true,
+      message: { role: "user", parts: [{ type: "text", text: "" }], metadata: { intro: true } },
+    });
+  });
+
+  it("sends nothing after a sign-in that failed", async () => {
+    const sent = openColumn([asked, signIn("m2", "failed")]);
+    expect(await screen.findByText(/^The sign-in did not finish: it stopped\./)).toBeTruthy();
+    // Long enough for a send the column started to reach `fetch`.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sent()).toEqual([]);
+  });
+
+  it("sends nothing again when the turn sent again after a sign-in ended in one too", async () => {
+    const sent = openColumn([asked, signIn("m2"), { ...asked, id: "m3" }, signIn("m4")]);
+    expect(await screen.findAllByText("Signed in to Claude Code.")).toHaveLength(2);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sent()).toEqual([]);
   });
 });

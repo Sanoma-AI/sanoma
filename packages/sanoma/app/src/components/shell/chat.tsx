@@ -24,9 +24,10 @@ import {
   enginesHere,
   enginesOf,
   isBusy,
+  isIntro,
   MODEL_CONNECTOR,
   onModelConnector,
-  written,
+  textOf,
 } from "../../lib/chat.ts";
 import { CHATS_KEY, chatModelQuery, chatQuery, chatsQuery, configQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
@@ -132,7 +133,11 @@ export function ChatColumn({
   );
 }
 
-/** What a conversation is opened with besides its chat: the prompt that opened it, whether it is the person's first, and the engine a new one opens on. */
+/** Whether a reply ends in a sign-in that finished: its card is `done`. */
+const signedInBy = (message?: ChatMessage) =>
+  message?.parts.some((part) => part.type === "data-signIn" && part.data.state === "done") === true;
+
+/** What a conversation is opened with besides its chat:the prompt that opened it, whether it is the person's first, and the engine a new one opens on. */
 interface Opened {
   opening?: Prompt;
   first?: boolean;
@@ -173,9 +178,9 @@ function ChatPane({ id, known, ...opened }: { id: string; known: boolean } & Ope
  * text), which says "Connect a model" (and Continue is not offered) while the chat's engine (its
  * own, `openedOn`, else the one chosen for a new chat) needs the model connector and it has no
  * key. A new chat's thread starts with the agents to connect while so (or when Agent… opened it);
- * and the agent speaks first in the person's first chat once its engine is connected, when a card
- * chose a plan of their own, and once the sign-in it asked for in a chat they have not written in
- * is done.
+ * and the agent speaks first in the person's first chat once its engine is connected, and when a
+ * card chose a plan of their own. Once a sign-in the agent asked for is done, the person's last
+ * message is sent again (in a chat they have not written in, the agent speaks first).
  */
 function Conversation({
   id,
@@ -229,17 +234,22 @@ function Conversation({
   const cards = fresh && !busy && !openedOn && (noModel || opening?.choose === true);
   const last = messages.at(-1);
   const lastId = last?.id ?? "";
-  const signedIn =
-    !written(messages) && last?.parts.some((part) => part.type === "data-signIn" && part.data.state === "done");
-  // The agent speaks by itself once each time the last message changes: in the person's first
-  // chat while it is in view (not one a page opened with a prompt), and after a sign-in it asked for.
+  // The chat goes on by itself once each time the last message changes: the agent speaks first in
+  // the person's first chat while it is in view (not one a page opened with a prompt), and after a
+  // sign-in it asked for, the turn is asked again, unless the turn before it ended in a sign-in too
+  // (a sign-in that does not hold would ask forever).
   const greet = first && fresh && !openedOn && !opening && model !== undefined && !cards;
+  const signedIn = signedInBy(last) && !signedInBy(messages.at(-3));
   const cue = !busy && !error && (greet || signedIn);
   const acted = useRef<string>(undefined);
   const act = useEffectEvent(() => {
     if (greet && !document.getElementById("chat")?.checkVisibility()) return;
     acted.current = lastId;
-    speak(engine);
+    // The person's last message, which the sign-in's turn did not answer; in a chat they have not
+    // written in, the agent's cue.
+    const asked = messages.findLast((message) => message.role === "user" && !isIntro(message));
+    if (asked) send(textOf(asked));
+    else speak(engine);
   });
   useEffect(() => {
     if (cue && acted.current !== lastId) act();
