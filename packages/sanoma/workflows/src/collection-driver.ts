@@ -1,5 +1,5 @@
 import * as drizzle from "drizzle-orm";
-import { and, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import {
   answer,
   type Batch,
@@ -10,7 +10,12 @@ import {
   type DataOps,
   type DeleteInput,
   jsonTypesOf,
+  type KeysByCollection,
+  linkedKeys,
+  linksMissing,
+  linksOf,
   type Listing,
+  missingLinks,
   recordChanged,
   recordExists,
   recordsChanged,
@@ -22,7 +27,7 @@ import type { Db } from "./db.ts";
 import { data } from "./db/company.ts";
 import { isObject } from "./resource.ts";
 import { type CallContext, defineDriver, type Driver, type DriverImpl } from "./op.ts";
-import { BATCH, type Deleted, reshape } from "./shared.ts";
+import { BATCH, type Deleted, linksIn, linkTarget, reshape } from "./shared.ts";
 
 // The collections' driver: their records as rows of the `data` table, in the config's database,
 // and `sanoma.records.reshape`'s. Apart from `collection.ts`, which declares them and fakes them in
@@ -42,13 +47,35 @@ type Row = Pick<typeof data.$inferSelect, keyof typeof COLUMNS>;
  */
 export function collectionsDriver(list: readonly Collection[], store: { db(): Promise<Db> }): Driver {
   const impl = list.map((c) => {
-    const saved = (row: Row) =>
-      answer(c, {
-        key: row.key,
-        record: row.record,
-        updatedAt: row.updatedAt.toISOString(),
-        updatedBy: row.updatedBy,
-      });
+    const linked = linksOf(c).length > 0;
+    const saved = (row: Row, found?: KeysByCollection) =>
+      answer(
+        c,
+        { key: row.key, record: row.record, updatedAt: row.updatedAt.toISOString(), updatedBy: row.updatedBy },
+        found,
+      );
+    /** The rows as `get` and `list` answer them: a link to a record that is not there among their issues. */
+    const answered = async (db: Db, rows: Row[]) => {
+      const found = linked
+        ? await foundOn(
+            db,
+            linkedKeys(
+              c,
+              rows.map((row) => row.record),
+            ),
+          )
+        : undefined;
+      return rows.map((row) => saved(row, found));
+    };
+    /**
+     * Refuses the records just written on `db`, in the save's transaction, when a link names a
+     * record that is not there; the records it names are locked (`for key share`) until it ends,
+     * so none is deleted under it.
+     */
+    const checkLinks = async (db: Db, written: readonly Record<string, unknown>[]) => {
+      const missing = missingLinks(c, written, await foundOn(db, linkedKeys(c, written), true));
+      if (missing.length) throw linksMissing(missing);
+    };
     const here = (key: string) => and(eq(data.collection, c.name), eq(data.key, key));
     /** The record on `db`, as `get` answers it and a refused save or delete carries it (`current`). */
     const getOn = async (db: Db, key: string) => {
@@ -101,18 +128,21 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
       throw recordChanged(current);
     };
     const ops: Record<string, (input: any, call: CallContext) => Promise<unknown>> = {
-      get: async ({ key }: { key: string }) => getOn(await store.db(), key),
+      get: async ({ key }: { key: string }) => {
+        const db = await store.db();
+        const rows = await db.select(COLUMNS).from(data).where(here(key));
+        return (await answered(db, rows))[0] ?? null;
+      },
       list: async (listing: Listing) => {
         const { where, order } = listClauses(c, listing);
-        const rows = await (
-          await store.db()
-        )
+        const db = await store.db();
+        const rows = await db
           .select(COLUMNS)
           .from(data)
           .where(where)
           .orderBy(...order)
           .limit(listing.limit);
-        return rows.map(saved);
+        return answered(db, rows);
       },
       count: async (counting: Pick<Listing, "where">) => {
         const [row] = await (
@@ -123,7 +153,15 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
           .where(listClauses(c, counting).where);
         return { count: row!.count };
       },
-      save: async (input: SaveInput, call) => saveOn(await store.db(), input, updatedBy(call)),
+      save: async (input: SaveInput, call) => {
+        const db = await store.db();
+        if (!linked) return saveOn(db, input, updatedBy(call));
+        return db.transaction(async (tx) => {
+          const receipt = await saveOn(tx, input, updatedBy(call));
+          await checkLinks(tx, [input.record]);
+          return receipt;
+        });
+      },
       // One transaction: a conflict on any entry, collected so each is answered, rolls back them all.
       [BATCH]: async ({ records, deletes }: Batch, call) =>
         (await store.db()).transaction(async (tx) => {
@@ -140,6 +178,12 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
           for (const e of records) await made(e.record[c.key] as string, saveOn(tx, e, by));
           for (const e of deletes) await made(e.key, deleteOn(tx, e, call.attempt > 1));
           if (conflicts.length) throw recordsChanged(conflicts);
+          // After every entry: a record the batch saves may be one another links to.
+          if (linked)
+            await checkLinks(
+              tx,
+              records.map((e) => e.record),
+            );
           return results;
         }),
       delete: async (input: DeleteInput, call) => deleteOn(await store.db(), input, call.attempt > 1),
@@ -147,6 +191,23 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
     return [c.name, ops];
   });
   return defineDriver(collectionsConnector(list), Object.fromEntries(impl) as DriverImpl<DataOps>);
+}
+
+/**
+ * The keys among `wanted` (by collection) that have a record on `db`, by collection: one statement
+ * for them all, locking those rows against a delete (`for key share`) when `lock` says so.
+ */
+async function foundOn(db: Db, wanted: KeysByCollection, lock = false): Promise<KeysByCollection> {
+  const found: KeysByCollection = new Map();
+  if (!wanted.size) return found;
+  const where = or(
+    ...[...wanted].map(([collection, keys]) => and(eq(data.collection, collection), inArray(data.key, [...keys]))),
+  );
+  const query = db.select({ collection: data.collection, key: data.key }).from(data).where(where);
+  for (const row of await (lock ? query.for("key share") : query)) {
+    found.set(row.collection, (found.get(row.collection) ?? new Set()).add(row.key));
+  }
+  return found;
 }
 
 /** How many records one statement of a reshape updates. */
@@ -170,9 +231,17 @@ export function recordsDriver(db: () => Promise<Db>): Driver {
             .where(eq(data.collection, collection))
             .orderBy(data.key)
             .for("update");
+          // A retype or a conversion to a link matches the values against the keys it links to.
+          const keys = new Map<string, Set<string>>();
+          for (const link of linksIn(changes)) {
+            const target = linkTarget(collection, link);
+            const there = await tx.select({ key: data.key }).from(data).where(eq(data.collection, target));
+            keys.set(link, new Set(there.map((row) => row.key)));
+          }
           const { changed, counts } = reshape(
             rows.map((row) => row.record),
             changes,
+            keys,
           );
           const updates = [...changed].map(([i, record]) => ({ key: rows[i]!.key, record }));
           const by = updatedBy(call);

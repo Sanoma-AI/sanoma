@@ -475,6 +475,100 @@ describe("sanoma.records.reshape on Postgres", () => {
   });
 });
 
+describe("links and free-form fields on Postgres", () => {
+  const customers = collection({ name: "customers", key: "id", fields: { id: "text" } });
+  const orders = collection({
+    name: "orders",
+    key: "id",
+    fields: { id: "text", customer: { link: "customers" }, meta: { type: "json", optional: true } },
+  });
+  const url = testDatabaseUrl("data");
+  const pool = lazyDb(url, "links test");
+  const driver = collectionsDriver([customers, orders], pool);
+  const records = recordsDriver(() => pool.db());
+  afterAll(() => pool.close());
+  beforeEach(async () => {
+    await (await pool.db()).delete(data).where(inArray(data.collection, ["customers", "orders"]));
+  });
+  let n = 0;
+  const call = async (op: Op, input: unknown) => {
+    const fn = driver.ops[`${op.resource}.${op.name}`]!;
+    const context = { idempotencyKey: `l:${n++}`, runId: "t", opId: op.id, attempt: 1, secrets: memorySecrets() };
+    return op.output.parse(await fn(op.input.parse(input), context));
+  };
+  const order = { id: "o1", customer: "acme", meta: { source: "web", seats: [1, 2], note: null } };
+  const missing = { vendorCode: "link_missing", status: 422, retryable: false };
+
+  it("saves a free-form value as it is, and a link only to a record that is there, checked in the save's transaction", async () => {
+    await expect(call(orders.save, { record: order })).rejects.toMatchObject({
+      ...missing,
+      message: 'customer: customers has no record "acme"',
+      missing: [{ key: "o1", field: "customer", value: "acme", target: "customers" }],
+    });
+    expect(await call(orders.get, { key: "o1" })).toBeNull();
+    // A batch checks once every entry is made: the record it links to may be one of them, in any order.
+    await expect(
+      call(orders.saveMany, { records: [{ record: order }, { record: { ...order, id: "o2", customer: "globex" } }] }),
+    ).rejects.toMatchObject({ ...missing, missing: [{ key: "o1" }, { key: "o2" }] });
+    expect(await call(orders.count, {})).toEqual({ count: 0 });
+    await call(customers.save, { record: { id: "acme" } });
+    expect(await call(orders.save, { record: order })).toMatchObject({ key: "o1", record: order });
+    expect(await call(orders.get, { key: "o1" })).toEqual({
+      key: "o1",
+      record: order,
+      updatedAt: expect.any(String),
+      updatedBy: "run:t",
+    });
+    // The database does not keep a link: a record deleted since reads as a link to fix, and saves elsewhere.
+    await call(customers.delete, { key: "acme" });
+    const issues = [{ path: ["customer"], message: 'customers has no record "acme"' }];
+    expect(await call(orders.get, { key: "o1" })).toMatchObject({ record: order, issues });
+    expect(await call(orders.list, { order: "customer" })).toMatchObject([{ key: "o1", issues }]);
+    await expect(call(orders.save, { record: { ...order, meta: "edited" } })).rejects.toMatchObject(missing);
+    await call(customers.save, { record: { id: "globex" } });
+    expect(await call(orders.save, { record: { ...order, customer: "globex" } })).not.toHaveProperty("issues");
+  });
+
+  it("matches a retype to a link against the keys there, and moves a free-form key to a column of its own", async () => {
+    const db = await pool.db();
+    await db.insert(data).values([
+      { collection: "customers", key: "acme", record: { id: "acme" }, updatedBy: "leon" },
+      ...[
+        { id: "o1", customer: "acme", meta: { source: "web", seats: "3" } },
+        { id: "o2", customer: "nobody", meta: { seats: "many" } },
+        { id: "o3", meta: "just text" },
+      ].map((record) => ({ collection: "orders", key: record.id, record, updatedBy: "leon" })),
+    ]);
+    const changes = [
+      { kind: "retype", field: "customer", to: { link: "customers" }, decision: "clear" },
+      { kind: "convert", field: "meta", key: "seats", to: "seats", type: "number" },
+    ];
+    const reshapeOp = recordsOps.records.reshape;
+    const reshapeCall = async () =>
+      reshapeOp.output.parse(
+        await records.ops["records.reshape"]!(reshapeOp.input.parse({ collection: "orders", changes }), {
+          idempotencyKey: "t:reshape",
+          runId: "t",
+          opId: reshapeOp.id,
+          attempt: 1,
+          secrets: memorySecrets(),
+        }),
+      );
+    expect(await reshapeCall()).toEqual({ rows: 3, changed: 2, converted: 1, cleared: 1, kept: 1 });
+    const rows = await db
+      .select({ key: data.key, record: data.record })
+      .from(data)
+      .where(eq(data.collection, "orders"))
+      .orderBy(data.key);
+    expect(rows).toEqual([
+      { key: "o1", record: { id: "o1", customer: "acme", meta: { source: "web" }, seats: 3 } },
+      { key: "o2", record: { id: "o2", meta: { seats: "many" } } },
+      { key: "o3", record: { id: "o3", meta: "just text" } },
+    ]);
+    expect(await reshapeCall()).toMatchObject({ changed: 0, kept: 1 });
+  });
+});
+
 describe("a workflow reading and saving a record", () => {
   // The outbound fixture, with a policy that refuses a save with no record before it: one that
   // passes shows the policy was given the record the save replaces.

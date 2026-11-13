@@ -101,6 +101,28 @@ describe("importRows and importEntry", () => {
     ]);
   });
 
+  it("reads a free-form cell as the JSON an export writes, else as its text, and a link as the key it names", () => {
+    const orders = {
+      key: "id",
+      fields: { id: "text", meta: { type: "json", optional: true }, customer: { link: "customers" } },
+    };
+    const { rows } = importRows(orders, {
+      mapping: [{ field: "id" }, { field: "meta" }, { field: "customer" }],
+      rows: [
+        ["o1", '{"source":"web","seats":[1,2]}', "acme"],
+        ["o2", "just text", "globex"],
+        ["o3", '"12"', "acme"],
+        ["o4", "12", "acme"],
+      ],
+    });
+    expect(rows.map((r) => r.fields)).toEqual([
+      { id: "o1", meta: { source: "web", seats: [1, 2] }, customer: "acme" },
+      { id: "o2", meta: "just text", customer: "globex" },
+      { id: "o3", meta: "12", customer: "acme" },
+      { id: "o4", meta: 12, customer: "acme" },
+    ]);
+  });
+
   it("takes any id for a person while nobody is declared", () => {
     for (const declared of [undefined, []]) {
       const { rows } = importRows(outbound, { mapping, people: declared, rows: [row("Acme").with(3, "T. Nguyen")] });

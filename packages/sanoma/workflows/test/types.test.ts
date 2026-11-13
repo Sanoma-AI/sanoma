@@ -166,10 +166,21 @@ const deals = collection({
     owner: "person",
     stage: { enum: ["new", "won"] },
     note: { type: "text", optional: true },
+    account: { link: "deals" },
+    meta: { type: "json", optional: true },
   },
 });
 type Deal = RecordOf<typeof deals.fields>;
-const deal: Deal = { id: "d1", amount: 10, open: true, closes: "2026-10-20", owner: "leon", stage: "won" };
+const deal: Deal = {
+  id: "d1",
+  amount: 10,
+  open: true,
+  closes: "2026-10-20",
+  owner: "leon",
+  stage: "won",
+  account: "d1",
+  meta: { source: "web", seats: [1, 2], note: null },
+};
 export const typed: [Deal, Saved<Deal>["record"]] = [deal, { ...deal, note: "renewal" }];
 export const wrongDeals: Deal[] = [
   // @ts-expect-error an enum field takes one of its strings
@@ -177,7 +188,11 @@ export const wrongDeals: Deal[] = [
   // @ts-expect-error a number field takes a number
   { ...deal, amount: "10" },
   // @ts-expect-error a required field is required
-  { id: "d2", amount: 1, open: false, closes: "2026-10-20", owner: "leon" },
+  { id: "d2", amount: 1, open: false, closes: "2026-10-20", owner: "leon", account: "d1" },
+  // @ts-expect-error a link holds a record's key: text
+  { ...deal, account: 1 },
+  // @ts-expect-error a free-form field holds what JSON does: not a date
+  { ...deal, meta: new Date() },
 ];
 // @ts-expect-error the key is a required text field: not a number
 export const numberKey = () => collection({ name: "x", key: "n", fields: { n: "number" } });

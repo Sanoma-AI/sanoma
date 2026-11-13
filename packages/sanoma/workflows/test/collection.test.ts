@@ -6,7 +6,17 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { collection, collectionsFake, recordIssues, recordSchemaOf } from "../src/collection.ts";
 import { jsonSchemaOf } from "../src/define.ts";
-import { converts, isBatch, isHidden, previewRequests, reshape, reshaped, reshapeOf } from "../src/shared.ts";
+import {
+  converts,
+  isBatch,
+  isHidden,
+  linksIn,
+  linkTarget,
+  previewRequests,
+  reshape,
+  reshaped,
+  reshapeOf,
+} from "../src/shared.ts";
 import { describeConfig } from "../src/describe.ts";
 import type { ColumnType } from "../src/description.ts";
 import { defineConnector, memorySecrets, type Op, resolveConfig } from "../src/index.ts";
@@ -56,7 +66,15 @@ describe("collection()", () => {
 
   it("refuses unknown field kinds, a field name it cannot sort or filter by, and no fields", () => {
     const refused = (field: unknown) => declared({ name: "leads", key: "id", fields: { id: "text", f: field } });
-    for (const kind of ["string", { type: "json" }, {}, { optional: true }, { type: "text", enum: ["a"] }, ["text"]]) {
+    for (const kind of [
+      "string",
+      { type: "object" },
+      {},
+      { optional: true },
+      { type: "text", enum: ["a"] },
+      { link: "companies", type: "text" },
+      ["text"],
+    ]) {
       expect(refused(kind)).toThrow(`collection("leads"): the field "f" is ${JSON.stringify(kind)}; a field is one of`);
     }
     expect(refused({ type: "text", optional: false })).toThrow('the field "f" may only be marked `optional: true`');
@@ -68,6 +86,9 @@ describe("collection()", () => {
       expect(refused(field)).toThrow(
         'the field "f" may only be marked `hidden: true`, and only when it is `optional: true`',
       );
+    }
+    for (const link of ["", "Companies", "crm.companies", 1]) {
+      expect(refused({ link })).toThrow('the field "f" links to a collection by its name');
     }
     expect(refused({ enum: [] })).toThrow('the field "f" needs an enum of distinct strings, at least one');
     expect(refused({ enum: ["a", "a"] })).toThrow("needs an enum of distinct strings");
@@ -106,6 +127,49 @@ describe("collection()", () => {
       },
     });
     expect(jsonSchemaOf(recordSchemaOf(outbound))).not.toHaveProperty(["properties", "seats", "deprecated"]);
+  });
+
+  it("takes a free-form field, of anything JSON holds, neither filtered nor sorted by", () => {
+    const deals = collection({
+      name: "deals",
+      key: "company",
+      fields: { company: "text", meta: "json", extra: { type: "json", optional: true } },
+    });
+    const saves = (record: unknown) => deals.save.input.safeParse({ record }).success;
+    for (const meta of [{ source: "web", seats: [1, 2] }, [1, "2"], "text", 3, false, null]) {
+      expect(saves({ company: "Acme", meta }), JSON.stringify(meta)).toBe(true);
+    }
+    for (const meta of [undefined, new Date(), Number.NaN, { at: new Date() }, () => 1]) {
+      expect(saves({ company: "Acme", meta }), String(meta)).toBe(false);
+    }
+    expect(saves({ company: "Acme", meta: {}, extra: { a: 1 } })).toBe(true);
+    // Its JSON Schema takes anything, so a form enters it as text and the SDK types it `unknown`.
+    expect(jsonSchemaOf(recordSchemaOf(deals))).toMatchObject({
+      properties: { meta: {}, extra: {} },
+      required: ["company", "meta"],
+    });
+    expect(jsonSchemaOf(recordSchemaOf(deals))).not.toHaveProperty("$defs");
+    expect(deals.list.input.safeParse({ where: { meta: "web" } }).success).toBe(false);
+    expect(deals.list.input.safeParse({ order: "meta" }).success).toBe(false);
+    expect(deals.list.input.safeParse({ order: "-company" }).success).toBe(true);
+  });
+
+  it("takes a link: the key of a record of a collection of its folder, said in its schema", () => {
+    const orders = collection({
+      name: "orders",
+      key: "id",
+      fields: { id: "text", customer: { link: "customers" }, referrer: { link: "customers", optional: true } },
+    });
+    const saves = (record: unknown) => orders.save.input.safeParse({ record }).success;
+    expect(saves({ id: "o1", customer: "Acme" })).toBe(true);
+    expect(saves({ id: "o1", customer: "" })).toBe(false);
+    expect(saves({ id: "o1", customer: 1 })).toBe(false);
+    expect(jsonSchemaOf(recordSchemaOf(orders))).toMatchObject({
+      properties: { customer: { type: "string", description: "The key of a record of customers." } },
+    });
+    expect(orders.list.input.safeParse({ where: { customer: "Acme" }, order: "customer" }).success).toBe(true);
+    expect(linkTarget("orders", "customers")).toBe("customers");
+    expect(linkTarget("crm.orders", "customers")).toBe("crm.customers");
   });
 
   it("makes six operations of the vendor data, each with its effect and target", () => {
@@ -228,9 +292,13 @@ describe("a column change's records", () => {
     no("person", ["", null]);
     yes({ enum: ["won", "1"] }, ["won", 1]);
     no({ enum: ["won"] }, ["Won", "", null]);
-    yes({ link: "companies" }, ["Acme"]);
-    no({ link: "companies" }, [1, null]);
-    yes("json", [null, "", {}, [1]]);
+    yes({ link: "companies" }, ["Acme", 12]);
+    no({ link: "companies" }, ["", null, {}]);
+    // Against the keys of the collection it links to, when they are known.
+    const keys = new Map([["companies", new Set(["Acme", "12"])]]);
+    expect(["Acme", 12, "Globex"].map((v) => converts(v, { link: "companies" }, keys))).toEqual([true, true, false]);
+    expect(converts("Globex", { link: "people" }, keys)).toBe(true);
+    yes("json", [null, "", {}, [1], 3, "text"]);
     // A date: what a `date` field's schema takes, no more, no less.
     const field = collection({ name: "days", key: "id", fields: { id: "text", on: "date" } });
     const dates = ["2026-11-10", "2024-02-29", "0000-02-29", "2026-11-10T09:30:00Z", "2026-11-10T09:30:00.123+02:00"];
@@ -287,18 +355,29 @@ describe("a column change's records", () => {
     expect(reshaped(record, { ...big, decision: "clear" })).toEqual({ record: cleared, did: "cleared" });
     const { notes: __, ...noNotes } = record;
     expect(reshaped(record, { kind: "retype", field: "notes", to: "number" })).toEqual({ record: noNotes });
-    // A key of a free-form field to a field of its own; only where that field is empty.
-    expect(reshaped(record, { kind: "convert", field: "extra", key: "region", type: "text" })).toEqual({
-      record: { ...record, extra: { size: "big" }, region: "EU" },
+    // A key of a free-form field to a field of its own, by another name; only where that field is empty.
+    expect(reshaped(record, { kind: "convert", field: "extra", key: "region", to: "area", type: "text" })).toEqual({
+      record: { ...record, extra: { size: "big" }, area: "EU" },
       did: "converted",
     });
-    const size = { kind: "convert", field: "extra", key: "size", type: "number" } as const;
+    const size = { kind: "convert", field: "extra", key: "size", to: "size", type: "number" } as const;
     expect(reshaped(record, size)).toEqual({ record, did: "kept" });
     expect(reshaped(record, { ...size, decision: "clear" })).toEqual({
       record: { ...record, extra: { region: "EU" } },
       did: "cleared",
     });
-    expect(reshaped({ ...record, region: "US" }, { ...size, key: "region" }).did).toBeUndefined();
+    expect(reshaped({ ...record, region: "US" }, { ...size, key: "region", to: "region" }).did).toBeUndefined();
+    // A retype to a link: a key the collection it links to has converts, another is kept or cleared.
+    const linked = new Map([["companies", new Set(["Acme"])]]);
+    const toLink = { kind: "retype", field: "company", to: { link: "companies" } } as const;
+    expect(reshaped(record, toLink, linked)).toEqual({ record });
+    expect(reshaped({ ...record, company: "Globex" }, toLink, linked)).toEqual({
+      record: { ...record, company: "Globex" },
+      did: "kept",
+    });
+    expect(reshaped({ ...record, company: "Globex" }, { ...toLink, decision: "clear" }, linked).did).toBe("cleared");
+    // Anything to free-form: every value converts, as it is.
+    expect(reshaped(record, { kind: "retype", field: "extra", to: "json" }).record).toBe(record);
     expect(reshaped(record, { ...size, field: "company" }).record).toBe(record);
     // A removed field's value deleted, counted as cleared when it held one; nothing to delete, left alone.
     const { seats: ___, ...noSeats } = record;
@@ -322,6 +401,15 @@ describe("a column change's records", () => {
     ]);
     const changedAgain = reshape([...changed.values()], changes).counts.changed;
     expect(changedAgain).toBe(0);
+    // The collections a retype or a conversion links to, each once: whose keys the driver reads.
+    expect(
+      linksIn([
+        { kind: "retype", field: "a", to: { link: "companies" } },
+        { kind: "convert", field: "meta", key: "b", to: "b", type: { link: "companies" } },
+        { kind: "convert", field: "meta", key: "c", to: "c", type: { link: "people" } },
+        { kind: "retype", field: "d", to: "text" },
+      ]),
+    ).toEqual(["companies", "people"]);
 
     const wontConvert = { count: 0, sample: [] };
     expect(
@@ -332,7 +420,7 @@ describe("a column change's records", () => {
           { kind: "add", field: "region", type: "text", required: false, empty: 4 },
           { kind: "rename", from: "a", to: "b" },
           { kind: "retype", field: "seats", from: "text", to: "number", wontConvert, decision: "clear" },
-          { kind: "convert", field: "extra", key: "size", type: "number", wontConvert },
+          { kind: "convert", field: "extra", key: "size", to: "size", type: "number", filled: 2, wontConvert },
           { kind: "hide", field: "notes", filled: 2 },
           { kind: "show", field: "owner", filled: 1 },
           { kind: "remove", field: "legacy", filled: 3 },
@@ -343,7 +431,7 @@ describe("a column change's records", () => {
       changes: [
         { kind: "rename", from: "a", to: "b" },
         { kind: "retype", field: "seats", to: "number", decision: "clear" },
-        { kind: "convert", field: "extra", key: "size", type: "number" },
+        { kind: "convert", field: "extra", key: "size", to: "size", type: "number" },
         { kind: "remove", field: "legacy" },
       ],
     });
@@ -539,6 +627,47 @@ describe("the collections' fake", () => {
     expect(await call(outbound.count, {})).toEqual({ count: 2 });
   });
 
+  it("saves a link only to a record that is there, and reads one to a record deleted since as an issue", async () => {
+    const customers = collection({ name: "customers", key: "id", fields: { id: "text" } });
+    const orders = collection({
+      name: "orders",
+      key: "id",
+      fields: { id: "text", customer: { link: "customers" }, meta: { type: "json", optional: true } },
+    });
+    const linking = collectionsFake([customers, orders]);
+    const run = async (op: Op, input: unknown) => {
+      const fn = linking.driver.ops[`${op.resource}.${op.name}`]!;
+      const context = { idempotencyKey: `l:${n++}`, runId: "l", opId: op.id, attempt: 1, secrets: memorySecrets() };
+      return op.output.parse(await fn(op.input.parse(input), context));
+    };
+    const order = { id: "o1", customer: "acme", meta: { source: "web" } };
+    await expect(run(orders.save, { record: order })).rejects.toMatchObject({
+      status: 422,
+      retryable: false,
+      vendorCode: "link_missing",
+      message: 'customer: customers has no record "acme"',
+      missing: [{ key: "o1", field: "customer", value: "acme", target: "customers" }],
+    });
+    expect(await run(orders.get, { key: "o1" })).toBeNull();
+    // A batch checks after every entry: a record it saves may be one another links to.
+    await run(orders.saveMany, { records: [{ record: order }] }).catch(() => undefined);
+    expect(await run(orders.count, {})).toEqual({ count: 0 });
+    await run(customers.save, { record: { id: "acme" } });
+    expect(await run(orders.save, { record: order })).toMatchObject({ key: "o1", record: order });
+    expect(await run(orders.get, { key: "o1" })).not.toHaveProperty("issues");
+    // Deleted since: read as it is, the link an issue to fix; saved again, refused until it links elsewhere.
+    await run(customers.delete, { key: "acme" });
+    const issues = [{ path: ["customer"], message: 'customers has no record "acme"' }];
+    expect(await run(orders.get, { key: "o1" })).toMatchObject({ record: order, issues });
+    expect(await run(orders.list, {})).toMatchObject([{ key: "o1", issues }]);
+    await expect(run(orders.save, { record: { ...order, meta: null } })).rejects.toMatchObject({
+      vendorCode: "link_missing",
+    });
+    expect(await run(orders.get, { key: "o1" })).toMatchObject({ record: order });
+    await run(customers.save, { record: { id: "globex" } });
+    expect(await run(orders.save, { record: { ...order, customer: "globex" } })).not.toHaveProperty("issues");
+  });
+
   it("gives back a record that no longer fits as it is, with its issues", async () => {
     fake.reset();
     fake.update((state) => {
@@ -638,6 +767,15 @@ describe("a config's collections", () => {
     expect(() => resolveConfig({ ...base, collections: outbound as never })).toThrow(
       "The config's `collections` must be an array",
     );
+  });
+
+  it("refuses a link to a collection the config does not have: one deleted or renamed that another links to", () => {
+    const orders = collection({ name: "orders", key: "id", fields: { id: "text", customer: { link: "customers" } } });
+    const customers = collection({ name: "customers", key: "id", fields: { id: "text" } });
+    expect(() => resolveConfig({ ...base, collections: [orders] })).toThrow(
+      'The collection "orders" links its field "customer" to "customers", which no collection is named: declare it, or change the link',
+    );
+    expect(resolveConfig({ ...base, collections: [orders, customers] }).collections.size).toBe(2);
   });
 
   it("are seeded by a scenario's step, which refuses a key field other than the quoted key", async () => {

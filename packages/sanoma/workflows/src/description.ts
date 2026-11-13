@@ -5,7 +5,7 @@ import { z } from "zod";
 import { LIFETIMES } from "./host.ts";
 import type { Outline } from "./outline.ts";
 import type { ResourceFields } from "./resource.ts";
-import { EFFECTS, FIELD_NAME, FIELD_TYPES } from "./shared.ts";
+import { COLLECTION_NAME, EFFECTS, FIELD_NAME, FIELD_TYPES } from "./shared.ts";
 
 /** A JSON Schema (draft 2020-12), as `jsonSchemaOf` writes one. */
 const JsonSchema = z.record(z.string(), z.unknown());
@@ -363,9 +363,11 @@ export const ResourceTypeEntrySchema = z.strictObject({
 export type ResourceTypeEntry = z.infer<typeof ResourceTypeEntrySchema>;
 
 /**
- * A collection's field as declared: its type, or `{ type, optional, hidden }`, or
- * `{ enum, optional, hidden }`. A hidden field (`hidden: true`, always optional) is one a person
- * removed: its values are kept, and the app leaves it out of the grid and the forms.
+ * A collection's field as declared: its type (`json` for free-form), or `{ type, optional, hidden }`,
+ * `{ enum, optional, hidden }`, or `{ link, optional, hidden }` (the key of a record of the
+ * collection it names, of the same folder: `linkTarget`). A hidden field (`hidden: true`, always
+ * optional) is one a person removed: its values are kept, and the app leaves it out of the grid
+ * and the forms.
  */
 const FieldSchema = z.union([
   z.enum(FIELD_TYPES),
@@ -376,6 +378,11 @@ const FieldSchema = z.union([
   }),
   z.strictObject({
     enum: z.tuple([z.string()], z.string()).readonly(),
+    optional: z.literal(true).optional(),
+    hidden: z.literal(true).optional(),
+  }),
+  z.strictObject({
+    link: z.string(),
     optional: z.literal(true).optional(),
     hidden: z.literal(true).optional(),
   }),
@@ -402,18 +409,18 @@ export const CollectionEntrySchema = z.strictObject({
 export type CollectionEntry = z.infer<typeof CollectionEntrySchema>;
 
 /**
- * A column's type in a table change: a field type, free-form JSON, a choice, or a link to another
- * collection. `json` and `link` are the plan's alone so far: `collection()` takes neither yet.
+ * A column's type in a table change: a field type (free-form, `json`, among them), a choice, or a
+ * link to another collection of the same folder, by its name as written (`linkTarget`).
  */
 export const ColumnTypeSchema = z.union([
-  z.enum([...FIELD_TYPES, "json"]),
+  z.enum(FIELD_TYPES),
   z.strictObject({
     enum: z
       .array(z.string().trim().min(1))
       .min(1, "Give it a choice")
       .refine((values) => new Set(values).size === values.length, "Each choice once"),
   }),
-  z.strictObject({ link: z.string().min(1) }),
+  z.strictObject({ link: z.string().regex(COLLECTION_NAME, "Choose a table to link to") }),
 ]);
 export type ColumnType = z.infer<typeof ColumnTypeSchema>;
 
@@ -445,10 +452,12 @@ const RetypeSchema = z.object({
   to: ColumnTypeSchema,
   decision: ConvertDecisionSchema.optional(),
 });
+// A conversion: the key `key` of the free-form field `field` made a field of its own, `to`.
 const ConvertSchema = z.object({
   kind: z.literal("convert"),
   field: z.string().min(1),
-  key: FieldNameSchema,
+  key: z.string().min(1),
+  to: FieldNameSchema,
   type: ColumnTypeSchema,
   decision: ConvertDecisionSchema.optional(),
 });
@@ -456,11 +465,12 @@ const RemoveSchema = z.object({ kind: z.literal("remove"), field: z.string().min
 
 /**
  * One change to a collection's columns, with the records it touches counted (`empty`, `filled`,
- * `unmatched`, `wontConvert.count`). Add, require, hide and show change the declaration alone
- * (hide sets `hidden: true`, so the values stay; show takes it off again); rename, retype, convert
- * and remove bring the records along (`reshaped` in `shared.ts`). Remove is the one that destroys
- * data: a hidden field's declaration deleted and its values (`filled` of them) stripped from every
- * record, so the name is free again.
+ * `wontConvert.count`). Add, require, hide and show change the declaration alone (hide sets
+ * `hidden: true`, so the values stay; show takes it off again); rename, retype, convert and remove
+ * bring the records along (`reshaped` in `shared.ts`). A retype to a link counts as won't convert
+ * the values that are no key of the collection it links to. A conversion's `filled` is how many
+ * records hold its key. Remove is the one that destroys data: a hidden field's declaration deleted
+ * and its values (`filled` of them) stripped from every record, so the name is free again.
  */
 const TableChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("add"), field: z.string(), type: ColumnTypeSchema, required: z.boolean(), empty: COUNT }),
@@ -470,8 +480,7 @@ const TableChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("hide"), field: z.string(), filled: COUNT }),
   z.object({ kind: z.literal("show"), field: z.string(), filled: COUNT }),
   RemoveSchema.extend({ filled: COUNT }),
-  z.object({ kind: z.literal("link"), field: z.string(), to: z.string(), unmatched: COUNT }),
-  ConvertSchema.extend({ wontConvert: WontConvertSchema }),
+  ConvertSchema.extend({ filled: COUNT, wontConvert: WontConvertSchema }),
 ]);
 export type TableChange = z.infer<typeof TableChangeSchema>;
 

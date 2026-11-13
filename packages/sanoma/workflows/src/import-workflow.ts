@@ -55,14 +55,20 @@ const ImportInputSchema = z.strictObject({
 
 /**
  * The entries a batch's save refused, each with why: a policy's denial (`data.deniedFor`, each
- * denied key's reason) or a record changed since it was read (`conflicts`). Undefined for any
- * other failure, which ends the run.
+ * denied key's reason), a record changed since it was read (`conflicts`), or a link to a record
+ * that is not there (`missing`). Undefined for any other failure, which ends the run.
  */
 function refusedBy(err: unknown): Map<string, string> | undefined {
-  const { data, conflicts } = (err ?? {}) as {
+  const { data, conflicts, missing } = (err ?? {}) as {
     data?: { deniedFor?: Record<string, string> };
     conflicts?: { key: string }[];
+    missing?: { key: string; field: string; value: string; target: string }[];
   };
+  if (vendorCodeOf(err) === "link_missing" && missing?.length) {
+    return new Map(
+      missing.map(({ key, field, value, target }) => [key, `${field}: ${target} has no record "${value}"`]),
+    );
+  }
   if (errorCode(err) === "policy_denied" && data?.deniedFor) {
     return new Map(Object.entries(data.deniedFor).map(([key, why]) => [key, `the policy denies saving it: ${why}`]));
   }

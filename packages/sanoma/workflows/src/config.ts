@@ -40,7 +40,14 @@ import { importWorkflow } from "./import-workflow.ts";
 import { connectWorkflow } from "./connect-workflow.ts";
 import { storeMoveDriver, storeMoveOps } from "./store-move.ts";
 import { migrateStoreWorkflow } from "./store-move-workflow.ts";
-import { type Collection, collectionsConnector, collectionsFake, isCollection, recordsOps } from "./collection.ts";
+import {
+  type Collection,
+  collectionsConnector,
+  collectionsFake,
+  isCollection,
+  linksOf,
+  recordsOps,
+} from "./collection.ts";
 import { collectionsDriver, recordsDriver } from "./collection-driver.ts";
 import { lazyDb, type LazyDb } from "./db.ts";
 import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
@@ -697,7 +704,7 @@ function checkLogin(
 
 /**
  * The config's collections by name, checked: each one `collection()` made, no two with one name,
- * and no connector of their vendor, `DATA_VENDOR`.
+ * each link to a collection of the config (`linksOf`), and no connector of their vendor, `DATA_VENDOR`.
  */
 function collectionsOf(config: SanomaConfig): Map<string, Collection> {
   const list: unknown = config.collections ?? [];
@@ -715,6 +722,16 @@ function collectionsOf(config: SanomaConfig): Map<string, Collection> {
     const other = collections.get(c.name);
     if (other && other !== c) throw new Error(`Two collections are named "${c.name}"; name each once`);
     collections.set(c.name, c);
+  }
+  // A link names a collection of the config: deleting or renaming one another links to is refused here.
+  for (const c of collections.values()) {
+    for (const { field, target } of linksOf(c)) {
+      if (!collections.has(target)) {
+        throw new Error(
+          `The collection "${c.name}" links its field "${field}" to "${target}", which no collection is named: declare it, or change the link`,
+        );
+      }
+    }
   }
   return collections;
 }

@@ -254,21 +254,25 @@ export const BATCH_LIMIT = 1000;
 /** What a collection's `delete` answers, and `saveMany` for each of its deletes: whether there was a record. */
 export type Deleted = { key: string; deleted: boolean };
 
-/** The kinds of value a field holds: text, a number, true or false, a date (ISO 8601) or a person's id. */
-export const FIELD_TYPES = ["text", "number", "boolean", "date", "person"] as const;
+/**
+ * The kinds of value a field holds: text, a number, true or false, a date (ISO 8601), a person's
+ * id, or free-form (`json`: anything JSON holds, an object, a list, text, a number).
+ */
+export const FIELD_TYPES = ["text", "number", "boolean", "date", "person", "json"] as const;
 
-const COLLECTION_NAME = /^[a-z][a-zA-Z0-9]*$/;
+/** A collection's name, as `collection()` takes it and a link (`{ link }`) names one: a lowercase letter, then letters and digits. */
+export const COLLECTION_NAME = /^[a-z][a-zA-Z0-9]*$/;
 /** A field's name, as `collection()` takes it: letters, digits and _, not a digit first. */
 export const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const KINDS = `${FIELD_TYPES.map((t) => `"${t}"`).join(", ")}, { type, optional: true } or { enum: [...] }`;
+const KINDS = `${FIELD_TYPES.map((t) => `"${t}"`).join(", ")}, { type, optional: true }, { enum: [...] } or { link: "<collection>" }`;
 /** Whether `v` is a plain object: not null, not a list. */
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * Throws unless `collection()` takes this declaration: the name a lowercase letter then letters
- * and digits, at least one field, each a type, the type marked optional or an enum of distinct
- * strings, the key a required text field, the title a string. `collection()` and the reader of
+ * and digits, at least one field, each a type, the type marked optional, an enum of distinct
+ * strings or a link to a collection, the key a required text field, the title a string. `collection()` and the reader of
  * `resources/data.ts` both ask it, so `sanoma check` refuses what the runtime would.
  */
 export function checkCollection(declaration: { name?: unknown; key?: unknown; fields?: unknown; title?: unknown }) {
@@ -296,9 +300,24 @@ export function checkCollection(declaration: { name?: unknown; key?: unknown; fi
 export const isHidden = (field: unknown): boolean => isRecord(field) && field.hidden === true;
 
 /**
- * Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, or an
- * enum of distinct strings; an optional one may be marked `hidden: true` (`isHidden`: removed by
- * a person, its values kept; to the runtime an optional field), so no hidden field is required.
+ * The collection a link field of the collection `collection` (as the runtime names it) holds keys
+ * of: `link` as written, in the same folder, so an app's (`<app>.<name>`) links to `<app>.<link>`.
+ */
+export function linkTarget(collection: string, link: string): string {
+  const dot = collection.indexOf(".");
+  return dot === -1 ? link : `${collection.slice(0, dot + 1)}${link}`;
+}
+
+/** The collection a declared field links to, as written (`{ link }`); none for a field of any other kind. */
+export const linkOf = (field: unknown): string | undefined =>
+  isRecord(field) && typeof field.link === "string" ? field.link : undefined;
+
+/**
+ * Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, an
+ * enum of distinct strings, or a link to another collection by its name (`{ link }`, a collection
+ * of the same folder, which `resolveConfig` checks is there); an optional one may be marked
+ * `hidden: true` (`isHidden`: removed by a person, its values kept; to the runtime an optional
+ * field), so no hidden field is required.
  */
 function checkField(where: string, field: string, kind: unknown): void {
   const refused = (why: string) => new Error(`${where}: the field "${field}" ${why}`);
@@ -310,8 +329,12 @@ function checkField(where: string, field: string, kind: unknown): void {
     return;
   }
   if (!isRecord(kind)) throw refused(kinds);
-  const { type, enum: values, optional, hidden, ...rest } = kind;
-  if (Object.keys(rest).length || (type === undefined) === (values === undefined)) throw refused(kinds);
+  const { type, enum: values, link, optional, hidden, ...rest } = kind;
+  const named = [type, values, link].filter((v) => v !== undefined).length;
+  if (Object.keys(rest).length || named !== 1) throw refused(kinds);
+  if (link !== undefined && (typeof link !== "string" || !COLLECTION_NAME.test(link))) {
+    throw refused("links to a collection by its name: a lowercase letter, then letters and digits");
+  }
   if (optional !== undefined && optional !== true) throw refused("may only be marked `optional: true`");
   if (hidden !== undefined && (hidden !== true || optional !== true)) {
     throw refused("may only be marked `hidden: true`, and only when it is `optional: true`");
@@ -332,16 +355,26 @@ const NUMBER = /^-?\d+(\.\d+)?$/;
 const BOOLEANS: Readonly<Record<string, boolean>> = { true: true, false: false, yes: true, no: false };
 
 /**
+ * The keys of the collections a change links to, by the link as written (`{ link }`): what a
+ * retype or a conversion to a link matches its values against. A link absent from it takes any key.
+ */
+export type LinkedKeys = ReadonlyMap<string, ReadonlySet<string>>;
+
+/**
  * `value` as a column of `type` holds it, or undefined when it does not read as one: a number from
  * its digits ("12" is 12), yes or no (true, false, yes, no, any case), a date as a `date` field takes
  * it, text and a person from a string, number or yes/no (a person not empty), a choice from one of
- * its strings, a link from a string, anything as free-form. A value already of the type is itself.
+ * its strings, a link from the same as text, the key of a record of the collection it links to
+ * (among `keys`, when they name it), anything as free-form. A value already of the type is itself.
  */
-function asType(value: unknown, type: ColumnType): { value: unknown } | undefined {
+function asType(value: unknown, type: ColumnType, keys?: LinkedKeys): { value: unknown } | undefined {
   const scalar = typeof value === "number" || typeof value === "boolean" ? String(value) : undefined;
   if (typeof type === "object") {
-    if ("link" in type) return typeof value === "string" ? { value } : undefined;
     const text = typeof value === "string" ? value : scalar;
+    if ("link" in type) {
+      const known = keys?.get(type.link);
+      return text && (!known || known.has(text)) ? { value: text } : undefined;
+    }
     return text !== undefined && type.enum.includes(text) ? { value: text } : undefined;
   }
   switch (type) {
@@ -367,7 +400,18 @@ function asType(value: unknown, type: ColumnType): { value: unknown } | undefine
 }
 
 /** Whether `value` reads as a column of `type` (`reshaped` stores it so): what a retype or a conversion keeps. */
-export const converts = (value: unknown, type: ColumnType): boolean => asType(value, type) !== undefined;
+export const converts = (value: unknown, type: ColumnType, keys?: LinkedKeys): boolean =>
+  asType(value, type, keys) !== undefined;
+
+/** The collections `changes` retype or convert to a link to, as written (`{ link }`), each once: whose keys a reshape matches against. */
+export const linksIn = (changes: readonly ReshapeChange[]): string[] => [
+  ...new Set(
+    changes.flatMap((change) => {
+      const type = change.kind === "retype" ? change.to : change.kind === "convert" ? change.type : undefined;
+      return typeof type === "object" && "link" in type ? [type.link] : [];
+    }),
+  ),
+];
 
 /**
  * What a reshape did to one record's value: moved to a new name, converted to the new type,
@@ -390,15 +434,17 @@ function without(from: Readonly<Record<string, unknown>>, key: string): Record<s
  * when nothing changed. Idempotent: a rename moves the value only where `from` is present and `to`
  * absent; a retype converts a value that reads as the new type (`converts`) and leaves one already
  * of it, and one that cannot convert is cleared or left as it is, by `decision` (absent: keep); a
- * conversion moves the key `key` out of the free-form object in `field` to a field of its own, only
- * where that field is empty, converted, and one that cannot convert is cleared from the object or
- * left in it; a removal deletes the field's value, wherever it is present. An empty value (`""`,
- * `null`) the new type does not hold, or a removal deletes, is no value: it is dropped, with no
- * `did`. Pure: the app's draft counts, the driver and its tests agree through it.
+ * conversion moves the key `key` out of the free-form object in `field` to a field of its own
+ * (`to`), only where that field is empty, converted, and one that cannot convert is cleared from
+ * the object or left in it; a removal deletes the field's value, wherever it is present. A link
+ * converts the key of a record of the collection it links to (`keys`; any key without them). An
+ * empty value (`""`, `null`) the new type does not hold, or a removal deletes, is no value: it is
+ * dropped, with no `did`. Pure: the app's draft counts, the driver and its tests agree through it.
  */
 export function reshaped(
   record: Readonly<Record<string, unknown>>,
   change: ReshapeChange,
+  keys?: LinkedKeys,
 ): { record: Readonly<Record<string, unknown>>; did?: Reshaping } {
   switch (change.kind) {
     case "rename":
@@ -407,7 +453,7 @@ export function reshaped(
     case "retype": {
       const value = record[change.field];
       if (value === undefined) return { record };
-      const as = asType(value, change.to);
+      const as = asType(value, change.to, keys);
       if (as)
         return as.value === value ? { record } : { record: { ...record, [change.field]: as.value }, did: "converted" };
       if (isEmpty(value)) return { record: without(record, change.field) };
@@ -417,11 +463,11 @@ export function reshaped(
     }
     case "convert": {
       const inner = record[change.field];
-      if (!isRecord(inner) || inner[change.key] === undefined || record[change.key] !== undefined) return { record };
+      if (!isRecord(inner) || inner[change.key] === undefined || record[change.to] !== undefined) return { record };
       const value = inner[change.key];
-      const as = asType(value, change.type);
+      const as = asType(value, change.type, keys);
       const rest = { ...record, [change.field]: without(inner, change.key) };
-      if (as) return { record: { ...rest, [change.key]: as.value }, did: "converted" };
+      if (as) return { record: { ...rest, [change.to]: as.value }, did: "converted" };
       if (isEmpty(value)) return { record: rest };
       return change.decision === "clear" ? { record: rest, did: "cleared" } : { record, did: "kept" };
     }
@@ -434,19 +480,21 @@ export function reshaped(
 }
 
 /**
- * `changes` brought along in each of `records`, in order (`reshaped`): the records that changed,
- * by their index in `records`, and the counts `sanoma.records.reshape` answers.
+ * `changes` brought along in each of `records`, in order (`reshaped`, a link matched against
+ * `keys`): the records that changed, by their index in `records`, and the counts
+ * `sanoma.records.reshape` answers.
  */
 export function reshape(
   records: readonly Readonly<Record<string, unknown>>[],
   changes: readonly ReshapeChange[],
+  keys?: LinkedKeys,
 ): { changed: Map<number, Record<string, unknown>>; counts: ReshapeOutput } {
   const counts: ReshapeOutput = { rows: records.length, changed: 0, converted: 0, cleared: 0, kept: 0 };
   const changed = new Map<number, Record<string, unknown>>();
   records.forEach((before, i) => {
     let record = before;
     for (const change of changes) {
-      const next = reshaped(record, change);
+      const next = reshaped(record, change, keys);
       record = next.record;
       if (next.did === "converted" || next.did === "cleared" || next.did === "kept") counts[next.did]++;
     }
@@ -459,7 +507,7 @@ export function reshape(
 /**
  * What `sanoma.records.reshape` is called with for `plan`: its collection and its changes that bring
  * the records along (renames, retypes, conversions and removals), each by names, target type and
- * decision; undefined for no plan or one with none (add, require, hide, show and link change the
+ * decision; undefined for no plan or one with none (add, require, hide and show change the
  * declaration alone).
  */
 export function reshapeOf(plan: TableChangePlan | undefined): ReshapeInput | undefined {
@@ -472,8 +520,8 @@ export function reshapeOf(plan: TableChangePlan | undefined): ReshapeInput | und
         return [{ kind: "retype", field, to, ...(decision && { decision }) }];
       }
       case "convert": {
-        const { field, key, type, decision } = change;
-        return [{ kind: "convert", field, key, type, ...(decision && { decision }) }];
+        const { field, key, to, type, decision } = change;
+        return [{ kind: "convert", field, key, to, type, ...(decision && { decision }) }];
       }
       case "remove":
         return [{ kind: "remove", field: change.field }];
