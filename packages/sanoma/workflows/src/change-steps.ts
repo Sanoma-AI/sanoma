@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { DBOS, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
+import { DBOS } from "@dbos-inc/dbos-sdk";
+import { child, step } from "./app-steps.ts";
 import { type ApprovalMessage, nextApprovalId, topicOf, withdrawApprovals } from "./approvals.ts";
 import { decide } from "./call.ts";
 import {
@@ -20,7 +21,6 @@ import {
 } from "./change.ts";
 import type { ChangeSteps } from "./change-workflow.ts";
 import type { DriftReport } from "./drift.ts";
-import { causes, isRunControlError } from "./errors.ts";
 import { warn } from "./log.ts";
 import { inside } from "./paths.ts";
 import { peopleSources, readPeople } from "./resources.ts";
@@ -32,10 +32,9 @@ import {
   CHANGE_MERGE,
   CHANGE_TOPIC,
   DRIFT_WORKFLOW,
-  errorMessage,
   mayDecide,
 } from "./shared.ts";
-import type { CheckResult, RemoteHalf } from "./source.ts";
+import type { RemoteHalf } from "./source.ts";
 
 // The change workflow's steps that are not one of its operations: checking and planning the
 // draft, asking the policy ahead, waiting for what happens to the change, retiring approvals,
@@ -103,35 +102,6 @@ async function drain(
   return strongest;
 }
 
-/**
- * Starts a run of the built-in `name` as a child of this one, with the id `<run>:<suffix>` (so a
- * replay finds it), as the run's own actor, and waits for its output, counted as a wait for
- * another run: undefined and the error's message when it failed, or was cancelled (a worker on a
- * new version cancels an apply started on other code, `carryBuiltInRuns`).
- */
-export async function child(
-  run: Run,
-  name: string,
-  suffix: string,
-  input: unknown,
-): Promise<{ runId: string; output?: unknown; error?: string }> {
-  const runId = `${run.id}:${suffix}`;
-  const handle = await run.state.startRun(name, runId, {
-    input,
-    startedBy: run.actor,
-    ...(run.sandbox !== undefined && { sandbox: run.sandbox }),
-  });
-  try {
-    return { runId, output: await run.state.deadlines.waiting(run.id, { kind: "run" }, () => handle.getResult()) };
-  } catch (err) {
-    // The child's cancellation, not this run's own (`DBOSWorkflowCancelledError`, which ends it).
-    if (causes(err).some((e) => e instanceof DBOSErrors.DBOSAwaitedWorkflowCancelledError))
-      return { runId, error: "it was cancelled: the worker restarted on a new version before it ended" };
-    if (isRunControlError(err)) throw err;
-    return { runId, error: errorMessage(err) };
-  }
-}
-
 /** A file's path relative to `root` with `/`, as git names it; undefined when it is outside. */
 const pathIn = (root: string, file: string) =>
   inside(root, file) ? relative(root, file).split(sep).join("/") : undefined;
@@ -158,15 +128,8 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     );
 
   return {
-    check: (id) =>
-      DBOS.runStep(
-        async (): Promise<CheckResult> => {
-          const source = sourceOfRun();
-          if (!source.check) throw new Error("This repository cannot check a draft (`Source.check`)");
-          return source.check(id);
-        },
-        { name: "change:check" },
-      ),
+    // In the box of whoever the change is by, through the app's steps: never on this instance.
+    check: (id) => step(runNow("A change step"), "check", { id }, "change:check"),
 
     plan: (id, check) =>
       DBOS.runStep(

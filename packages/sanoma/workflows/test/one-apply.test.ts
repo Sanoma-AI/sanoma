@@ -236,7 +236,7 @@ describe("one apply at a time across a deploy", () => {
   });
 
   const start = async (config: SanomaConfig) => {
-    const worker = await startTestWorker(config, { databaseUrl, source: repo.source, promote: true });
+    const worker = await startTestWorker(config, { databaseUrl, source: repo.source, app: repo.app, promote: true });
     workers.push(worker);
     return worker;
   };

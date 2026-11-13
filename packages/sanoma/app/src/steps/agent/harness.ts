@@ -1,6 +1,6 @@
 import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
-import { type AppStepContext, type Box, statusesOf, unconfigured } from "sanoma/workflows";
+import { type AppStepContext, type Box, type CheckResult, statusesOf, unconfigured } from "sanoma/workflows";
 import { errorMessage } from "sanoma/workflows/shared";
 import {
   createUIMessageStream,
@@ -13,7 +13,7 @@ import { type ChatMessage, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
 import { modelRegistry } from "../../server/models.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { boxSession, homeOf, personBox } from "./box-session.ts";
-import { boxTurn, carryIn, carryOut } from "./carrier.ts";
+import { boxTurn, carryIn, carryOut, checkIn } from "./carrier.ts";
 import {
   agentOn,
   allowedPaths,
@@ -36,7 +36,8 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // the box. A turn opens the box (one turn in it at a time), carries the draft into it (`carryIn`)
 // and is one harness session: made, run to its end (its permission requests answered by the
 // checkout rule), destroyed (what it started killed). Then what the agent changed is committed in
-// the box and carried back to the draft (`carryOut`), the box is stopped, and the draft checked.
+// the box and carried back to the draft (`carryOut`), the draft checked in the box (`checkIn`),
+// and the box is stopped.
 
 /** A bridge's first session in a box, by its runtime and the box's id: it installs the bridge there, so the next ones wait for it. */
 const installing = new Map<string, Promise<unknown>>();
@@ -64,8 +65,9 @@ async function runTurn(agent: TurnAgent<"onKey">, turn: EngineTurn, writer: UIMe
   // The agent works in the chat's draft from its first turn, in the person's box, opened last
   // so that nothing that fails before leaves it running.
   const [draft, model, port] = await Promise.all([openDraft(step, chat), modelFor(step, agent), freePort()]);
-  /** Whether the box's commits reached the draft. */
+  /** Whether the box's commits reached the draft, and their check in the box. */
   let carried = false;
+  let checked: CheckResult | undefined;
   try {
     await boxTurn(person.name, person.open, async (box) => {
       // Kept across turns: a bridge installs its agent under it once, and the clone stays.
@@ -94,11 +96,13 @@ async function runTurn(agent: TurnAgent<"onKey">, turn: EngineTurn, writer: UIMe
         if (ended) console.error(`sanoma app: the turn in the box ${box.id} failed:`, ended.err);
         throw err;
       }
+      // Unless a new message stopped the turn: its own turn checks.
+      if (carried && !step.signal.aborted) checked = await checkIn(box, { signal: step.signal });
       if (ended) throw ended.err;
     });
   } finally {
-    // Checked once the box is free: the turn's error, if any, follows the card.
-    if (carried) await showCommits(turn, draft, writer);
+    // Shown once the box is free: the turn's error, if any, follows the card.
+    if (carried) await showCommits(turn, draft, writer, checked);
   }
   writer.write({ type: "finish" });
 }

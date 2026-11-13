@@ -25,7 +25,7 @@ import type { CheckResult } from "./source.ts";
 
 /** What the change workflow does that is no operation, each a step of its own (`change-steps.ts`). */
 export interface ChangeSteps {
-  /** `sanoma check` on the draft (`Source.check`), its Permissions grid among it. */
+  /** `sanoma check` on the draft in the box of the person the run is by (the app's `AppSteps.check`), its Permissions grid among it. */
   check(id: string): Promise<CheckResult>;
   /** The facts the policy decides the merge on: from the draft's diff, the waiting runs and `check`. */
   plan(id: string, check: CheckResult): Promise<ChangeFacts>;

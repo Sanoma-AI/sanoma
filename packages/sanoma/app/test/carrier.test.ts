@@ -12,18 +12,20 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeSandbox } from "sanoma/testing/sandbox";
-import type { Box, Source } from "sanoma/workflows";
+import { type Box, resolveConfig, type Source } from "sanoma/workflows";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { copyFixture, ensureBuilt, FIXTURE_GRID, installInClone } from "../../test/fixture.ts";
 import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
-import { homeOf } from "../src/steps/agent/box-session.ts";
+import { checkDraft, homeOf } from "../src/steps/agent/box-session.ts";
 import { BOX_BUSY, boxTurn, carryIn, carryOut, OWN_PNPM } from "../src/steps/agent/carrier.ts";
+import { boxName } from "../src/steps/agent/checkout.ts";
 import { localBackend } from "../src/steps/agent/local-box.ts";
 
 // Git between the live instance and a person's box (`carrier.ts`), over the fake sandbox and the
 // app's local backend: a draft carried into the box's clone and its commits back, nothing of the
 // repository's remote or the company's secrets in the box, a box that dies mid-turn, two turns in
-// one box at once, and the clone's install.
+// one box at once, the clone's install, and `sanoma check` in the box (`checkDraft`, `checkIn`).
 
 /** What must never reach a box: the remote's token, the company's secret. */
 const TOKEN = "ghs_carrier-test-token-value";
@@ -279,9 +281,19 @@ touch "${join(root, "..", "ran")}"
         async () => "bob",
       ),
     ).toBe("bob");
+    // A check waits for the box instead, and runs once the turn ends.
+    const order: string[] = [];
+    const check = boxTurn(
+      opening.name,
+      () => backend.open(opening),
+      async () => void order.push("check"),
+      { wait: true },
+    );
     await vi.waitFor(() => expect(release).toBeDefined());
+    order.push("turn ends");
     release!();
-    await first;
+    await Promise.all([first, check]);
+    expect(order).toEqual(["turn ends", "check"]);
     await expect(
       boxTurn(
         opening.name,
@@ -298,7 +310,7 @@ touch "${join(root, "..", "ran")}"
         async () => "again",
       ),
     ).toBe("again");
-    expect(stopped).toEqual(["sanoma-acme-bob", opening.name, opening.name, opening.name]);
+    expect(stopped).toEqual(["sanoma-acme-bob", opening.name, opening.name, opening.name, opening.name]);
   });
 
   it("refuses to carry a draft for a repository that cannot", async () => {
@@ -367,4 +379,91 @@ describe("the clone's install", () => {
     expect(logged).toHaveBeenCalledWith(expect.stringMatching(/the install in the box .* failed/), expect.any(String));
     logged.mockRestore();
   }, 120_000);
+});
+
+describe("the check in a person's box", () => {
+  it("checks each draft in the box's clone, one at a time, with every field of its result, on a Postgres of its own, and nothing of this instance's", async () => {
+    // The fixture company in a git repository of its own, on the packages' builds (made when stale):
+    // its install given to the box's clone, as the box's own install of a lockfile would make it.
+    ensureBuilt();
+    const company = copyFixture();
+    const at = (...args: string[]) => execFileSync("git", args, { cwd: company, encoding: "utf8" }).trim();
+    try {
+      writeFileSync(join(company, ".gitignore"), ".sanoma/\nnode_modules/\n");
+      at("init", "--quiet", "--initial-branch=main");
+      at("add", "--all");
+      at("commit", "--quiet", "-m", "First");
+      const source = localGitSource(company);
+      const [, broken, unloadable] = await Promise.all([
+        source.draft!("ok"),
+        source.draft!("broken"),
+        source.draft!("unloadable"),
+      ]);
+      writeFileSync(join(broken.root, "workflows", "broken.ts"), 'export const n: number = "one";\n');
+      // Its config prints a passing result as it loads, which does not pass it: the launcher's comes last.
+      const fake = JSON.stringify({ sanoma: 1, event: "checked", ok: true, problems: [], warnings: [] });
+      const config = join(broken.root, "sanoma.config.ts");
+      writeFileSync(config, `console.log(${JSON.stringify(fake)});\n${readFileSync(config, "utf8")}`);
+      await broken.commit({ paths: ["workflows/broken.ts", "sanoma.config.ts"], message: "Break", author: "agent" });
+      // A config that does not load, and says what the check's environment holds.
+      const says = 'throw new Error(`no config; env ${Object.keys(process.env).sort().join(" ")}`);\n';
+      writeFileSync(join(unloadable.root, "sanoma.config.ts"), says);
+      await unloadable.commit({ paths: ["sanoma.config.ts"], message: "Unload", author: "agent" });
+      // Neither this process's database nor its credentials reach the check.
+      vi.stubEnv("SANOMA_DATABASE_URL", "postgresql://postgres:dbos@localhost:5433/not_for_the_check");
+      vi.stubEnv("GHOST_ADMIN_API_KEY", "not-for-the-check");
+
+      // The local box of a person on this computer, as Publish and our loop's run_checks check in it.
+      const resolved = resolveConfig({ workflows: [], connectors: [], root: company });
+      const step = { source, resolved, by: { id: "ada" }, client: undefined as never };
+      const home = join(company, ".sanoma/agent-home/boxes", boxName(resolved.appName, "ada"));
+      const clone = join(home, "repo");
+      installInClone(company, clone);
+      const [passed, failed, refused] = await Promise.all([
+        checkDraft(step, { id: "ok" }),
+        checkDraft(step, { id: "broken" }),
+        checkDraft(step, { id: "unloadable" }),
+      ]);
+      // The grid comes back as the check reported it: the fixture has no policies, so all allow.
+      expect(passed).toEqual({ ok: true, problems: [], warnings: [], grid: FIXTURE_GRID });
+      expect(failed.ok).toBe(false);
+      expect(failed.problems).toContainEqual(
+        expect.stringMatching(/^workflows\/broken\.ts:1:14: .*'string'.*'number'/),
+      );
+      expect(refused).toEqual({
+        ok: false,
+        problems: [expect.stringMatching(/^sanoma check: .*no config; env /)],
+        warnings: [],
+      });
+      const names = refused.problems[0]!.split("no config; env ")[1]!.split(" ");
+      expect(names).toEqual(expect.arrayContaining(["HOME", "PATH", "SANOMA_EVENTS"]));
+      expect(names.filter((name) => /DATABASE|GHOST/.test(name))).toEqual([]);
+      // On a Postgres of its own (no URL reached it): this platform's server, under the box's home.
+      const cache = join(home, process.platform === "darwin" ? "Library/Caches" : ".cache", "sanoma/postgres");
+      expect(readdirSync(cache)).toHaveLength(1);
+
+      // A draft that cannot be carried in is a result of one problem, saying why.
+      expect(await checkDraft(step, { id: "never" })).toEqual({
+        ok: false,
+        problems: [expect.stringMatching(/^sanoma check: The draft could not be brought into your box/)],
+        warnings: [],
+      });
+      expect((await checkDraft(step, { id: "../escape" })).problems).toEqual([expect.stringMatching(/A draft's id/)]);
+      // What the check wrote in the clone is never brought back: the next turn's carry finds nothing.
+      await boxTurn(
+        "check",
+        () => localBackend(join(company, ".sanoma/agent-home/boxes")).open({ name: boxName(resolved.appName, "ada") }),
+        async (box) => {
+          const { head } = await carryIn(box, source, "ok", { home });
+          expect(await carryOut(box, source, "ok", { since: head, ...turn })).toBe(false);
+        },
+      );
+      // The live checkout as it was.
+      expect(await source.drafts!()).toEqual(["broken", "ok", "unloadable"]);
+      expect(at("status", "--porcelain")).toBe("");
+      expect(at("log", "--format=%s")).toBe("First");
+    } finally {
+      rmSync(company, { recursive: true, force: true });
+    }
+  }, 600_000);
 });
