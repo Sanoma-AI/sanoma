@@ -121,6 +121,12 @@ export const branchPath = (branch: string) => branch.split("/").map(encodeURICom
 
 const AccessToken = z.object({ token: z.string(), expires_at: z.string() });
 
+/** An installation token as `github.repository.token` answers it, and Sanoma Cloud's `cloud-token` too. */
+export const MintedToken = z.object({
+  token: z.string().describe("The installation token (`ghs_…`)"),
+  expiresAt: z.iso.datetime({ offset: true }).describe("When its hour is out, as GitHub says"),
+});
+
 /**
  * An installation token of the App, minted with its JWT, good for an hour; for the repository
  * `name` alone when given, which GitHub refuses (422) when the installation does not cover it,

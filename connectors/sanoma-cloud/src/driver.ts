@@ -58,18 +58,13 @@ function answered<T>(workflow: string, schema: z.ZodType<T>, output: unknown): T
 const runIdOf = (call: CallContext, workflow: string) =>
   `sanoma-cloud-${createHash("sha256").update(`${call.idempotencyKey}\n${workflow}`).digest("hex").slice(0, 32)}`;
 
-/**
- * Sanoma Cloud's API for one call: sanoma-ops's workflows over its public api (`POST /api/call`),
- * each started (`<workflow>.start`, an id per call, so a retry resumes the same run), then its
- * result read (`<workflow>.result`, 20 s per request, `run_running` until the run ends), with the
- * token as a bearer.
- */
+/** Sanoma Cloud's API for one call: sanoma-ops's workflows, each run with `cloudRun` (a write's with an id per call). */
 function workflowsApi(call: CallContext, options: CloudDriverOptions): CloudApi {
   /** Read once for the call, when its first run starts. */
   let token: Promise<string> | undefined;
   /** Starts `workflow` with `input` and answers its output once the run ends; a failed run fails the call. */
   const run = (workflow: string, input: unknown, id?: string) =>
-    cloudRun(workflow, input, { ...options, token: (token ??= tokenOf(call)), ...(id && { id }) });
+    cloudRun(workflow, input, { ...options, token: (token ??= tokenOf(call)), id });
 
   /** A write's run: its id the call's, so each attempt of the call resumes the same run. */
   const resume = (workflow: string, input: unknown) => run(workflow, input, runIdOf(call, workflow));

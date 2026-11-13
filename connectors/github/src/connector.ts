@@ -1,6 +1,7 @@
 import { tfConnector } from "sanoma/internal/bridge/connector";
 import { type Connector, defineConnector, type OpSpec, vendorInfo } from "sanoma/workflows";
 import { z } from "zod";
+import { MintedToken } from "./rest.ts";
 import {
   github_branch_protection,
   github_repository,
@@ -235,12 +236,11 @@ const appSpecs = {
         repository: fullName,
         permissions: z
           .record(z.string().min(1), z.enum(["read", "write"]))
+          // GitHub gives a token minted with no permissions named all the installation's.
+          .refine((named) => Object.keys(named).length > 0, "name at least one permission")
           .describe('What the token may do, by GitHub\'s permission names: `{ contents: "write" }`'),
       }),
-      output: z.object({
-        token: z.string().describe("The installation token (`ghs_…`)"),
-        expiresAt: z.iso.datetime({ offset: true }).describe("When its hour is out, as GitHub says"),
-      }),
+      output: MintedToken,
       target: ({ repository }: { repository: string }) => repository,
       // A bearer for the repository: the ledger records that there was one, not what it was.
       opaque: ["token"],

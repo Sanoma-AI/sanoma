@@ -12,7 +12,6 @@ import {
   type SourceHost,
 } from "sanoma/workflows";
 import { z } from "zod";
-import { githubApp } from "./connector.ts";
 import {
   appJwtOf,
   branchPath,
@@ -20,6 +19,7 @@ import {
   GITHUB_APP_SECRETS,
   installationToken,
   limited,
+  MintedToken,
   ok,
   read,
   repoPath,
@@ -76,8 +76,13 @@ interface Minted {
  * Sanoma's GitHub App and mints it (sanoma-ops's `cloud-token`), with its expiry.
  */
 async function cloudToken(cloud: string, owner: string, name: string): Promise<Minted> {
-  const output = await cloudRun("cloud-token", { repository: `${owner}/${name}`, scope: "write" }, { token: cloud });
-  const minted = read(githubApp.repository.token.output, output, "Sanoma Cloud's cloud-token");
+  // A minute at most: the call waits on it.
+  const output = await cloudRun(
+    "cloud-token",
+    { repository: `${owner}/${name}`, scope: "write" },
+    { token: cloud, runTimeoutMs: 60_000 },
+  );
+  const minted = read(MintedToken, output, "Sanoma Cloud's cloud-token");
   return { token: minted.token, expiresAt: Date.parse(minted.expiresAt) };
 }
 

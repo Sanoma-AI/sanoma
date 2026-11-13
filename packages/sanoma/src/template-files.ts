@@ -1,6 +1,6 @@
-// The company template's files with a company's own declared in them, text in and text out:
-// `sanoma init` applies them to the files it copies, and a workflow can apply them to a
-// repository's files (`github.repository.files`) before committing them back. Browser-safe.
+// `sanoma/init`: the company template's files with a company's own declared in them, text in and
+// text out. `sanoma init` applies them to the files it copies, and a workflow or a site can apply
+// them to a repository's files (`github.repository.files`). No imports, so it runs anywhere.
 
 /** Who starts the company: the first person `resources/people.ts` declares. */
 export interface Creator {

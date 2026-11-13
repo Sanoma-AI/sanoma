@@ -439,16 +439,14 @@ describe("a sandbox run started by a scenario's visitor or api token", () => {
       { id: "visitor:scenario:visitor", email: "ada@example.com" },
       { id: "token:cli", subject: "visitor:better-auth:ada" },
     ]);
-    // The token's row, made for the first run, serves a second; another subject for it is refused.
+    // A sandbox token has no row: the same id acts for another subject in another scenario, and none is stored.
     const [, , token] = scenarios;
-    const again = await runScenario(token!, { client: app.client, scope });
-    expect(await app.client.result(again.runId)).toEqual({ id: "token:cli", subject: "visitor:better-auth:ada" });
     const other = {
       ...token!,
       startedBy: { id: "token:cli", groups: ["visitors"], subject: "visitor:better-auth:bob" },
     };
-    await expect(runScenario(other, { client: app.client, scope })).rejects.toThrow(
-      'the api token "cli" acts for visitor:better-auth:ada on this database',
-    );
+    const again = await runScenario(other, { client: app.client, scope });
+    expect(await app.client.result(again.runId)).toEqual({ id: "token:cli", subject: "visitor:better-auth:bob" });
+    expect(await app.client.tokens.subjectOf("cli")).toBeUndefined();
   });
 });

@@ -366,14 +366,20 @@ export class SanomaClient {
     input: z.input<S>,
     options: StartOptions,
   ): Promise<string> {
+    const given: Principal = parseOrThrow(
+      PrincipalOrId,
+      options?.startedBy,
+      '`startedBy` must be a principal, such as "alice" or { id: "alice" }',
+    );
+    const sandbox = parseOrThrow(
+      z.string().min(1).optional(),
+      options?.sandbox,
+      "`sandbox` must be the name of a scenario in the config's `scenarios/`",
+    );
+    // A sandbox run's api token acts for the subject given (a scenario's `an api token … is acting`): it has no row.
     const startedBy = await this.withSubject(
-      await this.admitted(
-        parseOrThrow(
-          PrincipalOrId,
-          options?.startedBy,
-          '`startedBy` must be a principal, such as "alice" or { id: "alice" }',
-        ),
-      ),
+      await this.admitted(given),
+      sandbox === undefined ? undefined : given.subject,
     );
     if (typeof workflow === "string") {
       const named = this.config.workflows.get(workflow);
@@ -389,11 +395,6 @@ export class SanomaClient {
     // The policy decides the start on the input as parsed, its defaults filled, as the Cedar schema types it.
     const parsed = parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
     const { runId } = options;
-    const sandbox = parseOrThrow(
-      z.string().min(1).optional(),
-      options.sandbox,
-      "`sandbox` must be the name of a scenario in the config's `scenarios/`",
-    );
     const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
     const own = OWN_STARTS[workflow.name];
     if (own && !(await own.admits(parsed, startedBy, runId, this))) {
@@ -1784,10 +1785,13 @@ export class SanomaClient {
     return admit(principal, readPeople(this.config.root));
   }
 
-  /** An api token's principal (`token:<id>`) with the subject its row acts for, refused once the token is revoked; anyone else as given. */
-  private async withSubject(principal: Principal): Promise<Principal> {
+  /**
+   * An api token's principal (`token:<id>`) with the subject its row acts for (or `given`, which reads no row),
+   * refused once the token is revoked; anyone else as given.
+   */
+  private async withSubject(principal: Principal, given?: string): Promise<Principal> {
     if (!isToken(principal)) return principal;
-    const subject = await this.tokens.subjectOf(principal.id.slice("token:".length));
+    const subject = given ?? (await this.tokens.subjectOf(principal.id.slice("token:".length)));
     if (subject === undefined) throw new NotAdmittedError(principal.id);
     return { ...principal, subject };
   }

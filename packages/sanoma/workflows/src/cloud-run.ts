@@ -2,10 +2,6 @@ import { z } from "zod";
 import { DriverError, retryableStatus } from "./op.ts";
 import { apiNameOf, errorMessage, vendorCodeOf } from "./shared.ts";
 
-// A run of one of Sanoma Cloud's workflows (sanoma-ops's) over its public api, as a connector
-// calls it: the Sanoma Cloud connector for the company's database and host, the GitHub connector
-// for a Cloud company's token.
-
 /** Where Sanoma Cloud's api answers when `SANOMA_CLOUD_URL` is not set. */
 const DEFAULT_URL = "https://www.sanoma.work";
 

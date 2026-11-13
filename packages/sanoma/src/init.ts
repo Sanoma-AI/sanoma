@@ -13,19 +13,11 @@ import { userInfo } from "node:os";
 import { basename, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import {
-  AGENTS,
-  type Creator,
-  declareFounder,
-  declareName,
-  declareSlug,
-  INFRA,
-  RUNTIME_AGENTS,
-  VISITORS,
-} from "sanoma/workflows";
+import { AGENTS, RUNTIME_AGENTS, VISITORS } from "sanoma/workflows";
 import { isVisitor, slugged } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { stage } from "./events.ts";
+import { type Creator, declareFounder, declareName, declareSlug, INFRA } from "./template-files.ts";
 import { writeDeploymentKeys } from "./key.ts";
 
 const run = promisify(execFile);

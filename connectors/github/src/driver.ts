@@ -232,6 +232,14 @@ const emptyRepository = (repository: string) =>
 /** A file's contents as GitHub answers them, base64 (up to 1 MB). */
 const Contents = z.object({ type: z.literal("file"), encoding: z.literal("base64"), content: z.string() });
 
+/** What GitHub answered for `file` when it is no file's text: a directory (a list), or a file over 1 MB (no content). */
+function unreadable(repository: string, file: string, body: unknown): DriverError {
+  let why = "is not a file";
+  if (Array.isArray(body)) why = "is a directory: name its files";
+  else if ((body as { encoding?: unknown } | null)?.encoding === "none") why = "is over 1 MB, more than it reads";
+  return new DriverError(`github: repository.files: ${repository}'s ${file} ${why}`, { retryable: false });
+}
+
 /**
  * The operations through the App, over GitHub's REST API: each mints an installation token from
  * the App's JWT when called (`installation.get` uses the JWT itself), which is never kept; only
@@ -326,8 +334,9 @@ const appDriver = defineDriver(githubApp, {
           const reply = await send(token, "GET", path);
           if (reply.status === 404) return [];
           if (reply.status >= 300) throw failure("GET", path, reply);
-          const { content } = read(Contents, reply.body, `GET ${path}`);
-          return [[file, Buffer.from(content, "base64").toString("utf8")] as const];
+          const contents = Contents.safeParse(reply.body);
+          if (!contents.success) throw unreadable(repository, file, reply.body);
+          return [[file, Buffer.from(contents.data.content, "base64").toString("utf8")] as const];
         }),
       );
       return Object.fromEntries(found.flat());

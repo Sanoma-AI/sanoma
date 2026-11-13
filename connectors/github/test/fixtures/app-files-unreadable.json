@@ -1,0 +1,55 @@
+[
+  {
+    "method": "POST",
+    "path": "/app/installations/7/access_tokens",
+    "status": 201,
+    "body": {
+      "token": "ghs_recorded",
+      "expires_at": "2026-10-31T13:00:00Z",
+      "permissions": { "contents": "write", "metadata": "read" },
+      "repository_selection": "selected"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops/commits/main",
+    "status": 200,
+    "body": { "sha": "7638417db6d59f3c431d3e1f261cc637155684cd", "commit": { "message": "Set up acme" } }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops/contents/resources?ref=7638417db6d59f3c431d3e1f261cc637155684cd",
+    "status": 200,
+    "body": [{ "type": "file", "name": "people.ts", "path": "resources/people.ts", "size": 120 }]
+  },
+  {
+    "method": "POST",
+    "path": "/app/installations/7/access_tokens",
+    "status": 201,
+    "body": {
+      "token": "ghs_recorded",
+      "expires_at": "2026-10-31T13:00:00Z",
+      "permissions": { "contents": "write", "metadata": "read" },
+      "repository_selection": "selected"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops/commits/main",
+    "status": 200,
+    "body": { "sha": "7638417db6d59f3c431d3e1f261cc637155684cd", "commit": { "message": "Set up acme" } }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops/contents/data.csv?ref=7638417db6d59f3c431d3e1f261cc637155684cd",
+    "status": 200,
+    "body": {
+      "type": "file",
+      "encoding": "none",
+      "size": 2097152,
+      "name": "data.csv",
+      "path": "data.csv",
+      "content": ""
+    }
+  }
+]

@@ -202,6 +202,19 @@ describe("the operations through the App", () => {
     expect(await call(githubDriver(), "repository.files", input)).toEqual({ "README.md": "# acme\n" });
   });
 
+  it.skipIf(live)("says so when a path is a directory or a file over 1 MB", async () => {
+    play("app-files-unreadable");
+    const input = { installation: 7, repository: "acme/acme-ops", ref: "main" };
+    await expect(call(githubDriver(), "repository.files", { ...input, paths: ["resources"] })).rejects.toMatchObject({
+      message: "github: repository.files: acme/acme-ops's resources is a directory: name its files",
+      retryable: false,
+    });
+    await expect(call(githubDriver(), "repository.files", { ...input, paths: ["data.csv"] })).rejects.toMatchObject({
+      message: "github: repository.files: acme/acme-ops's data.csv is over 1 MB, more than it reads",
+      retryable: false,
+    });
+  });
+
   it.skipIf(live)("tries files at a ref again while the repository is empty, as one just generated is", async () => {
     play("app-files-empty");
     const input = { installation: 7, repository: "acme/acme-ops", paths: ["README.md"], ref: "main" };
@@ -222,6 +235,11 @@ describe("the operations through the App", () => {
     expect(() => github.repository.files.input.parse({ ...input, paths: [], ref: ".." })).toThrow(
       "a path inside the repository",
     );
+  });
+
+  it("refuses a token with no permissions named, which GitHub would give all the installation's", () => {
+    const input = { installation: 7, repository: "acme/acme-ops", permissions: {} };
+    expect(() => github.repository.token.input.parse(input)).toThrow("name at least one permission");
   });
 
   it.skipIf(live)("mints a token for one repository with only the permissions named, and returns it", async () => {

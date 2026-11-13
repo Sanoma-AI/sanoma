@@ -235,6 +235,10 @@ function Demo() {
 - The dev server listens on this machine only: with `SANOMA_APP_HOST` naming another, `sanoma` builds the sites and serves the build, as `sanoma app` does.
 - A public site (`defineSite({ public: true })`) answers at the root of `<name>.localhost` on the app's port, with hot updates too, as its visitors see it ([public sites](app/README.md#public-sites)); `sanoma`, `sanoma serve` and `sanoma app` print each one's address after they start (`www: http://www.localhost:3000`). Browsers send `*.localhost` to this machine with no setup.
 
+## Template files
+
+`sanoma/init` is how `sanoma init` writes a company's own facts into the company template's files, as plain functions over text that a workflow or a site's page can import too (to apply them to a repository's files read with `github.repository.files`, say): `declareFounder(text, creator)` writes the `founder` in `resources/people.ts` as `creator` (a `Creator`: `id`, and `name`, `github` or `email` when known), `declareName(text, name)` writes `name` first in `sanoma.config.ts`, and `declareSlug(text, slug)` puts the slug in place of the template's `"company"` in `resources/sanoma/infra.ts` (`INFRA`), in the Cloud names and the address. Each throws when the file is not shaped as the template's.
+
 ## Invoices
 
 `sanoma/invoices` is an invoice's shape and exact arithmetic (zod only), and `sanoma/invoices/pdf` its PDF (`renderInvoice`, in Node and in a browser). Both are plain functions a workflow or a site's page imports: no connector, nothing stored. Rendering needs `@react-pdf/renderer` installed beside `sanoma`; a company that never renders needs nothing more. See [`sanoma/invoices`](invoices/README.md).
