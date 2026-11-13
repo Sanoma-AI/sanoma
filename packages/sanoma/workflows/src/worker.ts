@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { DBOS, Error as DBOSErrors, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
 import type { WorkerApp } from "./app-steps.ts";
 import { readApps } from "./apps.ts";
@@ -165,13 +166,26 @@ export interface WorkerOptions {
 }
 
 /**
+ * The async context as this module loaded, in no run: a worker started from inside a run's step (a
+ * change's deploy asks the worker to start again, `WorkerOptions.reload`) starts in it, else DBOS
+ * would take its calls for the step's (`resumeWorkflows` refuses one in a step) and the worker's
+ * timers would keep the step's context for good.
+ */
+const OUTSIDE_ANY_RUN = AsyncLocalStorage.snapshot();
+
+/**
  * Registers the workflows, connects to Postgres and recovers any runs that were interrupted.
  * When a driver declares variables the environment leaves unset, it first loads their stored
  * values into `process.env` and keeps them current while it runs. It starts whether or not they
  * are all there: it prints one line naming the vendors that lack one (`unconfigured`), and a live
  * call to such a vendor fails, saying why, as the call's own final failure, until they are set.
  */
-export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
+export function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
+  return OUTSIDE_ANY_RUN(() => launchWorker(config, options));
+}
+
+/** What `startWorker` does, outside any run. */
+async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
   setLogLevel(options.logLevel);
@@ -559,14 +573,13 @@ async function carryBuiltInRuns(
       carry.filter((r) => pending.has(r.workflowID)),
       (r) => (onApplyQueue(r) ? applyQueueName : queueName),
     );
-    await Promise.all(
-      [...byQueue].map(([queue, runs]) =>
-        DBOS.resumeWorkflows(
-          runs.map((r) => r.workflowID),
-          { queueName: queue },
-        ),
-      ),
-    );
+    // One queue at a time, so a failure leaves no other resume unawaited.
+    for (const [queue, runs] of byQueue) {
+      await DBOS.resumeWorkflows(
+        runs.map((r) => r.workflowID),
+        { queueName: queue },
+      );
+    }
     if (carried.length) {
       info(`carried ${carried.length} built-in run(s) onto version ${version}: ${carried.map((r) => r.id).join(", ")}`);
     }

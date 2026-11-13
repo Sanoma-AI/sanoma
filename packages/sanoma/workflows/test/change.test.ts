@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeHost, testRepository } from "sanoma/testing/host";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { lazyDb } from "../src/db.ts";
 import { data } from "../src/db/company.ts";
@@ -597,6 +597,8 @@ describe("a change whose deploy starts the worker again", () => {
       process.env.DBOS__APPVERSION = "moved";
       restarts.push(app.restart());
     };
+    // Started again from inside the apply's step, the worker carries the runs outside it.
+    const warn = vi.spyOn(console, "warn");
     try {
       // The host's source moved on, so the apply starts it again.
       await source.commit();
@@ -617,7 +619,9 @@ describe("a change whose deploy starts the worker again", () => {
       for (const id of [runId, `${runId}:deploy`]) {
         expect((await app.raw.getWorkflow(id))?.applicationVersion).toMatch(/@moved$/);
       }
+      expect(warn.mock.calls.flat().join("\n")).not.toMatch(/carrying the built-in runs|retrieveWorkflow/);
     } finally {
+      warn.mockRestore();
       delete process.env.DBOS__APPVERSION;
       reload = () => void restarts.push(app.restart());
     }
