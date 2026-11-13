@@ -35,7 +35,10 @@ const api = agent37Api(KEY);
 const templateCalls = () => vendor.sent.filter((s) => s.path.startsWith("/templates"));
 const madeFrom = () =>
   vendor.sent.filter((s) => s.method === "POST" && s.path === "/instances").map((s) => s.body?.template);
-const execs = (id: string) => vendor.sent.filter((s) => s.path === `/instances/${id}/exec`).length;
+/** The execs that wrote the runner in and started it. */
+const execs = (id: string) =>
+  vendor.sent.filter((s) => s.path === `/instances/${id}/exec` && String(s.body?.command).includes(".sanoma/runner-"))
+    .length;
 
 describe("agent37Backend", () => {
   it("passes the sandbox conformance kit", async () => {

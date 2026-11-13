@@ -179,7 +179,7 @@ The template declares explicit `{ bootstrap: "SANOMA_SIGNING_KEY" }` and `{ boot
 }
 ```
 
-`sanoma/oxlint.json` is self-contained (it extends nothing): `sanoma/workflows`'s rules (the clock, randomness, the network, the environment, the imports a workflow may make, with its plugin inside `sanoma`; data files are held to no lint, since Sanoma loads them and reports what does not load), a site's (client code only: no server function, `*.server.*` file or route `server` handlers, no import of the runtime, a connector, Postgres, DBOS, Node's modules or TanStack Start, the app only through `sanoma/site` and `sanoma/ui`, no relative import out of `sites/`, no `virtual:` module (content comes through `content`), no `process` or `require`; types may be imported from anywhere; `sites/__virtual.ts`, the build's listing, aside) and the rules this repo holds its own code to. Add your own rules beside the `extends`; `sanoma check` leaves an existing file alone.
+`sanoma/oxlint.json` is self-contained (it extends nothing): `sanoma/workflows`'s rules (the clock, randomness, the network, the environment, the imports a workflow may make, with its plugin inside `sanoma`; data files are held to no lint, since Sanoma loads them and reports what does not load), a site's (client code only: no server function, `*.server.*` file or route `server` handlers, no import of the runtime, a connector, Postgres, DBOS, Node's modules or TanStack Start, the app only through `sanoma/site` and `sanoma/ui`, no relative import out of `sites/`, no import by a path from the root (`/…`: a file at a fixed address goes in the site's `public/` folder) or by a `#` import, no `virtual:` module (content comes through `content`), no `process` or `require`; types may be imported from anywhere; `sites/__virtual.ts`, the build's listing, aside) and the rules this repo holds its own code to. Add your own rules beside the `extends`; `sanoma check` leaves an existing file alone.
 
 ## Sites
 
@@ -234,6 +234,10 @@ function Demo() {
 - `sanoma check` beside it builds the app with the same route options, so it leaves the dev server's route tree alone.
 - The dev server listens on this machine only: with `SANOMA_APP_HOST` naming another, `sanoma` builds the sites and serves the build, as `sanoma app` does.
 - A public site (`defineSite({ public: true })`) answers at the root of `<name>.localhost` on the app's port, with hot updates too, as its visitors see it ([public sites](app/README.md#public-sites)); `sanoma`, `sanoma serve` and `sanoma app` print each one's address after they start (`www: http://www.localhost:3000`). Browsers send `*.localhost` to this machine with no setup.
+
+## Template files
+
+`sanoma/init` is how `sanoma init` writes a company's own facts into the company template's files, as plain functions over text that a workflow or a site's page can import too (to apply them to a repository's files read with `github.repository.files`, say): `declareFounder(text, creator)` writes the `founder` in `resources/people.ts` as `creator` (a `Creator`: `id`, and `name`, `github` or `email` when known), `declareName(text, name)` writes `name` first in `sanoma.config.ts`, and `declareSlug(text, slug)` puts the slug in place of the template's `"company"` in `resources/sanoma/infra.ts` (`INFRA`), in the Cloud names and the address. Each throws when the file is not shaped as the template's.
 
 ## Invoices
 

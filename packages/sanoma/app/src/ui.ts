@@ -35,6 +35,7 @@ export {
   CardTitle,
 } from "./components/ui/card.tsx";
 export { Checkbox } from "./components/ui/checkbox.tsx";
+export { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "./components/ui/code-block.tsx";
 export { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./components/ui/collapsible.tsx";
 export {
   Dialog,

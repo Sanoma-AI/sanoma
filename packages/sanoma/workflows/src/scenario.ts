@@ -52,9 +52,11 @@ import {
   groupNamesOf,
   isBatch,
   isEnded,
+  isToken,
   principalIdsOf,
   problemLine,
   RUNTIME_AGENTS,
+  VISITORS,
   visitorPrincipal,
 } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
@@ -427,6 +429,14 @@ const visitorWith = (verified: { email: unknown; github?: unknown }): Principal 
   ...(verified as Pick<Principal, "email" | "github">),
 });
 
+/** An api token of a public site's api (`token:<id>`, in `visitors`) acting for `subject`, as `an api token … is acting` says. */
+function tokenActing(id: string, subject: string): Principal {
+  const principal = { id: `token:${id}`, groups: [VISITORS], subject };
+  if (!isToken(principal)) throw new Error(`"${id}" is no api token's id: one word, such as "cli"`);
+  if (!subject.trim()) throw new Error(`the api token "${id}" acts for nobody: name its subject`);
+  return principal;
+}
+
 /** The rules a scope has, and the parameter types their expressions use. */
 function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSpec[] } {
   const { types, collections } = scope;
@@ -496,6 +506,11 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       kind: "actor",
       source: "a visitor {string} with GitHub {string} is acting",
       read: ([email, github]) => visitorWith({ email, github }),
+    },
+    {
+      kind: "actor",
+      source: "an api token {string} for {string} is acting",
+      read: ([id, subject]) => tokenActing(id as string, subject as string),
     },
     {
       kind: "given",
