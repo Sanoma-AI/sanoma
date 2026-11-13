@@ -553,7 +553,7 @@ describe("readSites", () => {
       ),
       // Through a file of another folder of the site: read too.
       "sites/www/lib/x.ts": 'export { list as x } from "../components/cloud.ts";\n',
-      // `api` imported and used in a form no call is read from, a module not written out, and code
+      // `api` imported and used in a form no call is read from, a module not written out or globbed, and code
       // that is not read (outside the site's folder, a `.js` name): each may call.
       "sites/www/components/unread.ts": 'import { api } from "sanoma/site";\n\nexport const { hello } = api;\n',
       "sites/www/routes/unread.tsx": page(
@@ -565,6 +565,11 @@ describe("readSites", () => {
         "/sites/www/computed",
         "",
         "return import(`../components/${'plain'}.tsx`);",
+      ),
+      "sites/www/routes/glob.tsx": page(
+        "/sites/www/glob",
+        "",
+        'return import.meta.glob("../components/*.ts", { eager: true });',
       ),
       "sites/www/routes/lib.tsx": page("/sites/www/lib", 'import { x } from "../lib/x.ts";', "return x;"),
       "sites/www/routes/js.tsx": page("/sites/www/js", 'import { ping } from "../components/ping.js";', "return ping;"),
@@ -583,6 +588,7 @@ describe("readSites", () => {
         { path: "/sites/www" },
         { path: "/sites/www/account", calls: true },
         { path: "/sites/www/computed", calls: true },
+        { path: "/sites/www/glob", calls: true },
         { path: "/sites/www/js", calls: true },
         { path: "/sites/www/lazy", calls: true },
         { path: "/sites/www/lib", calls: true },
@@ -622,7 +628,7 @@ describe("readSites", () => {
         'return site.api.hello.start({ who: "x" });',
       ),
       "sites/www/routes/dynamic.tsx": page("/sites/www/dynamic", "", 'return import("sanoma/site");'),
-      // Code it cannot follow: a worker, a dotted name outside the site, a package's import, the folder above.
+      // Code it cannot follow: a worker, a dotted name outside the site, a package's import, the folder above, a path from the root.
       "sites/www/components/x.ts": "export const x = 1;\n",
       "sites/www/routes/worker.tsx": page(
         "/sites/www/worker",
@@ -636,6 +642,11 @@ describe("readSites", () => {
       ),
       "sites/www/routes/hash.tsx": page("/sites/www/hash", 'import { y } from "#lib/y";', "return y;"),
       "sites/www/routes/up.tsx": page("/sites/www/up", 'import { z } from "..";', "return z;"),
+      "sites/www/routes/rooted.tsx": page(
+        "/sites/www/rooted",
+        'import { x } from "/sites/www/components/x.ts";',
+        "return x;",
+      ),
       // Assets: none, as is a script's source read as text.
       "sites/www/routes/assets.tsx": page(
         "/sites/www/assets",
@@ -653,6 +664,7 @@ describe("readSites", () => {
         { path: "/sites/www/hash", calls: true },
         { path: "/sites/www/named", calls: true },
         { path: "/sites/www/namespace", calls: true },
+        { path: "/sites/www/rooted", calls: true },
         { path: "/sites/www/typed" },
         { path: "/sites/www/up", calls: true },
         { path: "/sites/www/worker", calls: true },
@@ -660,7 +672,7 @@ describe("readSites", () => {
     ]);
   });
 
-  it("takes a page only from a file under routes/ the router reads, and reads no test, spec or story", () => {
+  it("takes a page only from a file under routes/ the router reads, and reads no test, spec or story outside it", () => {
     const root = tree("stray", {
       "sites/www/routes/index.tsx": page("/sites/www/", "", "return null;"),
       // Not under routes/, or under a `-` folder or file there: no page.
@@ -668,6 +680,8 @@ describe("readSites", () => {
       "sites/www/drafts/old.tsx": page("/sites/www/old", "", "return null;"),
       "sites/www/routes/-components/card.tsx": page("/sites/www/card", "", "return null;"),
       "sites/www/routes/blog/-helper.tsx": page("/sites/www/blog/helper", "", "return null;"),
+      // A route file whose name ends like a story's: a page, as the router makes it.
+      "sites/www/routes/customer.stories.tsx": page("/sites/www/customer/stories", "", "return null;"),
       // Read for its calls, still: a call from it is a call of the site.
       "sites/www/drafts/calling.tsx": page(
         "/sites/www/calling",
@@ -680,7 +694,7 @@ describe("readSites", () => {
         'import { api } from "sanoma/site";\n\nexport const b = () => api.gone();\n',
     });
     const [www] = describeConfig(config(root)).sites;
-    expect(www!.pages).toEqual([{ path: "/sites/www" }]);
+    expect(www!.pages).toEqual([{ path: "/sites/www" }, { path: "/sites/www/customer/stories" }]);
     expect(www!.calls.map(({ file, target }) => [file, target])).toEqual([["sites/www/drafts/calling.tsx", "gone"]]);
   });
 

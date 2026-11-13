@@ -168,7 +168,7 @@ export const SitePageSchema = z.strictObject({
    * or a file of the site one of them imports, directly or through others (statically or by
    * `import()`). A file may when it imports, re-exports or `import()`s `api` or `RunForm` from
    * `sanoma/site` (by name, a namespace or `export *`), or code that is not read: outside the
-   * site's folder, an `import()` not written out, a package's `#import`, a bare `.` or `..`. An
+   * site's folder, an `import()` not written out, `import.meta.glob`, a package's `#import`, a path from the root (`/…`), a bare `.` or `..`. An
    * asset's import (a stylesheet, an image, `?url` or `?raw`) is none.
    */
   calls: z.literal(true).optional(),

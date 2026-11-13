@@ -42,7 +42,7 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
  * The sites under `root` (`sitesUnder`): each folder of `sites/`, then of each app's
  * `apps/<app>/sites/`, with a `routes/` whose name is a URL segment, by key (as
  * `sanoma/app/build`'s `sitesOf` mounts them). Reads every file of each (`.ts` and `.tsx`, less
- * tests, stories and declarations) with oxc, never running them: each page (`SitePage`, from the
+ * declarations, and tests, specs and stories outside `routes/`) with oxc, never running them: each page (`SitePage`, from the
  * route's id of a file under `routes/`), each `<RunForm workflow="…" />` and each use of `api`, both imported from `sanoma/site`,
  * called or passed on (`queryFn: api.data.leads.list`):
  * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` (an app's
@@ -228,13 +228,15 @@ function callingFiles(read: readonly SiteFile[]): Set<string> {
 /**
  * Each file of the site in `dir` (relative to `root`), as `readSiteFile` reads it, by path: a page
  * only under `routes/`, outside a file or folder whose name starts with `-`, which the router skips.
+ * A test, spec or story is read only there, where the router makes it a route (`news.stories.tsx`).
  */
 const readSiteFiles = (root: string, dir: string) =>
   filesUnder(join(root, dir), isSource).flatMap((path) => {
-    const file = readSource(path);
-    if (typeof file === "string") return [];
     const [top, ...under] = relPath(join(root, dir), path).split("/");
-    return [readSiteFile(file, relPath(root, path), top === "routes" && !under.some((s) => s.startsWith("-")))];
+    const routed = top === "routes" && !under.some((s) => s.startsWith("-"));
+    if (!routed && /\.(?:test|spec|stories)\.tsx?$/.test(path)) return [];
+    const file = readSource(path);
+    return typeof file === "string" ? [] : [readSiteFile(file, relPath(root, path), routed)];
   });
 
 /**
@@ -389,6 +391,13 @@ function readSiteFile({ program, at }: SourceFile, file: string, routed: boolean
       if (callee?.type === "Identifier" && ROUTE_MAKERS.has(callee.name) && routed && id === undefined) {
         id = stringValue(node.arguments[0]);
       }
+      // Vite's `import.meta.glob(…)`: the modules it imports are not followed.
+      if (
+        callee?.type === "MemberExpression" &&
+        callee.object.type === "MetaProperty" &&
+        keyName(callee.property) === "glob"
+      )
+        calls = true;
       const kind = contentKind(callee, content);
       if (kind !== undefined) gets.push({ kind, arg: unwrap(node.arguments[0]), start: node.start });
     } else if (node.type === "JSXOpeningElement" && node.name.type === "JSXIdentifier" && runForm.has(node.name.name)) {
@@ -402,11 +411,11 @@ function readSiteFile({ program, at }: SourceFile, file: string, routed: boolean
       const source = moduleSpecifier(node);
       if (source !== undefined && RELATIVE.test(source))
         imports.push(posix.join(posix.dirname(file), source).replace(/\/$/, ""));
-      // An `import()` not written out, a package's `#import` or a bare `.` or `..` (not followed), or `api` or `RunForm` taken.
+      // An `import()` not written out, a package's `#import`, a root's `/…` or a bare `.` or `..` (not followed), or `api` or `RunForm` taken.
       else if (
         source === undefined
           ? node.type === "ImportExpression"
-          : /^(?:#|\.\.?$)/.test(source) || (SITE_ENTRIES.has(source) && takesCallers(node))
+          : /^(?:#|\/|\.\.?$)/.test(source) || (SITE_ENTRIES.has(source) && takesCallers(node))
       )
         calls = true;
     }
@@ -656,5 +665,5 @@ const pageOf = (id: string): string =>
 /** A route id's segment the router's path leaves out: a `(group)` or a `_pathless` one. */
 const isPathless = (segment: string): boolean => /^\(.*\)$/.test(segment) || segment.startsWith("_");
 
-/** A site's source file: `.ts` or `.tsx`, but a test, a story or a declaration. */
-const isSource = (name: string) => /\.tsx?$/.test(name) && !/\.(test|spec|stories|d)\.tsx?$/.test(name);
+/** A site's source file: `.ts` or `.tsx`, but a declaration. */
+const isSource = (name: string) => /\.tsx?$/.test(name) && !/\.d\.tsx?$/.test(name);
