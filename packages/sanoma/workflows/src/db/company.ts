@@ -26,11 +26,10 @@ import type { MoveItemAction, MoveItemKind, MoveItemState, MovePhase } from "../
 // sanoma generate` writes it under `drizzle/company/`, and CI refuses a schema
 // whose migration was not generated.
 //
-// Every table has row-level security on and no policy (`enableRLS`, never FORCE): a floor, not
-// the policy, which the runtime decides per call. The runtime's login makes the tables, so it
-// owns them and passes; any other role (Supabase's `anon` and `authenticated` among them) reads
-// no row and writes none, whatever it was granted. A role that serves the runtime must own them:
-// one holding grants alone would read nothing. `db.test.ts` fails on a table without it.
+// Every table has row-level security on and no policy (`enableRLS`, never FORCE): a floor against
+// other roles, not the policy, which the runtime decides per call. The login that migrates them
+// owns them and is not affected; one serving the runtime on grants alone would read nothing
+// ([Postgres](../../../README.md#postgres)). `db.test.ts` fails on a table without it.
 
 const when = () => timestamp({ withTimezone: true });
 

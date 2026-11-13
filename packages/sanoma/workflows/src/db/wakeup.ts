@@ -3,7 +3,7 @@ import { index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-c
 
 // The wakeup service's tables (`wakeup-service.ts`), in the service's own database: never a
 // company's, which every company database gets. Migrations under `drizzle/wakeup/`. Row-level
-// security is on with no policy, as on a company's (`company.ts`): the service's login owns them.
+// security is on with no policy, as on a company's (`company.ts`).
 
 const when = () => timestamp({ withTimezone: true });
 

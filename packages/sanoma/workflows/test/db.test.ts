@@ -1,8 +1,7 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { randomUUID } from "node:crypto";
 import { testDatabaseUrl } from "sanoma/testing";
-import { is, sql } from "drizzle-orm";
-import { getTableName } from "drizzle-orm";
+import { getTableName, is, sql } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -226,7 +225,7 @@ describe("underPreparationLock", () => {
 });
 
 describe("row-level security", () => {
-  it("is on, with no policy, on every table the migrations make: their owner reads and writes, another role granted everything reads and writes none", async () => {
+  it("is on, with no policy, on every table the migrations make: their owner reads and writes, another role granted everything reads no row and changes none", async () => {
     // A login that is no superuser makes the tables and so owns them, as a hosted company's does
     // (Neon's `neondb_owner`, Supabase's `postgres`); a second login is granted every privilege on
     // them, as Supabase grants its API's roles. Schemas and roles only: dropping a database waits
@@ -242,16 +241,11 @@ describe("row-level security", () => {
         if ((await admin.query("SELECT FROM pg_roles WHERE rolname = $1", [role])).rowCount)
           await admin.query(`DROP OWNED BY "${role}"; DROP ROLE "${role}"`);
       }
-      await admin.query(
-        "DROP SCHEMA IF EXISTS public CASCADE; DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA IF EXISTS dbos CASCADE; CREATE SCHEMA public",
-      );
+      await admin.query("DROP SCHEMA IF EXISTS public, drizzle, dbos CASCADE; CREATE SCHEMA public");
     };
-    const pools: Pool[] = [];
-    const poolAs = (role: string) => {
-      const opened = new Pool({ connectionString: as(role) });
-      pools.push(opened);
-      return opened;
-    };
+    // Pools connect at their first query, once the roles are made.
+    const ownerPool = new Pool({ connectionString: as(owner) });
+    const otherPool = new Pool({ connectionString: as(other) });
     try {
       await reset();
       for (const role of [owner, other]) await admin.query(`CREATE ROLE "${role}" LOGIN PASSWORD '${password}'`);
@@ -267,7 +261,6 @@ describe("row-level security", () => {
         .flatMap((tables) => Object.values(tables))
         .filter((t) => is(t, PgTable))
         .map((t) => getTableName(t));
-      const ownerPool = poolAs(owner);
       const { rows: made } = await ownerPool.query<{ name: string; on: boolean; forced: boolean; owner: string }>(
         `SELECT relname AS name, relrowsecurity AS on, relforcerowsecurity AS forced, pg_get_userbyid(relowner) AS owner
          FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p') ORDER BY 1`,
@@ -284,11 +277,11 @@ describe("row-level security", () => {
       await writeRunChecks(ownerDb, "run-1", { error: "none yet" });
       expect(await readRunChecks(ownerDb, "run-1")).toEqual({ error: "none yet" });
 
-      // Another role, granted every privilege, reads no row of any table and writes none.
+      // Another role, granted every privilege, reads no row of any table and inserts, updates and
+      // deletes none (TRUNCATE is not row-level, so a grant of it is not stopped).
       await ownerPool.query(
         `GRANT USAGE ON SCHEMA public TO "${other}"; GRANT ALL ON ALL TABLES IN SCHEMA public TO "${other}"`,
       );
-      const otherPool = poolAs(other);
       for (const table of ours) {
         expect((await otherPool.query(`SELECT count(*)::int AS n FROM "${table}"`)).rows, table).toEqual([{ n: 0 }]);
       }
@@ -302,7 +295,7 @@ describe("row-level security", () => {
       expect((await ownerPool.query("SELECT last_error FROM sanoma_wakeup")).rows).toEqual([{ last_error: null }]);
       expect(await readRunChecks(ownerDb, "run-1")).toEqual({ error: "none yet" });
     } finally {
-      await Promise.all(pools.map((opened) => opened.end()));
+      await Promise.all([ownerPool.end(), otherPool.end()]);
       await reset();
       await admin.end();
     }

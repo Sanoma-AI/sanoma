@@ -6,7 +6,7 @@ import { bigint, boolean, index, integer, pgSchema, text, timestamp } from "driz
 // a schema of its own (`visitors.ts`, `staff.ts`), from which drizzle-kit generates its
 // migrations, so a change here is a new migration in both folders: `pnpm --filter
 // sanoma generate`. Row-level security is on with no policy, as on the runtime's own tables
-// (`sanoma/workflows`' `db/company.ts`): the worker's login owns them, and no other role reads them.
+// (`sanoma/workflows`' `db/company.ts`).
 
 const when = () => timestamp({ withTimezone: true });
 

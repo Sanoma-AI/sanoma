@@ -119,23 +119,14 @@ describe("the staff login", () => {
     signIns.length = 0;
   });
 
-  it("has row-level security on each of its tables, with no policy: only their owner, the worker's login, reads them", async () => {
-    const client = new Client({ connectionString: databaseUrl });
-    await client.connect();
-    try {
-      const { rows: tables } = await client.query<{ relname: string; relrowsecurity: boolean }>(
-        "SELECT relname, relrowsecurity FROM pg_class WHERE relnamespace = 'better_auth_staff'::regnamespace AND relkind = 'r' ORDER BY 1",
-      );
-      expect(tables).toEqual(
-        ["account", "rate_limit", "session", "user", "verification"].map((relname) => ({
-          relname,
-          relrowsecurity: true,
-        })),
-      );
-      expect((await client.query("SELECT 1 FROM pg_policies WHERE schemaname = 'better_auth_staff'")).rowCount).toBe(0);
-    } finally {
-      await client.end();
-    }
+  it("has row-level security on each of its tables, not forced, with no policy: only their owner, the worker's login, reads them", async () => {
+    const { rows: tables } = await pool.query<{ relname: string; secured: boolean }>(
+      "SELECT relname, relrowsecurity AND NOT relforcerowsecurity AS secured FROM pg_class WHERE relnamespace = 'better_auth_staff'::regnamespace AND relkind = 'r' ORDER BY 1",
+    );
+    expect(tables).toEqual(
+      ["account", "rate_limit", "session", "user", "verification"].map((relname) => ({ relname, secured: true })),
+    );
+    expect((await pool.query("SELECT FROM pg_policies WHERE schemaname = 'better_auth_staff'")).rowCount).toBe(0);
   });
 
   it("offers a code and invites, and GitHub only with the company's client", async () => {
