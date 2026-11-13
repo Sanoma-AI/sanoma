@@ -602,6 +602,36 @@ describe("readSites", () => {
     ]);
   });
 
+  it("follows a bare `.` or `..` to its folder's index", () => {
+    const root = tree("index", {
+      "sites/www/components/cloud.ts":
+        'import { api } from "sanoma/site";\n\nexport const list = () => api.hello.start({ who: "x" });\n',
+      "sites/www/components/quiet/index.ts": "export const quiet = 1;\n",
+      "sites/www/components/quiet/near.ts": 'export { quiet } from ".";\n',
+      "sites/www/components/quiet/deep/up.ts": 'export { quiet } from "..";\n',
+      "sites/www/components/loud/index.tsx": 'export { list } from "../cloud.ts";\n',
+      "sites/www/components/loud/near.ts": 'export { list } from ".";\n',
+      "sites/www/routes/near.tsx": page(
+        "/sites/www/near",
+        'import { quiet } from "../components/quiet/near.ts";',
+        "return quiet;",
+      ),
+      "sites/www/routes/up.tsx": page(
+        "/sites/www/up",
+        'import { quiet } from "../components/quiet/deep/up.ts";',
+        "return quiet;",
+      ),
+      "sites/www/routes/loud.tsx": page(
+        "/sites/www/loud",
+        'import { list } from "../components/loud/near.ts";',
+        "return list();",
+      ),
+    });
+    expect(describeConfig(config(root)).sites.map(({ pages }) => pages)).toEqual([
+      [{ path: "/sites/www/loud", calls: true }, { path: "/sites/www/near" }, { path: "/sites/www/up" }],
+    ]);
+  });
+
   it("marks a page that reaches api or RunForm other than by a named import, or imports code it cannot follow", () => {
     const root = tree("reaching", {
       // Re-exported from sanoma/site, by name or all of it, for a page to import.
@@ -628,7 +658,7 @@ describe("readSites", () => {
         'return site.api.hello.start({ who: "x" });',
       ),
       "sites/www/routes/dynamic.tsx": page("/sites/www/dynamic", "", 'return import("sanoma/site");'),
-      // Code it cannot follow: a worker, a dotted name outside the site, a package's import, the folder above, a path from the root.
+      // Code it cannot follow: a worker, a dotted name outside the site, a package's import, a folder with no index, a path from the root.
       "sites/www/components/x.ts": "export const x = 1;\n",
       "sites/www/routes/worker.tsx": page(
         "/sites/www/worker",
