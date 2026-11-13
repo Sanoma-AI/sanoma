@@ -10,23 +10,37 @@ import {
   type CheckResult,
   type Draft,
   errorCode,
-  isDirect,
   isEnded,
+  type RunSummary,
+  type SanomaConfig,
 } from "sanoma/workflows";
+import { chatAgentActing, type ConfigDescription, describeConfig, readPeople } from "sanoma/workflows/describe";
 import { tool } from "ai";
 import { z } from "zod";
-import type { DraftCard, HeldOutput } from "../../lib/chat.ts";
+import { catalogCallId, type DraftCard, type HeldOutput, type LookupOutput, type RunOutput } from "../../lib/chat.ts";
+import {
+  CATALOG,
+  type CatalogName,
+  describedOn,
+  lookupOutput,
+  runCatalog,
+  runOutput,
+  startDrift,
+  stillHeld,
+} from "../../server/catalog.ts";
+import { type CallHost, noRun, RESULT_WAIT_MS } from "../../server/core.ts";
 import { checks, drafting, mustAllow, openDraft, tellCommits } from "./checkout.ts";
 
 // Our loop's tools: reading the repository, editing the chat's draft (opened by the first edit,
 // committed at each), taking and updating an app there (a git merge of its source), its checks,
-// and lookups through the policy. No shell: the draft sits in the live checkout until previews
-// exist. Every path goes through the checkout rule (`allowedPaths`).
+// and the agent catalog (`catalogTools`), which both engines get. No shell: the draft sits in the
+// live checkout until previews exist. Every path goes through the checkout rule (`allowedPaths`).
 
-/** What the tools act for: the turn's step (the worker's client and repository, the person), and the chat (whose `draftId` the first edit sets). */
+/** What the tools act for: the turn's step (the worker's client and repository, the person), the chat (whose `draftId` the first edit sets) and the id of the person's message the turn answers (`ChatTurnInput.message`). */
 export interface ToolsTurn {
   step: ChatTurnContext;
   chat: Chat;
+  message: string;
   /** Shows the draft's card in the reply, as it now stands. */
   showDraft(card: DraftCard): void;
 }
@@ -35,8 +49,22 @@ export interface ToolsTurn {
 const READ_LIMIT = 100_000;
 /** The most lines a listing or a search gives. */
 const LINES_LIMIT = 500;
-/** How often a held lookup looks at its run: first after a second, then less often, to every 10 s. */
+/** How often a held call or start looks at its run: first after a second, then less often, to every 10 s. */
 const HELD_POLL_MS = [1000, 10_000] as const;
+/** How long our loop's catalog tool waits on a held call or start for its decision before answering that it waits. */
+const LOOP_HELD_MS = 10 * 60_000;
+/** How long a catalog tool waits for a held start's run to end once its approval is decided. */
+const DECIDED_WAIT_MS = 5000;
+/** The longest a catalog tool takes to answer in a coding agent's turn: well before an MCP client in the box gives up on it. */
+const HARNESS_ANSWER_MS = 40_000;
+/**
+ * How long a catalog tool waits on a held call or start for its decision in a coding agent's turn:
+ * what `HARNESS_ANSWER_MS` leaves after a start's own wait (`RESULT_WAIT_MS`) and the wait after a
+ * decision (`DECIDED_WAIT_MS`), so a call answers within it, its run's id in the answer.
+ */
+export const HARNESS_HELD_MS = HARNESS_ANSWER_MS - RESULT_WAIT_MS - DECIDED_WAIT_MS;
+/** How often a catalog tool looks at a run it started, until it ends or waits: first after a quarter second, to every 2 s. */
+const STARTED_POLL_MS = [250, 2000] as const;
 
 const git = promisify(execFile);
 
@@ -243,40 +271,162 @@ export function loopTools(turn: ToolsTurn) {
           return checked;
         }),
     }),
-    lookup: tool({
-      description:
-        "Call an operation whose effect is read (a lookup listed in your instructions) as the person, through the company's policy. A held one waits for its approver's decision.",
-      inputSchema: z.object({
-        op: z.string().describe("The operation's id, such as ghost.post.list"),
-        input: z.record(z.string(), z.unknown()).default({}).describe("Its input"),
-      }),
-      async *execute({ op, input }, { toolCallId, abortSignal }): AsyncGenerator<HeldOutput | { output: unknown }> {
-        const declared = step.resolved.ops.get(op);
-        if (declared?.effect !== "read" || !isDirect(declared, step.resolved.types)) {
-          throw new Error(`${op} is not a lookup: only a read your instructions list as one is`);
-        }
-        let output: unknown;
-        try {
-          // One run per tool call: the chat's and the call's ids, so the run is the chat's alone.
-          output = await client.call(op, input, { actor: principal, id: `${chat.id}:${toolCallId}` });
-        } catch (err) {
-          const runId = heldRun(err);
-          if (runId === undefined) throw err;
-          yield { held: { runId } };
-          for (let wait: number = HELD_POLL_MS[0]; !isEnded((await client.run(runId))?.status ?? "failed");) {
-            await sleep(wait, undefined, { signal: abortSignal });
-            wait = Math.min(wait * 2, HELD_POLL_MS[1]);
-          }
-          output = await client.result(runId);
-        }
-        yield { output };
-      },
-    }),
+    ...catalogTools(turn, { heldMs: LOOP_HELD_MS }),
   };
 }
 
 /** Our loop's tools, as the chat's messages type them. */
 export type LoopTools = ReturnType<typeof loopTools>;
+
+/** Each config's description (`describeConfig`), made once: what the catalog reads of the company. */
+const descriptions = new WeakMap<SanomaConfig, ConfigDescription>();
+const describedOf = (config: SanomaConfig) => {
+  let description = descriptions.get(config);
+  if (!description) descriptions.set(config, (description = describeConfig(config)));
+  return description;
+};
+
+/** The catalog's tool `name`, as the AI SDK's `tool` takes it, described as the chat has it (`describedOn`: no `id` to send, a hold and a failed run as outputs). */
+const spec = <N extends CatalogName>(name: N) => {
+  const { title, input } = CATALOG[name];
+  return { title, description: describedOn(name, "chat"), inputSchema: input as (typeof CATALOG)[N]["input"] };
+};
+
+/**
+ * The agent catalog (`server/catalog.ts`, the tools `/mcp` serves) as AI SDK tools for a turn of
+ * `turn.chat`, run in the worker against the turn's step (its client, resolved config and the
+ * config's description) as the in-app chat's agent acting for the person chatting
+ * (`chatAgentActing`), so the policy is asked as it and as them and the ledger records both. A
+ * tool that takes an idempotency id is given `catalogCallId` of the chat, the turn's message
+ * (`turn.message`) and the tool call, one call per tool call. A held lookup, or a start
+ * (`start_run`, `drift`) whose run waits for an approval, shows the held output
+ * (`{ held: { runId } }`, the chat's approval card) at once and waits up to `heldMs` for the
+ * decision; past it, it answers that it waits, for whom, with the run's id (`StillHeld`, which
+ * `settle` replaces with the run's state once it is decided). A started run that is not held is
+ * waited for at most `RESULT_WAIT_MS`. A start answers the one shape whatever became of its run
+ * (`RunOutput`, built by `runOutput`): a run that started and then failed is an output with its id
+ * and its error, never the tool's error, which is only for a call that left no run (a refusal, an
+ * input it does not take). Every wait here ends with the turn (its abort signal): the tool's own
+ * polls, and `wait_run`'s wait in `callApi`, which is given the signal.
+ * HarnessAgent's engines run these on the host too, never in the box.
+ */
+export function catalogTools(
+  { step, chat, message }: Pick<ToolsTurn, "step" | "chat" | "message">,
+  { heldMs }: { heldMs: number },
+) {
+  const { client } = step;
+  const host = (): CallHost => ({
+    client,
+    resolved: step.resolved,
+    snapshot: { description: describedOf(step.config) },
+  });
+  /** The chat's agent for the turn's person (the people's files as they are now). */
+  const actor = () => chatAgentActing(step.by.id, readPeople(step.resolved.root));
+  /** The idempotency id of the tool call `toolCallId` in this turn. */
+  const idOf = (toolCallId: string) => catalogCallId(chat.id, message, toolCallId);
+  /** The tool `name` called with `args` as the chat's agent, by the tool call's id where it takes one, its wait ended by `signal`. */
+  const call = (
+    name: CatalogName,
+    args: unknown,
+    { toolCallId, signal }: { toolCallId?: string; signal?: AbortSignal },
+  ) =>
+    runCatalog(host(), name, args, {
+      actor: actor(),
+      ...(toolCallId !== undefined && { id: idOf(toolCallId) }),
+      ...(signal && { signal }),
+    });
+  /** The run `runId`, read every `steps` (doubling) until `done` says so of it or `until` passes; undefined once it is gone. */
+  const poll = async (
+    runId: string,
+    until: number,
+    done: (run: RunSummary) => boolean,
+    signal: AbortSignal | undefined,
+    steps: readonly [number, number] = HELD_POLL_MS,
+  ): Promise<RunSummary | undefined> => {
+    for (let wait: number = steps[0]; ; wait = Math.min(wait * 2, steps[1])) {
+      signal?.throwIfAborted();
+      const run = await client.run(runId);
+      if (!run || done(run) || Date.now() >= until) return run;
+      await sleep(Math.min(wait, until - Date.now()), undefined, { signal });
+    }
+  };
+  /** The run `runId` read until it ends or waits for an approval, for `ms` at most. */
+  const settled = async (runId: string, ms: number, signal: AbortSignal | undefined) => {
+    const run = await poll(
+      runId,
+      Date.now() + ms,
+      (r) => isEnded(r.status) || r.status === "waiting",
+      signal,
+      STARTED_POLL_MS,
+    );
+    if (!run) throw noRun(runId);
+    return run;
+  };
+  /**
+   * A started run watched for `startMs` (`RESULT_WAIT_MS` at most, and when not given), until it
+   * ends or waits for an approval; one that waits shows the held output, then is waited for up to
+   * `heldMs` for the decision, and once it is decided up to `DECIDED_WAIT_MS` more for its end.
+   * Its answer is the run's, as it then stands (`runOutput`): finished with its output, failed with
+   * its error, still running, or still held.
+   */
+  async function* watched(
+    runId: string,
+    signal: AbortSignal | undefined,
+    startMs = RESULT_WAIT_MS,
+  ): AsyncGenerator<RunOutput, RunOutput> {
+    const started = await settled(runId, Math.min(startMs, RESULT_WAIT_MS), signal);
+    if (started.status !== "waiting") return runOutput(client, started);
+    yield { held: { runId } } satisfies HeldOutput;
+    const decided = await poll(runId, Date.now() + heldMs, (r) => r.status !== "waiting", signal);
+    if (!decided) throw noRun(runId);
+    if (decided.status === "waiting" || isEnded(decided.status)) return runOutput(client, decided);
+    return runOutput(client, await settled(runId, DECIDED_WAIT_MS, signal));
+  }
+
+  return {
+    describe: tool({ ...spec("describe"), execute: (args) => call("describe", args, {}) }),
+    lookup: tool({
+      ...spec("lookup"),
+      async *execute(args, { toolCallId, abortSignal }): AsyncGenerator<LookupOutput> {
+        let output: unknown;
+        try {
+          output = await call("lookup", args, { toolCallId });
+        } catch (err) {
+          const runId = heldRun(err);
+          if (runId === undefined) throw err;
+          yield { held: { runId } };
+          const run = await poll(runId, Date.now() + heldMs, (r) => isEnded(r.status), abortSignal);
+          if (run && !isEnded(run.status)) {
+            yield stillHeld(run);
+            return;
+          }
+          output = await client.result(runId);
+        }
+        yield lookupOutput(output);
+      },
+    }),
+    get_run: tool({ ...spec("get_run"), execute: (args) => call("get_run", args, {}) }),
+    wait_run: tool({
+      ...spec("wait_run"),
+      execute: (args, { abortSignal }) => call("wait_run", args, { signal: abortSignal }),
+    }),
+    drift: tool({
+      ...spec("drift"),
+      async *execute({ waitMs }, { toolCallId, abortSignal }): AsyncGenerator<RunOutput> {
+        // Started without waiting, then watched as a start is: a drift the policy holds shows at once.
+        const { runId } = await startDrift(host(), actor(), idOf(toolCallId));
+        yield yield* watched(runId, abortSignal, waitMs);
+      },
+    }),
+    start_run: tool({
+      ...spec("start_run"),
+      async *execute(args, { toolCallId, abortSignal }): AsyncGenerator<RunOutput> {
+        const { runId } = (await call("start_run", args, { toolCallId })) as { runId: string };
+        yield yield* watched(runId, abortSignal);
+      },
+    }),
+  };
+}
 
 /** The held call's run a direct call's `approval_pending` names. */
 const heldRun = (err: unknown): string | undefined => {

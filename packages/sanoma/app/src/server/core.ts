@@ -309,11 +309,14 @@ export async function applyAheadOf(client: SanomaClient, run: RunSummary): Promi
   return ahead && { runId: ahead.runId, status: ahead.status, startedBy: ahead.startedBy, createdAt: ahead.createdAt };
 }
 
+/** The 404 `run_not_found` for a run there is not: `runDetail`'s, and the agent catalog's. */
+export const noRun = (runId: string) => new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
+
 /** The run with its ledger and approvals, a sandbox run's checks as the worker last ran them, and the apply a queued one waits for; or a 404. */
 export async function runDetail(app: AppContext, runId: string): Promise<RunDetail> {
   const { client, snapshot } = app;
   const run = await client.run(runId);
-  if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
+  if (!run) throw noRun(runId);
   const [read, told, ahead] = await Promise.all([
     client.ledger(runId).then(
       (records) => ({ records }),
@@ -426,7 +429,8 @@ export async function startRun(
 }
 
 /** The latest runs, or the latest with a status, of a workflow (`getRuns`). */
-export const listRuns = ({ client }: AppContext, query: z.output<typeof RunsQuery>) => client.runs(query);
+export const listRuns = ({ client }: Pick<AppContext, "client">, query: z.output<typeof RunsQuery>) =>
+  client.runs(query);
 
 /**
  * Each workflow's latest run, by name (`getLastRuns`): one read of each workflow's newest, all at
@@ -741,6 +745,13 @@ const ResultRef = RunRef.extend({ waitMs: z.number().int().min(0).optional() });
 const RunsLimit = RunsQuery.pick({ limit: true });
 
 /**
+ * What `callApi` needs of the app: its client, its resolved config and the company's description.
+ * A request's `AppContext` is one; the worker's chat turn makes one from its step (the agent
+ * catalog's host, `server/catalog.ts`).
+ */
+export type CallHost = Pick<AppContext, "client" | "resolved"> & { snapshot: Pick<AppSnapshot, "description"> };
+
+/**
  * A site's `api` call (`callFn`), as the person asking. An operation's id calls it directly
  * (`SanomaClient.call`, which refuses one that is not direct), with `{}` for no input. A
  * workflow's api name (`apiNameOf`) starts it, as does `<name>.start`, answering `{ runId }`;
@@ -750,9 +761,15 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * answers `agentDescription`. Anything else is `invalid_input`. A visitor (`isVisitor`) calls no
  * built-in workflow, reads no description and reads only the result of a run it started: its other
  * reads are `policy_denied`. A declared agent (`isDeclaredAgent`) starts no built-in workflow but
- * those in `AGENT_BUILT_INS` (`policy_denied`), as the client refuses it too.
+ * those in `AGENT_BUILT_INS` (`policy_denied`), as the client refuses it too. `signal`, when
+ * given, ends `.result`'s wait early, with its reason (a chat turn's stop).
  */
-export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
+export async function callApi(
+  app: CallHost,
+  actor: Principal,
+  { name, input, id }: CallRequest,
+  { signal }: { signal?: AbortSignal } = {},
+): Promise<unknown> {
   const { client, resolved } = app;
   if (name === DESCRIBE_CALL) {
     if (isVisitor(actor)) throw new PolicyDeniedError(name, "a visitor does not read the company's description");
@@ -799,7 +816,7 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
         if (Date.now() >= until) {
           throw new ApiError(409, { error: `Run ${runId} is still running`, code: "run_running", runId });
         }
-        await sleep(RESULT_POLL_MS);
+        await sleep(RESULT_POLL_MS, undefined, { signal });
       }
       try {
         return await client.result(runId);
@@ -935,7 +952,7 @@ const notCallable = (name: string) =>
 
 /** The run, when it is one of the workflow's (and `startedBy`'s, when given); a 404 otherwise. */
 async function runOf(
-  { client }: AppContext,
+  { client }: Pick<AppContext, "client">,
   workflow: string,
   runId: string,
   startedBy?: Principal,

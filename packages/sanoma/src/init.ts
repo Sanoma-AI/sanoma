@@ -13,7 +13,7 @@ import { userInfo } from "node:os";
 import { basename, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { AGENTS, RUNTIME_AGENTS, VISITORS } from "sanoma/workflows";
+import { AGENTS, RESERVED_AGENTS, VISITORS } from "sanoma/workflows";
 import { isVisitor, slugged } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { stage } from "./events.ts";
@@ -232,7 +232,7 @@ export function templatePeopleIds(): string[] {
  * of the runtime's own agents or by the visitors (`isVisitor`): then "founder".
  */
 function free(id: string): string {
-  const taken = [...templatePeopleIds(), AGENTS, VISITORS, ...RUNTIME_AGENTS];
+  const taken = [...templatePeopleIds(), AGENTS, VISITORS, ...RESERVED_AGENTS];
   return id && !taken.includes(id) && !isVisitor({ id }) ? id : "founder";
 }
 

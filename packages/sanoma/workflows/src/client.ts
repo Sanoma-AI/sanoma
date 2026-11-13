@@ -104,6 +104,7 @@ import {
   ENDED_STATUSES,
   errorMessage,
   FOLLOW_WORKFLOW,
+  heldCallRunId,
   HOST_CHECK_AGENT,
   isBatch,
   isDeclaredAgent,
@@ -517,7 +518,7 @@ export class SanomaClient {
       revision: connection.revision,
     };
     const runId = `direct:${actor.id}:${id}`;
-    const heldId = `call:${actor.id}:${id}`;
+    const heldId = heldCallRunId(actor.id, id);
     const held: RunArgs = { input: { op: op.id, input, ...(selected && { connection: selected }) }, startedBy: actor };
     // The calls this one makes (a batch's entries), each decided and recorded on its own.
     const calls = callsOf(op, parsed, ops);

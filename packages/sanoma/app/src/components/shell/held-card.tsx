@@ -11,7 +11,7 @@ import { ApprovalDecision, ApprovalDetails } from "../approval.tsx";
 import { CardHeading } from "../kit.tsx";
 
 /**
- * A held lookup: the Inbox's approval card while you may decide it, else who it waits for with a
+ * A held call or start (the agent catalog's `lookup`, `start_run` or `drift`): the Inbox's approval card while you may decide it, else who it waits for with a
  * link to the Inbox; once decided, its status.
  */
 export default function HeldCard({ runId }: { runId: string }) {

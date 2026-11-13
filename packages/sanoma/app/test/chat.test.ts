@@ -7,7 +7,16 @@ import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from "@ai-
 import { anthropic } from "@sanoma-ai/connector-anthropic";
 import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
-import { defineConnector, defineDriver, isEnded, localBackend, SanomaClient, withSetup } from "sanoma/workflows";
+import {
+  defineConnector,
+  defineDriver,
+  defineWorkflow,
+  isEnded,
+  localBackend,
+  SanomaClient,
+  withSetup,
+} from "sanoma/workflows";
+import { CHAT_AGENT, heldCallRunId } from "sanoma/workflows/shared";
 import { createUIMessageStream, customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -18,7 +27,7 @@ import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
-import { type ChatMessage, chatTransport, isIntro } from "../src/lib/chat.ts";
+import { catalogCallId, type ChatMessage, chatTransport, isIntro } from "../src/lib/chat.ts";
 import { INTRO } from "../src/server/chat.ts";
 import { allowedPaths, here, realIn } from "../src/steps/agent/checkout.ts";
 import { suggestedAsks } from "../src/steps/agent/transcript.ts";
@@ -56,6 +65,13 @@ const SCRIPT: Record<string, Step[]> = {
   "Look up Acme": [{ tool: "lookup", input: { op: "crm.customer.find", input: { name: "Acme" } } }, { text: "Acme." }],
   "Look up Beta": [{ tool: "lookup", input: { op: "crm.customer.find", input: { name: "Beta" } } }, { text: "Beta." }],
   "Never mind": [{ text: "Fine." }],
+  "Note the visit": [
+    { tool: "start_run", input: { workflow: "memo", input: { note: "visited Acme" } } },
+    { text: "Noted." },
+  ],
+  "Pay Bo 5": [{ tool: "start_run", input: { workflow: "payout", input: { amount: 5 } } }, { text: "Paid." }],
+  "Give a bonus": [{ tool: "start_run", input: { workflow: "bonus", input: { amount: 1 } } }, { text: "No." }],
+  "Save the draft for me": [{ tool: "start_run", input: { workflow: "save-draft", input: {} } }, { text: "No." }],
   continue: [{ text: "Acme Ltd is a customer since 2019." }],
   [INTRO]: [
     {
@@ -121,6 +137,29 @@ const crm = defineConnector("crm", {
     },
   },
 });
+/** The company's own workflows the catalog starts: a note, a payout the policy holds for an agent, a bonus Ada may not start. */
+const memo = defineWorkflow({
+  name: "memo",
+  title: "Note something",
+  trigger: "manual",
+  input: z.object({ note: z.string() }),
+  uses: [],
+  run: async (_ctx, { note }) => ({ noted: note }),
+});
+const payout = defineWorkflow({
+  name: "payout",
+  trigger: "manual",
+  input: z.object({ amount: z.number().int() }),
+  uses: [],
+  run: async (_ctx, { amount }) => ({ paid: amount }),
+});
+const bonus = defineWorkflow({
+  name: "bonus",
+  trigger: "manual",
+  input: z.object({ amount: z.number().int() }),
+  uses: [],
+  run: async (_ctx, { amount }) => ({ bonus: amount }),
+});
 const crmDriver = defineDriver(crm, { customer: { find: async ({ name }) => ({ name: `${name} Ltd`, since: 2019 }) } });
 
 // The config's root: its people, and a policy that holds every customer lookup for `lead`.
@@ -142,10 +181,20 @@ writeFileSync(
 forbid (principal, action == Sanoma::Action::"crm.customer.find", resource);
 `,
 );
+// An agent's payout waits for whom it acts for; Ada starts no bonus, and so neither does her chat.
+writeFileSync(
+  join(root, "policies/agents.cedar"),
+  `@hold("on-behalf-of")
+forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflow:payout", resource);
+
+@reason("Ada starts no bonus")
+forbid (principal == Sanoma::Principal::"ada", action == Sanoma::Action::"workflow:bonus", resource);
+`,
+);
 
 const testApp = useTestApp(
   {
-    workflows: [],
+    workflows: [memo, payout, bonus],
     connectors: [
       withSetup(crm, { driver: () => crmDriver }),
       withSetup(defineConnector("mock", {}), { model: () => customProvider({ languageModels: { default: model } }) }),
@@ -273,6 +322,13 @@ const said = (message: ChatMessage) => message.parts.flatMap((p) => (p.type === 
 
 const toolParts = (message: ChatMessage | undefined) => (message?.parts ?? []).filter(isToolUIPart);
 
+/** The id of the person's message `text` in the chat `id`: its turn's, which names the turn's catalog calls. */
+const askedIn = async (id: string, text: string) =>
+  ((await testApp.client.chats.load(id)) as ChatMessage[]).findLast((m) => m.role === "user" && said(m) === text)!.id;
+
+/** The reply's first tool part. */
+const firstTool = (reply: ChatMessage | undefined) => toolParts(reply)[0]!;
+
 describe("the chat", () => {
   const id = `chat-${RUN}`;
 
@@ -329,7 +385,13 @@ describe("the chat", () => {
       runId ??= output?.held?.runId;
     });
     await waitFor(() => runId, Boolean, 30_000);
-    expect(runId).toBe(`call:ada:${id}:${RUN}-12-0`);
+    // The chat's agent's held call, for Ada, named by the chat, the turn's message and the tool call.
+    expect(runId).toBe(heldCallRunId(CHAT_AGENT, catalogCallId(id, await askedIn(id, "Look up Acme"), `${RUN}-12-0`)));
+    expect((await testApp.client.run(runId!))?.startedBy).toEqual({
+      id: CHAT_AGENT,
+      groups: ["agents"],
+      onBehalfOf: "ada",
+    });
     await waitFor(async () => {
       const stored = (await chats.load(id)) as ChatMessage[];
       return toolParts(stored.at(-1))[0]?.output !== undefined;
@@ -483,7 +545,7 @@ describe("the chat", () => {
       data: { asks: ["Add a laptop step to offboarding", "Who can approve a refund?"] },
     });
     expect(systems.at(-1)).toMatch(
-      /The company at a glance: its workflows: none; its connectors: crm, mock; its people: ada, lead; its groups: none\./,
+      /The company at a glance: its workflows \(each by its name, then its title\): memo \(Note something\), payout, bonus; its connectors: crm, mock; its people: ada, lead; its groups: none\./,
     );
     expect(systems.at(-1)).toContain('end your reply with a line that says only "Suggested asks:"');
     expect(systems.at(-1)).toContain("Otherwise suggest none.");
@@ -551,6 +613,87 @@ async function chatColumn(url: string, path = "/workflows", actor = "ada") {
   const html = (await res.text()).replaceAll("<!-- -->", "");
   return html.match(/<aside id="chat" aria-label="Chat"[^>]*>([\s\S]*?)<\/aside>/)?.[1] ?? "";
 }
+
+describe("the agent catalog in the chat", () => {
+  /** The chat's agent acting for Ada, as the run and the ledger keep it. */
+  const chatForAda = { id: CHAT_AGENT, groups: ["agents"], onBehalfOf: "ada" };
+
+  it("offers the catalog's six tools beside the loop's, and names each in the system prompt", async () => {
+    const id = `catalog-${RUN}`;
+    await send(id, [], "Note the visit");
+    const call = model.doStreamCalls.findLast((c) => JSON.stringify(c.prompt).includes("Note the visit"))!;
+    const offered = (call.tools ?? []).map((t) => t.name);
+    for (const name of ["describe", "lookup", "get_run", "wait_run", "drift", "start_run"]) {
+      expect(offered, name).toContain(name);
+      expect(systems.at(-1), name).toMatch(new RegExp(`^- ${name} `, "m"));
+    }
+    // What the agent edits stays in its draft; what it starts runs the merged code live, for the person.
+    expect(systems.at(-1)).toContain("You edit nothing live.");
+    expect(systems.at(-1)).toContain("your draft's code is not in them");
+    expect(systems.at(-1)).toContain("never say a change is live");
+  }, 300_000);
+
+  it("starts a workflow as the chat's agent acting for the person chatting, which the run and its ledger keep", async () => {
+    const id = `start-${RUN}`;
+    const reply = await send(id, [], "Note the visit");
+    const part = firstTool(reply);
+    expect([getToolName(part), part.state]).toEqual(["start_run", "output-available"]);
+    const runId = catalogCallId(id, await askedIn(id, "Note the visit"), `${RUN}-14-0`);
+    expect(runId).toMatch(/^[\w-]{1,200}$/);
+    expect(part.output).toEqual({ runId, status: "finished", output: { noted: "visited Acme" } });
+    expect(reply!.parts.at(-1)).toMatchObject({ type: "text", text: "Noted." });
+    expect((await testApp.client.run(runId))?.startedBy).toEqual(chatForAda);
+    expect((await testApp.client.ledger(runId))[0]).toMatchObject({ type: "run.started", actor: chatForAda });
+    // The stored reply records the turn that wrote it, which names its catalog calls (`settle`).
+    const stored = (await testApp.client.chats.load(id)) as ChatMessage[];
+    expect(stored.at(-1)).toMatchObject({ role: "assistant", metadata: { turn: await askedIn(id, "Note the visit") } });
+
+    // The model uses the same tool-call id in the next turn (as some providers do): another call, another run.
+    const history = (await testApp.client.chats.load(id)) as ChatMessage[];
+    const again = firstTool(await send(id, history, "Note the visit"));
+    const second = (again.output as { runId: string }).runId;
+    expect(again.toolCallId).toBe(part.toolCallId);
+    expect(second).not.toBe(runId);
+    expect(again.output).toEqual({ runId: second, status: "finished", output: { noted: "visited Acme" } });
+  }, 300_000);
+
+  it("shows a start the policy holds for agents as its approval, which the person may give", async () => {
+    const id = `held-start-${RUN}`;
+    let held: string | undefined;
+    const turn = send(id, [], "Pay Bo 5", (reply) => {
+      held ??= (toolParts(reply)[0]?.output as { held?: { runId: string } } | undefined)?.held?.runId;
+    });
+    await waitFor(() => held, Boolean, 60_000);
+    const runId = catalogCallId(id, await askedIn(id, "Pay Bo 5"), `${RUN}-8-0`);
+    expect(held).toBe(runId);
+    expect(await testApp.client.approvals(runId)).toEqual([
+      expect.objectContaining({ approver: "ada", status: "pending" }),
+    ]);
+    // Ada approves the run her chat started for her; the tool answers its result.
+    await testApp.client.decide(runId, { decision: "approve", by: { id: "ada" } });
+    const reply = await turn;
+    expect(firstTool(reply)).toMatchObject({
+      state: "output-available",
+      output: { runId, status: "finished", output: { paid: 5 } },
+    });
+    expect((await testApp.client.run(runId))?.startedBy).toEqual(chatForAda);
+  }, 300_000);
+
+  it("refuses the chat's start a forbid on the person refuses them, and any of the runtime's own workflows", async () => {
+    const refused = await send(`bonus-${RUN}`, [], "Give a bonus");
+    expect(firstTool(refused)).toMatchObject({
+      state: "output-error",
+      errorText: expect.stringContaining("Ada starts no bonus"),
+    });
+    const builtIn = await send(`builtin-${RUN}`, [], "Save the draft for me");
+    expect(firstTool(builtIn)).toMatchObject({
+      state: "output-error",
+      errorText: expect.stringContaining("save-draft is the runtime's own workflow"),
+    });
+    const asked = await askedIn(`builtin-${RUN}`, "Save the draft for me");
+    expect(await testApp.client.run(catalogCallId(`builtin-${RUN}`, asked, `${RUN}-21-0`))).toBeUndefined();
+  }, 300_000);
+});
 
 describe("the composer and a model", () => {
   it("has no note and Send waiting for a message once a connector gives a model", async () => {

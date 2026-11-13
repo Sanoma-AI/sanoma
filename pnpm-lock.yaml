@@ -6,6 +6,7 @@ settings:
 
 overrides:
   ai: 7.0.153
+  '@ai-sdk/provider-utils': 5.0.68
 
 importers:
 
@@ -774,12 +775,6 @@ packages:
 
   '@ai-sdk/mcp@2.0.84':
     resolution: {integrity: sha512-yVhkdm1cpN1L65Vfg8TjyNMFI+P20NsZ/WcYSI6kyv1MbbHWtOn7lBUSuXJ6H/+wGQaH410q1Um1h4PqoWxocA==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/provider-utils@5.0.64':
-    resolution: {integrity: sha512-BDU8rDR6mBR+na5U/Dj4B33LX980x200lqhBGRIOxxx1NFunoixuvvweqIB+sCsCoFC8cGCsa82Ce2fKoAPOqw==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -5111,6 +5106,7 @@ packages:
   image-size@0.7.5:
     resolution: {integrity: sha512-Hiyv+mXHfFEP7LzUL/llg9RwFxxY+o9N3JVLIeG5E7iFIFAalxvRU9UZthBdYDEVnzHMgjnKJPPpay5BWf1g9g==}
     engines: {node: '>=6.9.0'}
+    deprecated: Please migrate to image-size@2.x
     hasBin: true
 
   imul@1.0.1:
@@ -7643,7 +7639,7 @@ snapshots:
     dependencies:
       '@ai-sdk/harness': 1.0.158(ws@8.22.0)(zod@4.6.5)
       '@ai-sdk/provider': 4.0.31
-      '@ai-sdk/provider-utils': 5.0.64(zod@4.6.5)
+      '@ai-sdk/provider-utils': 5.0.68(zod@4.6.5)
       ws: 8.22.0
       zod: 4.6.5
     transitivePeerDependencies:
@@ -7653,7 +7649,7 @@ snapshots:
   '@ai-sdk/harness-pi@1.0.160(@aws-sdk/credential-provider-node@3.972.88)(@modelcontextprotocol/sdk@1.32.1(supports-color@11.0.0)(zod@4.6.5))(@smithy/signature-v4@5.7.4)(supports-color@11.0.0)(ws@8.22.0)(zod@4.6.5)':
     dependencies:
       '@ai-sdk/harness': 1.0.158(ws@8.22.0)(zod@4.6.5)
-      '@ai-sdk/provider-utils': 5.0.64(zod@4.6.5)
+      '@ai-sdk/provider-utils': 5.0.68(zod@4.6.5)
       '@earendil-works/pi-coding-agent': 1.4.0(@aws-sdk/credential-provider-node@3.972.88)(@modelcontextprotocol/sdk@1.32.1(supports-color@11.0.0)(zod@4.6.5))(@smithy/signature-v4@5.7.4)(supports-color@11.0.0)(ws@8.22.0)(zod@4.6.5)
       typebox: 1.4.3
       zod: 4.6.5
@@ -7671,7 +7667,7 @@ snapshots:
   '@ai-sdk/harness@1.0.158(ws@8.22.0)(zod@4.6.5)':
     dependencies:
       '@ai-sdk/provider': 4.0.31
-      '@ai-sdk/provider-utils': 5.0.64(zod@4.6.5)
+      '@ai-sdk/provider-utils': 5.0.68(zod@4.6.5)
       ai: 7.0.153(zod@4.6.5)
       zod: 4.6.5
     optionalDependencies:
@@ -7683,15 +7679,6 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.68(zod@4.6.5)
       cross-spawn: 7.0.6
       pkce-challenge: 5.0.1
-      zod: 4.6.5
-
-  '@ai-sdk/provider-utils@5.0.64(zod@4.6.5)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.31
-      '@standard-schema/spec': 1.1.0
-      '@workflow/serde': 4.1.0
-      eventsource-parser: 3.1.1
-      undici: 7.30.0
       zod: 4.6.5
 
   '@ai-sdk/provider-utils@5.0.68(zod@4.6.5)':

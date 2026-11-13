@@ -28,6 +28,7 @@ import {
 } from "./checkout.ts";
 import { freePort } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
+import { catalogTools, HARNESS_HELD_MS } from "./tools.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's second engine: an existing coding agent driven by the AI SDK's `HarnessAgent` in a
@@ -106,7 +107,7 @@ async function runTurn(agent: TurnAgent<"onKey">, turn: EngineTurn, writer: UIMe
 /** The turn's harness session in `sandbox`, run to its end, its permission requests answered by the checkout rule. */
 async function converse(
   agent: TurnAgent<"onKey">,
-  { step, chat, messages }: EngineTurn,
+  { step, chat, messages, message }: EngineTurn,
   writer: UIMessageStreamWriter<ChatMessage>,
   sandbox: HarnessV1NetworkSandboxSession,
   { auth, model, home, box }: { auth: Record<string, string>; model: string | undefined; home: string; box: Box },
@@ -117,11 +118,16 @@ async function converse(
   const harnessAgent = new HarnessAgent({
     harness,
     model,
-    instructions: harnessInstructions(step, principal, chat, messages.slice(0, -1)),
+    instructions: harnessInstructions(step, principal, chat, messages.slice(0, -1), { catalog: true }),
     // Edits and commands ask first, and the checkout rule answers.
     permissionMode: "allow-reads",
     // The draft's checkout itself, not a directory per session under it.
     sandboxConfig: { workDir: "." },
+    // The agent catalog, run here on the host (Pi's agent is in this process; Claude Code's bridge
+    // serves them to it in the box as an in-process MCP server and sends each call back over its
+    // socket), never in the box: nothing of the instance enters it. No `toolApproval`: the
+    // company's policy decides each call.
+    tools: catalogTools({ step, chat, message }, { heldMs: HARNESS_HELD_MS }),
   });
   const said = messages.at(-1)!;
   const create = () =>

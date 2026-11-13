@@ -234,9 +234,14 @@ describe("the chat on a person's own agent", () => {
     expect(log.filter((entry) => "asked" in entry)).toEqual([
       { asked: "Write node_modules/evil.js", chosen: "reject_once" },
       { asked: "cat /etc/hosts", chosen: "reject_once" },
+      { asked: "mcp__sanoma__start_run", chosen: "reject_once" },
       { asked: "Edit workflows/offboarding.ts", chosen: "allow_once" },
       { asked: "Edit always", chosen: "cancelled" },
     ]);
+    // No MCP server is offered (stable ACP's would need a URL and its credential, or a process, in
+    // the box), and an MCP tool's call is refused as any tool but an edit, delete, move or read is.
+    expect(log.find((entry) => "mcpServers" in entry)).toEqual({ mcpServers: [] });
+    expect(log.find((entry) => "prompt" in entry)!.prompt).not.toMatch(/start_run|The company's tools/);
     expect(log.find((entry) => "wroteOutside" in entry)).toMatchObject({ wroteOutside: false });
     expect(log.find((entry) => "readOther" in entry)).toEqual({
       readOther: false,
