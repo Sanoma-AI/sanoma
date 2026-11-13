@@ -10,7 +10,7 @@ import {
   type TableChangePlan,
   type WontConvert,
 } from "sanoma/workflows/description";
-import { isHidden, isRecord, reshaped, type Saved } from "sanoma/workflows/shared";
+import { isHidden, isRecord, type LinkedKeys, linkTarget, reshaped, type Saved } from "sanoma/workflows/shared";
 import { z } from "zod";
 
 // A change to a collection's columns, as a person proposes it from the grid (`ColumnChange`) and
@@ -21,9 +21,6 @@ import { z } from "zod";
 
 /** How many of the rows that won't convert a plan names. */
 const SAMPLE = 20;
-
-/** Why a link or a free-form column cannot be proposed. */
-export const UNAVAILABLE = "Links and free-form columns aren't available yet";
 
 /**
  * A change to a collection's columns, as the grid proposes it: a `TableChange` before its rows are
@@ -43,11 +40,11 @@ export const ColumnChange = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("hide"), field: z.string().min(1) }),
   z.strictObject({ kind: z.literal("show"), field: z.string().min(1) }),
   z.strictObject({ kind: z.literal("remove"), field: z.string().min(1) }),
-  z.strictObject({ kind: z.literal("link"), field: z.string().min(1), to: z.string().min(1) }),
   z.strictObject({
     kind: z.literal("convert"),
     field: z.string().min(1),
-    key: FieldNameSchema,
+    key: z.string().min(1),
+    to: FieldNameSchema,
     type: ColumnTypeSchema,
     decision: ConvertDecisionSchema.optional(),
   }),
@@ -59,7 +56,20 @@ type Field = CollectionEntry["fields"][string];
 
 /** A declared field's type. */
 export const typeOf = (field: Field): ColumnType =>
-  typeof field === "string" ? field : "enum" in field ? { enum: [...field.enum] } : field.type;
+  typeof field === "string"
+    ? field
+    : "enum" in field
+      ? { enum: [...field.enum] }
+      : "link" in field
+        ? { link: field.link }
+        : field.type;
+
+/** Whether a declared field is free-form (`json`): the grid shows it, the record form edits it, and nothing filters or sorts by it. */
+export const isFreeForm = (field: Field | undefined): boolean => field !== undefined && typeOf(field) === "json";
+
+/** The collection a column of `type` in `collection` links to, as the runtime names it (`linkTarget`); none for another type. */
+export const targetOf = (collection: string, type: ColumnType): string | undefined =>
+  typeof type === "object" && "link" in type ? linkTarget(collection, type.link) : undefined;
 
 /** Whether a declared field is required: not marked `optional`. */
 export const requiredOf = (field: Field): boolean => typeof field === "string" || field.optional !== true;
@@ -78,10 +88,6 @@ function fieldOf(type: ColumnType, required: boolean): string | Record<string, u
   return required ? type : { ...type, optional: true };
 }
 
-/** Whether a column of `type` can be proposed: not a link or free-form, which `collection()` takes neither of yet. */
-export const takenToday = (type: ColumnType): boolean =>
-  type !== "json" && !(typeof type === "object" && "link" in type);
-
 const filled = (value: unknown) => value !== undefined && value !== null && value !== "";
 
 /** The value under `key` of a free-form field's object; none for anything else. */
@@ -94,9 +100,10 @@ const valueAt = (value: unknown, key: string): unknown => (isRecord(value) ? val
 function unconverted(
   rows: readonly Saved[],
   change: Extract<ColumnChange, { kind: "retype" | "convert" }>,
+  keys: LinkedKeys | undefined,
 ): { wontConvert: WontConvert; decision?: ConvertDecision } {
   const wont = rows.filter(({ record }) => {
-    const { did } = reshaped(record, change);
+    const { did } = reshaped(record, change, keys);
     return did === "kept" || did === "cleared";
   });
   const valueOf = (record: Saved["record"]) =>
@@ -125,9 +132,14 @@ export function keysIn(rows: readonly Saved[], field: string): { key: string; co
  * Why `change` cannot be proposed on `collection` as declared: a field it does not have, a name
  * it has already (a hidden column's too, until it is removed for good), the key (which names each
  * record), a hidden column changed other than shown again or removed for good, or either of those
- * on a column that is not hidden, a type the runtime does not take yet; none when it can.
+ * on a column that is not hidden, a link to a collection the company does not have (`collections`,
+ * by name), a conversion out of a field that is not free-form; none when it can.
  */
-export function problemOf({ key, fields }: Pick<CollectionEntry, "key" | "fields">, change: ColumnChange) {
+export function problemOf(
+  { name: collection, key, fields }: Pick<CollectionEntry, "name" | "key" | "fields">,
+  change: ColumnChange,
+  collections: readonly string[],
+) {
   const named = "field" in change ? change.field : change.from;
   if (change.kind !== "add" && !Object.hasOwn(fields, named)) return `${named} is not a field of this collection`;
   // The name a new column, a rename or a conversion takes.
@@ -137,7 +149,7 @@ export function problemOf({ key, fields }: Pick<CollectionEntry, "key" | "fields
       : change.kind === "rename"
         ? change.to
         : change.kind === "convert"
-          ? change.key
+          ? change.to
           : undefined;
   if (name !== undefined && isHidden(fields[name])) {
     return `${name} is taken by a hidden column: remove it for good, under Fields, to use the name`;
@@ -151,19 +163,24 @@ export function problemOf({ key, fields }: Pick<CollectionEntry, "key" | "fields
     return `${key} is the key, which names each record: it stays as it is`;
   }
   const type = "type" in change ? change.type : change.kind === "retype" ? change.to : undefined;
-  if (change.kind === "link" || (type !== undefined && !takenToday(type))) {
-    return UNAVAILABLE;
-  }
+  const target = type && targetOf(collection, type);
+  if (target !== undefined && !collections.includes(target)) return `There is no table ${target} to link to`;
   if (change.kind === "convert" && typeOf(fields[change.field]!) !== "json") return `${change.field} is not free-form`;
   return undefined;
 }
 
 /**
  * The plan of `change` to `collection`, over `rows`, the records read for it: each row's value
- * counted, a retype's or a conversion's values that will not convert (`reshaped`) sampled, with
- * the person's decision for them when there are some.
+ * counted, a retype's or a conversion's values that will not convert (`reshaped`, a link's
+ * against `keys`, those of the collection it links to) sampled, with the person's decision for
+ * them when there are some; a conversion's records that hold its key counted.
  */
-export function planOf(collection: CollectionEntry, rows: readonly Saved[], change: ColumnChange): TableChangePlan {
+export function planOf(
+  collection: CollectionEntry,
+  rows: readonly Saved[],
+  change: ColumnChange,
+  keys?: LinkedKeys,
+): TableChangePlan {
   const values = (field: string) => rows.map(({ key, record }) => ({ key, value: record[field] }));
   const count = (field: string) => values(field).filter(({ value }) => filled(value)).length;
   let planned: TableChange;
@@ -176,7 +193,7 @@ export function planOf(collection: CollectionEntry, rows: readonly Saved[], chan
       break;
     case "retype": {
       const { decision: _, ...rest } = change;
-      planned = { ...rest, from: typeOf(collection.fields[change.field]!), ...unconverted(rows, change) };
+      planned = { ...rest, from: typeOf(collection.fields[change.field]!), ...unconverted(rows, change, keys) };
       break;
     }
     case "require":
@@ -187,13 +204,10 @@ export function planOf(collection: CollectionEntry, rows: readonly Saved[], chan
     case "remove":
       planned = { ...change, filled: count(change.field) };
       break;
-    case "link":
-      // Every filled value, until the runtime matches them against the other table's keys.
-      planned = { ...change, unmatched: count(change.field) };
-      break;
     case "convert": {
       const { decision: _, ...rest } = change;
-      planned = { ...rest, ...unconverted(rows, change) };
+      const holding = rows.filter(({ record }) => valueAt(record[change.field], change.key) !== undefined).length;
+      planned = { ...rest, filled: holding, ...unconverted(rows, change, keys) };
       break;
     }
   }
@@ -243,10 +257,8 @@ export function declarationEdit(fields: CollectionEntry["fields"], change: Colum
       return set(change.field, typeOf(declared!), false);
     case "remove":
       return rename(change.field, null);
-    case "link":
-      return set(change.field, { link: change.to }, requiredOf(declared!));
     case "convert":
-      return set(change.key, change.type, false);
+      return set(change.to, change.type, false);
   }
 }
 
@@ -266,6 +278,16 @@ const TYPE_WORDS = {
   json: "free-form",
 } as const;
 const OR = new Intl.ListFormat("en", { type: "disjunction" });
+
+/** That every value converts to `type`, in a sentence: a link's each name a record of the table it links to. */
+export const allConvert = (type: ColumnType) =>
+  typeof type === "object" && "link" in type ? `Every value names a record of ${type.link}.` : "Every value converts.";
+
+/** That `count` values don't convert to `type`, after how many: a link's name no record of the table it links to. */
+export const cantConvert = (type: ColumnType, count: number) =>
+  typeof type === "object" && "link" in type
+    ? `${count === 1 ? "names" : "name"} no record of ${type.link}`
+    : "can't convert";
 
 /** A plan's records as a sentence's subject: "No records", "The record", "All 12 records". */
 export const allRecords = ({ rows }: TableChangePlan) =>
@@ -310,13 +332,22 @@ export function happens(plan: TableChangePlan): string {
     case "retype":
     case "convert": {
       const to = change.kind === "retype" ? change.to : change.type;
-      const what = change.kind === "retype" ? change.field : `${change.field}'s ${change.key}`;
+      const becomes =
+        change.kind === "retype"
+          ? `${change.field} becomes ${typeWords(to)}.`
+          : change.filled === 0
+            ? `${plan.collection} gains a ${change.to} column, ${typeWords(to)}. No record holds ${change.key} in ${change.field}, so it starts empty.`
+            : `${change.key} moves out of ${change.field} into a ${change.to} column of its own, ${typeWords(to)}, in ${records(change.filled)}.`;
       const wont = change.wontConvert.count;
-      const becomes = `${what} becomes ${typeWords(to)}.`;
-      if (wont === 0) return `${becomes} Every value converts.`;
-      const cant = `${records(wont)} can't convert`;
+      if (wont === 0)
+        return change.kind === "convert" && change.filled === 0 ? becomes : `${becomes} ${allConvert(to)}`;
+      const cant = `${records(wont)} ${cantConvert(to, wont)}`;
       if (change.decision === "clear") return `${becomes} ${cant}: they're left empty, and lose what they hold now.`;
-      if (change.decision === "keep") return `${becomes} ${cant}: they keep what they hold and show as needs fixing.`;
+      if (change.decision === "keep") {
+        return change.kind === "convert"
+          ? `${becomes} ${cant}: theirs stay in ${change.field}.`
+          : `${becomes} ${cant}: they keep what they hold and show as needs fixing.`;
+      }
       return `${becomes} ${cant}. Choose below what happens to them.`;
     }
     case "require":
@@ -335,8 +366,6 @@ export function happens(plan: TableChangePlan): string {
       return change.filled === 0
         ? `${change.field} is removed for good. No record has a value in it, so nothing is lost, and its name is free for a new column.`
         : `${change.field} is removed for good. ${deleted(change.filled)} Its name is free for a new column.`;
-    case "link":
-      return `${change.field} links to ${change.to}.`;
     case undefined:
       return "Nothing changes.";
   }
@@ -368,7 +397,7 @@ export function landed(plan: TableChangePlan, counts: ReshapeOutput): string {
   const typed = along.filter((change) => change.kind !== "rename" && change.kind !== "remove");
   if (typed.length) {
     const [first] = typed;
-    const value = one && first ? `${first.kind === "retype" ? first.field : first.key} value` : "value";
+    const value = one && first ? `${first.kind === "retype" ? first.field : first.to} value` : "value";
     const { converted, cleared, kept } = counts;
     if (converted + cleared + kept === 0) said.push(`No ${value} needed converting.`);
     else {

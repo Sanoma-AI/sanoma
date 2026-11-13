@@ -73,7 +73,7 @@ export function valuesToMap(
     typeof kind === "object" && "enum" in kind
       ? [kind.enum, kind.enum.map((value) => [value, value] as const)]
       : // A person field takes any id while nobody is declared, as `importRows` does.
-        (typeof kind === "object" ? kind.type : kind) === "person" && people.length > 0
+        (typeof kind === "object" ? "type" in kind && kind.type : kind) === "person" && people.length > 0
         ? [
             people.map((person) => person.id),
             people.flatMap(({ id, name, email }) => [id, name, email].flatMap((n) => (n ? [[n, id] as const] : []))),

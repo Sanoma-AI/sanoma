@@ -215,14 +215,26 @@ function HiddenFields({
 /**
  * A field's heading, sorting by it: ascending, then descending, then by key again; disabled while
  * a change is `staged`. Not preloaded: hovering a heading would read the records in its order.
+ * A free-form field's (`sortable` false) is its name alone: `list` sorts by no free-form field.
  */
 export function SortHead({
   field,
   order,
   staged,
+  sortable = true,
   children,
   ...props
-}: { field: string; order: string | undefined; staged: boolean } & ComponentProps<typeof TableHead>) {
+}: { field: string; order: string | undefined; staged: boolean; sortable?: boolean } & ComponentProps<
+  typeof TableHead
+>) {
+  if (!sortable) {
+    return (
+      <TableHead {...props}>
+        {field}
+        {children}
+      </TableHead>
+    );
+  }
   const sort = order === field ? "ascending" : order === `-${field}` ? "descending" : undefined;
   const next = sort === undefined ? field : sort === "ascending" ? `-${field}` : undefined;
   const Icon = sort === "ascending" ? ArrowUpIcon : sort === "descending" ? ArrowDownIcon : ArrowsDownUpIcon;
@@ -260,7 +272,7 @@ export function Value({ value }: { value: unknown }) {
 export function IssuesFlag({ issues }: { issues: NonNullable<Saved["issues"]> }) {
   const text = issues.map(issueText).join("; ");
   return (
-    <Tip tip={`Saved before its fields changed: ${text}`}>
+    <Tip tip={`Fix before saving it again: ${text}`}>
       <ToneBadge tone="bad" tabIndex={0}>
         needs fixing
       </ToneBadge>

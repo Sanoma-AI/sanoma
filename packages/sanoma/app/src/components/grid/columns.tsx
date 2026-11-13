@@ -1,7 +1,7 @@
 import type { PatchOutput } from "sanoma/workflows";
 import type { CollectionEntry } from "sanoma/workflows/describe";
 import type { ColumnType, ConvertDecision, TableChangePlan } from "sanoma/workflows/description";
-import { changeIdOf, errorMessage, type Saved } from "sanoma/workflows/shared";
+import { changeIdOf, errorMessage, FIELD_NAME, type Saved } from "sanoma/workflows/shared";
 import { deepEquals } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -25,6 +25,7 @@ import {
 } from "#/components/ui/dropdown-menu.tsx";
 import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
+import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { proposeColumnChangeFn } from "../../functions.ts";
@@ -36,7 +37,7 @@ import {
   refreshColumns,
   remoteQuery,
 } from "../../queries.ts";
-import { ButtonLink, CardHeading, Notice, ToneBadge } from "../common.tsx";
+import { ButtonLink, CardHeading, Notice, plural, ToneBadge } from "../common.tsx";
 import { FROM } from "../data-grid.tsx";
 import {
   ColumnChange,
@@ -47,10 +48,8 @@ import {
   landed,
   problemOf,
   requiredOf,
-  takenToday,
   typeOf,
   typeWords,
-  UNAVAILABLE,
 } from "./plan.ts";
 import { WontConvertSample } from "./review.tsx";
 
@@ -170,11 +169,14 @@ function KeysIn({
   return (
     <DropdownMenuGroup>
       <DropdownMenuSeparator />
-      <DropdownMenuLabel>Convert to column: found in this free-form column</DropdownMenuLabel>
+      <DropdownMenuLabel className="flex flex-col">
+        Convert to column
+        <span className="font-normal">Found in this free-form column. Pick one to make it a column of its own.</span>
+      </DropdownMenuLabel>
       {keys.map(({ key, count }) => (
         <DropdownMenuItem key={key} onClick={() => open({ change: "convert", field, key })}>
           <code className="text-xs">{key}</code>
-          <span className="ml-auto text-xs text-muted-foreground">in {count}</span>
+          <span className="ml-auto text-xs text-muted-foreground">in {plural(count, "record")}</span>
         </DropdownMenuItem>
       ))}
     </DropdownMenuGroup>
@@ -207,7 +209,11 @@ const TYPES: { label: string; type: ColumnType | typeof CHOICES }[] = [
 ];
 const isChoice = (type: ColumnType): type is Extract<ColumnType, { enum: unknown }> =>
   typeof type === "object" && "enum" in type;
-const sameChip = (a: ColumnType | typeof CHOICES, b: ColumnType) => (a === CHOICES ? isChoice(b) : deepEquals(a, b));
+// Of the object types: a string has a `link` method of its own.
+const isLink = (type: ColumnType | typeof CHOICES): type is Extract<Exclude<ColumnType, string>, { link: unknown }> =>
+  typeof type === "object" && "link" in type;
+const sameChip = (a: ColumnType | typeof CHOICES, b: ColumnType) =>
+  a === CHOICES ? isChoice(b) : isLink(a) ? isLink(b) : deepEquals(a, b);
 
 /** The panel's heading for each change. */
 function titleOf(collection: CollectionEntry, { change, field, key }: ColumnSearch) {
@@ -234,7 +240,8 @@ const SETTLE_MS = 400;
 
 /**
  * The column panel beside the grid: what `column` changes, with the fields it takes (a name, a
- * type of the chips, its choices, Optional), What will happen over every record (the server's
+ * type of the chips, its choices or the table a link links to, of the company's `tables`, by the
+ * runtime's names, Optional), What will happen over every record (the server's
  * plan, `columnPlanQuery`, read once the form settles) in plain words, for a type change with
  * values that won't convert those values and what becomes of them (the plan's `decision`, asked
  * before it goes on, for the count it was asked on), for removing a hidden column for good a
@@ -243,12 +250,27 @@ const SETTLE_MS = 400;
  * what became of the records. A `clear` or a removal sent once the records changed is refused
  * with the plan as it is now (`recounted`), which the panel shows, asking again.
  */
-export function ColumnPanel({ collection, column }: { collection: CollectionEntry; column: ColumnSearch }) {
+export function ColumnPanel({
+  collection,
+  column,
+  tables,
+}: {
+  collection: CollectionEntry;
+  column: ColumnSearch;
+  tables: readonly string[];
+}) {
   const navigate = useNavigate({ from: FROM });
   const queryClient = useQueryClient();
   const remote = useQuery(remoteQuery()).data;
   const declared = column.field === undefined ? undefined : collection.fields[column.field];
-  const [name, setName] = useState(column.change === "rename" ? (column.field ?? "") : "");
+  // A conversion's column is named as its key, when that is a name a column can have.
+  const [name, setName] = useState(
+    column.change === "rename"
+      ? (column.field ?? "")
+      : column.change === "convert" && FIELD_NAME.test(column.key ?? "")
+        ? column.key!
+        : "",
+  );
   const [type, setType] = useState<ColumnType>(declared && column.change === "retype" ? typeOf(declared) : "text");
   const [choices, setChoices] = useState(isChoice(type) ? type.enum.join("\n") : "");
   const [optional, setOptional] = useState(true);
@@ -268,13 +290,19 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
     add: { kind: "add", field: name, type: typed, required: !optional },
     rename: { kind: "rename", from: field, to: name },
     retype: { kind: "retype", field, to: typed },
-    convert: { kind: "convert", field, key: column.key ?? "", type: typed },
+    convert: { kind: "convert", field, key: column.key ?? "", to: name, type: typed },
     hide: { kind: "hide", field },
     show: { kind: "show", field },
     remove: { kind: "remove", field },
   }[column.change];
   const parsed = ColumnChange.safeParse(intent);
-  const problem = parsed.success ? problemOf(collection, parsed.data) : parsed.error.issues[0]?.message;
+  const problem = parsed.success ? problemOf(collection, parsed.data, tables) : parsed.error.issues[0]?.message;
+  // The tables a link may link to: those of the collection's folder, by name as written.
+  const folder = collection.app === undefined ? "" : `${collection.app}.`;
+  const linkable = tables.flatMap((table) => {
+    const written = table.slice(folder.length);
+    return table.startsWith(folder) && !written.includes(".") ? [written] : [];
+  });
   const unchanged =
     (column.change === "rename" && name === field) ||
     (column.change === "retype" && declared !== undefined && deepEquals(typed, typeOf(declared)));
@@ -362,7 +390,7 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
             void propose();
           }}
         >
-          {(column.change === "add" || column.change === "rename") && (
+          {(column.change === "add" || column.change === "rename" || column.change === "convert") && (
             <Field>
               <FieldLabel htmlFor="column-name">Name</FieldLabel>
               <Input id="column-name" autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
@@ -375,7 +403,6 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
               <div className="flex flex-wrap gap-1.5">
                 {TYPES.map((chip) => {
                   const on = sameChip(chip.type, type);
-                  const offered = chip.type === CHOICES || takenToday(chip.type);
                   return (
                     <Button
                       key={chip.label}
@@ -383,8 +410,6 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
                       size="sm"
                       variant={on ? "default" : "outline"}
                       aria-pressed={on}
-                      disabled={!offered}
-                      title={offered ? undefined : UNAVAILABLE}
                       onClick={() => {
                         setType(chip.type === CHOICES ? { enum: [] } : chip.type);
                         // Another type, other values that won't convert: what becomes of them is asked again.
@@ -397,6 +422,30 @@ export function ColumnPanel({ collection, column }: { collection: CollectionEntr
                 })}
               </div>
             </FieldSet>
+          )}
+          {isLink(type) && (
+            <Field>
+              <FieldLabel htmlFor="column-link">Links to</FieldLabel>
+              <NativeSelect
+                id="column-link"
+                className="w-full"
+                value={type.link}
+                onChange={(e) => {
+                  setType({ link: e.target.value });
+                  ask();
+                }}
+              >
+                <NativeSelectOption value="" disabled>
+                  Choose a table…
+                </NativeSelectOption>
+                {linkable.map((table) => (
+                  <NativeSelectOption key={table} value={table}>
+                    {table}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <FieldDescription>Each value is the key of one of its records.</FieldDescription>
+            </Field>
           )}
           {isChoice(type) && (
             <Field>

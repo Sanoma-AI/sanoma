@@ -26,7 +26,7 @@ import { TABLE_CHANGE_PLAN } from "./fixtures/table-change-plan.ts";
 // (`shownFields`, `hiddenFields`), showing a hidden one again and removing it for good; and the review of a table change (`components/grid/review.tsx`) over the plan
 // fixture, rendered on the server in a memory router, with all four of its cards.
 
-/** The outbound fixture's collection, as the description has it, with a free-form `details` field the runtime does not take yet. */
+/** The outbound fixture's collection, as the description has it. */
 const outbound = {
   name: "outbound",
   key: "company",
@@ -65,8 +65,15 @@ const hiding = {
   },
 } as CollectionEntry;
 
-/** Why `change` cannot be proposed on outbound, if it cannot. */
-const refused = (change: ColumnChange) => problemOf(outbound, change);
+/** Outbound with its rows' `details` declared, free-form. */
+const detailed = {
+  ...outbound,
+  fields: { ...outbound.fields, details: { type: "json", optional: true } },
+} as CollectionEntry;
+
+/** Why `change` cannot be proposed on outbound, if it cannot: the company has outbound and customers. */
+const refused = (change: ColumnChange, on: CollectionEntry = outbound) =>
+  problemOf(on, change, ["outbound", "customers"]);
 /** What `change` writes into outbound's declaration. */
 const edit = (change: ColumnChange) => declarationEdit(outbound.fields, change);
 /** Each card's title and what it says it is, in order. */
@@ -178,25 +185,30 @@ describe("planOf", () => {
 });
 
 describe("a column change", () => {
-  it("refuses a field the collection lacks, a name taken, the key, and a type the runtime does not take yet", () => {
+  it("refuses a field the collection lacks, a name taken, the key, and a link to a table there isn't", () => {
     expect(refused({ kind: "hide", field: "nope" })).toBe("nope is not a field of this collection");
     expect(refused({ kind: "add", field: "stage", type: "text", required: false })).toBe("stage is a field already");
     expect(refused({ kind: "rename", from: "stage", to: "owner" })).toBe("owner is a field already");
     expect(refused({ kind: "retype", field: "company", to: "number" })).toBe(
       "company is the key, which names each record: it stays as it is",
     );
-    expect(refused({ kind: "add", field: "notes", type: "json", required: false })).toBe(
-      "Links and free-form columns aren't available yet",
+    expect(refused({ kind: "add", field: "notes", type: "json", required: false })).toBeUndefined();
+    expect(refused({ kind: "add", field: "customer", type: { link: "customers" }, required: false })).toBeUndefined();
+    expect(refused({ kind: "add", field: "vendor", type: { link: "vendors" }, required: false })).toBe(
+      "There is no table vendors to link to",
+    );
+    expect(refused({ kind: "retype", field: "contact", to: { link: "vendors" } })).toBe(
+      "There is no table vendors to link to",
     );
     expect(refused({ kind: "add", field: "priority", type: "number", required: true })).toBeUndefined();
   });
 
   it("refuses a hidden column's name until it is removed for good, any change of it but showing or removing it, and either of those on a column not hidden", () => {
     const taken = "seats is taken by a hidden column: remove it for good, under Fields, to use the name";
-    expect(problemOf(hiding, { kind: "rename", from: "contact", to: "seats" })).toBe(taken);
-    expect(problemOf(hiding, { kind: "add", field: "seats", type: "text", required: false })).toBe(taken);
+    expect(refused({ kind: "rename", from: "contact", to: "seats" }, hiding)).toBe(taken);
+    expect(refused({ kind: "add", field: "seats", type: "text", required: false }, hiding)).toBe(taken);
     for (const kind of ["show", "remove"] as const) {
-      expect(problemOf(hiding, { kind, field: "seats" })).toBeUndefined();
+      expect(refused({ kind, field: "seats" }, hiding)).toBeUndefined();
       expect(refused({ kind, field: "seats" })).toBe("seats is not hidden");
     }
     for (const change of [
@@ -205,11 +217,11 @@ describe("a column change", () => {
       { kind: "require", field: "seats" },
       { kind: "hide", field: "seats" },
     ] as const) {
-      expect(problemOf(hiding, change)).toBe("seats is hidden for everyone: show it again first");
+      expect(refused(change, hiding)).toBe("seats is hidden for everyone: show it again first");
     }
     // Once removed for good, the name is free.
     const { seats: _, ...rest } = hiding.fields;
-    expect(problemOf({ ...hiding, fields: rest }, { kind: "rename", from: "contact", to: "seats" })).toBeUndefined();
+    expect(refused({ kind: "rename", from: "contact", to: "seats" }, { ...hiding, fields: rest })).toBeUndefined();
   });
 
   it("shows a hidden field again as optional, and removes one for good from the declaration: neither leaves a hidden required field", () => {
@@ -278,6 +290,45 @@ const one = (change: TableChangePlan["changes"][number]): TableChangePlan => ({
   collection: "outbound",
   rows: 312,
   changes: [change],
+});
+
+describe("free-form and link columns", () => {
+  it("converts a free-form field's key to a column of its own, counting the records that hold it and the values that won't convert", () => {
+    const change: ColumnChange = { kind: "convert", field: "details", key: "seats", to: "seatCount", type: "number" };
+    expect(refused(change, detailed)).toBeUndefined();
+    expect(refused({ ...change, to: "stage" }, detailed)).toBe("stage is a field already");
+    expect(refused({ ...change, field: "contact" }, detailed)).toBe("contact is not free-form");
+    const plan = planOf(detailed, rows, change);
+    expect(plan.changes).toEqual([
+      { ...change, filled: 2, wontConvert: { count: 1, sample: [{ key: "Cedar & Finch", value: "two" }] } },
+    ]);
+    expect(happens(plan)).toBe(
+      "seats moves out of details into a seatCount column of its own, a number, in 2 records. 1 record can't convert. Choose below what happens to them.",
+    );
+    expect(edit(change)).toEqual({ fields: { "fields.seatCount": { type: "number", optional: true } }, rename: {} });
+  });
+
+  it("links a text column to another table, its values that name no record there as those that won't convert", () => {
+    const change: ColumnChange = { kind: "retype", field: "contact", to: { link: "customers" } };
+    const plan = planOf(outbound, rows, change, new Map([["customers", new Set(["40", "TBD"])]]));
+    expect(plan.changes).toEqual([
+      {
+        kind: "retype",
+        field: "contact",
+        from: "text",
+        to: { link: "customers" },
+        wontConvert: { count: 1, sample: [{ key: "Brightwater Dental", value: "about 40k" }] },
+      },
+    ]);
+    expect(happens(plan)).toBe(
+      "contact becomes a link to customers. 1 record names no record of customers. Choose below what happens to them.",
+    );
+    // Every value naming one of its records, nothing to decide.
+    expect(happens(planOf(outbound, rows, change, new Map([["customers", new Set(["40", "TBD", "about 40k"])]])))).toBe(
+      "contact becomes a link to customers. Every value names a record of customers.",
+    );
+    expect(edit(change)).toEqual({ fields: { "fields.contact": { link: "customers" } }, rename: {} });
+  });
 });
 
 describe("landed", () => {
@@ -373,6 +424,41 @@ describe("TableChangeReview", () => {
         "Chosen: keep them as they are.</span> They show as needs fixing in the grid until someone edits them.",
       );
     }
+  });
+
+  it("titles a conversion by its new column, and says a link's values that name no record of its table", async () => {
+    const html = await render(
+      "waiting",
+      {},
+      {
+        collection: "outbound",
+        rows: 4,
+        changes: [
+          {
+            kind: "convert",
+            field: "details",
+            key: "seats",
+            to: "seatCount",
+            type: "number",
+            filled: 2,
+            wontConvert: { count: 0, sample: [] },
+          },
+          {
+            kind: "retype",
+            field: "contact",
+            from: "text",
+            to: { link: "customers" },
+            wontConvert: { count: 1, sample: [{ key: "Brightwater Dental", value: "about 40k" }] },
+          },
+        ],
+      },
+    );
+    expect(cards(html)).toEqual([
+      ["Make seats of details the column seatCount, a number", "Safe"],
+      ["Change contact from text to a link to customers", "Keeps 1 for fixing"],
+    ]);
+    expect(html).toContain("Every value converts.");
+    expect(html).toContain("1 of 4 records names no record of customers.");
   });
 
   it("says plainly how many values removing a column for good deletes, and that showing one again is safe", async () => {

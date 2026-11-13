@@ -11,7 +11,18 @@ import { cn, plural } from "#/lib/utils.ts";
 import type { ChangeDetail } from "../../api.ts";
 import type { Verbs } from "../approval.tsx";
 import { CardHeading, ToneBadge } from "../kit.tsx";
-import { allRecords, DECIDED, deleted, diffLines, DOES, landed, renamed, typeWords } from "./plan.ts";
+import {
+  allConvert,
+  allRecords,
+  cantConvert,
+  DECIDED,
+  deleted,
+  diffLines,
+  DOES,
+  landed,
+  renamed,
+  typeWords,
+} from "./plan.ts";
 
 // A table change's review on its change's page (`routes/changes/$id.tsx`), from the plan the
 // change carries (`ChangeState.plan`): once it merged, what became of the records
@@ -134,12 +145,12 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
       const title =
         change.kind === "retype"
           ? `Change ${change.field} from ${typeWords(change.from)} to ${typeWords(to)}`
-          : `Make ${change.key} of ${change.field} a column, ${typeWords(to)}`;
+          : `Make ${change.key} of ${change.field} the column ${change.to}, ${typeWords(to)}`;
       const wont = change.wontConvert.count;
       if (wont === 0) {
         return (
           <ChangeCard title={title} tone="ok" said="Safe">
-            <p>Every value converts.</p>
+            <p>{allConvert(to)}</p>
           </ChangeCard>
         );
       }
@@ -152,7 +163,9 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
           said={decision === "clear" ? `Clears ${plural(wont, "value")}` : `Keeps ${wont} for fixing`}
         >
           <p>
-            {plural(plan.rows - wont, "record")} convert. {wont} can't, because what's in them isn't {typeWords(to)}.
+            {typeof to === "object" && "link" in to
+              ? `${wont} of ${plural(plan.rows, "record")} ${cantConvert(to, wont)}.`
+              : `${plural(plan.rows - wont, "record")} convert. ${wont} can't, because what's in them isn't ${typeWords(to)}.`}
           </p>
           <WontConvertSample
             keyField={keyField}
@@ -218,20 +231,6 @@ function Planned({ change, plan, keyField }: { change: TableChange; plan: TableC
         >
           <p className="font-medium">{deleted(change.filled)}</p>
           <p>Its name is free for a new column once this is applied. To keep the values, send the change back.</p>
-        </ChangeCard>
-      );
-    case "link":
-      return (
-        <ChangeCard
-          title={`Link ${change.field} to ${change.to}`}
-          tone={change.unmatched ? "waiting" : "ok"}
-          said={change.unmatched ? "Needs a decision" : "Safe"}
-        >
-          <p>
-            {change.unmatched
-              ? `${plural(change.unmatched, "record")} to match against ${change.to}'s records.`
-              : `${all} match.`}
-          </p>
         </ChangeCard>
       );
   }

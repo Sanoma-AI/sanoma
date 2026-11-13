@@ -269,8 +269,8 @@ describe("the Data section", () => {
     expect(rowKeys(html)).toEqual(["Old Co"]);
     expect(html).toContain("needs fixing");
     // Where the fields refuse it, in the flag's tooltip (and its description).
-    expect(html).toContain("Saved before its fields changed: contact: ");
-    expect(html).toMatch(/Saved before its fields changed: contact: .*; stage: .*; owner: /);
+    expect(html).toContain("Fix before saving it again: contact: ");
+    expect(html).toMatch(/Fix before saving it again: contact: .*; stage: .*; owner: /);
     // Its form opens with what it has.
     expect((await page(`/data/outbound${searchOf({ key: "Old", record: "Old Co" })}`)).html).toContain(
       'value="Old Co"',

@@ -246,12 +246,12 @@ function readScalar(field: ScalarField, raw: unknown, name: string, errors: Reco
     }
     case "enum":
       return field.options?.[Number(text)];
+    // Free-form: what reads as JSON is that value, anything else the text as written, as Import reads a cell.
     case "json":
       try {
         return JSON.parse(text);
       } catch {
-        errors[name] = "Not valid JSON";
-        return OMIT;
+        return text;
       }
   }
 }

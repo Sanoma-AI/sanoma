@@ -5,7 +5,7 @@ import type { TableChangePlan } from "sanoma/workflows/description";
 import { LIST_LIMIT, PATCH_WORKFLOW, type Saved } from "sanoma/workflows/shared";
 import { createApi, type UntypedApi } from "../api-client.ts";
 import { ApiError, type ColumnPlanRequest, type ProposeColumnChange } from "../api.ts";
-import { declarationEdit, planOf, problemOf } from "../components/grid/plan.ts";
+import { declarationEdit, planOf, problemOf, targetOf } from "../components/grid/plan.ts";
 import type { AppContext } from "../context.ts";
 import { callApi } from "./core.ts";
 
@@ -17,29 +17,47 @@ import { callApi } from "./core.ts";
 /** A column change refused, saying why. */
 const refuse = (error: string) => new ApiError(400, { error, code: "invalid_input" });
 
-/**
- * The plan of `change` to the collection `name`, as `actor`, through `createApi` over `callApi`
- * as the page's own `api` is (`api`, for what follows): every one of its records read (by key,
- * `LIST_LIMIT.max` a page) and the plan drafted over them (`planOf`). Refused (`invalid_input`)
- * for a collection no data file declares and a change the declaration cannot take (`problemOf`).
- */
-async function planned(app: AppContext, actor: Principal, { collection: name, change }: ColumnPlanRequest) {
-  const collection = app.snapshot.description.collections.find((c) => c.name === name);
-  if (!collection) throw new ApiError(404, { error: `No collection ${name}` });
-  const { declared } = collection;
-  if (!declared) throw refuse(`${name} is not declared in a data file, so its columns change in code`);
-  const problem = problemOf(collection, change);
-  if (problem) throw refuse(problem);
-  const api: UntypedApi = createApi((request) => callApi(app, actor, request));
+/** Every record of the collection `name`, keyed by `key`, through `api`: by key, `LIST_LIMIT.max` a page. */
+async function everyRecord(api: UntypedApi, name: string, key: string): Promise<Saved[]> {
   const rows: Saved[] = [];
   for (;;) {
     const after = rows.at(-1)?.key;
-    const where = after === undefined ? undefined : { [collection.key]: { gt: after } };
+    const where = after === undefined ? undefined : { [key]: { gt: after } };
     const page = (await api.data[name].list({ limit: LIST_LIMIT.max, ...(where && { where }) })) as Saved[];
     rows.push(...page);
-    if (page.length < LIST_LIMIT.max) break;
+    if (page.length < LIST_LIMIT.max) return rows;
   }
-  return { api, collection, at: declared.at, plan: planOf(collection, rows, change) };
+}
+
+/**
+ * The plan of `change` to the collection `name`, as `actor`, through `createApi` over `callApi`
+ * as the page's own `api` is (`api`, for what follows): every one of its records read, and for a
+ * change to a link every key of the collection it links to, and the plan drafted over them
+ * (`planOf`). Refused (`invalid_input`) for a collection no data file declares and a change the
+ * declaration cannot take (`problemOf`).
+ */
+async function planned(app: AppContext, actor: Principal, { collection: name, change }: ColumnPlanRequest) {
+  const { collections } = app.snapshot.description;
+  const collection = collections.find((c) => c.name === name);
+  if (!collection) throw new ApiError(404, { error: `No collection ${name}` });
+  const { declared } = collection;
+  if (!declared) throw refuse(`${name} is not declared in a data file, so its columns change in code`);
+  const problem = problemOf(
+    collection,
+    change,
+    collections.map((c) => c.name),
+  );
+  if (problem) throw refuse(problem);
+  const api: UntypedApi = createApi((request) => callApi(app, actor, request));
+  const rows = await everyRecord(api, name, collection.key);
+  // A change to a link: the values matched against the keys of the collection it links to.
+  const type = change.kind === "retype" ? change.to : change.kind === "convert" ? change.type : undefined;
+  const target = type && collections.find((c) => c.name === targetOf(name, type));
+  const keys =
+    target && typeof type === "object" && "link" in type
+      ? new Map([[type.link, new Set((await everyRecord(api, target.name, target.key)).map((row) => row.key))]])
+      : undefined;
+  return { api, collection, at: declared.at, plan: planOf(collection, rows, change, keys) };
 }
 
 /**

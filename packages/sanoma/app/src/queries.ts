@@ -78,7 +78,7 @@ import {
   startRunFn,
 } from "./functions.ts";
 import type { UntypedApi } from "./api-client.ts";
-import type { ColumnChange } from "./components/grid/plan.ts";
+import { type ColumnChange, isFreeForm } from "./components/grid/plan.ts";
 import { api } from "./site-api.ts";
 
 /**
@@ -972,7 +972,9 @@ export function listQueryOf(
     if (value !== undefined && values.includes(value)) where[name] = value;
   }
   if (search.key) where[key] = { gte: search.key, lt: search.key + LAST };
-  const order = search.order && Object.hasOwn(fields, search.order.replace(/^-/, "")) ? search.order : undefined;
+  // By a field it has, never a free-form one, which `list` does not sort by.
+  const by = search.order?.replace(/^-/, "");
+  const order = by !== undefined && Object.hasOwn(fields, by) && !isFreeForm(fields[by]) ? search.order : undefined;
   return {
     ...(Object.keys(where).length > 0 && { where }),
     ...(order && { order }),

@@ -161,9 +161,10 @@ describe("buildInput", () => {
     });
   });
 
-  it("names the fields whose values it cannot read", () => {
-    const { errors } = filled({ count: "three", extra: "{", people: [{ name: "" }] });
-    expect(errors).toEqual({ count: "Not a number", extra: "Not valid JSON" });
+  it("names the fields whose values it cannot read, and keeps a free-form value that isn't JSON as its text", () => {
+    const { errors, input: built } = filled({ count: "three", extra: "{", people: [{ name: "" }] });
+    expect(errors).toEqual({ count: "Not a number" });
+    expect(built).toMatchObject({ extra: "{" });
   });
 });
 
@@ -224,7 +225,7 @@ describe("issueTarget", () => {
   });
 
   it("takes the whole input as one JSON field when the form has no fields", () => {
-    const whole: Field[] = [{ key: "input", label: "Input (JSON)", kind: "json", required: true }];
+    const whole: Field[] = [{ key: "input", label: "Input", kind: "json", required: true }];
     expect(issueTarget(whole, ["input", 1], "Expected string")).toEqual({
       name: "input",
       message: "[1]: Expected string",
