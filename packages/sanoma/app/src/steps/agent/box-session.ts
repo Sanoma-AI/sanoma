@@ -102,10 +102,11 @@ export async function checkDraft(
         await carryIn(box, step.source, id, { home: await homeOf(box), signal });
         return checkIn(box, { signal });
       },
-      { wait: true },
+      { wait: true, signal },
     );
   } catch (err) {
-    // The connector page `NO_BOX` names is the chat's to link.
+    // Its text alone: a check's problems are plain text, where a chat message would link the
+    // connector page `NO_BOX` names.
     return checkFailed(errorParts(errorMessage(err)).text);
   }
 }

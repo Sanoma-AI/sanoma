@@ -18,8 +18,9 @@ const BUNDLE = ".sanoma-draft.bundle";
 const HEAD_FILE = ".git/sanoma-head";
 const LOCK_FILE = ".git/sanoma-lockfile";
 
-/** What a turn refused while another runs in the same box is told. */
-export const BOX_BUSY = "A turn is already running in your box: wait for it to end, then send this again";
+/** What a turn refused while another turn, or a draft's check, runs in the same box is told. */
+export const BOX_BUSY =
+  "Your box is busy with another turn or a draft's check: wait for it to end, then send this again";
 
 /** The boxes a turn runs in now, by name: each turn's end, which never rejects. */
 const busy = new Map<string, Promise<unknown>>();
@@ -27,18 +28,27 @@ const busy = new Map<string, Promise<unknown>>();
 /**
  * Runs `use` in the box `name`, opened for it (`open`) and stopped at its end however it ends,
  * alone: a second turn in the same box while one runs is refused (`BOX_BUSY`), or, with `wait` (a
- * check), runs once the box is free.
+ * check), runs once the box is free, unless `signal` stops it first.
  */
 export async function boxTurn<T>(
   name: string,
   open: () => Promise<Box>,
   use: (box: Box) => Promise<T>,
-  { wait = false }: { wait?: boolean } = {},
+  { wait = false, signal }: { wait?: boolean; signal?: AbortSignal } = {},
 ): Promise<T> {
   for (let running = busy.get(name); running; running = busy.get(name)) {
     if (!wait) throw new Error(BOX_BUSY);
-    await running;
+    signal?.throwIfAborted();
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        signal?.removeEventListener("abort", done);
+        resolve();
+      };
+      signal?.addEventListener("abort", done);
+      void running.then(done);
+    });
   }
+  signal?.throwIfAborted();
   const turn = (async () => {
     const box = await open();
     try {
@@ -292,24 +302,30 @@ export const checkFailed = (why: string): CheckResult => ({
 
 /**
  * The box's side of `checkIn`, in its home: the clone's `sanoma check`, its stdout capped from its
- * end, then the last line of its stderr, which says why when it printed no event.
+ * end, then, on a line of its own, the last line of its stderr, which says why when it printed no
+ * event.
  */
 const CHECK = `cd ${CLONE}
-[ -e node_modules/.bin/sanoma ] || { echo "the draft installs no sanoma in your box (it has no pnpm-lock.yaml)"; exit 0; }
+[ -f pnpm-lock.yaml ] && [ -e node_modules/.bin/sanoma ] || { echo "the draft installs no sanoma in your box (it needs a pnpm-lock.yaml)"; exit 0; }
 node_modules/.bin/sanoma check 2>.git/sanoma-check.err | tail -c ${CHECK_OUTPUT_BYTES}
+echo
 tail -n 1 .git/sanoma-check.err`;
 
 /**
  * The result in what `sanoma check` printed with `SANOMA_EVENTS=1`: its last `checked` event, the
  * event lines being lines of their own beside those a person reads (the draft's own code, which
  * the check imports, prints on the same stdout before it); else one problem, its `error` event's
- * message or its last line.
+ * message or its last line that is no event.
  */
 function checkedOf(out: string): CheckResult {
   let result: CheckResult | undefined;
   let error: string | undefined;
+  let last: string | undefined;
   for (const line of out.split("\n")) {
-    if (!line.startsWith('{"sanoma":1,')) continue;
+    if (!line.startsWith('{"sanoma":1,')) {
+      if (line.trim()) last = line;
+      continue;
+    }
     let event: { sanoma: 1; event: string; message?: string } & CheckResult;
     try {
       event = JSON.parse(line) as typeof event;
@@ -322,5 +338,5 @@ function checkedOf(out: string): CheckResult {
     }
     if (event.event === "error") error = event.message;
   }
-  return result ?? checkFailed(error ?? (out.split("\n").at(-1) || "it gave no result"));
+  return result ?? checkFailed(error ?? last ?? "it gave no result");
 }

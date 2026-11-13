@@ -37,9 +37,6 @@ export interface Served extends Stoppable {
 /** The checkout the config was loaded from (`loadConfig` sets its `file`). */
 export const rootOf = (config: SanomaConfig) => config.root ?? dirname(config.file!);
 
-/** The checkout, as the worker's and the app's `source`, a draft's check on the config's database. */
-const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config));
-
 /**
  * What a worker of the launcher's starts with: promoted, since a local worker is always the
  * version to take queued runs, even one seen before; the checkout as its source; the app's steps,
@@ -48,7 +45,7 @@ const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config));
  */
 export const workerOptions = (config: SanomaConfig) => ({
   promote: true,
-  source: sourceOf(config),
+  source: localGitSource(rootOf(config)),
   app: appSteps,
   prepare: [prepareBetterAuthStaff],
 });
@@ -115,7 +112,7 @@ async function appStart(
 
 /** Starts the app with `options`, the checkout as its source, and the machine routes `ingress` (`/wake`). */
 async function served(config: SanomaConfig, options: AppOptions, ingress: IngressRoute[]): Promise<Served> {
-  const app = await startApp(config, { ...options, source: sourceOf(config), ingress });
+  const app = await startApp(config, { ...options, source: localGitSource(rootOf(config)), ingress });
   return { url: app.url, sites: app.sites, stop: () => app.close() };
 }
 

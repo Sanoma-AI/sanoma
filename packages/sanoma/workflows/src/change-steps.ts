@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { appStepsOf, child, NO_APP_STEPS, stepContext } from "./app-steps.ts";
+import { child, step } from "./app-steps.ts";
 import { type ApprovalMessage, nextApprovalId, topicOf, withdrawApprovals } from "./approvals.ts";
 import { decide } from "./call.ts";
 import {
@@ -34,7 +34,7 @@ import {
   DRIFT_WORKFLOW,
   mayDecide,
 } from "./shared.ts";
-import type { CheckResult, RemoteHalf } from "./source.ts";
+import type { RemoteHalf } from "./source.ts";
 
 // The change workflow's steps that are not one of its operations: checking and planning the
 // draft, asking the policy ahead, waiting for what happens to the change, retiring approvals,
@@ -128,16 +128,8 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     );
 
   return {
-    check: (id) =>
-      DBOS.runStep(
-        async (): Promise<CheckResult> => {
-          // In the box of whoever the change is by, through the app's steps: never on this instance.
-          const run = runNow("A change step");
-          const app = appStepsOf(run, NO_APP_STEPS);
-          return app.steps.check(await stepContext(run, app), { id });
-        },
-        { name: "change:check" },
-      ),
+    // In the box of whoever the change is by, through the app's steps: never on this instance.
+    check: (id) => step(runNow("A change step"), "check", { id }, "change:check"),
 
     plan: (id, check) =>
       DBOS.runStep(

@@ -73,16 +73,17 @@ export async function stepContext(run: Run, { config, resolved }: WorkerApp): Pr
   };
 }
 
-/** The app's step `name` with `input`, in a DBOS step of the run's (`app:<name>`). */
-function step(run: Run, name: AppAction, input: unknown): Promise<any> {
-  const app = appStepsOf(run, NO_APP_STEPS);
+/** The app's step `name` with `input`, in a DBOS step of the run's named `stepName` (`app:<name>`). */
+export function step(run: Run, name: AppAction | "check", input: unknown, stepName = `app:${name}`): Promise<any> {
   return DBOS.runStep(
-    async () =>
-      (app.steps[name] as (step: AppStepContext, input: unknown) => Promise<unknown>)(
+    async () => {
+      const app = appStepsOf(run, NO_APP_STEPS);
+      return (app.steps[name] as (step: AppStepContext, input: unknown) => Promise<unknown>)(
         await stepContext(run, app),
         input,
-      ),
-    { name: `app:${name}` },
+      );
+    },
+    { name: stepName },
   );
 }
 
