@@ -163,6 +163,11 @@ async function work(client, sessionId, cwd) {
     { toolCallId: "always", title: "Edit always", kind: "edit", locations: [{ path: file }] },
     ["allow_always", "reject_always"],
   );
+  // One that offers no way to allow it: declined once, the turn going on.
+  await ask(client, sessionId, { toolCallId: "never", title: "Never allowed", kind: "other" }, [
+    "reject_always",
+    "reject_once",
+  ]);
   if (editChosen === "allow_once") {
     const changed = content.replace(
       "`Removed ${person}'s accounts`",

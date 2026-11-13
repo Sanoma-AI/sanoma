@@ -406,12 +406,14 @@ class AcpTurn {
 
   /**
    * A permission request, of any kind, approved: the agent runs in its box, which is the boundary.
-   * The `allow_once` it offered, else its `allow_always` (a tool that offers only that), else a
-   * cancel, for a request that offers no way to allow it.
+   * The `allow_once` it offered, else its `allow_always` (a tool that offers only that); a request
+   * that offers no way to allow it, its `reject_once`, so the turn goes on, else a cancel.
    */
   #permit({ options }: acp.RequestPermissionRequest): acp.RequestPermissionResponse {
-    const allow = options.find((o) => o.kind === "allow_once") ?? options.find((o) => o.kind === "allow_always");
-    return { outcome: allow ? { outcome: "selected", optionId: allow.optionId } : { outcome: "cancelled" } };
+    const [chosen] = ["allow_once", "allow_always", "reject_once"].flatMap((kind) =>
+      options.filter((o) => o.kind === kind),
+    );
+    return { outcome: chosen ? { outcome: "selected", optionId: chosen.optionId } : { outcome: "cancelled" } };
   }
 
   /** `path` as the checkout rule allows it in the draft, on the box's files; a request error naming it otherwise. */

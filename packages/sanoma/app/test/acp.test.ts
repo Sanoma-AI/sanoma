@@ -234,6 +234,7 @@ describe("the chat on a person's own agent", () => {
       { asked: "cat /etc/hosts", chosen: "allow_once" },
       { asked: "Edit workflows/offboarding.ts", chosen: "allow_once" },
       { asked: "Edit always", chosen: "allow_always" },
+      { asked: "Never allowed", chosen: "reject_once" },
     ]);
     // What this process does for it stays in the clone: its write under node_modules, and its
     // read of another person's box, through the client, are refused.
