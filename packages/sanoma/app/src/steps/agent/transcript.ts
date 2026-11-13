@@ -6,10 +6,11 @@ import type { ChatMessage } from "../../lib/chat.ts";
 // (`persist`): its suggested asks taken out of its text (`suggestedAsks`), then to the chat's
 // chunks, which the app streams to the browser, and to its transcript.
 
-/** What an engine is given for a turn: the chat, its messages (the new one last), and the turn's step (who asks, when to stop). */
+/** What an engine is given for a turn: the chat, its messages (the new one last), the id of that new message (`ChatTurnInput.message`, which names the turn), and the turn's step (who asks, when to stop). */
 export interface EngineTurn {
   chat: Chat;
   messages: ChatMessage[];
+  message: string;
   step: ChatTurnContext;
 }
 

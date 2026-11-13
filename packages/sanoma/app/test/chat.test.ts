@@ -16,6 +16,7 @@ import {
   SanomaClient,
   withSetup,
 } from "sanoma/workflows";
+import { CHAT_AGENT, heldCallRunId } from "sanoma/workflows/shared";
 import { createUIMessageStream, customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -385,9 +386,9 @@ describe("the chat", () => {
     });
     await waitFor(() => runId, Boolean, 30_000);
     // The chat's agent's held call, for Ada, named by the chat, the turn's message and the tool call.
-    expect(runId).toBe(`call:sanoma-chat:${catalogCallId(id, await askedIn(id, "Look up Acme"), `${RUN}-12-0`)}`);
+    expect(runId).toBe(heldCallRunId(CHAT_AGENT, catalogCallId(id, await askedIn(id, "Look up Acme"), `${RUN}-12-0`)));
     expect((await testApp.client.run(runId!))?.startedBy).toEqual({
-      id: "sanoma-chat",
+      id: CHAT_AGENT,
       groups: ["agents"],
       onBehalfOf: "ada",
     });
@@ -615,7 +616,7 @@ async function chatColumn(url: string, path = "/workflows", actor = "ada") {
 
 describe("the agent catalog in the chat", () => {
   /** The chat's agent acting for Ada, as the run and the ledger keep it. */
-  const chatForAda = { id: "sanoma-chat", groups: ["agents"], onBehalfOf: "ada" };
+  const chatForAda = { id: CHAT_AGENT, groups: ["agents"], onBehalfOf: "ada" };
 
   it("offers the catalog's six tools beside the loop's, and names each in the system prompt", async () => {
     const id = `catalog-${RUN}`;

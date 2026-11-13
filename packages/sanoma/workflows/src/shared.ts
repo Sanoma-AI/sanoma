@@ -488,6 +488,9 @@ export const DRAFT_ID = /^[\w-]{1,64}$/;
  */
 export const CALL_ID = /^[\w-]{1,200}$/;
 
+/** The run a direct call held for an approval becomes (`SanomaClient.call`): `call:<actor>:<id>`, of the actor's id and the call's. */
+export const heldCallRunId = (actorId: string, id: string) => `call:${actorId}:${id}`;
+
 /**
  * Who is asking, without a login: the page asks once and sends the name in this header with
  * every server function call, which the default loopback login reads (`sanoma call` too).
@@ -780,11 +783,16 @@ export const RENEWAL_AGENT = "renewal";
  * call and start (the agent catalog, `/mcp`'s six) is the chat's, for them (`chatAgentActing`), and
  * never anyone's acting for no one (`admit` refuses it bare). Named `sanoma-chat`, not `chat`, a
  * word a company may well have given a person or an agent already.
- * Unlike the runtime's other agents it is held to the agent rules (`isDeclaredAgent`): the
- * built-ins it may start (`AGENT_BUILT_INS`) and the policy asked as it and as the person.
+ * Unlike the runtime's other agents (`RUNTIME_AGENTS`, which it is not among) it is held to the
+ * agent rules (`isDeclaredAgent`): the built-ins it may start (`AGENT_BUILT_INS`) and the policy
+ * asked as it and as the person.
  */
 export const CHAT_AGENT = "sanoma-chat";
-/** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration, sign-in codes, grant renewals, the in-app chat), declared whether a data file names them or not. */
+/**
+ * The runtime's own agents that act for no one and are exempt from the agent rules
+ * (`isDeclaredAgent`): scenarios, the host check, scheduled runs, the wakeup's registration,
+ * sign-in codes, grant renewals. Declared whether a data file names them or not.
+ */
 export const RUNTIME_AGENTS: readonly string[] = [
   "scenarios",
   HOST_CHECK_AGENT,
@@ -792,8 +800,9 @@ export const RUNTIME_AGENTS: readonly string[] = [
   WAKEUP_AGENT,
   LOGIN_AGENT,
   RENEWAL_AGENT,
-  CHAT_AGENT,
 ];
+/** The ids the runtime keeps for its own agents, each in `agents` and none a data file's to take: `RUNTIME_AGENTS` and the in-app chat's (`CHAT_AGENT`). */
+export const RESERVED_AGENTS: readonly string[] = [...RUNTIME_AGENTS, CHAT_AGENT];
 
 /** The declared resources of one of the runtime's people types, by `desired`. */
 const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>
@@ -830,13 +839,13 @@ export function agentOfClient(client: string, resources: readonly PeopleResource
 
 /**
  * True for a principal the agent rules bind: in `agents`, not a visitor, and either a declared
- * agent or the in-app chat's (`CHAT_AGENT`), the one runtime agent they bind; the others
+ * agent or the in-app chat's (`CHAT_AGENT`), the one agent of the runtime's they bind; the others
  * (`RUNTIME_AGENTS`) are exempt. Such an agent starts no built-in workflow but those in
  * `AGENT_BUILT_INS` and `call`, and those through the start policy; acting for a person, it is
  * asked about as itself and as the person (`cedarPolicy`'s `authorize`).
  */
 export const isDeclaredAgent = (p: Pick<Principal, "id" | "groups">): boolean =>
-  !isVisitor(p) && (p.groups?.includes(AGENTS) ?? false) && (p.id === CHAT_AGENT || !RUNTIME_AGENTS.includes(p.id));
+  !isVisitor(p) && (p.groups?.includes(AGENTS) ?? false) && !RUNTIME_AGENTS.includes(p.id);
 
 /** The built-in workflows a declared agent (`isDeclaredAgent`) may start, its start decided by the policy: drift, which changes nothing. */
 export const AGENT_BUILT_INS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW]);
@@ -855,7 +864,7 @@ export const declaresPeople = (resources: readonly PeopleResource[]): boolean =>
  */
 export function principalOf(id: string, resources: readonly PeopleResource[]): Principal | undefined {
   const agent = peopleOfType<AgentFields>(resources, "agent").find((a) => a.id === id);
-  const isAgent = agent !== undefined || RUNTIME_AGENTS.includes(id);
+  const isAgent = agent !== undefined || RESERVED_AGENTS.includes(id);
   if (!isAgent && !peopleOfType<PersonFields>(resources, "person").some((p) => p.id === id)) return undefined;
   const groups = peopleOfType<GroupFields>(resources, "group")
     .filter((g) => g.members.includes(id))

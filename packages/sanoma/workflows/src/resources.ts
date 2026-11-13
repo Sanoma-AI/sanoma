@@ -27,6 +27,7 @@ import {
   personsOf,
   principalOf,
   problemLine,
+  RESERVED_AGENTS,
   RUNTIME_AGENTS,
   VISITORS,
 } from "./shared.ts";
@@ -52,7 +53,7 @@ export interface DeclaredPeople {
   people: DeclaredResource[];
   /**
    * The problems in each file that declares (or tries to declare) a person, agent or group, and
-   * an id two of them share or one of the runtime's own agents (`RUNTIME_AGENTS`) takes. While
+   * an id two of them share or one of the runtime's own agents (`RESERVED_AGENTS`) takes. While
    * there are any, nobody is admitted: a broken file never admits more than it says.
    */
   problems: ResourceProblem[];
@@ -122,7 +123,7 @@ export function readPeople(root: string | undefined): DeclaredPeople {
     }
     const id = r.name;
     const other = ids.get(id);
-    if (other || RUNTIME_AGENTS.includes(id) || isVisitor({ id })) {
+    if (other || RESERVED_AGENTS.includes(id) || isVisitor({ id })) {
       own.push({
         ...r.at,
         message: other
@@ -167,13 +168,7 @@ export function admit(
   // The chat's agent acts only for a person, checked as `chatAgentActing` checks it, and keeps
   // them: never bare, and never through a sign-in, which admits a person alone.
   if (asking.id === CHAT_AGENT) {
-    if (signIn || asking.onBehalfOf === undefined) {
-      throw new NotAdmittedError(
-        CHAT_AGENT,
-        [],
-        `${CHAT_AGENT} is the in-app chat's own agent, which acts only for the person chatting in the app`,
-      );
-    }
+    if (signIn || asking.onBehalfOf === undefined) throw new NotAdmittedError(CHAT_AGENT, [], CHAT_AGENT_ALONE);
     return chatAgentActing(asking.onBehalfOf, { people, problems });
   }
   if (problems.length) {
@@ -202,6 +197,24 @@ export function admit(
   throw new NotAdmittedError(who);
 }
 
+/** Why the in-app chat's agent is refused wherever it is named but in a chat's turn: bare, through a sign-in, or as a declared agent. */
+const CHAT_AGENT_ALONE = `${CHAT_AGENT} is the in-app chat's own agent, which acts only for the person chatting in the app`;
+
+/**
+ * What every agent acting for a person is refused for (`agentActing`, `chatAgentActing`), each a
+ * `NotAdmittedError` as `agent`, checked in the caller's order: `files`, while the people's files
+ * have problems, and `person`, when the one it would act for is no declared `sanoma.person`.
+ */
+const mustAct = {
+  files(agent: string, problems: readonly ResourceProblem[]) {
+    if (problems.length) throw new NotAdmittedError(agent, problems.map(problemLine));
+  },
+  person(agent: string, person: string, declared: boolean) {
+    if (declared) return;
+    throw new NotAdmittedError(agent, [], `${agent} acts for no one but a declared person, and ${person} is not one`);
+  },
+};
+
 /**
  * The principal of the declared agent `agent` acting on behalf of the declared person `person`:
  * the agent's id and declared groups (`agents` among them, `principalOf`), with `onBehalfOf`
@@ -217,12 +230,12 @@ export function agentActing(
   person: string,
   { people, problems }: { people: readonly PeopleResource[]; problems: readonly ResourceProblem[] },
 ): Principal {
-  if (problems.length) throw new NotAdmittedError(agent, problems.map(problemLine));
+  mustAct.files(agent, problems);
   const declared = declaredAgentOf(agent, people);
   if (!declared) {
     const why =
       agent === CHAT_AGENT
-        ? `${agent} is the in-app chat's own agent, which acts only for the person chatting in the app`
+        ? CHAT_AGENT_ALONE
         : RUNTIME_AGENTS.includes(agent)
           ? `${agent} is one of the runtime's own agents, which acts for no one`
           : principalOf(agent, people)
@@ -230,9 +243,11 @@ export function agentActing(
             : `${agent} is not an agent resources/people.ts declares`;
     throw new NotAdmittedError(agent, [], why);
   }
-  if (!personsOf(people).some((p) => p.id === person)) {
-    throw new NotAdmittedError(agent, [], `${agent} acts for no one but a declared person, and ${person} is not one`);
-  }
+  mustAct.person(
+    agent,
+    person,
+    personsOf(people).some((p) => p.id === person),
+  );
   if (declared.onBehalfOf !== undefined && declared.onBehalfOf !== person) {
     throw new NotAdmittedError(
       agent,
@@ -257,14 +272,10 @@ export function chatAgentActing(
   person: string,
   { people, problems }: { people: readonly PeopleResource[]; problems: readonly ResourceProblem[] },
 ): Principal {
-  if (problems.length) throw new NotAdmittedError(CHAT_AGENT, problems.map(problemLine));
-  if (isVisitor({ id: person }) || (declaresPeople(people) && !personsOf(people).some((p) => p.id === person))) {
-    throw new NotAdmittedError(
-      CHAT_AGENT,
-      [],
-      `${CHAT_AGENT} acts for no one but a declared person, and ${person} is not one`,
-    );
-  }
+  mustAct.files(CHAT_AGENT, problems);
+  // While no person is declared, whoever chats is taken as given, as `admit` takes them; never a visitor.
+  const known = !declaresPeople(people) || personsOf(people).some((p) => p.id === person);
+  mustAct.person(CHAT_AGENT, person, known && !isVisitor({ id: person }));
   return { id: CHAT_AGENT, groups: principalOf(CHAT_AGENT, people)!.groups ?? [], onBehalfOf: person };
 }
 

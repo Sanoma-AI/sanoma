@@ -1,5 +1,5 @@
 import { type Chat, ChatTurnInput, type Principal, type RunSummary, type SanomaClient } from "sanoma/workflows";
-import { CHAT_AGENT, isEnded } from "sanoma/workflows/shared";
+import { CHAT_AGENT, heldCallRunId, isEnded } from "sanoma/workflows/shared";
 import {
   createUIMessageStreamResponse,
   getToolName,
@@ -214,29 +214,34 @@ export async function postSignInCode(request: Request, context: ActorContext): P
  * stop or a restart cut it short, text and reasoning done, and a tool call with no result failed
  * as interrupted, unless it is one of the agent catalog's that leaves a run (`start_run`, `drift`,
  * a held `lookup`) and its run is there: found by the call's idempotency id (`catalogCallId`, of
- * the turn's message, the person's before the reply), the part answers from it (`fromRun`), so the
- * model is not led to start it again. A message it leaves as it was is the same object, so the
- * caller writes back only those it changed.
+ * the message whose turn wrote that reply: `turn`, which a resumed turn gives as its own, since its
+ * history holds the message apart; without it, the person's last message in `messages`), the part
+ * answers from it (`fromRun`), so the model is not led to start it again. A message it leaves as
+ * it was is the same object, so the caller writes back only those it changed.
  */
-export async function settle(client: SanomaClient, messages: UIMessage[], chat: string): Promise<UIMessage[]> {
+export async function settle(
+  client: SanomaClient,
+  messages: UIMessage[],
+  chat: string,
+  turn: string | undefined = messages.findLast((m) => m.role === "user")?.id,
+): Promise<UIMessage[]> {
+  const callId = (toolCallId: string) => (turn === undefined ? undefined : catalogCallId(chat, turn, toolCallId));
   return Promise.all(
     messages.map(async (message, i) => {
       if (message.role !== "assistant" || !message.parts.some(unfinished)) return message;
       const last = i === messages.length - 1;
-      const turn = messages.slice(0, i).findLast((m) => m.role === "user")?.id;
-      const callId = (toolCallId: string) => (turn === undefined ? undefined : catalogCallId(chat, turn, toolCallId));
       const parts = await Promise.all(message.parts.map((part) => settlePart(client, part, last, callId)));
       return parts.every((part, j) => part === message.parts[j]) ? message : { ...message, parts };
     }),
   );
 }
 
-/** The catalog's tools that leave a run named by their idempotency id: a start's is its run, a held lookup's `call:<actor>:<id>`. */
-const RUN_OF_CALL: Record<string, (id: string) => string> = {
-  start_run: (id) => id,
-  drift: (id) => id,
-  lookup: (id) => `call:${CHAT_AGENT}:${id}`,
-};
+/** The catalog's tools that leave a run named by their idempotency id: a start's is its run, a held lookup's the chat's agent's held call (`heldCallRunId`). */
+const RUN_OF_CALL = new Map<string, (id: string) => string>([
+  ["start_run", (id) => id],
+  ["drift", (id) => id],
+  ["lookup", (id) => heldCallRunId(CHAT_AGENT, id)],
+]);
 
 async function settlePart(
   client: SanomaClient,
@@ -258,13 +263,15 @@ async function settlePart(
   if (!isToolUIPart(part)) return { ...part, state: "done" } as typeof part;
   if (part.state !== "input-streaming" && part.state !== "input-available") return part;
   const name = getToolName(part);
-  const id = Object.hasOwn(RUN_OF_CALL, name) ? callId(part.toolCallId) : undefined;
-  const run = id === undefined ? undefined : await client.run(RUN_OF_CALL[name]!(id));
-  if (run) return fromRun(client, { ...part, input: part.input ?? {} }, name, run);
+  const runOf = RUN_OF_CALL.get(name);
+  const id = runOf && callId(part.toolCallId);
+  const run = runOf && id !== undefined ? await client.run(runOf(id)) : undefined;
+  // A call cut short while its input streamed has none.
+  const called = { ...part, input: part.input ?? {} };
+  if (run) return fromRun(client, called, name, run);
   return {
-    ...part,
+    ...called,
     state: "output-error",
-    input: part.input ?? {},
     errorText: `${name} was interrupted: the server restarted before it finished`,
   };
 }
@@ -299,19 +306,13 @@ async function fromRun(
   name: string,
   run: RunSummary,
 ): Promise<UIMessage["parts"][number]> {
-  const held = { held: { runId: run.runId } } satisfies HeldOutput;
+  const answered = { ...part, state: "output-available" as const };
   if (run.status === "waiting" || (name === "lookup" && !isEnded(run.status))) {
-    return { ...part, state: "output-available", output: held, preliminary: true } as UIMessage["parts"][number];
+    const output = { held: { runId: run.runId } } satisfies HeldOutput;
+    return { ...answered, output, preliminary: true } as UIMessage["parts"][number];
   }
-  if (name === "lookup") {
-    const answered = { ...part, state: "output-available", output: held } as UIMessage["parts"][number];
-    return settledHeld(client, answered, run.runId);
-  }
-  return {
-    ...part,
-    state: "output-available",
-    output: { runId: run.runId, status: run.status },
-  } as UIMessage["parts"][number];
+  if (name === "lookup") return settledHeld(client, answered as UIMessage["parts"][number], run.runId);
+  return { ...answered, output: { runId: run.runId, status: run.status } } as UIMessage["parts"][number];
 }
 
 /** The person's chat `id` with its transcript; null when they have none of that id. */

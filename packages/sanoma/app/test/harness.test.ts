@@ -19,6 +19,7 @@ import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeSandbox } from "sanoma/testing/sandbox";
 import { defineWorkflow } from "sanoma/workflows";
+import { CHAT_AGENT } from "sanoma/workflows/shared";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -373,7 +374,7 @@ describe.each(engines)("the agent catalog on %s", (engine, name, enabled) => {
         expect(sent[0]!.tools.some((t) => t === "start_run" || t.endsWith("__start_run"))).toBe(true);
         const asked = ((await testApp.client.chats.load(id)) as ChatMessage[]).find((m) => m.role === "user")!.id;
         const runId = catalogCallId(id, asked, `toolu_${RUN}_c0`);
-        const chatForAda = { id: "sanoma-chat", groups: ["agents"], onBehalfOf: "ada" };
+        const chatForAda = { id: CHAT_AGENT, groups: ["agents"], onBehalfOf: "ada" };
         expect((await testApp.client.run(runId))?.startedBy).toEqual(chatForAda);
         expect((await testApp.client.ledger(runId))[0]).toMatchObject({ type: "run.started", actor: chatForAda });
         const results = sent.flatMap((request) => request.results).join("\n");

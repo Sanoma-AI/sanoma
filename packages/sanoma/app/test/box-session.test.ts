@@ -261,7 +261,7 @@ describe("personBox", () => {
       "Coding agents work in a box of their own on a live instance, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY [connector:agent37]",
     );
     const step = { resolved, by, signal: new AbortController().signal } as unknown as ChatTurnContext;
-    const turn = { step, chat: { id: "c" } as Chat, messages: [] };
+    const turn = { step, chat: { id: "c" } as Chat, messages: [], message: "m" };
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       for (const stream of [harnessEngine("pi")(turn), acpEngine("copilot")(turn)]) {

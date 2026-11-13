@@ -334,6 +334,7 @@ export {
   personOf,
   principalOf,
   RUNTIME_AGENTS,
+  RESERVED_AGENTS,
   CHAT_AGENT,
   HOST_CHECK_AGENT,
   LOGIN_AGENT,

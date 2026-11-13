@@ -4,7 +4,7 @@ import type { Principal } from "sanoma/workflows";
 import { apiNameOf, builtInNamed, builtInRefusal, DESCRIBE_CALL, DRIFT_WORKFLOW } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { ApiError, asApiError } from "../api.ts";
-import { agentDescription, type CallHost, callApi, parse, RESULT_WAIT_MS } from "./core.ts";
+import { agentDescription, type CallHost, callApi, noRun, parse, RESULT_WAIT_MS } from "./core.ts";
 
 // The agent catalog: the six tools an agent is given, as data, and what each does, once. `/mcp`
 // renders it as an MCP server (`server/mcp.ts`), the chat's engines as AI SDK tools
@@ -113,10 +113,11 @@ export const CATALOG = {
 /** A tool's name. */
 export type CatalogName = keyof typeof CATALOG;
 
-/** Who a catalog call is made as, and its idempotency id where the tool takes one. */
+/** Who a catalog call is made as, its idempotency id where the tool takes one, and what ends its wait for a run early (`wait_run`'s and `drift`'s). */
 export interface CatalogCall {
   actor: Principal;
   id?: string;
+  signal?: AbortSignal;
 }
 
 /**
@@ -131,7 +132,7 @@ export async function runCatalog(
   args: unknown,
   call: CatalogCall,
 ): Promise<unknown> {
-  const { actor } = call;
+  const { actor, signal } = call;
   const id = CATALOG[name].idempotencyId !== undefined && call.id !== undefined ? { id: call.id } : {};
   switch (name) {
     case "describe":
@@ -152,18 +153,12 @@ export async function runCatalog(
       return runNamed(host, parse(CATALOG.get_run.input, args, "The input").runId);
     case "wait_run": {
       const { runId, waitMs } = parse(CATALOG.wait_run.input, args, "The input");
-      return resultOf(host, actor, (await runNamed(host, runId)).workflow, runId, waitMs);
+      return resultOf(host, actor, (await runNamed(host, runId)).workflow, runId, { waitMs, signal });
     }
     case "drift": {
       const { waitMs } = parse(CATALOG.drift.input, args, "The input");
-      if (!host.snapshot.description.workflows.some((wf) => wf.name === DRIFT_WORKFLOW)) {
-        throw new ApiError(400, {
-          error: "This company declares no resources in its data files, so there is no drift to check",
-          code: "invalid_input",
-        });
-      }
-      const started = await callApi(host, actor, { name: `${apiNameOf(DRIFT_WORKFLOW)}.start`, input: {}, ...id });
-      return resultOf(host, actor, DRIFT_WORKFLOW, (started as { runId: string }).runId, waitMs);
+      const { runId } = await startDrift(host, actor, call.id);
+      return resultOf(host, actor, DRIFT_WORKFLOW, runId, { waitMs, signal });
     }
     case "start_run": {
       const { workflow, input } = parse(CATALOG.start_run.input, args, "The input");
@@ -192,22 +187,46 @@ function startable(host: CallHost, workflow: string) {
   });
 }
 
+/**
+ * `drift`'s start alone: the built-in drift workflow started as `actor`, its run named by `id` when
+ * given (a retry with it is the same run), without waiting for it; a 400 `invalid_input` when the
+ * company declares no resources, so has no drift to check.
+ */
+export async function startDrift(host: CallHost, actor: Principal, id?: string): Promise<{ runId: string }> {
+  if (!host.snapshot.description.workflows.some((wf) => wf.name === DRIFT_WORKFLOW)) {
+    throw new ApiError(400, {
+      error: "This company declares no resources in its data files, so there is no drift to check",
+      code: "invalid_input",
+    });
+  }
+  const name = `${apiNameOf(DRIFT_WORKFLOW)}.start`;
+  return (await callApi(host, actor, { name, input: {}, ...(id !== undefined && { id }) })) as { runId: string };
+}
+
 /** The run `runId` (`SanomaClient.run`, as `callApi` reads a run), or a 404 `run_not_found`. */
 async function runNamed({ client }: Pick<CallHost, "client">, runId: string) {
   const run = await client.run(runId);
-  if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
+  if (!run) throw noRun(runId);
   return run;
 }
 
 /**
- * The run's output once it ended, through `callApi`'s `<workflow>.result`, as `{ runId, status:
- * "finished", output }`; `{ runId, status: "running" }` when it has not ended within the wait (its
- * `run_running`), which is no failure. A failed run is `callApi`'s failure.
+ * The output of the run `runId` of `workflow` once it ended, through `callApi`'s
+ * `<workflow>.result`, as `{ runId, status: "finished", output }`; `{ runId, status: "running" }`
+ * when it has not ended within the wait (its `run_running`), which is no failure. A failed run is
+ * `callApi`'s failure. `signal` ends the wait early, with its reason.
  */
-async function resultOf(host: CallHost, actor: Principal, workflow: string, runId: string, waitMs?: number) {
+export async function resultOf(
+  host: CallHost,
+  actor: Principal,
+  workflow: string,
+  runId: string,
+  { waitMs, signal }: { waitMs?: number; signal?: AbortSignal } = {},
+) {
   try {
     const name = `${apiNameOf(workflow)}.result`;
-    const output = await callApi(host, actor, { name, input: { runId, ...(waitMs !== undefined && { waitMs }) } });
+    const input = { runId, ...(waitMs !== undefined && { waitMs }) };
+    const output = await callApi(host, actor, { name, input }, { signal });
     return { runId, status: "finished", output: output ?? null };
   } catch (err) {
     if (asApiError(err).body.code === "run_running") return { runId, status: "running" };

@@ -14,14 +14,13 @@ import {
   type RunSummary,
   type SanomaConfig,
 } from "sanoma/workflows";
-import { chatRunPrefix } from "sanoma/workflows/shared";
+import { approverLabel } from "sanoma/workflows/shared";
 import { chatAgentActing, type ConfigDescription, describeConfig, readPeople } from "sanoma/workflows/describe";
 import { tool } from "ai";
 import { z } from "zod";
-import { ApiError } from "../../api.ts";
 import { catalogCallId, type DraftCard, type HeldOutput } from "../../lib/chat.ts";
-import { CATALOG, type CatalogName, runCatalog } from "../../server/catalog.ts";
-import { type CallHost, RESULT_WAIT_MS } from "../../server/core.ts";
+import { CATALOG, type CatalogName, resultOf, runCatalog, startDrift } from "../../server/catalog.ts";
+import { type CallHost, noRun, RESULT_WAIT_MS } from "../../server/core.ts";
 import { checks, drafting, mustAllow, openDraft, tellCommits } from "./checkout.ts";
 
 // Our loop's tools: reading the repository, editing the chat's draft (opened by the first edit,
@@ -29,10 +28,11 @@ import { checks, drafting, mustAllow, openDraft, tellCommits } from "./checkout.
 // and the agent catalog (`catalogTools`), which both engines get. No shell: the draft sits in the
 // live checkout until previews exist. Every path goes through the checkout rule (`allowedPaths`).
 
-/** What the tools act for: the turn's step (the worker's client and repository, the person), and the chat (whose `draftId` the first edit sets). */
+/** What the tools act for: the turn's step (the worker's client and repository, the person), the chat (whose `draftId` the first edit sets) and the id of the person's message the turn answers (`ChatTurnInput.message`). */
 export interface ToolsTurn {
   step: ChatTurnContext;
   chat: Chat;
+  message: string;
   /** Shows the draft's card in the reply, as it now stands. */
   showDraft(card: DraftCard): void;
 }
@@ -47,8 +47,16 @@ const HELD_POLL_MS = [1000, 10_000] as const;
 const LOOP_HELD_MS = 10 * 60_000;
 /** How long a catalog tool waits for a held start's run to end once its approval is decided. */
 const DECIDED_WAIT_MS = 5000;
-/** How often a catalog tool looks at a run it waits to end: first after a quarter second, to every 2 s. */
-const RESULT_POLL_MS = [250, 2000] as const;
+/** The longest a catalog tool takes to answer in a coding agent's turn: well before an MCP client in the box gives up on it. */
+const HARNESS_ANSWER_MS = 40_000;
+/**
+ * How long a catalog tool waits on a held call or start for its decision in a coding agent's turn:
+ * what `HARNESS_ANSWER_MS` leaves after a start's own wait (`RESULT_WAIT_MS`) and the wait after a
+ * decision (`DECIDED_WAIT_MS`), so a call answers within it, its run's id in the answer.
+ */
+export const HARNESS_HELD_MS = HARNESS_ANSWER_MS - RESULT_WAIT_MS - DECIDED_WAIT_MS;
+/** How often a catalog tool looks at a run it started, until it ends or waits: first after a quarter second, to every 2 s. */
+const STARTED_POLL_MS = [250, 2000] as const;
 
 const git = promisify(execFile);
 
@@ -283,48 +291,52 @@ const spec = <N extends CatalogName>(name: N) => {
   return { title, description, inputSchema: input as (typeof CATALOG)[N]["input"] };
 };
 
-/** A run that waits for its approvals, as the model is told it: whose decisions it waits for (a person's id, or a group). */
+/** A run that waits for its approvals, as the model is told it: whose decisions it waits for (`approverLabel`: a person's id, or "group <name>"). */
 const stillHeld = (run: RunSummary): StillHeld => ({
   held: { runId: run.runId },
   runId: run.runId,
   status: "waiting for approval",
-  waitsFor: run.approvals
-    .filter((a) => a.status === "pending")
-    .map(({ approver }) => (typeof approver === "string" ? approver : `the group ${approver.group}`)),
+  waitsFor: run.approvals.filter((a) => a.status === "pending").map(({ approver }) => approverLabel(approver)),
 });
-
-/** The 404 for a run there is not, in `callApi`'s words. */
-const noRun = (runId: string) => new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
 
 /**
  * The agent catalog (`server/catalog.ts`, the tools `/mcp` serves) as AI SDK tools for a turn of
  * `turn.chat`, run in the worker against the turn's step (its client, resolved config and the
  * config's description) as the in-app chat's agent acting for the person chatting
  * (`chatAgentActing`), so the policy is asked as it and as them and the ledger records both. A
- * tool that takes an idempotency id is given `catalogCallId` of the chat, the turn's message and
- * the tool call, one call per tool call. A held lookup, or a start (`start_run`, `drift`) whose run
- * waits for an approval, shows the held output (`{ held: { runId } }`, the chat's approval card) at
- * once and waits up to `heldMs` for the decision; past it, it answers that it waits, for whom, with
- * the run's id. A started run that is not held is waited for at most `RESULT_WAIT_MS`. Every wait
- * here is the tool's own and ends with the turn (its abort signal): `callApi`'s result wait, which
- * takes none, is never used. HarnessAgent's engines run these on the host too, never in the box.
+ * tool that takes an idempotency id is given `catalogCallId` of the chat, the turn's message
+ * (`turn.message`) and the tool call, one call per tool call. A held lookup, or a start
+ * (`start_run`, `drift`) whose run waits for an approval, shows the held output
+ * (`{ held: { runId } }`, the chat's approval card) at once and waits up to `heldMs` for the
+ * decision; past it, it answers that it waits, for whom, with the run's id. A started run that is
+ * not held is waited for at most `RESULT_WAIT_MS`. Every wait here ends with the turn (its abort
+ * signal): the tool's own polls, and `callApi`'s result wait, which is given the signal.
+ * HarnessAgent's engines run these on the host too, never in the box.
  */
-export function catalogTools({ step, chat }: Pick<ToolsTurn, "step" | "chat">, { heldMs }: { heldMs: number }) {
+export function catalogTools(
+  { step, chat, message }: Pick<ToolsTurn, "step" | "chat" | "message">,
+  { heldMs }: { heldMs: number },
+) {
   const { client } = step;
-  // The turn's run is `chat:<chat>:<message>`: its message names the turn, so `settle` finds its calls again.
-  const prefix = chatRunPrefix(chat.id);
-  if (!step.runId.startsWith(prefix)) throw new Error(`${step.runId} is no turn of the chat ${chat.id}`);
-  const message = step.runId.slice(prefix.length);
   const host = (): CallHost => ({
     client,
     resolved: step.resolved,
     snapshot: { description: describedOf(step.config) },
   });
-  /** The tool `name` called with `args` as the chat's agent for the turn's person (the people's files as they are now). */
-  const call = (name: CatalogName, args: unknown, toolCallId?: string) =>
+  /** The chat's agent for the turn's person (the people's files as they are now). */
+  const actor = () => chatAgentActing(step.by.id, readPeople(step.resolved.root));
+  /** The idempotency id of the tool call `toolCallId` in this turn. */
+  const idOf = (toolCallId: string) => catalogCallId(chat.id, message, toolCallId);
+  /** The tool `name` called with `args` as the chat's agent, by the tool call's id where it takes one, its wait ended by `signal`. */
+  const call = (
+    name: CatalogName,
+    args: unknown,
+    { toolCallId, signal }: { toolCallId?: string; signal?: AbortSignal },
+  ) =>
     runCatalog(host(), name, args, {
-      actor: chatAgentActing(step.by.id, readPeople(step.resolved.root)),
-      ...(toolCallId !== undefined && { id: catalogCallId(chat.id, message, toolCallId) }),
+      actor: actor(),
+      ...(toolCallId !== undefined && { id: idOf(toolCallId) }),
+      ...(signal && { signal }),
     });
   /** The run `runId`, read every `steps` (doubling) until `done` says so of it or `until` passes; undefined once it is gone. */
   const poll = async (
@@ -341,41 +353,45 @@ export function catalogTools({ step, chat }: Pick<ToolsTurn, "step" | "chat">, {
       await sleep(Math.min(wait, until - Date.now()), undefined, { signal });
     }
   };
-  /** `wait_run`'s answer for the run `runId`, waited for up to `ms`: its output once it ended, else that it is running. */
-  const resultWithin = async (runId: string, ms: number, signal: AbortSignal | undefined) => {
-    const run = await poll(runId, Date.now() + ms, (r) => isEnded(r.status), signal, RESULT_POLL_MS);
-    if (!run) throw noRun(runId);
-    return isEnded(run.status) ? call("wait_run", { runId, waitMs: 0 }) : { runId, status: "running" };
-  };
   /**
-   * A started run watched for `startMs` at most, until it ends or waits for an approval; one that
-   * waits shows the held output, then is waited for up to `heldMs` for the decision, and once it is
-   * decided up to `DECIDED_WAIT_MS` more for its end. Its answer: `wait_run`'s, or that it waits.
+   * `wait_run`'s answer for `run`, just read: an ended one's result fetched at once, one still
+   * going waited for up to `ms` more.
    */
-  async function* watched(runId: string, startMs: number, signal: AbortSignal | undefined) {
+  const answerOf = (run: RunSummary, ms: number, signal: AbortSignal | undefined) =>
+    isEnded(run.status)
+      ? resultOf(host(), actor(), run.workflow, run.runId, { waitMs: 0 })
+      : call("wait_run", { runId: run.runId, waitMs: ms }, { signal });
+  /**
+   * A started run watched for `startMs` (`RESULT_WAIT_MS` at most, and when not given), until it
+   * ends or waits for an approval; one that waits shows the held output, then is waited for up to
+   * `heldMs` for the decision, and once it is decided up to `DECIDED_WAIT_MS` more for its end.
+   * Its answer: `wait_run`'s, or that it waits.
+   */
+  async function* watched(runId: string, signal: AbortSignal | undefined, startMs = RESULT_WAIT_MS) {
     const started = await poll(
       runId,
-      Date.now() + startMs,
+      Date.now() + Math.min(startMs, RESULT_WAIT_MS),
       (r) => isEnded(r.status) || r.status === "waiting",
       signal,
-      RESULT_POLL_MS,
+      STARTED_POLL_MS,
     );
     if (!started) throw noRun(runId);
-    if (started.status !== "waiting") return resultWithin(runId, 0, signal);
+    if (started.status !== "waiting") return answerOf(started, 0, signal);
     yield { held: { runId } } satisfies HeldOutput;
     const decided = await poll(runId, Date.now() + heldMs, (r) => r.status !== "waiting", signal);
-    if (decided?.status === "waiting") return stillHeld(decided);
-    return resultWithin(runId, DECIDED_WAIT_MS, signal);
+    if (!decided) throw noRun(runId);
+    if (decided.status === "waiting") return stillHeld(decided);
+    return answerOf(decided, DECIDED_WAIT_MS, signal);
   }
 
   return {
-    describe: tool({ ...spec("describe"), execute: (args) => call("describe", args) }),
+    describe: tool({ ...spec("describe"), execute: (args) => call("describe", args, {}) }),
     lookup: tool({
       ...spec("lookup"),
       async *execute(args, { toolCallId, abortSignal }): AsyncGenerator<HeldOutput | { output: unknown }> {
         let output: unknown;
         try {
-          output = await call("lookup", args, toolCallId);
+          output = await call("lookup", args, { toolCallId });
         } catch (err) {
           const runId = heldRun(err);
           if (runId === undefined) throw err;
@@ -390,25 +406,24 @@ export function catalogTools({ step, chat }: Pick<ToolsTurn, "step" | "chat">, {
         yield { output };
       },
     }),
-    get_run: tool({ ...spec("get_run"), execute: (args) => call("get_run", args) }),
+    get_run: tool({ ...spec("get_run"), execute: (args) => call("get_run", args, {}) }),
     wait_run: tool({
       ...spec("wait_run"),
-      execute: ({ runId, waitMs }, { abortSignal }) =>
-        resultWithin(runId, Math.min(waitMs ?? RESULT_WAIT_MS, RESULT_WAIT_MS), abortSignal),
+      execute: (args, { abortSignal }) => call("wait_run", args, { signal: abortSignal }),
     }),
     drift: tool({
       ...spec("drift"),
       async *execute({ waitMs }, { toolCallId, abortSignal }) {
         // Started without waiting, then watched as a start is: a drift the policy holds shows at once.
-        const { runId } = (await call("drift", { waitMs: 0 }, toolCallId)) as { runId: string };
-        yield yield* watched(runId, Math.min(waitMs ?? RESULT_WAIT_MS, RESULT_WAIT_MS), abortSignal);
+        const { runId } = await startDrift(host(), actor(), idOf(toolCallId));
+        yield yield* watched(runId, abortSignal, waitMs);
       },
     }),
     start_run: tool({
       ...spec("start_run"),
       async *execute(args, { toolCallId, abortSignal }) {
-        const { runId } = (await call("start_run", args, toolCallId)) as { runId: string };
-        yield yield* watched(runId, RESULT_WAIT_MS, abortSignal);
+        const { runId } = (await call("start_run", args, { toolCallId })) as { runId: string };
+        yield yield* watched(runId, abortSignal);
       },
     }),
   };

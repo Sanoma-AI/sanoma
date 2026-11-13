@@ -46,7 +46,7 @@ const loopAgent = (model: LanguageModel, system: string, tools: LoopTools) =>
   });
 
 /** The loop's engine: a turn of `chat` as a UI message stream. */
-export const run: Engine = ({ chat, messages, step }) => {
+export const run: Engine = ({ chat, messages, message, step }) => {
   // `postChat` refuses a turn of the loop (`onModelConnector`) while no connector gives a model (`chatModel`).
   const vendor = modelVendor(step)!;
   const { by: principal, signal } = step;
@@ -71,6 +71,7 @@ export const run: Engine = ({ chat, messages, step }) => {
       const tools = loopTools({
         step,
         chat,
+        message,
         showDraft: (data) => writer.write({ type: "data-draft", id: "draft", data }),
       });
       const agent = loopAgent(model, system, tools);

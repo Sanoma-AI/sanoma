@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,13 +14,14 @@ import {
   withSetup,
 } from "sanoma/workflows";
 import { defineFake } from "sanoma/workflows/fake";
-import { chatRunId } from "sanoma/workflows/shared";
+import { CHAT_AGENT, chatRunId, heldCallRunId } from "sanoma/workflows/shared";
 import type { UIMessage } from "ai";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { catalogCallId } from "../src/lib/chat.ts";
 import { settle } from "../src/server/chat.ts";
 import { catalogTools } from "../src/steps/agent/tools.ts";
+import { chat as chatTurn } from "../src/steps/agent/turn.ts";
 
 // Needs Postgres (`pnpm db:up`). The agent catalog as the chat's engines take it (`catalogTools`),
 // run against a worker's client as the in-app chat's agent for a person, without a model: the
@@ -84,6 +86,7 @@ writeFileSync(
 
 export const ada = sanoma.person({ id: "ada" });
 export const bo = sanoma.person({ id: "bo" });
+export const finance = sanoma.group({ name: "finance", members: ["ada"] });
 `,
 );
 writeFileSync(
@@ -108,6 +111,10 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
 @hold("on-behalf-of")
 forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"crm.customer.find", resource)
 when { context.input.name == "Held" };
+
+@hold("finance")
+forbid (principal, action == Sanoma::Action::"crm.customer.find", resource)
+when { context.input.name == "Audit" };
 `,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -121,6 +128,12 @@ const testApp = useTestApp(
   { databaseUrl: testDatabaseUrl("catalog_tools") },
 );
 
+/** This file's run, so its chats and the runs their calls leave are new on a test database used before. */
+const RUN = randomUUID().slice(0, 8);
+
+/** The test app's config resolved, once. */
+let resolved: ReturnType<typeof resolveConfig> | undefined;
+
 /** A turn of the chat `chat` for the person `by`'s message `message`, as the worker's step gives it. */
 const toolsFor = (by: string, chat: string, message = "m1", heldMs = 2000) => {
   const { config } = testApp;
@@ -128,10 +141,10 @@ const toolsFor = (by: string, chat: string, message = "m1", heldMs = 2000) => {
     client: testApp.client,
     by: { id: by },
     config,
-    resolved: resolveConfig(config),
+    resolved: (resolved ??= resolveConfig(config)),
     runId: chatRunId(chat, message),
   } as unknown as ChatTurnContext;
-  return catalogTools({ step, chat: { id: chat } as never }, { heldMs });
+  return catalogTools({ step, chat: { id: chat } as never, message }, { heldMs });
 };
 
 const options = (toolCallId: string, abortSignal?: AbortSignal) => ({
@@ -151,31 +164,34 @@ async function outputs(answer: unknown): Promise<unknown[]> {
   return [await answer];
 }
 
-const chatFor = (person: string) => ({ id: "sanoma-chat", groups: ["agents"], onBehalfOf: person });
+/** What a tool's `execute` answered last: its result. */
+const lastOf = async (answer: unknown) => (await outputs(answer)).at(-1);
+
+const chatFor = (person: string) => ({ id: CHAT_AGENT, groups: ["agents"], onBehalfOf: person });
 
 describe("the chat's catalog tools", () => {
   it("refuse the chat what a forbid refuses its person, and let another person's chat through", async () => {
-    const ada = toolsFor("ada", "c-ada");
+    const ada = toolsFor("ada", `c-ada-${RUN}`);
     await expect(
       outputs(ada.lookup.execute!({ op: "crm.customer.find", input: { name: "A" } }, options("t1"))),
     ).rejects.toThrow(/Ada looks up no customer/);
     await expect(
       outputs(ada.start_run.execute!({ workflow: "memo", input: { note: "x" } }, options("t2"))),
     ).rejects.toThrow(/Ada writes no memo/);
-    const bo = toolsFor("bo", "c-bo");
-    expect(
-      (await outputs(bo.lookup.execute!({ op: "crm.customer.find", input: { name: "A" } }, options("t1")))).at(-1),
-    ).toEqual({ output: { name: "A" } });
-    const started = (
-      await outputs(bo.start_run.execute!({ workflow: "memo", input: { note: "x" } }, options("t2")))
-    ).at(-1) as { runId: string };
+    const bo = toolsFor("bo", `c-bo-${RUN}`);
+    expect(await lastOf(bo.lookup.execute!({ op: "crm.customer.find", input: { name: "A" } }, options("t1")))).toEqual({
+      output: { name: "A" },
+    });
+    const started = (await lastOf(
+      bo.start_run.execute!({ workflow: "memo", input: { note: "x" } }, options("t2")),
+    )) as { runId: string };
     expect(started).toMatchObject({ status: "finished", output: { noted: "x" } });
-    expect(started.runId).toBe(catalogCallId("c-bo", "m1", "t2"));
+    expect(started.runId).toBe(catalogCallId(`c-bo-${RUN}`, "m1", "t2"));
     expect((await testApp.client.run(started.runId))?.startedBy).toEqual(chatFor("bo"));
   }, 120_000);
 
   it("refuse every one of the runtime's own workflows, however it is written", async () => {
-    const bo = toolsFor("bo", "c-builtins");
+    const bo = toolsFor("bo", `c-builtins-${RUN}`);
     for (const workflow of ["save-draft", "saveDraft", "call", "chat", "drift", "apply", "login-code", "loginCode"]) {
       await expect(
         outputs(bo.start_run.execute!({ workflow, input: {} }, options(`b-${workflow}`))),
@@ -185,27 +201,20 @@ describe("the chat's catalog tools", () => {
   }, 120_000);
 
   it("start a new run for a tool-call id used again in a later turn, and answer the same run within one", async () => {
-    const first = toolsFor("bo", "c-again", "m1");
-    const a = (
-      await outputs(first.start_run.execute!({ workflow: "memo", input: { note: "same" } }, options("call_0")))
-    ).at(-1) as { runId: string };
+    const first = toolsFor("bo", `c-again-${RUN}`, "m1");
+    const start = (tools: ReturnType<typeof toolsFor>) =>
+      lastOf(tools.start_run.execute!({ workflow: "memo", input: { note: "same" } }, options("call_0")));
+    const a = (await start(first)) as { runId: string };
     // A retry within the turn is the same call.
-    expect(
-      (await outputs(first.start_run.execute!({ workflow: "memo", input: { note: "same" } }, options("call_0")))).at(
-        -1,
-      ),
-    ).toEqual(a);
-    const later = toolsFor("bo", "c-again", "m2");
-    const b = (
-      await outputs(later.start_run.execute!({ workflow: "memo", input: { note: "same" } }, options("call_0")))
-    ).at(-1) as { runId: string };
+    expect(await start(first)).toEqual(a);
+    const b = (await start(toolsFor("bo", `c-again-${RUN}`, "m2"))) as { runId: string };
     expect(b.runId).not.toBe(a.runId);
     expect(b).toMatchObject({ status: "finished", output: { noted: "same" } });
   }, 120_000);
 
   it("show a held start at once, and past the wait answer that it waits, and for whom", async () => {
-    const bo = toolsFor("bo", "c-held", "m1", 1500);
-    const runId = catalogCallId("c-held", "m1", "h1");
+    const bo = toolsFor("bo", `c-held-${RUN}`, "m1", 100);
+    const runId = catalogCallId(`c-held-${RUN}`, "m1", "h1");
     const seen = await outputs(bo.start_run.execute!({ workflow: "payout", input: { amount: 3 } }, options("h1")));
     expect(seen).toEqual([
       { held: { runId } },
@@ -213,23 +222,34 @@ describe("the chat's catalog tools", () => {
     ]);
   }, 120_000);
 
+  it("name a group a held lookup still waits for as the approvals' pages do", async () => {
+    const bo = toolsFor("bo", `c-group-${RUN}`, "m1", 100);
+    const runId = heldCallRunId(CHAT_AGENT, catalogCallId(`c-group-${RUN}`, "m1", "g1"));
+    expect(
+      await outputs(bo.lookup.execute!({ op: "crm.customer.find", input: { name: "Audit" } }, options("g1"))),
+    ).toEqual([
+      { held: { runId } },
+      { held: { runId }, runId, status: "waiting for approval", waitsFor: ["group finance"] },
+    ]);
+  }, 120_000);
+
   it("show a drift the policy holds at once, not after the result's wait", async () => {
-    const bo = toolsFor("bo", "c-drift", "m1", 600_000);
+    const bo = toolsFor("bo", `c-drift-${RUN}`, "m1", 600_000);
     const generator = bo.drift.execute!({}, options("d1")) as AsyncGenerator<unknown>;
     const started = Date.now();
-    expect((await generator.next()).value).toEqual({ held: { runId: catalogCallId("c-drift", "m1", "d1") } });
+    expect((await generator.next()).value).toEqual({ held: { runId: catalogCallId(`c-drift-${RUN}`, "m1", "d1") } });
     expect(Date.now() - started).toBeLessThan(10_000);
     await generator.return(undefined);
   }, 120_000);
 
   it("end a wait the turn's stop ends: a held start's, and wait_run's", async () => {
-    const bo = toolsFor("bo", "c-stop", "m1", 600_000);
+    const bo = toolsFor("bo", `c-stop-${RUN}`, "m1", 600_000);
     const stop = new AbortController();
     const generator = bo.start_run.execute!(
       { workflow: "payout", input: { amount: 4 } },
       options("s1", stop.signal),
     ) as AsyncGenerator<unknown>;
-    const runId = catalogCallId("c-stop", "m1", "s1");
+    const runId = catalogCallId(`c-stop-${RUN}`, "m1", "s1");
     expect((await generator.next()).value).toEqual({ held: { runId } });
     let started = Date.now();
     setTimeout(() => stop.abort(), 200);
@@ -243,7 +263,7 @@ describe("the chat's catalog tools", () => {
     await expect(outputs(bo.wait_run.execute!({ runId }, options("s2", waiting.signal)))).rejects.toThrow(/abort/i);
     expect(Date.now() - started).toBeLessThan(3000);
     // Unstopped, it answers that the run is running once its wait is over.
-    expect((await outputs(bo.wait_run.execute!({ runId, waitMs: 300 }, options("s3")))).at(-1)).toEqual({
+    expect(await lastOf(bo.wait_run.execute!({ runId, waitMs: 300 }, options("s3")))).toEqual({
       runId,
       status: "running",
     });
@@ -263,23 +283,25 @@ const partOf = (messages: UIMessage[]) => messages.at(-1)!.parts[0] as Record<st
 
 describe("settle, for a catalog call a restart cut short", () => {
   it("answers a start from the run it left, by its id and status, so the model does not start it again", async () => {
-    const bo = toolsFor("bo", "c-cut", "m1");
+    const bo = toolsFor("bo", `c-cut-${RUN}`, "m1");
     await outputs(bo.start_run.execute!({ workflow: "memo", input: { note: "once" } }, options("t1")));
-    const runId = catalogCallId("c-cut", "m1", "t1");
-    const settled = partOf(await settle(testApp.client, cut("m1", "start_run", "t1", { workflow: "memo" }), "c-cut"));
+    const runId = catalogCallId(`c-cut-${RUN}`, "m1", "t1");
+    const settled = partOf(
+      await settle(testApp.client, cut("m1", "start_run", "t1", { workflow: "memo" }), `c-cut-${RUN}`),
+    );
     expect(settled).toMatchObject({ state: "output-available", output: { runId, status: "finished" } });
   }, 120_000);
 
   it("keeps a held start's or held lookup's run as its approval card, and settles it once it ended", async () => {
-    const bo = toolsFor("bo", "c-cut-held", "m1", 500);
+    const bo = toolsFor("bo", `c-cut-held-${RUN}`, "m1", 500);
     await outputs(bo.start_run.execute!({ workflow: "payout", input: { amount: 5 } }, options("p1")));
     await outputs(bo.lookup.execute!({ op: "crm.customer.find", input: { name: "Held" } }, options("l1")));
-    const start = catalogCallId("c-cut-held", "m1", "p1");
-    const call = `call:sanoma-chat:${catalogCallId("c-cut-held", "m1", "l1")}`;
+    const start = catalogCallId(`c-cut-held-${RUN}`, "m1", "p1");
+    const call = heldCallRunId(CHAT_AGENT, catalogCallId(`c-cut-held-${RUN}`, "m1", "l1"));
     expect((await testApp.client.run(call))?.startedBy).toEqual(chatFor("bo"));
-    const heldStart = await settle(testApp.client, cut("m1", "start_run", "p1", {}), "c-cut-held");
+    const heldStart = await settle(testApp.client, cut("m1", "start_run", "p1", {}), `c-cut-held-${RUN}`);
     expect(partOf(heldStart)).toMatchObject({ output: { held: { runId: start } }, preliminary: true });
-    expect(partOf(await settle(testApp.client, cut("m1", "lookup", "l1", {}), "c-cut-held"))).toMatchObject({
+    expect(partOf(await settle(testApp.client, cut("m1", "lookup", "l1", {}), `c-cut-held-${RUN}`))).toMatchObject({
       output: { held: { runId: call } },
       preliminary: true,
     });
@@ -287,13 +309,35 @@ describe("settle, for a catalog call a restart cut short", () => {
     await waitFor(async () => (await testApp.client.approvals(call)).some((a) => a.status === "pending"));
     await testApp.client.decide(call, { decision: "approve", by: { id: "bo" } });
     await waitFor(async () => (await testApp.client.run(call))?.status === "finished");
-    const held = await settle(testApp.client, cut("m1", "lookup", "l1", {}), "c-cut-held");
-    const answered = await settle(testApp.client, held, "c-cut-held");
+    const held = await settle(testApp.client, cut("m1", "lookup", "l1", {}), `c-cut-held-${RUN}`);
+    const answered = await settle(testApp.client, held, `c-cut-held-${RUN}`);
     expect(partOf(answered)).toMatchObject({ preliminary: false, output: { output: { name: "Held" } } });
   }, 120_000);
 
+  it("answers a resumed turn's own start from its run, by the turn's message, whatever was said before it", async () => {
+    const chat = `c-resumed-${RUN}`;
+    const bo = toolsFor("bo", chat, "m2");
+    await outputs(bo.start_run.execute!({ workflow: "memo", input: { note: "resumed" } }, options("t1")));
+    const { chats } = testApp.client;
+    await chats.open({ id: chat, person: "bo", engine: "loop", title: "Resumed" });
+    // An earlier turn, then this one's message and its reply, cut short in the start by the worker's restart.
+    const [asked, reply] = cut("m2", "start_run", "t1", { workflow: "memo" });
+    await chats.upsert(chat, [
+      { id: "m1", role: "user", parts: [{ type: "text", text: "Hi" }] },
+      { id: "r1", role: "assistant", parts: [{ type: "text", text: "Hello", state: "done" }] },
+      asked!,
+      reply!,
+    ]);
+    const step = { client: testApp.client, runId: chatRunId(chat, "m2"), resumed: true } as unknown as ChatTurnContext;
+    expect(await chatTurn(step, { chat, message: "m2" })).toEqual({ interrupted: true });
+    expect(partOf((await chats.load(chat)) as UIMessage[])).toMatchObject({
+      state: "output-available",
+      output: { runId: catalogCallId(chat, "m2", "t1"), status: "finished" },
+    });
+  }, 120_000);
+
   it("fails a call that left no run as interrupted, as before", async () => {
-    const settled = partOf(await settle(testApp.client, cut("m9", "start_run", "nothing", {}), "c-none"));
+    const settled = partOf(await settle(testApp.client, cut("m9", "start_run", "nothing", {}), `c-none-${RUN}`));
     expect(settled).toMatchObject({
       state: "output-error",
       errorText: "start_run was interrupted: the server restarted before it finished",

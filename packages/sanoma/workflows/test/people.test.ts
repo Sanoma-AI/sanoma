@@ -420,23 +420,18 @@ describe("agentActing, and admit for an agent acting for someone", () => {
   });
 });
 
+/** The in-app chat's agent acting for `person`, as `chatAgentActing` makes it while no group lists it. */
+const chatFor = (person: string) => ({ id: CHAT_AGENT, groups: ["agents"], onBehalfOf: person });
+
 describe("chatAgentActing: the in-app chat's agent, for the person chatting", () => {
   const read = { people, problems: [] };
 
   it("is the runtime's agent chat, in agents, acting for the declared person, which admit keeps", () => {
     expect(CHAT_AGENT).toBe("sanoma-chat");
-    expect(chatAgentActing("ada", read)).toEqual({ id: "sanoma-chat", groups: ["agents"], onBehalfOf: "ada" });
-    expect(admit({ id: "sanoma-chat", onBehalfOf: "ada", groups: ["finance"] }, read)).toEqual({
-      id: "sanoma-chat",
-      groups: ["agents"],
-      onBehalfOf: "ada",
-    });
+    expect(chatAgentActing("ada", read)).toEqual(chatFor("ada"));
+    expect(admit({ id: "sanoma-chat", onBehalfOf: "ada", groups: ["finance"] }, read)).toEqual(chatFor("ada"));
     // While no person is declared, for whoever the chat's person is, as the app takes them.
-    expect(chatAgentActing("anyone", { people: [], problems: [] })).toEqual({
-      id: "sanoma-chat",
-      groups: ["agents"],
-      onBehalfOf: "anyone",
-    });
+    expect(chatAgentActing("anyone", { people: [], problems: [] })).toEqual(chatFor("anyone"));
   });
 
   it.each([
@@ -500,7 +495,7 @@ describe("chatAgentActing: the in-app chat's agent, for the person chatting", ()
       expect(admit({ id: "chat" }, declared)).toEqual({ id: "chat", groups: [] });
       expect(admit({ id: "ada" }, declared)).toEqual({ id: "ada", groups: [] });
       expect(isDeclaredAgent(admit({ id: "chat" }, declared))).toBe(false);
-      expect(chatAgentActing("chat", declared)).toEqual({ id: "sanoma-chat", groups: ["agents"], onBehalfOf: "chat" });
+      expect(chatAgentActing("chat", declared)).toEqual(chatFor("chat"));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -667,7 +662,7 @@ describe("the client, with people declared", () => {
     expect(await app.client.start(held, {}, { startedBy: { id: "sanoma-chat", onBehalfOf: "ada" }, runId })).toBe(
       runId,
     );
-    const startedBy = { id: "sanoma-chat", groups: ["agents"], onBehalfOf: "ada" };
+    const startedBy = chatFor("ada");
     expect((await app.client.run(runId))?.startedBy).toEqual(startedBy);
     await waitFor(async () => (await app.client.ledger(runId)).length > 0);
     expect((await app.client.ledger(runId))[0]).toMatchObject({ type: "run.started", actor: startedBy });
