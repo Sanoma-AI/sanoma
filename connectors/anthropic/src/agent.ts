@@ -18,12 +18,17 @@ export const claudeCode: CodingAgent = {
     bin: "claude-agent-acp",
     args: [],
     signIn: { method: "claude-ai-login" },
+    // Its model's API, and its claude.ai sign-in (SSO organisations' too): Anthropic's list,
+    // https://code.claude.com/docs/en/network-config.
+    hosts: ["api.anthropic.com", "claude.ai", "claude.com", "platform.claude.com", "sso.claude.com"],
   },
   onKey: {
     model: "anthropic",
     baseUrl: "ANTHROPIC_BASE_URL",
     qualified: false,
     bridge: true,
+    // Its model's API; its bridge's install is the registry's.
+    hosts: ["api.anthropic.com"],
     harness: async (auth) => {
       const { createClaudeCode }: typeof import("@ai-sdk/harness-claude-code") = await import(
         /* @vite-ignore */ ADAPTER

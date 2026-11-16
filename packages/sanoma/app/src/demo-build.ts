@@ -465,6 +465,7 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
     policy: { defined: false, files: [] },
     sites: [],
     place: "live",
+    loopbackLogin: false,
     content: [],
   };
   const text = demoModule({

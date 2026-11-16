@@ -20,7 +20,7 @@ const config = {
   databaseUrl: process.env.SANOMA_DATABASE_URL!,
   connectors: [...loaded.config.connectors, remote.connector, demoAgent()],
 };
-const source = localGitSource(root, { databaseUrl: config.databaseUrl });
+const source = localGitSource(root);
 const worker = await startWorker(config, { source, app: appSteps, promote: true });
 const client = await SanomaClient.connect(config);
 const app = await runApp(config, { port: 0, log: console.log });

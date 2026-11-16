@@ -99,7 +99,7 @@ describe("the sandbox runner", () => {
       timeoutMs: 10_000,
     });
     expect(results.filter((r) => !r.ok)).toEqual([]);
-    expect(results).toHaveLength(8);
+    expect(results).toHaveLength(9);
   });
 
   it("runs commands side by side on one connection, in their cwd with their env, under the home", async () => {

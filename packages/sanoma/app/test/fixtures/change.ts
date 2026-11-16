@@ -123,7 +123,7 @@ export function useChangeApp(name: string): ChangeApp {
     connectors: [withFake(shop, fake), remote.connector],
     root,
   };
-  const testApp = useTestApp(config, { databaseUrl, source: repo.source });
+  const testApp = useTestApp(config, { databaseUrl, source: repo.source, app: repo.app });
   let app: App | undefined;
   beforeAll(async () => {
     ensureSanomaBuilt();

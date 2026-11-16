@@ -87,7 +87,8 @@ async function work(client, sessionId, cwd) {
     content: [{ type: "content", content: { type: "text", text: content.split("\n")[0] } }],
   });
 
-  // A write under node_modules, asked for and written directly: both refused.
+  // A write under node_modules: asked for, approved as every request is; written through the
+  // client, which writes in its own process: refused.
   const evil = {
     toolCallId: "evil",
     title: "Write node_modules/evil.js",
@@ -120,7 +121,7 @@ async function work(client, sessionId, cwd) {
     log({ readOther: false, error: err.message });
   }
 
-  // A command it asks for: refused. One it runs through the client's terminal: its own.
+  // A command it asks for: approved. One it runs through the client's terminal: its own, in the box.
   const shell = { toolCallId: "shell", title: "cat /etc/hosts", kind: "execute" };
   await update(client, sessionId, { sessionUpdate: "tool_call", ...shell, status: "pending" });
   const shellChosen = await ask(client, sessionId, shell, ["allow_once", "allow_always", "reject_once"]);
@@ -138,6 +139,13 @@ async function work(client, sessionId, cwd) {
   const { output } = await client.request("terminal/output", { sessionId, terminalId });
   await client.request("terminal/release", { sessionId, terminalId });
   log({ terminal: output, exit });
+  // A terminal whose working directory is outside the draft, which the client checks: refused.
+  try {
+    await client.request("terminal/create", { sessionId, command: "pwd", cwd: dirname(cwd) });
+    log({ terminalOutside: true });
+  } catch (err) {
+    log({ terminalOutside: false, error: err.message });
+  }
 
   // The edit, asked for with allow_always first: allowed once, then written through the client.
   const edit = {
@@ -148,13 +156,18 @@ async function work(client, sessionId, cwd) {
   };
   await update(client, sessionId, { sessionUpdate: "tool_call", ...edit, status: "pending", rawInput: { path: file } });
   const editChosen = await ask(client, sessionId, edit, ["allow_always", "allow_once", "reject_once"]);
-  // An edit offered only for always: never chosen.
+  // An edit offered only for always: approved with that, the one way offered to allow it.
   await ask(
     client,
     sessionId,
     { toolCallId: "always", title: "Edit always", kind: "edit", locations: [{ path: file }] },
     ["allow_always", "reject_always"],
   );
+  // One that offers no way to allow it: declined once, the turn going on.
+  await ask(client, sessionId, { toolCallId: "never", title: "Never allowed", kind: "other" }, [
+    "reject_always",
+    "reject_once",
+  ]);
   if (editChosen === "allow_once") {
     const changed = content.replace(
       "`Removed ${person}'s accounts`",

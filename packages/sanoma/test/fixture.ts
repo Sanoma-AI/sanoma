@@ -1,5 +1,14 @@
-import { spawn, type SpawnOptions } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
+import {
+  appendFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +24,7 @@ const manifest = JSON.parse(readFileSync(join(sanoma, "package.json"), "utf8")) 
   exports: Record<string, string | { "sanoma-source"?: string; default: string }>;
   files: string[];
   dependencies: Record<string, string>;
+  bin: { sanoma: string };
 };
 
 /** This package's `src/cli.ts`, which the tests run with Node as a company repo would run the bin. */
@@ -105,8 +115,10 @@ export const FIXTURE_GRID = {
 /**
  * A fresh copy of `fixtures/project` (or of the repo at `from`, such as the template), with what a
  * company repo installs: `sanoma` as pnpm lays out its tarball (its published files in
- * `.pnpm/sanoma/node_modules/sanoma`, its dependencies linked beside it, not under it) and
- * `@sanoma-ai/connector-ghost`, both reaching this checkout's builds.
+ * `.pnpm/sanoma/node_modules/sanoma`, its dependencies linked beside it, not under it, this
+ * platform's `@sanoma-ai/postgres-<platform>` among them, and its bin in `.bin`) and
+ * `@sanoma-ai/connector-ghost`, both reaching this checkout's builds. The PostgreSQL package holds
+ * its server once `pnpm postgres:download` filled it: a check with no database URL (a box's) starts it.
  */
 export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", import.meta.url))): string {
   const dir = mkdtempSync(join(tmpdir(), "sanoma-fixture-"));
@@ -128,9 +140,28 @@ export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", 
     }),
   );
   writeFileSync(join(store, "sanoma/package.json"), JSON.stringify({ ...manifest, exports }, null, 2));
-  for (const name of Object.keys(manifest.dependencies)) link(join(sanoma, "node_modules", name), join(store, name));
+  const postgres = `@sanoma-ai/postgres-${process.platform}-${process.arch}`;
+  for (const name of [...Object.keys(manifest.dependencies), postgres]) {
+    link(join(sanoma, "node_modules", name), join(store, name));
+  }
   symlinkSync(join(store, "sanoma"), join(modules, "sanoma"));
+  // As pnpm's shim runs it, through the link.
+  const bin = `#!/bin/sh\nexec node "$(dirname "$0")/../sanoma/${manifest.bin.sanoma}" "$@"\n`;
+  mkdirSync(join(modules, ".bin"));
+  writeFileSync(join(modules, ".bin/sanoma"), bin, { mode: 0o755 });
   return dir;
+}
+
+/**
+ * The fixture copy at `dir`'s install given to a box's clone at `clone` (`<box's home>/repo`), as
+ * the box's own install of a lockfile would make it (the fixture has none): a link to it, which
+ * the clone's git ignores, so no carry brings it back.
+ */
+export function installInClone(dir: string, clone: string): void {
+  mkdirSync(clone, { recursive: true });
+  execFileSync("git", ["init", "--quiet"], { cwd: clone });
+  appendFileSync(join(clone, ".git/info/exclude"), "/node_modules\n");
+  symlinkSync(join(dir, "node_modules"), join(clone, "node_modules"));
 }
 
 /** This checkout's `connectors/<name>` installed in the copy at `dir` as `@sanoma-ai/connector-<name>`. */

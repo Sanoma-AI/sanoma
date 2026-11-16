@@ -16,7 +16,7 @@ The change flow pushes to a disposable bare Git repository and uses the test Git
 
 The temporary MP4 clips are joined and converted to a 960 × 720, 15 fps looping GIF with ffmpeg. The recorder sizes Chrome's content area as well as its emulated viewport, checks each clip's dimensions, and verifies that the GIF preserves their combined duration. It reserves space below the chat composer for captions and replaces the README GIF only after the full capture and assertions succeed. Duration varies with the interactions; inspect the exported GIF rather than assuming a fixed cut length. No standalone video is published by this command.
 
-Each invocation uses its own temporary company, Git remote, log and database. The database is `SANOMA_TEST_DATABASE_URL` with `_readme_intro_<random suffix>` appended; checks use its `_check` database. Chrome, the server, databases and temporary files are cleaned up on completion, failure or interruption. A failure keeps the server log and, when Chrome is available, a diagnostic screenshot beside the temporary directory.
+Each invocation uses its own temporary company, Git remote, log and database. The database is `SANOMA_TEST_DATABASE_URL` with `_readme_intro_<random suffix>` appended; the draft's check runs in the person's box on this computer, on a Postgres of its own there. Chrome, the server, databases and temporary files are cleaned up on completion, failure or interruption. A failure keeps the server log and, when Chrome is available, a diagnostic screenshot beside the temporary directory.
 
 ## The screenshots
 

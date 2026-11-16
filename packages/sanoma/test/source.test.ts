@@ -17,7 +17,8 @@ import { pathToFileURL } from "node:url";
 import { testDatabaseUrl } from "sanoma/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localGitSource } from "../src/source.ts";
-import { copyFixture, FIXTURE_GRID, ensureBuilt } from "./fixture.ts";
+import type { CheckResult } from "sanoma/workflows";
+import { copyFixture, ensureBuilt, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
 let dir = "";
@@ -789,68 +790,7 @@ describe("localGitSource's apps", () => {
   });
 });
 
-describe("localGitSource's check", () => {
-  it("runs sanoma check in each draft, one at a time, with every field of its result and the live checkout untouched", async () => {
-    // The fixture company in a git repository of its own: the installed bin as a child in each
-    // draft, on the packages' builds (made when stale) and Postgres.
-    ensureBuilt();
-    rmSync(dir, { recursive: true, force: true });
-    dir = copyFixture();
-    writeFileSync(join(dir, ".gitignore"), ".sanoma/\nnode_modules/\n");
-    git("init", "--quiet", "--initial-branch=main");
-    git("add", "--all");
-    git("commit", "--quiet", "-m", "First");
-    const source = localGitSource(dir, { databaseUrl: testDatabaseUrl("drafts") });
-    const [, broken, unloadable] = await Promise.all([
-      source.draft!("ok"),
-      source.draft!("broken"),
-      source.draft!("unloadable"),
-    ]);
-    writeFileSync(join(broken.root, "workflows", "broken.ts"), 'export const n: number = "one";\n');
-    // Its config prints a passing result as it loads, which does not pass it: the launcher's comes last.
-    const fake = JSON.stringify({ sanoma: 1, event: "checked", ok: true, problems: [], warnings: [] });
-    const config = join(broken.root, "sanoma.config.ts");
-    writeFileSync(config, `console.log(${JSON.stringify(fake)});\n${readFileSync(config, "utf8")}`);
-    await broken.commit({ paths: ["workflows/broken.ts", "sanoma.config.ts"], message: "Break", author: "agent" });
-    // A config that does not load, and says what the check's environment holds (but what macOS adds to every one).
-    const names = 'Object.keys(process.env).filter((n) => !n.startsWith("__CF_")).sort().join(" ")';
-    const says = `throw new Error(\`no config; env \${${names}}\`);\n`;
-    writeFileSync(join(unloadable.root, "sanoma.config.ts"), says);
-    await unloadable.commit({ paths: ["sanoma.config.ts"], message: "Unload", author: "agent" });
-    // A credential of this process never reaches the check.
-    vi.stubEnv("GHOST_ADMIN_API_KEY", "not-for-the-check");
-
-    const [passed, failed, refused] = await Promise.all([
-      source.check!("ok"),
-      source.check!("broken"),
-      source.check!("unloadable"),
-    ]);
-    // The grid comes back as the check reported it: the fixture has no policies, so all allow.
-    expect(passed).toEqual({
-      ok: true,
-      problems: [],
-      warnings: [],
-      grid: FIXTURE_GRID,
-    });
-    expect(failed.ok).toBe(false);
-    expect(failed.problems).toContainEqual(expect.stringMatching(/^workflows\/broken\.ts:1:14: .*'string'.*'number'/));
-    expect(refused).toEqual({
-      ok: false,
-      problems: [expect.stringMatching(/^sanoma check: .*no config; env HOME PATH SANOMA_DATABASE_URL SANOMA_EVENTS$/)],
-      warnings: [],
-    });
-    await expect(source.check!("../escape")).rejects.toThrow(/A draft's id/);
-    expect(await source.check!("never")).toEqual({
-      ok: false,
-      problems: [`sanoma check: the draft at ${join(dir, ".sanoma", "drafts", "never")} is not open`],
-      warnings: [],
-    });
-
-    expect(await source.drafts!()).toEqual(["broken", "ok", "unloadable"]);
-    expect(git("status", "--porcelain")).toBe("");
-    expect(git("log", "--format=%s")).toBe("First");
-  }, 600_000);
-
+describe("localGitSource's apps, checked", () => {
   it("takes an app from a source made from the starter, passing sanoma check, then updates it clean", async () => {
     // The starter's root, the fixture's with the template's includes, in the company and in the
     // source; the source adds the company-apps fixture's crm (but its site, which the check would
@@ -877,11 +817,11 @@ describe("localGitSource's check", () => {
       });
       crm.commit({}, "The CRM");
 
-      const source = localGitSource(dir, { databaseUrl: testDatabaseUrl("apps") });
+      const source = localGitSource(dir);
       const take = await source.draft!("take");
       expect(await take.take!({ url: crm.url, author: "ada" })).toMatchObject({ folder: "crm", conflicts: [] });
       // Its scenario runs crm.follow-up, and the grid has the app's workflow.
-      const checked = await source.check!("take");
+      const checked = await checkAt(take.root);
       expect(checked).toMatchObject({ ok: true, problems: [] });
       expect(checked.grid?.workflows.map((w) => w.id)).toEqual(["crm.follow-up", "hello"]);
 
@@ -900,9 +840,23 @@ describe("localGitSource's check", () => {
       const update = await source.draft!("update");
       expect(await update.update!({ folder: "crm", author: "ada" })).toMatchObject({ merged: 1, conflicts: [] });
       expect(readFileSync(join(update.root, "apps/crm/workflows/follow-up.ts"), "utf8")).toContain("with a customer");
-      expect(await source.check!("update")).toMatchObject({ ok: true, problems: [] });
+      expect(await checkAt(update.root)).toMatchObject({ ok: true, problems: [] });
     } finally {
       rmSync(crm.at, { recursive: true, force: true });
     }
   }, 600_000);
 });
+
+/** `sanoma check` in the draft's checkout at `root`, by the bin from this checkout, on a database of the test's: its result. */
+async function checkAt(root: string): Promise<CheckResult> {
+  const ran = await runCli(root, ["check"], { SANOMA_DATABASE_URL: testDatabaseUrl("apps"), SANOMA_EVENTS: "1" });
+  const {
+    sanoma: _,
+    event: __,
+    ...result
+  } = JSON.parse(ran.stdout.trimEnd().split("\n").at(-1)!) as CheckResult & {
+    sanoma: 1;
+    event: "checked";
+  };
+  return result;
+}
