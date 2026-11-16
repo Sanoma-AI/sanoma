@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { collection } from "../src/collection.ts";
 import { describeConfig, generateApi, writeApi } from "../src/describe.ts";
 import { defineConnector, defineWorkflow } from "../src/index.ts";
 import outbound from "./fixtures/outbound/sanoma.config.ts";
@@ -56,7 +57,20 @@ const plan = defineWorkflow({
 /** `plan` as if defined with this name: defineWorkflow takes no `planIt`. */
 const named = (name: string) => ({ ...plan, name }) as typeof plan;
 
-const config = { ...outbound, connectors: [acme], workflows: [...(outbound.workflows ?? []), plan] };
+/** Collections with a free-form field and a link, beside the fixture's. */
+const customers = collection({ name: "customers", key: "id", fields: { id: "text", meta: "json" } });
+const orders = collection({
+  name: "orders",
+  key: "id",
+  fields: { id: "text", customer: { link: "customers" }, extra: { type: "json", optional: true } },
+});
+
+const config = {
+  ...outbound,
+  connectors: [acme],
+  workflows: [...(outbound.workflows ?? []), plan],
+  collections: [...(outbound.collections ?? []), customers, orders],
+};
 
 describe("generateApi", () => {
   it("types each workflow, each direct operation and each collection, with their JSDoc", async () => {

@@ -39,6 +39,7 @@ import {
   errorMessage,
   mayDecide,
   reshapeOf,
+  typeOf,
 } from "./shared.ts";
 import type { CheckResult, RemoteHalf } from "./source.ts";
 
@@ -328,7 +329,7 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
           if (!reshaping) throw new Error(`The change of the draft ${id} brings no records along`);
           // A plan replayed over columns a later change made again would move or clear their values.
           const fields = state.collections.get(reshaping.collection)?.fields;
-          if (!fields || !reshaping.changes.every((c) => declares(fields, c))) {
+          if (!fields || !stillMade(fields, reshaping.changes)) {
             throw new Error(
               `The columns of ${reshaping.collection} are no longer what the change of the draft ${id} made them, so its records are not brought along by it again`,
             );
@@ -340,22 +341,40 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
   };
 }
 
-/** Whether `fields` declare what `change` made of them: its new name alone, or its field of its new type. */
-function declares(fields: Readonly<Record<string, Field>>, change: ReshapeChange): boolean {
-  const typed = (name: string, type: ColumnType) => {
-    const field = fields[name];
-    if (field === undefined) return false;
-    return isDeepStrictEqual(
-      typeof field === "string" ? field : "enum" in field ? { enum: [...field.enum] } : field.type,
-      type,
-    );
-  };
-  switch (change.kind) {
-    case "rename":
-      return Object.hasOwn(fields, change.to) && !Object.hasOwn(fields, change.from);
-    case "retype":
-      return typed(change.field, change.to);
-    case "convert":
-      return typed(change.key, change.type);
+/**
+ * Whether `fields` (the running declaration) are still what `changes` (a plan's that bring the
+ * records along, in order) made of them, so replaying them does to the records what the first
+ * call would have: a renamed or removed field not declared (a column declared under its name since
+ * would have its values moved or deleted), a rename's new name declared, a retyped field and a
+ * conversion's new column (`to`) of the type they took (a link to the same collection, whose keys
+ * the replay reads as the first call did), and the free-form field a conversion took its key out
+ * of free-form still. Each name is judged by the last change that made it. Hidden or shown, a
+ * field is the same: hide and show (with add and require) change the declaration alone, never
+ * reach the records, and so constrain nothing.
+ */
+export function stillMade(fields: Readonly<Record<string, Field>>, changes: readonly ReshapeChange[]): boolean {
+  const made = new Map<string, ColumnType | "declared" | "gone">();
+  for (const change of changes) {
+    switch (change.kind) {
+      case "rename": {
+        const was = made.get(change.from);
+        made.set(change.from, "gone").set(change.to, was === undefined || was === "gone" ? "declared" : was);
+        break;
+      }
+      case "retype":
+        made.set(change.field, change.to);
+        break;
+      case "convert":
+        made.set(change.field, "json").set(change.to, change.type);
+        break;
+      case "remove":
+        made.set(change.field, "gone");
+        break;
+    }
   }
+  return [...made].every(([name, wanted]) => {
+    const field = Object.hasOwn(fields, name) ? fields[name] : undefined;
+    if (wanted === "gone" || field === undefined) return wanted === "gone" && field === undefined;
+    return wanted === "declared" || isDeepStrictEqual(typeOf(field), wanted);
+  });
 }

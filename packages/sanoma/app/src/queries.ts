@@ -6,6 +6,8 @@ import {
   CALL_WORKFLOW,
   errorMessage,
   isEnded,
+  isFreeForm,
+  isHidden,
   LIST_LIMIT,
   type ListQuery,
   type Saved,
@@ -78,7 +80,7 @@ import {
   startRunFn,
 } from "./functions.ts";
 import type { UntypedApi } from "./api-client.ts";
-import { type ColumnChange, isHidden } from "./components/grid/plan.ts";
+import type { ColumnChange } from "./components/grid/plan.ts";
 import { api } from "./site-api.ts";
 
 /**
@@ -900,7 +902,7 @@ export const DataSearch = z.object({
   hide: z.array(z.string().min(1)).min(1).optional().catch(undefined),
   column: z
     .object({
-      change: z.enum(["add", "rename", "retype", "convert", "hide"]),
+      change: z.enum(["add", "rename", "retype", "convert", "hide", "show", "remove"]),
       field: z.string().min(1).optional(),
       key: z.string().min(1).optional(),
     })
@@ -988,7 +990,9 @@ export function listQueryOf(
     if (value !== undefined && values.includes(value)) where[name] = value;
   }
   if (search.key) where[key] = { gte: search.key, lt: search.key + LAST };
-  const order = search.order && Object.hasOwn(fields, search.order.replace(/^-/, "")) ? search.order : undefined;
+  // By a field it has, never a free-form one, which `list` does not sort by.
+  const by = search.order?.replace(/^-/, "");
+  const order = by !== undefined && Object.hasOwn(fields, by) && !isFreeForm(fields[by]) ? search.order : undefined;
   return {
     ...(Object.keys(where).length > 0 && { where }),
     ...(order && { order }),
