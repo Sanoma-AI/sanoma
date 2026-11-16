@@ -31,6 +31,8 @@ Four more operations call the Management API, each but the organizations' with t
 
 Apply calls two of them after it creates a project (the type's `afterCreate`): `project.health` until the database and pooler are healthy, then `database.storeUrl` with the data file's export, so a host can name the URL as `secret("SANOMA_DATABASE_URL_STORE")`.
 
+The runtime connects with that URL as the project's `postgres` role and makes its tables in the schema `public`. Supabase's Data API serves `public` to its `anon` and `authenticated` roles, and with Supabase's default grants those roles get every privilege on each table `postgres` makes there. Sanoma's tables have row-level security on with no policy ([Postgres](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/README.md#postgres)), so through the Data API those roles read no row and write none. `service_role` bypasses row-level security: keep its key as secret as the database password.
+
 The project type meets the [`Database` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#databases) (`database`): it neither pauses nor branches (a paid project never pauses, and a branch starts empty), takes `region` from Supabase's regions (`database.regions`), and stores its URL with `database.storeUrl`. Going live chooses it when the config has no Neon project type.
 
 A data file declares a project with the constructor in `@sanoma-ai/connector-supabase/resources`, without its ref, which Supabase sets: which project a declaration means is its binding, in the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#bindings), by its ref. A declaration with no binding is `absent` to a drift check.

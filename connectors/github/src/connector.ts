@@ -1,6 +1,7 @@
 import { tfConnector } from "sanoma/internal/bridge/connector";
 import { type Connector, defineConnector, type OpSpec, vendorInfo } from "sanoma/workflows";
 import { z } from "zod";
+import { MintedToken } from "./rest.ts";
 import {
   github_branch_protection,
   github_repository,
@@ -120,10 +121,18 @@ const fullName = z
   .regex(/^(?!\.\.?\/)[\w.-]+\/(?!\.\.?$)[\w.-]+$/, "a repository as <owner>/<name>")
   .describe("The repository, as <owner>/<name>");
 const installation = z.number().int().positive().describe("The id of the App's installation that acts");
+/** A path inside the repository (or a ref), `/`-separated: no part empty, `.` or `..`, so its URL stays the repository's. */
+const inside = z
+  .string()
+  .refine(
+    (path) => path.split("/").every((step) => step && step !== "." && step !== ".."),
+    "a path inside the repository",
+  );
 
 /**
  * The operations through Sanoma's GitHub App, for a workflow to call: each mints an installation
- * token from the App's keys when called, which is never stored or returned.
+ * token from the App's keys when called, never stored; only `repository.token` returns the one it
+ * mints, and the ledger records it by name alone.
  */
 const appSpecs = {
   installation: {
@@ -179,6 +188,20 @@ const appSpecs = {
       output: z.object({ sha: z.string().describe("The new commit's") }),
       target: ({ repository }: { repository: string }) => repository,
     },
+    files: {
+      effect: "read",
+      idempotent: true,
+      description:
+        "Read files (path to text) of a repository at a ref, through an installation of the GitHub App; a file not there is left out",
+      input: z.object({
+        installation,
+        repository: fullName,
+        paths: z.array(inside).describe("The files' paths, from the repository's root"),
+        ref: inside.optional().describe("A branch, tag or commit; the default branch's head when left out"),
+      }),
+      output: z.record(z.string(), z.string()).describe("Each file there and its whole text"),
+      target: ({ repository }: { repository: string }) => repository,
+    },
     head: {
       effect: "read",
       idempotent: true,
@@ -202,6 +225,26 @@ const appSpecs = {
       output: z.object({ id: z.number() }),
       target: ({ repository }: { repository: string }) => repository,
     },
+    token: {
+      effect: "access",
+      // Each try mints a token of its own, which changes nothing at GitHub.
+      idempotent: true,
+      description:
+        "Mint an installation token of the GitHub App for one repository alone, with only the permissions named, good for an hour",
+      input: z.object({
+        installation,
+        repository: fullName,
+        permissions: z
+          .record(z.string().min(1), z.enum(["read", "write"]))
+          // GitHub gives a token minted with no permissions named all the installation's.
+          .refine((named) => Object.keys(named).length > 0, "name at least one permission")
+          .describe('What the token may do, by GitHub\'s permission names: `{ contents: "write" }`'),
+      }),
+      output: MintedToken,
+      target: ({ repository }: { repository: string }) => repository,
+      // A bearer for the repository: the ledger records that there was one, not what it was.
+      opaque: ["token"],
+    },
   },
 } satisfies Record<string, Record<string, OpSpec>>;
 
@@ -218,8 +261,8 @@ type GithubSpecs = Omit<typeof githubTf.resources, "repository"> & {
 
 /**
  * The connector's operations: each resource type's (`github.repository.read`, …), and those
- * through the App, `installation.get` and, in the repository's group, `generate`, `commit`, `head` and
- * `addDeployKey` (Neon's pattern for operations beside a type's).
+ * through the App, `installation.get` and, in the repository's group, `generate`, `commit`, `files`,
+ * `head`, `addDeployKey` and `token` (Neon's pattern for operations beside a type's).
  */
 export const githubOps = {
   ...githubApp,
