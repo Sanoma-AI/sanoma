@@ -123,7 +123,21 @@ describe("the staff login", () => {
     const { rows: tables } = await pool.query<{ relname: string }>(
       "SELECT relname FROM pg_class WHERE relnamespace = 'better_auth_staff'::regnamespace AND relkind = 'r' AND relrowsecurity AND NOT relforcerowsecurity ORDER BY 1",
     );
-    expect(tables.map((r) => r.relname)).toEqual(["account", "rate_limit", "session", "user", "verification"]);
+    expect(tables.map((r) => r.relname)).toEqual([
+      "account",
+      "jwks",
+      "oauth_access_token",
+      "oauth_client",
+      "oauth_client_assertion",
+      "oauth_client_resource",
+      "oauth_consent",
+      "oauth_refresh_token",
+      "oauth_resource",
+      "rate_limit",
+      "session",
+      "user",
+      "verification",
+    ]);
     expect((await pool.query("SELECT FROM pg_policies WHERE schemaname = 'better_auth_staff'")).rowCount).toBe(0);
   });
 
