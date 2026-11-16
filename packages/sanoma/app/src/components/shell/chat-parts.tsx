@@ -274,8 +274,9 @@ function httpsLink(url: string | undefined): URL | undefined {
 /**
  * A person's own agent's sign-in: the vendor's link and what it printed (its code among it), a
  * field for a code the vendor asks to have pasted back (written to its sign-in, `POST
- * /api/sign-in`), or the command to run once on this computer; then whether it finished. The
- * sign-in is the person's: the app opens no link and enters no code.
+ * /api/sign-in`), or the command to run once on this computer; then whether it finished (once it
+ * has, the chat sends the person's message again by itself). The sign-in is the person's: the app
+ * opens no link and enters no code.
  */
 function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; live: boolean }) {
   const { agent, state } = card;
@@ -353,7 +354,7 @@ function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; 
           </>
         ) : state === "done" ? (
           <p className="flex items-center gap-1.5">
-            <CheckIcon aria-hidden="true" /> Signed in to {agent}. Send your message again.
+            <CheckIcon aria-hidden="true" /> Signed in to {agent}.
           </p>
         ) : (
           <p className="text-destructive">
