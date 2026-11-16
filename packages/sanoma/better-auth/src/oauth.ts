@@ -1,6 +1,7 @@
 import { createCimdClientDiscovery } from "@better-auth/cimd";
 import { type ClientMetadataResourceFetch, getOAuthProviderState, oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins/jwt";
+import { CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
 
 // The staff login as an OAuth 2.1 authorization server for the agent surface (`/mcp`), whose
 // resource server is the app: Better Auth's oauth-provider, its JWT plugin (the access tokens
@@ -9,11 +10,6 @@ import { jwt } from "better-auth/plugins/jwt";
 // of `@better-auth/cimd` (a client is the HTTPS URL of its metadata document, as Claude Code's
 // is). No dynamic client registration: a client is admitted only as the declared agent that
 // stands for it.
-
-/** The app's sign-in page, where the provider sends someone not signed in, with the signed request. */
-export const LOGIN_PAGE = "/auth/login";
-/** The app's consent page, where the provider sends someone signed in, with the signed request. */
-export const CONSENT_PAGE = "/auth/consent";
 
 /** The scopes there are: none of the policy's, which decides each call, so only a refresh token's. */
 const SCOPES = ["offline_access"];

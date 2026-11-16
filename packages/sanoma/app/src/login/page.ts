@@ -41,7 +41,7 @@ export function smallPage(status: number, title: string, body: string, frame: Pa
  * A small page's headers: never kept, and framed by no page at all, so no other site can lay
  * the sign-in, an invite or a consent's Allow under a click of its own.
  */
-export const PAGE_HEADERS = {
+const PAGE_HEADERS = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "no-store",
   "content-security-policy": "frame-ancestors 'none'",

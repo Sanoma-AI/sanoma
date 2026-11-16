@@ -284,6 +284,7 @@ describe("the staff login's discovery", () => {
 
   it("answers 404 for the discovery documents it does not serve: the issuer has a path", async () => {
     for (const path of [
+      "/.well-known/x",
       "/.well-known/oauth-authorization-server",
       "/.well-known/openid-configuration",
       "/.well-known/openid-configuration/auth/better-auth",

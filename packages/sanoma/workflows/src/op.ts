@@ -586,6 +586,17 @@ export interface LoginContext {
  */
 export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
 
+/** The app's sign-in page: where a staff login that is an authorization server sends someone not signed in, with its signed request. */
+export const LOGIN_PAGE = "/auth/login";
+/** The app's consent page: where such a login sends someone signed in, with its signed request. */
+export const CONSENT_PAGE = "/auth/consent";
+/**
+ * RFC 9728's well-known path for a protected resource's metadata, the resource's own path
+ * appended (`/.well-known/oauth-protected-resource/mcp`): what the login serves, and the app's
+ * 401 at the resource points a client at.
+ */
+export const RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
+
 /**
  * A request's origin, https when a proxy that ends TLS says so (`x-forwarded-proto: https`), as
  * Start's `getRequestUrl({ xForwardedProto: true })` reads it: the absolute URLs a page or an invite writes, and a login's cookies, take it.

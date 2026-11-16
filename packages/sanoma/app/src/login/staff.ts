@@ -1,9 +1,11 @@
 import {
   ADMIN,
+  CONSENT_PAGE,
   errorMessage,
   INVITE_SECONDS,
   LOGIN_AGENT,
   LOGIN_CODE_WORKFLOW,
+  LOGIN_PAGE,
   type LoginContext,
   type LoginHalf,
   type LoginIdentity,
@@ -11,6 +13,7 @@ import {
   personOf,
   principalOf,
   requestOrigin,
+  RESOURCE_METADATA,
   sameOrigin,
   sealLoginCode,
   type SocialClients,
@@ -44,10 +47,6 @@ export type MakeStaffLogin = (context: LoginContext) => LoginHalf | Promise<Logi
 export type StaffSocial = SocialClients;
 
 const INVITE = "/auth/invite";
-/** The sign-in page's own address, where a GitHub sign-in that failed comes back to with `?error=`. */
-const LOGIN = "/auth/login";
-/** The consent page, where the half's authorize sends someone signed in (`CONSENT_PAGE` in `sanoma/better-auth`). */
-const CONSENT = "/auth/consent";
 /** The agent surface (`routes/mcp.ts`): the resource the half issues tokens for, and the one path a bearer is taken at. */
 const MCP = "/mcp";
 
@@ -104,35 +103,19 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     }
   };
   /** Who a bearer at `/mcp` was issued for and to which client, once per request: `handle` asks, then admission. */
-  const bearers = new WeakMap<Request, Promise<LoginIdentity | undefined>>();
-  const tokenOf = (request: Request) => {
-    let found = bearers.get(request);
-    if (!found) {
-      found = (async () => {
-        const token = await half?.bearer?.(request);
-        if (!token) return undefined;
-        const { email, github, client } = token;
-        return { ...(email && { email }), ...(github && { github }), client };
-      })();
-      bearers.set(request, found);
-    }
-    return found;
-  };
+  const tokenOf = oncePerRequest(async (request): Promise<LoginIdentity | undefined> => {
+    const token = await half?.bearer?.(request);
+    if (!token) return undefined;
+    const { email, github, client } = token;
+    return { ...(email && { email }), ...(github && { github }), client };
+  });
   /** Who the half says is signed in, once per request: `handle` asks, then admission. */
-  const verified = new WeakMap<Request, Promise<LoginIdentity | undefined>>();
-  const identityOf = (request: Request) => {
-    let found = verified.get(request);
-    if (!found) {
-      found = (async () => {
-        const session = await half?.verify(request);
-        if (!session) return undefined;
-        const { email, github } = session;
-        return { ...(email && { email }), ...(github && { github }) };
-      })();
-      verified.set(request, found);
-    }
-    return found;
-  };
+  const identityOf = oncePerRequest(async (request): Promise<LoginIdentity | undefined> => {
+    const session = await half?.verify(request);
+    if (!session) return undefined;
+    const { email, github } = session;
+    return { ...(email && { email }), ...(github && { github }) };
+  });
 
   const provider: LoginProvider = {
     name: "staff",
@@ -192,19 +175,23 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
         return (await tokenOf(request)) ? undefined : challenge(request, "invalid_token");
       }
       const signedIn = await identityOf(request);
-      if (pathname === LOGIN && request.method === "GET") {
+      if (pathname === LOGIN_PAGE && request.method === "GET") {
         // On to the app only for someone it admits: a session of someone no longer declared signs
         // in again here, as does anyone a client's sign-in sent here (the provider asks again).
         if (signedIn && !signedQuery(url) && (await admitted(signedIn)))
           return new Response(null, { status: 302, headers: { location: "/", "cache-control": "no-store" } });
         return signInPage(half, frame(), 200, url.searchParams.get("error"));
       }
-      if (pathname === CONSENT && request.method === "GET") {
+      if (pathname === CONSENT_PAGE && request.method === "GET") {
         const person = signedIn && (await admitted(signedIn));
         return person ? consentPage(url, person) : signInPage(half, frame(), 401);
       }
       if (signedIn) return undefined;
       if (atMcp(pathname)) return challenge(request);
+      // A well-known path nobody answered is no document of this host's: a 404, whatever the
+      // half serves there, never the sign-in page, which a client would read as one.
+      if (pathname.startsWith("/.well-known/"))
+        return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
       return wantsJson(request) ? refuse(401, "Sign in first") : signInPage(half, frame(), 401);
     },
     async invite(email, { origin, by }) {
@@ -242,13 +229,13 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
         look,
       );
     }
-    const who = personsOf(declared).find((p) => p.id === person.id);
+    const who = personsOf(declared).find((p) => p.id === person.id) ?? person;
     return smallPage(
       200,
       "Allow access",
       `<div class="lede"><h1>Let ${escapeHtml(agent)} act for you?</h1>` +
         `<p>${escapeHtml(client)} asks to work in ${escapeHtml(company)} as the agent <strong>${escapeHtml(agent)}</strong>, ` +
-        `for ${escapeHtml(who?.name ?? person.id)}. It may do only what both you and that agent may do, and the company's policy decides each call.</p></div>` +
+        `for ${escapeHtml(nameOf(who))}. It may do only what both you and that agent may do, and the company's policy decides each call.</p></div>` +
         `<div class="links"><button id="allow" type="button" class="button">Allow</button>` +
         `<button id="deny" type="button" class="link">Deny</button></div>` +
         `<p id="message" class="message" role="status"></p><script>${CONSENT_SCRIPT}</script>`,
@@ -348,22 +335,26 @@ export async function sendLoginCode(client: AppContext["client"], email: string,
  * the resource's metadata), which is what starts its sign-in; `error` says why one was refused.
  */
 function challenge(request: Request, error?: "invalid_token"): Response {
-  const metadata = `${requestOrigin(request)}/.well-known/oauth-protected-resource${MCP}`;
+  const metadata = `${requestOrigin(request)}${RESOURCE_METADATA}${MCP}`;
   const why = error
     ? `error="${error}", error_description="The access token is not one this company's sign-in issued for its agent surface, or it expired", `
     : "";
-  return Response.json(
-    { error: "Sign in first" },
-    {
-      status: 401,
-      headers: { "cache-control": "no-store", "www-authenticate": `Bearer ${why}resource_metadata="${metadata}"` },
-    },
-  );
+  return refuse(401, "Sign in first", { "www-authenticate": `Bearer ${why}resource_metadata="${metadata}"` });
 }
 
-/** A refusal of `POST /auth/invite`, as JSON saying why. */
-const refuse = (status: number, error: string) =>
-  Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
+/** A refusal as JSON saying why (`POST /auth/invite`'s, a server function's, `/mcp`'s), never kept, with `headers` besides. */
+const refuse = (status: number, error: string, headers: Record<string, string> = {}) =>
+  Response.json({ error }, { status, headers: { "cache-control": "no-store", ...headers } });
+
+/** `read`'s answer for a request, asked for once however often it is called for that request. */
+function oncePerRequest<T>(read: (request: Request) => Promise<T>): (request: Request) => Promise<T> {
+  const answers = new WeakMap<Request, Promise<T>>();
+  return (request) => {
+    let answer = answers.get(request);
+    if (!answer) answers.set(request, (answer = read(request)));
+    return answer;
+  };
+}
 
 /** What a page names a declared person by: their name, else their id. */
 type Named = { id: string; name?: string };
@@ -473,7 +464,7 @@ function invitePage(
     `<div class="lede">${lede}</div>` +
     `<a class="button tall" href="${escapeHtml(invitation.path)}">Continue as ${escapeHtml(invitation.email)}</a>` +
     `<p class="small muted note">${CLOCK_ICON}<span>This link works once and expires in 24 hours.</span></p>` +
-    `<p class="rule">Not ${escapeHtml(person ? firstNameOf(person) : invitation.email)}? <a href="${LOGIN}">Sign in with your own email</a></p>`
+    `<p class="rule">Not ${escapeHtml(person ? firstNameOf(person) : invitation.email)}? <a href="${LOGIN_PAGE}">Sign in with your own email</a></p>`
   );
 }
 
@@ -505,7 +496,7 @@ document.getElementById("deny").addEventListener("click",()=>answer(false));
 const SIGN_IN_SCRIPT = `
 const post=(path,body)=>fetch("/auth/better-auth"+path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
 const $=(id)=>document.getElementById(id);const message=$("message");const say=(text)=>{message.textContent=text};
-const here="/"+location.pathname.replace(/^[/]+/,"");const back=here===${JSON.stringify(LOGIN)}?"/":here+location.search;
+const here="/"+location.pathname.replace(/^[/]+/,"");const back=here===${JSON.stringify(LOGIN_PAGE)}?"/":here+location.search;
 const AGAIN="That did not work. Try again in a moment.";let email="";let wrong=0;
 const oauth=new URLSearchParams(location.search).has("sig")?{oauth_query:location.search.slice(1)}:{};
 const next=async(done)=>{const {url}=oauth.oauth_query?await done.json().catch(()=>({})):{};location.assign(url||back)};
@@ -525,6 +516,6 @@ $("again")?.addEventListener("click",async()=>{if(!await send()){say(AGAIN);retu
 say("");wrong=0;$("resent").hidden=false;$("code").reset();$("code").querySelector("input").focus()});
 $("different")?.addEventListener("click",()=>{say("");$("code-step").hidden=true;$("email-step").hidden=false;$("email").querySelector("input").focus()});
 $("github")?.addEventListener("click",async()=>{
-const started=await post("/sign-in/social",{provider:"github",callbackURL:back,errorCallbackURL:${JSON.stringify(LOGIN)},...oauth}).then((r)=>r.json()).catch(()=>({}));
+const started=await post("/sign-in/social",{provider:"github",callbackURL:back,errorCallbackURL:${JSON.stringify(LOGIN_PAGE)},...oauth}).then((r)=>r.json()).catch(()=>({}));
 if(started.url)location.href=started.url;else say("GitHub sign-in did not start. Try again in a moment.")});
 `;

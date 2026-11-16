@@ -399,6 +399,13 @@ describe("staffLogin", () => {
       expect([fn.status, fn.headers.get("www-authenticate")]).toEqual([401, null]);
     });
 
+    it("answers a well-known path the half does not 404, never the sign-in page", async () => {
+      for (const path of ["/.well-known/x", "/.well-known/openid-configuration"]) {
+        const lost = (await login.handle!(request(path)))!;
+        expect([lost.status, lost.headers.get("content-type")], path).toEqual([404, "text/plain;charset=UTF-8"]);
+      }
+    });
+
     it("takes a bearer at /mcp, as the declared agent for the person it was issued for", async () => {
       const asked = mcp(`at.ada@acme.test.${CLAUDE_CODE}`);
       expect(await login.handle!(asked)).toBeUndefined();

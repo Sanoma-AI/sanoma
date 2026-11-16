@@ -242,6 +242,8 @@ describe("the staff login", () => {
     expect(codes.size).toBe(0);
     const send = await half.handle(request("/auth/better-auth/sign-in/magic-link", { body: { email: DECLARED } }));
     expect(send?.status).toBe(404);
+    // Nor the JWT plugin's own route, a session's JWT: no client's.
+    expect((await half.handle(request("/auth/better-auth/token")))?.status).toBe(404);
     expect(await half.handle(request("/sites/www"))).toBeUndefined();
   });
 });

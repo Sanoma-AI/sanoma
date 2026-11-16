@@ -4,6 +4,7 @@ import {
   type LoginHalf,
   type LoginMethod,
   requestOrigin,
+  RESOURCE_METADATA,
   sameOrigin,
   type SignInMethod,
 } from "sanoma/workflows";
@@ -42,7 +43,11 @@ const SEND_CODE = "/email-otp/send-verification-otp";
 /** How long a staff session lasts: seven days. Who may sign in is read on every request, so removing someone takes effect at once. */
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 
-/** The routes a browser may reach, under `BASE_PATH`: anything else (a magic link's sending among them) is the app's alone. */
+/**
+ * The routes a browser may reach, under `BASE_PATH`; anything else is a 404: a magic link's
+ * sending, which is the app's alone, and the JWT plugin's own `/token` (a session's JWT), which
+ * is no client's.
+ */
 const ROUTES = new Set([
   SEND_CODE,
   "/sign-in/email-otp",
@@ -58,13 +63,20 @@ const TOKEN = "/oauth2/token";
 const REVOKE = "/oauth2/revoke";
 const CONSENT = "/oauth2/consent";
 /**
- * The OAuth provider's routes, with the app's OAuth context only (`staff.oauth`): authorize (a
- * browser's GET), the consent the app's page posts, the token endpoint, revocation (RFC 7009: a
- * public client revokes its own tokens with its client id) and the signing keys' public half.
- * Not registration (no client registers: a declared agent names it), introspection or userinfo,
- * which no resource or client here uses.
+ * The OAuth provider's routes, with the app's OAuth context only (`staff.oauth`), each with the
+ * field RFC 8414's metadata names it by, so the metadata says a route exactly when it is served:
+ * authorize (a browser's GET), the consent the app's page posts (no client's, so no field), the
+ * token endpoint, revocation (RFC 7009: a public client revokes its own tokens with its client
+ * id) and the signing keys' public half. Not registration (no client registers: a declared agent
+ * names it), introspection or userinfo, which no resource or client here uses.
  */
-const OAUTH_ROUTES = new Set([AUTHORIZE, CONSENT, TOKEN, REVOKE, "/jwks"]);
+const OAUTH_ROUTES = new Map<string, string | undefined>([
+  [AUTHORIZE, "authorization_endpoint"],
+  [CONSENT, undefined],
+  [TOKEN, "token_endpoint"],
+  [REVOKE, "revocation_endpoint"],
+  ["/jwks", "jwks_uri"],
+]);
 
 /**
  * The routes a non-browser client POSTs to without an `Origin`, each named here on purpose: the
@@ -75,16 +87,14 @@ const OAUTH_ROUTES = new Set([AUTHORIZE, CONSENT, TOKEN, REVOKE, "/jwks"]);
 const NO_ORIGIN = new Set([TOKEN, REVOKE]);
 
 /**
- * What RFC 8414's metadata says, of what the provider would: only what is served and supported
- * here. Public clients alone (`none`, at the token endpoint and revocation), so no client secret
- * or assertion; no introspection, DPoP or back-channel logout, which nothing here serves.
+ * What RFC 8414's metadata says, of what the provider would: only what is served (`OAUTH_ROUTES`)
+ * and supported here. Public clients alone (`none`, at the token endpoint and revocation), so no
+ * client secret or assertion; no introspection, DPoP or back-channel logout, which nothing here
+ * serves.
  */
 const SERVER_METADATA_FIELDS = [
   "issuer",
-  "authorization_endpoint",
-  "token_endpoint",
-  "revocation_endpoint",
-  "jwks_uri",
+  ...[...OAUTH_ROUTES.values()].filter((field) => field !== undefined),
   "scopes_supported",
   "response_types_supported",
   "response_modes_supported",
@@ -92,22 +102,13 @@ const SERVER_METADATA_FIELDS = [
   "code_challenge_methods_supported",
   "authorization_response_iss_parameter_supported",
   "client_id_metadata_document_supported",
-] as const;
+];
 
 /** The routes of the email code, which answer only when the app can send one. */
 const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
 
-/** RFC 9728's metadata for a resource at `path`: its well-known path, with the resource's path appended. */
-const RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
 /** RFC 8414's metadata for the issuer, `<origin>/auth/better-auth`: the issuer's path appended to the well-known one. */
 const SERVER_METADATA = `/.well-known/oauth-authorization-server${BASE_PATH}`;
-
-/** The well-known paths of OAuth and OpenID discovery: what of them is not served is a 404. */
-const DISCOVERY_PREFIXES = [
-  RESOURCE_METADATA,
-  "/.well-known/oauth-authorization-server",
-  "/.well-known/openid-configuration",
-];
 
 /**
  * How the metadata documents may be kept: each is made from the request's `Host` and protocol
@@ -249,8 +250,6 @@ export function betterAuthStaffLogin(
           },
         },
       }),
-      // The JWT plugin's own route (a session's JWT) is no client's: off, as Better Auth's docs set it.
-      disabledPaths: ["/token"],
       plugins: [
         // Always there, for one shape of the API; without the app's OAuth context no client is
         // declared and `handle` serves none of the provider's routes.
@@ -307,28 +306,26 @@ export function betterAuthStaffLogin(
   ];
 
   /**
-   * The well-known metadata, with the app's OAuth context: RFC 9728's for the resource (at its
-   * path, and at the root for a client that looks there), naming this login, on the request's
-   * own host, as its one authorization server; and RFC 8414's for that issuer, which the
-   * provider answers itself. Both are made from the request's `Host` and protocol, so no shared
-   * cache may keep one for another (`DISCOVERY_CACHE`). Any other OAuth or OpenID discovery path
-   * is a 404, not the sign-in page: RFC 8414's at the root is not this issuer's, which has a path,
-   * and there is no OpenID provider. Undefined for any other well-known path.
+   * A well-known path's answer, with the app's OAuth context: RFC 9728's metadata for the
+   * resource (`RESOURCE_METADATA`, at its path, and at the root for a client that looks there),
+   * naming this login, on the request's own host, as its one authorization server; and RFC 8414's
+   * for that issuer, which the provider answers itself. Both are made from the request's `Host`
+   * and protocol, so no shared cache may keep one for another (`DISCOVERY_CACHE`). Any other
+   * well-known path is a 404, never the sign-in page a client would take for a document: RFC
+   * 8414's at the root is not this issuer's, which has a path, and there is no OpenID provider.
    */
-  async function discovery(request: Request, pathname: string): Promise<Response | undefined> {
-    const { issuer, resource } = oauthOrigin(request, oauth!);
-    if (pathname === `${RESOURCE_METADATA}${oauth!.resource}` || pathname === RESOURCE_METADATA) {
+  async function discovery(request: Request, pathname: string, surface: OAuthContext): Promise<Response> {
+    if (pathname === `${RESOURCE_METADATA}${surface.resource}` || pathname === RESOURCE_METADATA) {
       if (request.method !== "GET" && request.method !== "HEAD")
         return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+      const { issuer, resource } = oauthOrigin(request, surface);
       return Response.json(
         { resource, authorization_servers: [issuer], bearer_methods_supported: ["header"] },
         { headers: DISCOVERY_CACHE },
       );
     }
     if (pathname === SERVER_METADATA) return serverMetadata(await (await authFor(request)).handler(request));
-    if (DISCOVERY_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)))
-      return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
-    return undefined;
+    return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
   }
 
   /** The mints of this process, one after another. */
@@ -386,7 +383,7 @@ export function betterAuthStaffLogin(
     },
     async handle(request) {
       const { pathname } = new URL(request.url);
-      if (oauth && pathname.startsWith("/.well-known/")) return discovery(request, pathname);
+      if (oauth && pathname.startsWith("/.well-known/")) return discovery(request, pathname, oauth);
       if (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`)) return undefined;
       const route = pathname.slice(BASE_PATH.length);
       const served = ROUTES.has(route) || (oauth !== undefined && OAUTH_ROUTES.has(route));
@@ -395,14 +392,8 @@ export function betterAuthStaffLogin(
         return new Response("Forbidden", { status: 403 });
       // Any host is allowed, so Better Auth trusts any redirect: only a path on this host is taken.
       if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
-      if (oauth && route === AUTHORIZE) {
-        const refused = await authorizing(request, oauth);
-        if (refused) return refused;
-      }
-      if (oauth && route === CONSENT && request.method === "POST") {
-        const refused = await consenting(request, oauth);
-        if (refused) return refused;
-      }
+      const refused = oauth && (await GUARDS.get(route)?.(request, oauth));
+      if (refused) return refused;
       return (await authFor(request)).handler(withSignOutBody(withoutDpop(request), SIGN_OUT));
     },
     ...(oauth && {
@@ -521,6 +512,7 @@ async function authorizing(request: Request, surface: OAuthContext): Promise<Res
  * the provider checks next). Otherwise undefined.
  */
 async function consenting(request: Request, surface: OAuthContext): Promise<Response | undefined> {
+  if (request.method !== "POST") return undefined;
   // The consent page posts JSON; a form is read too, so no shape of the body passes unread.
   const text = await request
     .clone()
@@ -550,6 +542,12 @@ function jsonField(text: string, field: string): unknown {
   }
 }
 
+/** What a route answers itself ahead of the provider, with the app's OAuth context: each guard for the methods it names. */
+const GUARDS = new Map([
+  [AUTHORIZE, authorizing],
+  [CONSENT, consenting],
+]);
+
 /**
  * The provider's row for `identifier`, this host's own `/mcp`, made the first time an authorize
  * for it is accepted: the provider issues a token only for a resource it has a row for, and
@@ -573,20 +571,16 @@ async function ensureResource(adapter: ResourceAdapter, identifier: string): Pro
 /** The provider's RFC 8414 answer, narrowed to `SERVER_METADATA_FIELDS`, public clients alone; any other answer as it is. */
 async function serverMetadata(answered: Response): Promise<Response> {
   if (answered.status !== 200) return answered;
+  const headers = new Headers(answered.headers);
+  headers.delete("content-length");
+  for (const [name, value] of Object.entries(DISCOVERY_CACHE)) headers.set(name, value);
   // A HEAD's answer has no body to narrow: its headers are the GET's.
-  if (answered.body === null) {
-    const headers = new Headers(answered.headers);
-    for (const [name, value] of Object.entries(DISCOVERY_CACHE)) headers.set(name, value);
-    return new Response(null, { status: 200, headers });
-  }
+  if (answered.body === null) return new Response(null, { status: 200, headers });
   const full = (await answered.json()) as Record<string, unknown>;
   const metadata: Record<string, unknown> = {};
   for (const field of SERVER_METADATA_FIELDS) if (full[field] !== undefined) metadata[field] = full[field];
   metadata.token_endpoint_auth_methods_supported = ["none"];
   metadata.revocation_endpoint_auth_methods_supported = ["none"];
-  const headers = new Headers(answered.headers);
-  headers.delete("content-length");
-  for (const [name, value] of Object.entries(DISCOVERY_CACHE)) headers.set(name, value);
   return new Response(JSON.stringify(metadata), { status: 200, headers });
 }
 
@@ -620,18 +614,17 @@ function refusalPage(status: number, title: string, body: string): Response {
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
       `<title>Sign-in refused</title></head><body><main><h1>${escape(title)}</h1><p>${body}</p></main></body></html>`,
-    {
-      status,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-        // Framed by no page: no other site lays it under a click of its own.
-        "content-security-policy": "frame-ancestors 'none'",
-        "x-frame-options": "DENY",
-      },
-    },
+    { status, headers: PAGE_HEADERS },
   );
 }
+
+/** The refusal page's headers, as the app's own small pages are sent: never kept, and framed by no page, so no other site lays it under a click of its own. */
+const PAGE_HEADERS = {
+  "content-type": "text/html; charset=utf-8",
+  "cache-control": "no-store",
+  "content-security-policy": "frame-ancestors 'none'",
+  "x-frame-options": "DENY",
+};
 
 /** The token keys' table could not be read (`cause` says why): never a bad token. */
 class KeysUnread extends Error {
