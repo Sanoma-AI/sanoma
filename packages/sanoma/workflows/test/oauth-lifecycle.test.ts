@@ -74,6 +74,8 @@ const provider = {
   thingStatus: undefined as number | undefined,
   /** Holds `/me` (the verifier) until it resolves. */
   holdMe: undefined as Promise<void> | undefined,
+  /** Called when `/me` is asked, before it is held. */
+  onMe: undefined as (() => void) | undefined,
   /** Holds each code's exchange until it resolves. */
   holdCode: undefined as Promise<void> | undefined,
 };
@@ -125,6 +127,7 @@ const server = setupServer(
     return new HttpResponse(null, { status: 200 });
   }),
   http.get(`${API}/me`, async ({ request }) => {
+    provider.onMe?.();
     await provider.holdMe;
     return access.has(bearer(request))
       ? HttpResponse.json({ account: "org-1" })
@@ -284,6 +287,7 @@ beforeEach(async () => {
     during: undefined,
     thingStatus: undefined,
     holdMe: undefined,
+    onMe: undefined,
     holdCode: undefined,
   });
   provider.thingRejects.clear();
@@ -650,7 +654,11 @@ describe("Disconnect and revoke", () => {
     const b = await processOf({ store });
     let release!: () => void;
     provider.holdMe = new Promise((resolve) => (release = resolve));
+    // The call is verifying (held at the provider) before the other process disconnects: one that
+    // had not got that far would be refused for a missing grant, which the last line here covers.
+    const verifying = new Promise<void>((resolve) => (provider.onMe = resolve));
     const racing = read(b);
+    await verifying;
     const { revision } = await card(a);
     await a.call("sanoma.connection.disconnect", { connection: ref, expectedRevision: revision! }, { actor: "alice" });
     release();
