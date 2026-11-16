@@ -232,10 +232,16 @@ describe("the chat on a person's own agent", () => {
     expect(log.filter((entry) => "asked" in entry)).toEqual([
       { asked: "Write node_modules/evil.js", chosen: "allow_once" },
       { asked: "cat /etc/hosts", chosen: "allow_once" },
+      { asked: "mcp__sanoma__start_run", chosen: "allow_once" },
       { asked: "Edit workflows/offboarding.ts", chosen: "allow_once" },
       { asked: "Edit always", chosen: "allow_always" },
       { asked: "Never allowed", chosen: "reject_once" },
     ]);
+    // No MCP server is offered (stable ACP's would need a URL and its credential, or a process, in
+    // the box), so an MCP tool's call it is allowed has nothing to reach, and the prompt names none
+    // of the catalog.
+    expect(log.find((entry) => "mcpServers" in entry)).toEqual({ mcpServers: [] });
+    expect(log.find((entry) => "prompt" in entry)!.prompt).not.toMatch(/start_run|The company's tools/);
     // What this process does for it stays in the clone: its write under node_modules, and its
     // read of another person's box, through the client, are refused.
     expect(log.find((entry) => "wroteOutside" in entry)).toMatchObject({

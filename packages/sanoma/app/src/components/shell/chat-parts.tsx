@@ -22,12 +22,20 @@ import {
   TraceTitle,
 } from "#/components/ui/trace.tsx";
 import { actorHeaders } from "../../actor.ts";
-import { type ChatMessage, type DraftCard, heldRunOf, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
+import {
+  type ChatMessage,
+  type DraftCard,
+  failedRunOf,
+  heldRunOf,
+  pathOf,
+  type SignInCard,
+  textOf,
+} from "../../lib/chat.ts";
 import { CardHeading, Notice, TipButton } from "../kit.tsx";
 import { DraftCardView } from "./draft-card.tsx";
 
 // What the chat draws of the agent's reply, per app.md's Chat: Markdown at the reply size, its
-// thinking and steps as one quiet trace (AI Elements' Reasoning and Tool), a held lookup as the
+// thinking and steps as one quiet trace (AI Elements' Reasoning and Tool), a held call or start as the
 // Inbox's approval card, the draft as a small card, a person's own agent's sign-in as its card,
 // and the last reply's suggested asks as buttons. Any engine's reply: a tool part of another
 // engine is a step by its title or name.
@@ -37,7 +45,7 @@ const Markdown = lazy(() => import("./markdown.tsx"));
 const HeldCard = lazy(() => import("./held-card.tsx"));
 
 type Part = ChatMessage["parts"][number];
-type ToolPart = Extract<Part, { toolCallId: string }>;
+export type ToolPart = Extract<Part, { toolCallId: string }>;
 type ReasoningPart = Extract<Part, { type: "reasoning" }>;
 type TracePart = ToolPart | ReasoningPart;
 
@@ -206,6 +214,9 @@ function stepState(step: ToolPart, live: boolean) {
     return { word: "Failed", status: "error" as const, icon: stopped, why: step.errorText };
   }
   if (step.approval?.approved === false) return { word: "Refused", icon: stopped, why: step.approval.reason };
+  // A run the step started that then failed (`RunOutput`): the step answered, and what it started did not go through.
+  const failed = step.state === "output-available" ? failedRunOf(step.output) : undefined;
+  if (failed) return { word: "Failed", status: "error" as const, icon: stopped, why: failed.error };
   if (step.state === "output-available" && !step.preliminary) {
     return { word: "Done", icon: <CheckIcon aria-hidden="true" /> };
   }
@@ -215,7 +226,7 @@ function stepState(step: ToolPart, live: boolean) {
 }
 
 /** A step in words: what the tool did, from its input; a coding agent's by its tool's name and the file it names. */
-function stepLabel(step: ToolPart): string {
+export function stepLabel(step: ToolPart): string {
   const input = (step.input ?? {}) as Record<string, unknown>;
   const path = typeof input.path === "string" ? input.path : "";
   switch (getToolName(step)) {
@@ -253,12 +264,32 @@ function stepLabel(step: ToolPart): string {
     }
     case "lookup":
       return `Looked up ${String(input.op ?? "")}`;
+    case "describe":
+      return "Read the company's description";
+    case "get_run":
+      return `Read the run ${String(input.runId ?? "")}`;
+    case "wait_run":
+      return `Waited for the run ${String(input.runId ?? "")}`;
+    case "drift":
+      return `Checked for drift${runEnd(step)}`;
+    case "start_run":
+      // An error is a start that left no run (the policy's refusal, an input it does not take); a run that started and then failed is an output.
+      return step.state === "output-error"
+        ? `Refused to start ${String(input.workflow ?? "")}`
+        : `Started ${String(input.workflow ?? "")}${runEnd(step)}`;
     default: {
       if (step.title) return step.title;
       const file = pathOf(input);
       return file === undefined ? getToolName(step) : `${getToolName(step)} ${file}`;
     }
   }
+}
+
+/** What became of the run a step started, when it failed or was cancelled (`failedRunOf`): said after the step's own words. */
+function runEnd(step: ToolPart): string {
+  const failed = step.state === "output-available" ? failedRunOf(step.output) : undefined;
+  if (!failed) return "";
+  return failed.status === "cancelled" ? ": the run was cancelled" : ": the run failed";
 }
 
 /** `url` when it is an https link that parses (the vendor wrote it), else undefined. */

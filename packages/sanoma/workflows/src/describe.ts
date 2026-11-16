@@ -54,6 +54,7 @@ export { companyRootOf, configDirOf } from "./company-file.ts";
 export {
   admit,
   agentActing,
+  chatAgentActing,
   clientClashes,
   loadDataFiles,
   peopleWarnings,

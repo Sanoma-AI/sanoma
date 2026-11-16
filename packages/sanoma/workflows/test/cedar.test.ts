@@ -806,6 +806,8 @@ forbid (principal, action in Sanoma::Action::"effect:write", resource == Sanoma:
 
 /** Claude Code acting for `person`, as admitted. */
 const forOf = (person: string): Principal => ({ id: "claude-code", groups: ["agents"], onBehalfOf: person });
+/** The in-app chat's agent acting for `person`, as admitted. */
+const chatFor = (person: string): Principal => ({ id: "sanoma-chat", groups: ["agents"], onBehalfOf: person });
 /** An approved approval addressed to `approver`, covering `op`. */
 const approvedBy = (op: string, approver: ApprovalState["approver"]): ApprovalState => ({
   ...approved(approver, typeof approver === "string" ? approver : "x"),
@@ -924,6 +926,36 @@ forbid (principal, action == Sanoma::Action::"shop.notes.add", resource);
     expect(call("notes", forOf("ada"), [approvedBy(notes, "ada")])).toMatchObject({ kind: "allow" });
   });
 
+  it("binds the in-app chat's agent acting for the person chatting as it binds a declared agent, and takes a policy naming it", () => {
+    // The person's rules reach it, and the agents' too, as Claude Code's do.
+    expect(decide.start(chatFor("ada"), "refund", { amount: 1 })).toMatchObject({
+      kind: "deny",
+      reason: "Contractors start no refunds",
+    });
+    expect(call("save", chatFor("cy"))).toMatchObject({ kind: "deny", reason: "Cy saves no leads" });
+    expect(call("tags", chatFor("ada"))).toMatchObject({ kind: "deny", reason: "Agents set no tags" });
+    expect(call("refund", chatFor("bo"))).toMatchObject({ kind: "approve", approver: "bo", reasons: ["agents-money"] });
+    // A policy may name it by its id: Cedar's schema and the policy check take it, and it reaches the chat alone.
+    const named = loadPolicies([
+      {
+        file: "policies/chat.cedar",
+        text: `@id("chat-no-refund")
+@reason("The chat starts no refunds")
+forbid (principal == Sanoma::Principal::"sanoma-chat", action == Sanoma::Action::"workflow:refund", resource);
+`,
+      },
+    ]);
+    expect(named.problems).toEqual([]);
+    expect(validatePolicies(resolved, named.policies, acting)).toEqual([]);
+    const byId = cedarPolicy(resolved, named.policies, acting);
+    expect(byId.start(chatFor("bo"), "refund", { amount: 1 })).toMatchObject({
+      kind: "deny",
+      reason: "The chat starts no refunds",
+    });
+    expect(byId.start(forOf("bo"), "refund", { amount: 1 })).toMatchObject({ kind: "allow" });
+    expect(byId.start({ id: "bo" }, "refund", { amount: 1 })).toMatchObject({ kind: "allow" });
+  });
+
   it("decides an agent acting for no one, and a person, as before", () => {
     const alone = { id: "claude-code", groups: ["agents"] };
     // No one to hold for: the agents' on-behalf-of hold cannot resolve, as before; finance's does not apply.
@@ -1016,6 +1048,48 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
     { databaseUrl },
   );
   const forAda = { id: "claude-code", onBehalfOf: "ada" };
+  /** The in-app chat's agent, for Ada, as her chat turn makes it. */
+  const chatForAda = { id: "sanoma-chat", onBehalfOf: "ada" };
+
+  it("binds the in-app chat's agent to the agent rules, unlike the runtime's other agents", async () => {
+    // Its drift is asked as an agent's: refused here, as Claude Code's is.
+    expect(await failure(app.client.drift({ startedBy: chatForAda }))).toMatchObject({
+      code: "policy_denied",
+      message: "workflow:drift was denied by policy: Agents do not check drift here",
+    });
+    // No other built-in but call, before any policy.
+    const runId = randomUUID();
+    expect(await failure(app.client.start("go-live-host", {}, { startedBy: chatForAda, runId }))).toMatchObject({
+      code: "policy_denied",
+      message:
+        "workflow:go-live-host was denied by policy: an agent starts none of the runtime's own workflows but drift",
+    });
+    expect(await app.client.run(runId)).toBeUndefined();
+    // What a forbid refuses the person, it refuses the chat acting for them; another person's chat starts it.
+    expect(await failure(app.client.start(bonus, { amount: 7 }, { startedBy: chatForAda }))).toMatchObject({
+      code: "policy_denied",
+      message: "workflow:bonus was denied by policy: Contractors get no bonus",
+    });
+    const forBo = { id: "sanoma-chat", onBehalfOf: "bo" };
+    expect(await app.client.result(await app.client.start(bonus, { amount: 8 }, { startedBy: forBo }))).toEqual({
+      bonus: 8,
+    });
+    // An agents' on-behalf-of hold waits for the person chatting, who may approve it; the run says who.
+    const held = await app.client.start(payout, { amount: 9 }, { startedBy: chatForAda });
+    expect((await app.client.run(held))?.startedBy).toEqual({
+      id: "sanoma-chat",
+      groups: ["agents"],
+      onBehalfOf: "ada",
+    });
+    await waitFor(async () => (await app.client.approvals(held)).some((a) => a.status === "pending"));
+    expect(await app.client.approvals(held)).toEqual([
+      expect.objectContaining({ approver: "ada", status: "pending", reasons: ["agent-payouts"] }),
+    ]);
+    await app.client.decide(held, { decision: "approve", by: { id: "ada" } });
+    expect(await app.client.result(held)).toEqual({ paid: 9 });
+    // The chat's agent acting for no one is nobody.
+    expect(await failure(app.client.drift({ startedBy: "sanoma-chat" }))).toMatchObject({ code: "not_admitted" });
+  });
 
   it("refuses an agent's drift a forbid on workflow:drift names, and not a person's or a runtime agent's", async () => {
     expect(await failure(app.client.drift({ startedBy: forAda }))).toMatchObject({

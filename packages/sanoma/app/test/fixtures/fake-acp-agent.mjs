@@ -130,6 +130,12 @@ async function work(client, sessionId, cwd) {
     toolCallId: "shell",
     status: shellChosen === "allow_once" ? "completed" : "failed",
   });
+  // An MCP server's tool, as an agent asks for one it was given: approved as every request is, though
+  // the client offers no MCP server, so there is none to call.
+  await ask(client, sessionId, { toolCallId: "mcp", title: "mcp__sanoma__start_run", kind: "other" }, [
+    "allow_once",
+    "reject_once",
+  ]);
   const { terminalId } = await client.request("terminal/create", {
     sessionId,
     // What it leaves running holds the output's pipes: its exit is still seen.
@@ -212,6 +218,7 @@ const app = acp
   })
   .onRequest("session/new", ({ params }) => {
     if (needsSignIn()) throw signInRequired();
+    log({ mcpServers: params.mcpServers });
     log({ session: params.cwd });
     return { sessionId: `fake-${Date.now()}` };
   })

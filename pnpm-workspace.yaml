@@ -20,9 +20,12 @@ allowBuilds:
   esbuild: false
   workerd: false
 overrides:
-  # One AI SDK: @ai-sdk/harness 1.0.158 pins ai 7.0.147. Its later releases' Claude Code and Codex
-  # adapters ship without their bridges' lockfiles (vercel/ai#23829); drop this once one does.
+  # One AI SDK: @ai-sdk/harness 1.0.158 pins ai 7.0.147, and with it its own
+  # @ai-sdk/provider-utils (5.0.64), whose `Tool` type is then not the app's: the chat's catalog
+  # tools are made by the app's `ai` and given to HarnessAgent. Its later releases' Claude Code and
+  # Codex adapters ship without their bridges' lockfiles (vercel/ai#23829); drop both once one does.
   ai: 7.0.153
+  "@ai-sdk/provider-utils": 5.0.68
 # pnpm's default, stated: Electron Forge's system check (packages/desktop) asks for a hoist pattern
 # or the hoisted linker. The shell's build is bundled by Vite and packs no node_modules.
 hoistPattern:
