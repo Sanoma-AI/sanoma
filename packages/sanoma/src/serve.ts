@@ -296,8 +296,11 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
         .catch((err: unknown) => log(`could not start again on the saved files: ${errorMessage(err)}`));
     }, RELOAD_MS);
   };
+  // `appOptions` gives a login provider only for a host beyond this machine; without one the app
+  // runs the loopback login, where a coding agent's box may be a folder of this machine.
+  const loopbackLogin = options.login === undefined;
   const supervise = (files: SanomaConfig) =>
-    superviseWorker(files, { ...workerOptions(files), selfStop: !here, reload });
+    superviseWorker(files, { ...workerOptions(files), selfStop: !here, reload, loopbackLogin });
   let supervised = await supervise(config);
   let wakeup: WakeupService | undefined;
   const start = (files: SanomaConfig, started: AppOptions) =>

@@ -58,8 +58,9 @@ let draftRoot = "";
 
 /**
  * The script for "Add a laptop step to offboarding", by the step (the assistant's messages since
- * the person's): read the workflow, try a command and a write under node_modules (both refused by
- * the checkout rule), edit the workflow (allowed), then say so.
+ * the person's): read the workflow, run a command (allowed: it runs in the box, in the clone), try
+ * a write under node_modules (refused: Pi's file calls run in this process, kept to the clone),
+ * edit the workflow, then say so.
  */
 function stepFor(step: number, tools: Tool[]): Block {
   const tool = (name: string) => tools.find((t) => t.name.toLowerCase() === name)!;
@@ -76,7 +77,7 @@ function stepFor(step: number, tools: Tool[]): Block {
     case 0:
       return use("read", { [key("read", /path/i)]: file });
     case 1:
-      return use("bash", { command: "pnpm test" });
+      return use("bash", { command: "echo ran in $(pwd -P)" });
     case 2:
       return use("write", {
         [key("write", /path/i)]: join(draftRoot, "node_modules/evil.js"),
@@ -224,7 +225,7 @@ export default defineWorkflow({
   installInClone(dir, join(sandbox.root, "sanoma-harness%2Dtest-ada", "repo"));
   const source = localGitSource(dir);
   // The worker runs the turns: with the checkout and the app's steps.
-  await testApp.restart({ source, app: appSteps });
+  await testApp.restart({ source, app: appSteps, loopbackLogin: true });
   app = await startApp(testApp.config, { port: 0, source });
 }, 600_000);
 
@@ -266,7 +267,7 @@ const engines: [string, string, boolean][] = [
 
 describe.each(engines)("the chat on %s", (engine, name, enabled) => {
   it.runIf(enabled)(
-    "edits the draft as the checkout rule allows, commits and checks it, and shows the draft card",
+    "runs its commands in the box's clone, keeps its own file calls to it, commits and checks the draft, and shows the draft card",
     async () => {
       const id = `${engine}-${RUN}`;
       // In the declared sandbox, not this machine's local boxes.
@@ -286,10 +287,12 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
       // The key reached the model as the auth record set it.
       expect(sent.length).toBeGreaterThanOrEqual(5);
       expect(sent.every((request) => request.key === KEY)).toBe(true);
-      // The command and the write under node_modules were refused, with the reason the agent read.
+      // Its command ran, asking nobody, in the box's clone; its write under node_modules (here a
+      // link out of the clone, to the fixture's install), a file call of this process's, was
+      // refused with the reason the agent read.
       const results = sent.flatMap((request) => request.results).join("\n");
-      expect(results).toMatch(/No shell commands in this chat/);
-      expect(results).toMatch(/evil\.js is outside your checkout, or under \.git or node_modules/);
+      expect(results).toContain(`ran in ${realpathSync(draftRoot)}`);
+      expect(results).toMatch(/escapes the workspace: \S*node_modules\/evil\.js/);
       expect(existsSync(join(draftRoot, "node_modules/evil.js"))).toBe(false);
       expect(toolNames(reply)).toEqual(expect.arrayContaining(["read", "bash", "write", "edit"]));
 

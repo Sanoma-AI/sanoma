@@ -9,23 +9,12 @@ import {
   LoadAPIKeyError,
   type UIMessageStreamWriter,
 } from "ai";
-import { type ChatMessage, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
+import { type ChatMessage, noKeyText, textOf } from "../../lib/chat.ts";
 import { modelRegistry } from "../../server/models.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { boxSession, homeOf, personBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut, checkIn } from "./carrier.ts";
-import {
-  agentOn,
-  allowedPaths,
-  NO_SHELL,
-  openDraft,
-  outsideCheckout,
-  type RealPaths,
-  realIn,
-  showCommits,
-  type TurnAgent,
-  turnMessage,
-} from "./checkout.ts";
+import { agentOn, openDraft, showCommits, type TurnAgent, turnMessage } from "./checkout.ts";
 import { freePort } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
@@ -34,8 +23,8 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // session of ours over the person's box (`boxSession`), in the box's clone of the chat's draft, on
 // the company's model key. Pi runs in this process; Claude Code through its adapter's bridge, in
 // the box. A turn opens the box (one turn in it at a time), carries the draft into it (`carryIn`)
-// and is one harness session: made, run to its end (its permission requests answered by the
-// checkout rule), destroyed (what it started killed). Then what the agent changed is committed in
+// and is one harness session: made, run to its end (every built-in tool allowed, `allow-all`: the
+// box is the boundary), destroyed (what it started killed). Then what the agent changed is committed in
 // the box and carried back to the draft (`carryOut`), the draft checked in the box (`checkIn`),
 // and the box is stopped.
 
@@ -107,7 +96,7 @@ async function runTurn(agent: TurnAgent<"onKey">, turn: EngineTurn, writer: UIMe
   writer.write({ type: "finish" });
 }
 
-/** The turn's harness session in `sandbox`, run to its end, its permission requests answered by the checkout rule. */
+/** The turn's harness session in `sandbox`, run to its end. */
 async function converse(
   agent: TurnAgent<"onKey">,
   { step, chat, messages }: EngineTurn,
@@ -116,14 +105,14 @@ async function converse(
   { auth, model, home, box }: { auth: Record<string, string>; model: string | undefined; home: string; box: Box },
 ) {
   const { by: principal, signal } = step;
-  const real = realIn(box);
   const harness = await agent.harness(auth, home);
   const harnessAgent = new HarnessAgent({
     harness,
     model,
     instructions: harnessInstructions(step, principal, chat, messages.slice(0, -1)),
-    // Edits and commands ask first, and the checkout rule answers.
-    permissionMode: "allow-reads",
+    // Its built-in tools, its shell among them, run without asking: they run in the box, which is
+    // the boundary, so nothing asks for an approval.
+    permissionMode: "allow-all",
     // The draft's checkout itself, not a directory per session under it.
     sandboxConfig: { workDir: "." },
   });
@@ -145,33 +134,11 @@ async function converse(
   }
   const session = await started;
   try {
-    let result = await harnessAgent.stream({ session, prompt: textOf(said), abortSignal: signal });
-    for (let first = true; ; first = false) {
-      for await (const chunk of result.toUIMessageStream({
-        sendStart: first,
-        sendFinish: false,
-        generateMessageId: generateId,
-      })) {
-        // As the chat's chunk: a company's install has the harness's own copy of the AI SDK (its
-        // exact pin), whose chunk types are not this one's, though the chunks are.
-        writer.write(chunk as InferUIMessageChunk<ChatMessage>);
-      }
-      const asked = (await result.content).filter((part) => part.type === "tool-approval-request");
-      if (!asked.length || signal.aborted) break;
-      const kinds = harness.builtinTools as Record<string, { toolUseKind?: string } | undefined>;
-      const answers = await Promise.all(
-        asked.map(({ approvalId, toolCall }) =>
-          answer(
-            real,
-            sandbox.defaultWorkingDirectory,
-            approvalId,
-            toolCall.toolName,
-            kinds[toolCall.toolName]?.toolUseKind,
-            toolCall.input,
-          ),
-        ),
-      );
-      result = await harnessAgent.continueStream({ session, toolApprovalContinuations: answers, abortSignal: signal });
+    const result = await harnessAgent.stream({ session, prompt: textOf(said), abortSignal: signal });
+    for await (const chunk of result.toUIMessageStream({ sendFinish: false, generateMessageId: generateId })) {
+      // As the chat's chunk: a company's install has the harness's own copy of the AI SDK (its
+      // exact pin), whose chunk types are not this one's, though the chunks are.
+      writer.write(chunk as InferUIMessageChunk<ChatMessage>);
     }
   } finally {
     await session.destroy();
@@ -215,30 +182,4 @@ async function authFor(
 async function modelFor(step: AppStepContext, { model: vendor, qualified }: TurnAgent<"onKey">): Promise<string> {
   const { modelId } = (await modelRegistry(step)).languageModel(`${vendor}/default`);
   return qualified ? `${vendor}/${modelId}` : modelId;
-}
-
-/**
- * The checkout rule's answer to a built-in call: an edit of a file the rule allows in the draft's
- * clone (`allowedPaths`, on the box's files, `real`) is approved; a command, an edit outside it or under `.git` or `node_modules`, and
- * any other call that asks, are denied with the reason, which the agent reads. Never a policy call.
- */
-async function answer(
-  real: RealPaths,
-  root: string,
-  approvalId: string,
-  toolName: string,
-  kind: string | undefined,
-  input: unknown,
-) {
-  const deny = (reason: string) => ({ type: "tool-approval-response" as const, approvalId, approved: false, reason });
-  if (kind === "bash") return deny(`${toolName}: ${NO_SHELL}`);
-  const path = pathOf(input);
-  if (kind !== "edit" || path === undefined) {
-    return deny(`${toolName} is not available in this chat: edit the files in your checkout`);
-  }
-  const [allowed] = await allowedPaths(root, [path], real);
-  if (allowed === undefined) {
-    return deny(outsideCheckout(path));
-  }
-  return { type: "tool-approval-response" as const, approvalId, approved: true };
 }

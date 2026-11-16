@@ -11,16 +11,13 @@ import {
 } from "sanoma/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "sanoma/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
-import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
+import { type ChatMessage, type SignInCard, textOf } from "../../lib/chat.ts";
 import { homeOf, OWN_AGENTS_DIR, personBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut, checkIn } from "./carrier.ts";
 import {
   agentOn,
-  allowedPaths,
   mustAllow,
-  NO_SHELL,
   openDraft,
-  outsideCheckout,
   type RealPaths,
   realIn,
   showCommits,
@@ -41,9 +38,10 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // chat's draft carried into its clone (`carryIn`), the agent started there, told the chat's earlier
 // messages as text, prompted, killed, what it changed committed in the box and carried back
 // (`carryOut`) and checked there (`checkIn`), the box stopped.
-// Its permission requests, file reads and writes are answered by the checkout rule; the commands
-// it runs through our terminal are its own, in the box. A sign-in it asks for is shown in the chat
-// as the vendor's own flow.
+// The box is its boundary: every permission request it makes is approved, and the commands it runs
+// through our terminal are its own, in the box. What this process does for it, its `fs/*` reads and
+// writes and a terminal's working directory, stays in the clone by the checkout rule. A sign-in it
+// asks for is shown in the chat as the vendor's own flow.
 
 /** What this client says it can do: files and terminals (ours, by the checkout rule), terminal sign-in methods, and links to show. */
 const CAPABILITIES: acp.ClientCapabilities = {
@@ -407,36 +405,15 @@ class AcpTurn {
   }
 
   /**
-   * The checkout rule's answer to a permission request: a read or an edit (a change, deletion or
-   * move) of paths the rule allows in the draft gets the `allow_once` the agent offered; anything else, a
-   * path outside, a command, a fetch, gets its `reject_once`, with the reason, which the step shows.
-   * `allow_always` is never chosen, and only an option the agent offered is returned.
+   * A permission request, of any kind, approved: the agent runs in its box, which is the boundary.
+   * The `allow_once` it offered, else its `allow_always` (a tool that offers only that); a request
+   * that offers no way to allow it, its `reject_once`, so the turn goes on, else a cancel.
    */
-  async #permit({ toolCall, options }: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
-    const offered = (kind: acp.PermissionOptionKind) => options.find((option) => option.kind === kind);
-    const refuse = (reason: string): acp.RequestPermissionResponse => {
-      this.relay.refusals.set(toolCall.toolCallId, reason);
-      const reject = offered("reject_once");
-      return reject
-        ? { outcome: { outcome: "selected", optionId: reject.optionId }, _meta: { reason } }
-        : { outcome: { outcome: "cancelled" }, _meta: { reason } };
-    };
-    const kind = toolCall.kind ?? this.relay.kindOf(toolCall.toolCallId);
-    if (kind === "execute") return refuse(NO_SHELL);
-    if (kind !== "edit" && kind !== "delete" && kind !== "move" && kind !== "read") {
-      return refuse(`${toolCall.title ?? "This tool"} is not available in this chat: edit the files in your checkout`);
-    }
-    const paths = [...(toolCall.locations ?? []).map((location) => location.path), pathOf(toolCall.rawInput)];
-    const named = [...new Set(paths.filter((path): path is string => typeof path === "string"))];
-    if (!named.length) return refuse("A read or an edit names its file: say which file in your checkout");
-    // Checked in one go, in the box.
-    const allowed = await allowedPaths(this.root, named, this.real);
-    const outside = named.find((_, i) => allowed[i] === undefined);
-    if (outside !== undefined) return refuse(outsideCheckout(outside));
-    const allow = offered("allow_once");
-    return allow
-      ? { outcome: { outcome: "selected", optionId: allow.optionId } }
-      : refuse("Only an edit allowed once is accepted in this chat");
+  #permit({ options }: acp.RequestPermissionRequest): acp.RequestPermissionResponse {
+    const [chosen] = ["allow_once", "allow_always", "reject_once"].flatMap((kind) =>
+      options.filter((o) => o.kind === kind),
+    );
+    return { outcome: chosen ? { outcome: "selected", optionId: chosen.optionId } : { outcome: "cancelled" } };
   }
 
   /** `path` as the checkout rule allows it in the draft, on the box's files; a request error naming it otherwise. */
@@ -462,8 +439,9 @@ class AcpTurn {
    * person's. A terminal method is run by us with piped stdio, what it prints relayed into the
    * card, and a code the person pastes on the card written to its stdin; a URL elicitation is the
    * card's link and code; a vendor whose sign-in needs a real terminal gets the command to run
-   * once on this computer. The card waits for its person, then says to send the message again.
-   * The app never opens the link, enters a code or reads what the vendor gives back.
+   * once on this computer. The card waits for its person and then says they are signed in, and the
+   * chat sends their last message again by itself. The app never opens the link, enters a code or
+   * reads what the vendor gives back.
    */
   async #signIn(agent: acp.ClientContext, methods: acp.AuthMethod[]) {
     const { signIn, title } = this.agent;
@@ -544,7 +522,6 @@ interface Step {
   toolName: string;
   title?: string;
   input: unknown;
-  kind?: acp.ToolKind | null;
   ended: boolean;
 }
 
@@ -553,8 +530,6 @@ const OUTPUT_LIMIT = 4_000;
 
 /** The agent's session updates as the chat's UI message parts: text, reasoning, and its tool calls as dynamic tool parts. */
 class Relay {
-  /** Why the checkout rule refused a tool call, by its id: the step's error once the agent says it failed. */
-  readonly refusals = new Map<string, string>();
   #open?: { type: "text" | "reasoning"; id: string };
   readonly #steps = new Map<string, Step>();
 
@@ -577,9 +552,6 @@ class Relay {
         return this.#step(update);
     }
   }
-
-  /** The kind a tool call said it is, for a permission request that does not repeat it. */
-  kindOf = (toolCallId: string) => this.#steps.get(toolCallId)?.kind;
 
   /** A text part of the reply, whole. */
   say(text: string) {
@@ -629,7 +601,6 @@ class Relay {
       toolName: known?.toolName ?? update.name ?? update.kind ?? "tool",
       title: update.title ?? known?.title,
       input: update.rawInput ?? known?.input ?? {},
-      kind: update.kind ?? known?.kind,
       ended: false,
     };
     this.#steps.set(toolCallId, step);
@@ -649,7 +620,7 @@ class Relay {
       this.writer.write({ type: "tool-output-available", toolCallId, output: outputOf(update), dynamic: true });
     } else if (update.status === "failed") {
       step.ended = true;
-      const errorText = this.refusals.get(toolCallId) ?? (textOfContent(update.content) || "It failed");
+      const errorText = textOfContent(update.content) || "It failed";
       this.writer.write({ type: "tool-output-error", toolCallId, errorText, dynamic: true });
     }
   }

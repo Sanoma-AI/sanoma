@@ -110,6 +110,7 @@ describe("saving a chat's draft without a remote", () => {
       resolved: app.resolved,
       by: { id: "alice" },
       runId: "save:welcome",
+      loopbackLogin: false,
       reload: () => void asked++,
     };
     const again = await appSteps.saveDraft(step, { id: "welcome", title: "Welcome a new client", head: welcomed });

@@ -65,11 +65,13 @@ export type Place = z.infer<typeof PlaceSchema>;
 /**
  * What `getConfig` answers: the description, less the workflows' sources, and where this instance
  * is: its `place`, and its database's host (only the host, never the URL; none when it cannot be
- * read), which the bar's badge says as its tip; and the repo's content kinds, each with the front
- * matter keys its files hold (`contentFields`).
+ * read), which the bar's badge says as its tip; whether people act here by the loopback login
+ * (`loopbackLogin`, no login provider), which a local box needs; and the repo's content kinds,
+ * each with the front matter keys its files hold (`contentFields`).
  */
 export const AppConfigSchema = ConfigDescriptionSchema.extend({
   place: PlaceSchema,
+  loopbackLogin: z.boolean(),
   databaseHost: z.string().optional(),
   content: z.array(z.strictObject({ kind: z.string(), fields: z.array(z.string()) })),
 });
@@ -470,10 +472,11 @@ export const SEALED_SHOWN = 4;
 export const INFRA = "resources/sanoma/infra.ts";
 
 /**
- * What a live instance with no sandbox declared lacks, for the coding agents, which would otherwise
- * run inside it: said by the chat's refusal (`NO_BOX`) and the Hosting page.
+ * What a live instance, or one with a login provider, lacks with no sandbox declared, for the
+ * coding agents, which would otherwise run inside it: said by the chat's refusal (`NO_BOX`) and the
+ * Hosting page.
  */
-export const DECLARE_BOX = `Coding agents work in a box of their own on a live instance, and this company declares none: declare one in ${INFRA} (\`export const box = agent37.instance({})\`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY`;
+export const DECLARE_BOX = `Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: declare one in ${INFRA} (\`export const box = agent37.instance({})\`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY`;
 
 /**
  * Why a host of type `hostType` that stops when idle has no Wakeup, `wakes` being the connected

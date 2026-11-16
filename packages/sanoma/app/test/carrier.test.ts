@@ -34,7 +34,7 @@ const SECRET = "sk-company-secret-value";
 let dir = "";
 let sandbox: ReturnType<typeof fakeSandbox>;
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
-const opening = { name: "sanoma-acme-ada", image: "node", size: 1 };
+const opening = { name: "sanoma-acme-ada", image: "node", size: 1, hosts: [] };
 /** The turn's commit, as the harness makes it. */
 const turn = { message: "Pi: Add a laptop step", author: "ada" };
 
@@ -415,7 +415,7 @@ describe("the check in a person's box", () => {
 
       // The local box of a person on this computer, as Publish and our loop's run_checks check in it.
       const resolved = resolveConfig({ workflows: [], connectors: [], root: company });
-      const step = { source, resolved, by: { id: "ada" }, client: undefined as never };
+      const step = { source, resolved, by: { id: "ada" }, client: undefined as never, loopbackLogin: true };
       const home = join(company, ".sanoma/agent-home/boxes", boxName(resolved.appName, "ada"));
       const clone = join(home, "repo");
       installInClone(company, clone);
@@ -452,7 +452,11 @@ describe("the check in a person's box", () => {
       // What the check wrote in the clone is never brought back: the next turn's carry finds nothing.
       await boxTurn(
         "check",
-        () => localBackend(join(company, ".sanoma/agent-home/boxes")).open({ name: boxName(resolved.appName, "ada") }),
+        () =>
+          localBackend(join(company, ".sanoma/agent-home/boxes")).open({
+            name: boxName(resolved.appName, "ada"),
+            hosts: [],
+          }),
         async (box) => {
           const { head } = await carryIn(box, source, "ok", { home });
           expect(await carryOut(box, source, "ok", { since: head, ...turn })).toBe(false);

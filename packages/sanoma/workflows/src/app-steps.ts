@@ -16,6 +16,8 @@ export interface WorkerApp {
   steps: AppSteps;
   config: SanomaConfig;
   resolved: ResolvedConfig;
+  /** `WorkerOptions.loopbackLogin`. */
+  loopbackLogin: boolean;
 }
 
 /** What a worker started without the app's steps answers a run of one of the app's built-ins. */
@@ -59,7 +61,7 @@ export async function child(
 }
 
 /** What the run's app step is given (`AppStepContext`): the worker's own client, connected on first use, and what the worker has. */
-export async function stepContext(run: Run, { config, resolved }: WorkerApp): Promise<AppStepContext> {
+export async function stepContext(run: Run, { config, resolved, loopbackLogin }: WorkerApp): Promise<AppStepContext> {
   const { state } = run;
   return {
     client: await state.client(),
@@ -68,6 +70,7 @@ export async function stepContext(run: Run, { config, resolved }: WorkerApp): Pr
     serially: state.serially,
     config,
     resolved,
+    loopbackLogin,
     by: run.actor,
     runId: run.id,
   };

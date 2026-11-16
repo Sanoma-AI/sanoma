@@ -4,10 +4,18 @@ import {
   harnessStateDirectoryPath,
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
-import { type AppStepContext, type Box, type CheckResult, type Process, valueAt } from "sanoma/workflows";
+import {
+  type AppStepContext,
+  type Box,
+  type CheckResult,
+  type Process,
+  REGISTRY,
+  type ResolvedConfig,
+  valueAt,
+} from "sanoma/workflows";
 import { errorMessage } from "sanoma/workflows/shared";
 import { DECLARE_BOX } from "../../api.ts";
-import { errorParts, noKeyText } from "../../lib/chat.ts";
+import { errorParts, localBox, noKeyText } from "../../lib/chat.ts";
 import { placeOf } from "../../loopback.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { boxTurn, carryIn, checkFailed, checkIn } from "./carrier.ts";
@@ -48,17 +56,32 @@ export const OWN_AGENTS_DIR = ".acp";
 export const NO_BOX = noKeyText("agent37", DECLARE_BOX);
 
 /**
+ * The hosts a box of `resolved`'s may reach (`SandboxBackend.open`'s `hosts`): the package registry
+ * and those every installed coding agent declares, on either plan, since one box holds them all.
+ */
+export const boxHosts = ({ agents }: Pick<ResolvedConfig, "agents">): string[] =>
+  [
+    ...new Set([
+      REGISTRY,
+      ...[...agents.values()].flatMap((a) => [...(a.own?.hosts ?? []), ...(a.onKey?.hosts ?? [])]),
+    ]),
+  ].toSorted();
+
+/**
  * The box of the person `step` is run by, for the company (`boxName`), chosen: where every coding
- * agent of theirs works, `open` opening it for a turn, whose engine stops it when the turn ends.
- * The declared sandbox's (`sandboxes()`), through its connector's backend given its fields, with
- * the image and size it declares; else, on this computer (`placeOf`), the local backend's; on a
- * live instance, none: refused with `NO_BOX`, so that no agent runs inside the live instance.
+ * agent of theirs works, `open` opening it for a turn, whose engine stops it when the turn ends,
+ * reaching only `boxHosts`. The declared sandbox's (`sandboxes()`), through its connector's backend
+ * given its fields, with the image and size it declares; else, on one person's own computer (the
+ * loopback login, `step.loopbackLogin`, on a database of this computer's, `placeOf`), the local
+ * backend's, which enforces no hosts; otherwise none: refused with `NO_BOX`, so that no agent runs
+ * inside a live instance, nor as the app's user on a server people sign in to.
  */
 export async function personBox(
-  step: Pick<AppStepContext, "source" | "resolved" | "by" | "client">,
+  step: Pick<AppStepContext, "source" | "resolved" | "by" | "client" | "loopbackLogin">,
 ): Promise<{ name: string; open: () => Promise<Box> }> {
   const { resolved, client } = step;
   const name = boxName(resolved.appName, step.by.id);
+  const hosts = boxHosts(resolved);
   const [declared] = await resolved.sandboxes();
   if (declared) {
     const make = resolved.sandboxBackends.get(declared.vendor);
@@ -70,15 +93,16 @@ export async function personBox(
       open: async () =>
         (await make({ secrets: secretValues(client), declared: declared.desired })).open({
           name,
+          hosts,
           // What it leaves out is the backend's own.
           ...(typeof image === "string" && { image }),
           ...(typeof size === "number" && { size }),
         }),
     };
   }
-  if (placeOf(resolved.databaseUrl) === "live") throw new Error(NO_BOX);
+  if (!localBox(placeOf(resolved.databaseUrl), step.loopbackLogin)) throw new Error(NO_BOX);
   // This machine is the local box's image and size.
-  return { name, open: () => localBackend(agentHome(step, "boxes")).open({ name }) };
+  return { name, open: () => localBackend(agentHome(step, "boxes")).open({ name, hosts }) };
 }
 
 /**
@@ -89,7 +113,7 @@ export async function personBox(
  * result of one problem saying why. `step.signal` stops it.
  */
 export async function checkDraft(
-  step: Pick<AppStepContext, "source" | "resolved" | "by" | "client"> & { signal?: AbortSignal },
+  step: Pick<AppStepContext, "source" | "resolved" | "by" | "client" | "loopbackLogin"> & { signal?: AbortSignal },
   { id }: { id: string },
 ): Promise<CheckResult> {
   const { signal } = step;
@@ -121,7 +145,7 @@ export async function homeOf(box: Box): Promise<string> {
 
 /**
  * The session over `box`, `HarnessV1NetworkSandboxSession`. A path is the checkout's as the
- * checkout rule allows it (`allowedPaths`, on the box's files), or under the box's home, or refused. `stop` stops the
+ * checkout rule allows it (`inCheckout`, on the box's files), or under the box's home, or refused. `stop` stops the
  * box; `destroy` kills what the session started (so the box stays up for the turn's carry back,
  * and its opener stops it) and deletes the session's `.agent-runs`, which a bridge writes the
  * model's key into; `HarnessAgentSession.destroy()` leaves a session it was given running.

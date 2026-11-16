@@ -310,7 +310,7 @@ describe("describeConfig", () => {
   });
 
   it("refuses a coding agent its package.json does not name, one id given by two vendors, and an id no engine can take", () => {
-    const own = { packages: [], bin: "x", args: [], signIn: { run: [] } };
+    const own = { packages: [], bin: "x", args: [], signIn: { run: [] }, hosts: [] };
     const nameless = withSetup(defineConnector("acme", {}, { title: "Acme" }), { agent: { own } });
     expect(() => resolveConfig({ ...base, connectors: [...base.connectors, nameless] })).toThrow(
       'The "acme" connector attaches a coding agent but does not say who it is',
