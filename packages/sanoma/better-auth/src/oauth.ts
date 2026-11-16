@@ -31,6 +31,18 @@ export interface OAuthSetup {
   fetchClientMetadata: ClientMetadataResourceFetch;
 }
 
+/** The CIMD discovery, as the provider takes one. */
+type Discovery = ReturnType<typeof createCimdClientDiscovery>;
+
+/**
+ * How long a client's resolution is waited for: the plugin caps the document's fetch at 5
+ * seconds, and writes the client's row after.
+ */
+const RESOLVE_WAIT_MS = 10_000;
+
+/** A resolution that did not settle in `RESOLVE_WAIT_MS`. */
+const LATE = Symbol("late");
+
 /**
  * The plugins, in the order Better Auth takes them: made once per login, never per request, so
  * the provider's own memos and the CIMD discovery's document cache hold across the instances made
@@ -39,10 +51,37 @@ export interface OAuthSetup {
  * an object of its own, which the provider's shared options then refuse the second time.
  */
 export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
-  const cimd = createCimdClientDiscovery({
-    fetchClientMetadataResource: fetchClientMetadata,
-    metadataProfile: "mcp-2026-07-28",
-  });
+  const make = () =>
+    createCimdClientDiscovery({
+      fetchClientMetadataResource: fetchClientMetadata,
+      metadataProfile: "mcp-2026-07-28",
+    });
+  /** The discovery every request resolves with, until one of its resolutions never settles. */
+  let cimd = make();
+  /**
+   * A client as `cimd` resolves it, waited for no longer than `RESOLVE_WAIT_MS`. The discovery
+   * keeps each client's resolution under way and hands it to whoever asks next, with no bound,
+   * and it is shared by every request; a request a Worker cancels never settles its own (its
+   * timers and continuations do not run again), so every later one for that client would wait
+   * for ever. One not settled in time is given up with the discovery that holds it (its cache
+   * and its counts of fetches under way too), and this request and those after resolve with a
+   * new one; a second that does not settle either fails the request.
+   */
+  const resolved: Discovery["resolve"] = async (ctx, clientId, existing) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const asked = cimd;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<typeof LATE>((resolve) => (timer = setTimeout(() => resolve(LATE), RESOLVE_WAIT_MS)));
+      try {
+        const client = await Promise.race([asked.resolve(ctx, clientId, existing), late]);
+        if (client !== LATE) return client;
+      } finally {
+        clearTimeout(timer);
+      }
+      if (cimd === asked) cimd = make();
+    }
+    throw new Error(`better-auth: the client ${clientId} was not resolved in time`);
+  };
   // The one gate: the provider finds every client, at every route, through its discovery's
   // `resolve` (its `getClient`, which awaits it and takes null as no such client; `matches` it
   // does not await). A client is one only while a declared agent stands for it, as the files say
@@ -50,11 +89,11 @@ export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
   // a caller's), and one undeclared since is no client at the token endpoint, consent or
   // revocation either. And no client is bound to DPoP, whatever its own document asks
   // (`dpop_bound_access_tokens`): the provider would demand a proof `handle` drops.
-  const discovery: typeof cimd = {
+  const discovery: Discovery = {
     ...cimd,
     async resolve(ctx, clientId, existing) {
       if ((await agentOf(clientId)) === undefined) return null;
-      const client = await cimd.resolve(ctx, clientId, existing);
+      const client = await resolved(ctx, clientId, existing);
       return client && { ...client, dpopBoundAccessTokens: false };
     },
   };

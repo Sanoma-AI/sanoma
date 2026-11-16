@@ -516,6 +516,41 @@ describe("a declared client", () => {
     });
   });
 
+  it("is not left waiting for a reading of its document another request began and never finished", async () => {
+    // The first fetch never answers, nor heeds its abort: a request a Worker cancelled, whose
+    // timers and continuations never run again.
+    let fetches = 0;
+    const stuck = declaredMetadataFetch((input, init) =>
+      fetches++ === 0 ? new Promise<Response>(() => undefined) : network(input, init),
+    );
+    const login = betterAuthStaffLogin(context, { fetchClientMetadata: stuck });
+    const asking = () => login.handle(request(authorizePath(CLAUDE_CODE, pkce().challenge)));
+    // The clock the login's waits read is the test's; the database's answers take real time.
+    const really = setTimeout;
+    const until = async (done: () => boolean, seconds: number) => {
+      for (let waited = 0; waited < 600 && !done(); waited++) {
+        await vi.advanceTimersByTimeAsync(seconds * 1000);
+        await new Promise((resolve) => really(resolve, 5));
+      }
+    };
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const first = asking();
+      await until(() => fetches > 0, 0);
+      // The next request for the same client, in the same process.
+      let answered: Response | undefined;
+      const second = asking().then((response) => (answered = response));
+      await until(() => answered !== undefined, 1);
+      expect(answered?.status).toBe(302);
+      // Those after it wait for nothing: the stuck reading is dropped with all it held.
+      expect((await asking())?.status).toBe(302);
+      expect(fetches).toBe(2);
+      await Promise.all([first, second]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("is refused a resource that is not this instance's own /mcp", async () => {
     const { challenge } = pkce();
     for (const resource of ["https://elsewhere.example/mcp", `${ORIGIN}/api/call`]) {
