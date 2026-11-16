@@ -559,8 +559,11 @@ export interface LoginContext {
   social?: SocialClients;
   /** For the staff login only: who it may let in, the company's social clients, and where it tells of a sign-in. */
   staff?: {
-    /** Whether the people files declare the person `identity` names; a login never makes a user for anyone else. */
-    admits(identity: LoginIdentity): boolean;
+    /**
+     * Whether the people files declare the person `identity` names, as they say when asked; a
+     * login never makes a user for anyone else.
+     */
+    admits(identity: LoginIdentity): boolean | Promise<boolean>;
     /** The company's own OAuth clients, each a method when given. */
     social: SocialClients;
     /** Tells the app of a sign-in by `method` of the person `identity` names, which the ledger records. Must not throw. */
@@ -568,10 +571,11 @@ export interface LoginContext {
     /**
      * The agent surface's OAuth, when the app serves it: the path on the request's own origin
      * that an access token is for (`/mcp`, its resource), and the declared agent that stands for
-     * an OAuth client, by the client's id (`agentOfClient`). The login is then the surface's
-     * authorization server, and refuses a client no agent stands for (`LoginHalf.bearer`).
+     * an OAuth client, by the client's id (`agentOfClient`), as the files say when asked. The
+     * login is then the surface's authorization server, and refuses a client no agent stands for
+     * (`LoginHalf.bearer`).
      */
-    oauth?: { resource: string; agentOf(client: string): string | undefined };
+    oauth?: { resource: string; agentOf(client: string): string | undefined | Promise<string | undefined> };
   };
 }
 

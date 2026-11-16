@@ -230,7 +230,7 @@ export function betterAuthStaffLogin(
             ...(row && row.emailVerified && { email: row.email }),
             ...(login && { github: login }),
           };
-          return staff.admits(identity) ? undefined : refused;
+          return (await staff.admits(identity)) ? undefined : refused;
         },
       },
       advanced: { cookiePrefix: "sanoma" },
@@ -266,14 +266,14 @@ export function betterAuthStaffLogin(
             const { resource } = oauthOrigin(ctx.request, oauth);
             const query = ctx.query as { client_id?: unknown; resource?: unknown } | undefined;
             const client = typeof query?.client_id === "string" ? query.client_id : "";
-            if (query?.resource === resource && oauth.agentOf(client) !== undefined)
+            if (query?.resource === resource && (await oauth.agentOf(client)) !== undefined)
               await ensureResource(ctx.context.adapter, resource);
             return;
           }
           // An undeclared email is answered as a declared one is, and nothing is stored or sent.
           if (ctx.path !== SEND_CODE) return;
           const email = (ctx.body as { email?: unknown } | undefined)?.email;
-          if (typeof email !== "string" || !staff.admits({ email })) return ctx.json({ success: true });
+          if (typeof email !== "string" || !(await staff.admits({ email }))) return ctx.json({ success: true });
         }),
       },
       databaseHooks: {
@@ -468,7 +468,7 @@ async function authorizing(request: Request, surface: OAuthContext): Promise<Res
   if (request.method !== "GET") return new Response(null, { status: 405, headers: { allow: "GET" } });
   const query = new URL(request.url).searchParams;
   const client = query.get("client_id") ?? "";
-  if (surface.agentOf(client) === undefined) {
+  if ((await surface.agentOf(client)) === undefined) {
     // What is missing and where, never a declaration to paste: the client id is whatever the
     // link that sent the person here says, and a link anyone can send.
     return refusalPage(
@@ -506,7 +506,7 @@ async function consenting(request: Request, surface: OAuthContext): Promise<Resp
   const said = form ? new URLSearchParams(text).get("oauth_query") : jsonField(text, "oauth_query");
   const query = typeof said === "string" ? said : "";
   const client = new URLSearchParams(query).get("client_id") ?? "";
-  if (surface.agentOf(client) !== undefined) return undefined;
+  if ((await surface.agentOf(client)) !== undefined) return undefined;
   return Response.json(
     {
       error: "invalid_client",
@@ -540,7 +540,7 @@ async function tokenFor(request: Request, surface: OAuthContext): Promise<Respon
       .catch(() => ""),
   );
   const client = form.get("client_id");
-  if (client !== null && surface.agentOf(client) === undefined) {
+  if (client !== null && (await surface.agentOf(client)) === undefined) {
     return Response.json(
       {
         error: "invalid_client",

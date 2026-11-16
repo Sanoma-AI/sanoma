@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { type LoginContext, type LoginHalf, type LoginMethod, sealInvite } from "sanoma/workflows";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppContext, LoginProvider } from "../src/context.ts";
+import type { AppSnapshot } from "../src/snapshot.ts";
 import { admitting } from "../src/login/admission.ts";
 import { staffLogin } from "../src/login/staff.ts";
 import { readPeople } from "sanoma/workflows/describe";
@@ -113,17 +114,21 @@ describe("staffLogin", () => {
       },
       { github: { clientId: "id", clientSecret: "secret" } },
     );
-    await provider.open!({
-      resolved: {
-        appName: "acme-plumbing",
-        name: "Acme Plumbing",
-        root,
-        ...(sender && { login: { sender: {}, from: "Acme <login@acme.test>" } }),
-      },
-      client,
-      snapshot: { people: readPeople(root) },
-      ...(stylesheet && { stylesheet }),
-    } as unknown as AppContext);
+    const snapshot = { people: readPeople(root) } as AppSnapshot;
+    await provider.open!(
+      {
+        resolved: {
+          appName: "acme-plumbing",
+          name: "Acme Plumbing",
+          root,
+          ...(sender && { login: { sender: {}, from: "Acme <login@acme.test>" } }),
+        },
+        client,
+        snapshot,
+        ...(stylesheet && { stylesheet }),
+      } as unknown as AppContext,
+      () => snapshot,
+    );
     return provider;
   }
 
@@ -138,9 +143,9 @@ describe("staffLogin", () => {
   });
 
   it("gives the half who is declared, the company's GitHub client and the sender", async () => {
-    expect(context.staff!.admits({ email: "ADA@acme.test" })).toBe(true);
-    expect(context.staff!.admits({ github: "bo-gh" })).toBe(true);
-    expect(context.staff!.admits({ email: "mallory@acme.test" })).toBe(false);
+    expect(await context.staff!.admits({ email: "ADA@acme.test" })).toBe(true);
+    expect(await context.staff!.admits({ github: "bo-gh" })).toBe(true);
+    expect(await context.staff!.admits({ email: "mallory@acme.test" })).toBe(false);
     expect(context.staff!.social).toEqual({ github: { clientId: "id", clientSecret: "secret" } });
     expect(context.origins).toEqual([]);
     expect(context.key).toMatch(/^[0-9a-f]{64}$/);
@@ -344,11 +349,15 @@ describe("staffLogin", () => {
     writeFileSync(join(broken, "resources", "people.ts"), "export const = ;\n");
     try {
       const provider = staffLogin(async () => fakeHalf(["code", "invite"]));
-      await provider.open!({
-        resolved: { appName: "acme-plumbing", name: "Acme Plumbing", root: broken },
-        client,
-        snapshot: { people: readPeople(broken) },
-      } as unknown as AppContext);
+      const snapshot = { people: readPeople(broken) } as AppSnapshot;
+      await provider.open!(
+        {
+          resolved: { appName: "acme-plumbing", name: "Acme Plumbing", root: broken },
+          client,
+          snapshot,
+        } as unknown as AppContext,
+        () => snapshot,
+      );
       const page = (await provider.handle!(request("/auth/invite/tok-dee@acme.test")))!;
       expect(page.status).toBe(200);
       const html = await page.text();
@@ -375,10 +384,10 @@ describe("staffLogin", () => {
   describe("the agent surface's sign-in", () => {
     const METADATA = `${APP}/.well-known/oauth-protected-resource/mcp`;
 
-    it("gives the half its OAuth: tokens for /mcp, and the agent each client stands for, as the files say", () => {
+    it("gives the half its OAuth: tokens for /mcp, and the agent each client stands for, as the files say", async () => {
       expect(context.staff!.oauth!.resource).toBe("/mcp");
-      expect(context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("claude-code");
-      expect(context.staff!.oauth!.agentOf("https://elsewhere.example/client.json")).toBeUndefined();
+      expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("claude-code");
+      expect(await context.staff!.oauth!.agentOf("https://elsewhere.example/client.json")).toBeUndefined();
     });
 
     it("answers /mcp without a token or a session the 401 that starts a client's sign-in", async () => {

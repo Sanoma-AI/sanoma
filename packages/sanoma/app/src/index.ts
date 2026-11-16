@@ -217,7 +217,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       });
     });
     // The staff login, once there is a client and the files it admits by; a login that cannot start stops the app.
-    await given.open?.(app.context);
+    await given.open?.(app.context, live);
   } catch (err) {
     if (server.listening) await new Promise((done) => server.close(done));
     await responder.close();

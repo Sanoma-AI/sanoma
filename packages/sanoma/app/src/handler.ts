@@ -177,18 +177,15 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
       return asked === entry.domain ? answered : withHeader(answered, "x-robots-tag", "noindex");
     }
     // Then the login sees every request (pages, server functions and files alike): its own
-    // routes, and any it will not let through. It reads who is declared from `context.snapshot`,
-    // and answers many requests itself (its sign-in, an OAuth client's authorize and token
-    // endpoint, the well-known documents): the snapshot is made as the files are now first, so
-    // a person or a client taken out is refused there too, not only once a page is asked.
-    await contextOf();
+    // routes, and any it will not let through. Who is declared it reads itself, as the files
+    // say then (`LoginProvider.open`'s `current`), only where it asks.
     return (await login.handle?.(request)) ?? served(request, (app) => ({ app, origin: requestOrigin(request) }));
   }
 
   /**
    * What the host has for the request, else (on `site`'s own host) `rootedAt`'s redirect, else
-   * Start's answer, in the context `asked` makes of the snapshot as it is now: on a public site's
-   * host a file never waits for the snapshot to be checked (on the app's, the login checked it).
+   * Start's answer, in the context `asked` makes of the snapshot as it is now: a file never waits
+   * for the snapshot to be checked.
    */
   const served = async (request: Request, asked: (app: AppContext) => RequestContext, site?: string) =>
     (await options.files?.(request, site)) ??

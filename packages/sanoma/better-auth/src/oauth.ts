@@ -20,7 +20,7 @@ const SCOPES = ["offline_access"];
 
 export interface OAuthSetup {
   /** The declared agent that stands for an OAuth client (`agentOfClient`), by its id; undefined for one no agent does. */
-  agentOf(client: string): string | undefined;
+  agentOf(client: string): string | undefined | Promise<string | undefined>;
   /** How a client's metadata document is fetched (`fetchClientMetadataResource`); only a declared client's ever is. */
   fetchClientMetadata: ClientMetadataResourceFetch;
 }
@@ -39,7 +39,7 @@ export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
     // Only a document a declared agent names is ever fetched: the URL is the company's choice,
     // never a caller's (`handle` refuses any other client before the provider sees it; this
     // holds for the token endpoint too, which may fetch the document again).
-    isMetadataDocumentUrlAllowed: (url) => agentOf(url) !== undefined,
+    isMetadataDocumentUrlAllowed: async (url) => (await agentOf(url)) !== undefined,
   });
   return [
     // The access tokens' keys, in the `jwks` table; no JWT on a session's responses.
@@ -71,9 +71,9 @@ export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
  * agent its client stands for now. A client no agent stands for gets a reference no consent has,
  * so it is never let through on an earlier one (and `handle` refuses it at authorize and consent).
  */
-function consentReference(agentOf: OAuthSetup["agentOf"], state: { query?: string } | null): string {
+async function consentReference(agentOf: OAuthSetup["agentOf"], state: { query?: string } | null): Promise<string> {
   const client = new URLSearchParams(state?.query ?? "").get("client_id") ?? "";
-  const agent = agentOf(client);
+  const agent = await agentOf(client);
   return agent === undefined ? `undeclared:${client}` : `agent:${agent}`;
 }
 

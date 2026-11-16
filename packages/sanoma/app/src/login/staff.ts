@@ -19,6 +19,7 @@ import { admit } from "sanoma/workflows/describe";
 import { agentOfClient, personsOf } from "sanoma/workflows/shared";
 import { z } from "zod";
 import type { AppContext, LoginProvider } from "../context.ts";
+import type { AppSnapshot } from "../snapshot.ts";
 import { secretValues } from "../server/secrets.ts";
 import { loginKey } from "./keys.ts";
 import { type Company, companyOf, firstWordOf, initialsOf } from "../lib/names.ts";
@@ -83,14 +84,21 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
   let half: LoginHalf | undefined;
   /** Whether `open` failed: the half is then never made, and the pages say so rather than "starting". */
   let failed = false;
-  const people = () => app!.snapshot.people;
+  /** The company as its files say when asked (`open`'s `current`). */
+  let current: (() => AppSnapshot | Promise<AppSnapshot>) | undefined;
+  /**
+   * Who the files declare, as they say now: read at each request that asks, so a person or a
+   * client taken out is refused at the login's own routes too, with no page asked in between.
+   */
+  const people = async () => (await current!()).people;
   /** How the login's pages look: the kit's stylesheet, and the company they are for. */
   const frame = (): PageFrame =>
     app ? { ...(app.stylesheet && { stylesheet: app.stylesheet }), company: companyOf(app.resolved.name) } : {};
   /** The declared person `identity` names, as admitted, or undefined. */
-  const admitted = (identity: LoginIdentity) => {
+  const admitted = async (identity: LoginIdentity) => {
+    const declared = await people();
     try {
-      return admit(identity, people(), true);
+      return admit(identity, declared, true);
     } catch {
       return undefined;
     }
@@ -131,8 +139,9 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     // The half's (Better Auth's), which the sign-in page posts to as well.
     signOut: "/auth/better-auth/sign-out",
     check() {},
-    async open(context) {
+    async open(context, snapshot) {
       app = context;
+      current = snapshot;
       const { client, resolved } = context;
       try {
         half = await make({
@@ -142,13 +151,13 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
           origins: [],
           ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
           staff: {
-            admits: (identity) => admitted(identity) !== undefined,
+            admits: async (identity) => (await admitted(identity)) !== undefined,
             social,
             // The agent surface's authorization server: tokens for `/mcp`, and a client only as
             // the agent the files declare for it, as they read now.
-            oauth: { resource: MCP, agentOf: (id) => agentOfClient(id, people().people) },
+            oauth: { resource: MCP, agentOf: async (id) => agentOfClient(id, (await people()).people) },
             async record(method, identity) {
-              const person = personOf(identity, people().people);
+              const person = personOf(identity, (await people()).people);
               if (person === undefined) return;
               await client
                 .recordSignIn(person, method)
@@ -186,12 +195,12 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       if (pathname === LOGIN && request.method === "GET") {
         // On to the app only for someone it admits: a session of someone no longer declared signs
         // in again here, as does anyone a client's sign-in sent here (the provider asks again).
-        if (signedIn && admitted(signedIn) && !signedQuery(url))
+        if (signedIn && !signedQuery(url) && (await admitted(signedIn)))
           return new Response(null, { status: 302, headers: { location: "/", "cache-control": "no-store" } });
         return signInPage(half, frame(), 200, url.searchParams.get("error"));
       }
       if (pathname === CONSENT && request.method === "GET") {
-        const person = signedIn && admitted(signedIn);
+        const person = signedIn && (await admitted(signedIn));
         return person ? consentPage(url, person) : signInPage(half, frame(), 401);
       }
       if (signedIn) return undefined;
@@ -200,7 +209,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     },
     async invite(email, { origin, by }) {
       if (!half?.invite || !app) throw new Error("The app is starting");
-      const person = personOf({ email }, people().people);
+      const person = personOf({ email }, (await people()).people);
       if (person === undefined) throw new Error(`${email} is not a declared person's email`);
       const { host, protocol } = new URL(origin);
       const token = await half.invite(
@@ -219,9 +228,10 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
    * signed request back to the half (`/oauth2/consent`). A client no agent stands for any more is
    * refused here too.
    */
-  function consentPage(url: URL, person: { id: string }): Response {
+  async function consentPage(url: URL, person: { id: string }): Promise<Response> {
     const client = url.searchParams.get("client_id") ?? "";
-    const agent = agentOfClient(client, people().people);
+    const { people: declared } = await people();
+    const agent = agentOfClient(client, declared);
     const look = frame();
     const company = look.company?.name ?? "this company";
     if (agent === undefined) {
@@ -232,13 +242,13 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
         look,
       );
     }
-    const declared = personsOf(people().people).find((p) => p.id === person.id);
+    const who = personsOf(declared).find((p) => p.id === person.id);
     return smallPage(
       200,
       "Allow access",
       `<div class="lede"><h1>Let ${escapeHtml(agent)} act for you?</h1>` +
         `<p>${escapeHtml(client)} asks to work in ${escapeHtml(company)} as the agent <strong>${escapeHtml(agent)}</strong>, ` +
-        `for ${escapeHtml(declared?.name ?? person.id)}. It may do only what both you and that agent may do, and the company's policy decides each call.</p></div>` +
+        `for ${escapeHtml(who?.name ?? person.id)}. It may do only what both you and that agent may do, and the company's policy decides each call.</p></div>` +
         `<div class="links"><button id="allow" type="button" class="button">Allow</button>` +
         `<button id="deny" type="button" class="link">Deny</button></div>` +
         `<p id="message" class="message" role="status"></p><script>${CONSENT_SCRIPT}</script>`,
@@ -264,14 +274,14 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     } else {
       if (!sameOrigin(request)) return refuse(403, "Ask for an invite from this app's own page");
       const identity = await identityOf(request);
-      const asking = identity && admitted(identity);
+      const asking = identity && (await admitted(identity));
       if (!asking) return refuse(401, "Sign in first");
       // An invite signs its holder in as that person: only an admin hands one out.
       if (!asking.groups?.includes(ADMIN)) return refuse(403, `Only someone in ${ADMIN} makes an invite link`);
       ({ email } = body.data);
       by = asking.id;
     }
-    if (personOf({ email }, people().people) === undefined) {
+    if (personOf({ email }, (await people()).people) === undefined) {
       return refuse(403, `${email} is not a declared person's email`);
     }
     const { url } = await provider.invite!(email, { origin: requestOrigin(request), by });
@@ -307,7 +317,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
 
   /** The declared person an invite for `email` signs in, with their groups, and who sent it (none for a sealed request's). */
   async function named(email: string): Promise<Invited> {
-    const declared = people().people;
+    const declared = (await people()).people;
     const persons = personsOf(declared);
     const invited = persons.find((p) => p.id === personOf({ email }, declared));
     if (!invited) return {};
