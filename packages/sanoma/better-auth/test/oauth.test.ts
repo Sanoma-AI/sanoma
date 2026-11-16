@@ -551,6 +551,38 @@ describe("a declared client", () => {
     }
   });
 
+  it("asking for a redirect its document does not list is told so on a page, never sent there", async () => {
+    const { challenge } = pkce();
+    const asked = (await half.handle(
+      request(authorizePath(CLAUDE_CODE, challenge, { redirect_uri: "https://elsewhere.example/callback" })),
+    ))!;
+    expect(asked.status).toBe(302);
+    const to = new URL(asked.headers.get("location")!, ORIGIN);
+    expect(to.origin + to.pathname).toBe(`${ISSUER}/error`);
+    const shown = (await half.handle(request(`${to.pathname}${to.search}`, { origin: null })))!;
+    expect(shown.status).toBe(400);
+    expect(shown.headers.get("content-type")).toContain("text/html");
+    expect(shown.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    expect(shown.headers.get("x-frame-options")).toBe("DENY");
+    expect(shown.headers.get("cache-control")).toBe("no-store");
+    const page = await shown.text();
+    expect(page).toContain("invalid_redirect");
+    expect(page).toMatch(/again from the agent/i);
+    // What the link says is shown as text, whatever it is: anyone can write such a link.
+    const forged = (await half.handle(
+      request(
+        `/auth/better-auth/error?${new URLSearchParams({ error: "<script>alert(1)</script>", error_description: '<img src=x onerror="alert(2)">' })}`,
+        { origin: null },
+      ),
+    ))!;
+    const text = await forged.text();
+    expect(text).not.toMatch(/<script|<img/);
+    expect(text).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    // With no OAuth context nothing sends anyone there: a 404 as any unlisted route.
+    const plain = betterAuthStaffLogin({ ...context, staff: { ...context.staff!, oauth: undefined } });
+    expect((await plain.handle(request("/auth/better-auth/error?error=x", { origin: null })))?.status).toBe(404);
+  });
+
   it("is refused a resource that is not this instance's own /mcp", async () => {
     const { challenge } = pkce();
     for (const resource of ["https://elsewhere.example/mcp", `${ORIGIN}/api/call`]) {

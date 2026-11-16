@@ -63,6 +63,12 @@ const TOKEN = "/oauth2/token";
 const REVOKE = "/oauth2/revoke";
 const CONSENT = "/oauth2/consent";
 /**
+ * Where the provider sends a person whose authorize it cannot answer at the client's redirect
+ * (its `getErrorURL`: a redirect the client's document does not list, a client it cannot read),
+ * with `error` and `error_description`: a page of this login's (`sentBack`), no route of Better Auth's.
+ */
+const ERROR = "/error";
+/**
  * The OAuth provider's routes, with the app's OAuth context only (`staff.oauth`), each with the
  * field RFC 8414's metadata names it by, so the metadata says a route exactly when it is served:
  * authorize (a browser's GET), the consent the app's page posts (no client's, so no field), the
@@ -386,6 +392,7 @@ export function betterAuthStaffLogin(
       if (oauth && pathname.startsWith("/.well-known/")) return discovery(request, pathname, oauth);
       if (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`)) return undefined;
       const route = pathname.slice(BASE_PATH.length);
+      if (oauth && route === ERROR) return sentBack(request);
       const served = ROUTES.has(route) || (oauth !== undefined && OAUTH_ROUTES.has(route));
       if (!served || (!sendCode && CODE_ROUTES.has(route))) return new Response("Not found", { status: 404 });
       if (request.method !== "GET" && !NO_ORIGIN.has(route) && !sameOrigin(request))
@@ -509,6 +516,26 @@ async function authorizing(request: Request, surface: OAuthContext): Promise<Res
     );
   }
   return undefined;
+}
+
+/**
+ * The page for `ERROR`: what the provider said went wrong with a client's sign-in, its code and
+ * its description as text (they are the link's to say, and anyone can write such a link), and
+ * what to do about it. A GET's alone.
+ */
+function sentBack(request: Request): Response {
+  if (request.method !== "GET" && request.method !== "HEAD")
+    return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+  const query = new URL(request.url).searchParams;
+  const said = (name: string) => escape((query.get(name) ?? "").slice(0, 300));
+  const error = said("error");
+  const description = said("error_description");
+  return refusalPage(
+    400,
+    "This sign-in could not go on.",
+    (error ? `The sign-in answered <code>${error}</code>${description ? `: ${description}` : ""}. ` : "") +
+      `Start it again from the agent. If it stops here again, the agent's client is not set up as this company's sign-in needs.`,
+  );
 }
 
 /**
