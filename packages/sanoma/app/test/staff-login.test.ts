@@ -104,6 +104,8 @@ describe("staffLogin", () => {
     methods: LoginMethod[] = ["code", "invite"],
     sender = true,
     stylesheet?: string,
+    /** The company as its files say at a request (`open`'s `current`): the one snapshot unless given. */
+    current?: (snapshot: AppSnapshot) => AppSnapshot | Promise<AppSnapshot>,
   ): Promise<LoginProvider> {
     const provider = staffLogin(
       async (given) => {
@@ -125,7 +127,7 @@ describe("staffLogin", () => {
         snapshot,
         ...(stylesheet && { stylesheet }),
       } as unknown as AppContext,
-      () => snapshot,
+      () => (current ? current(snapshot) : snapshot),
     );
     return provider;
   }
@@ -364,6 +366,37 @@ describe("staffLogin", () => {
     } finally {
       rmSync(broken, { recursive: true, force: true });
       vi.mocked(console.error).mockRestore();
+    }
+  });
+
+  it("admits nobody, and fails no sign-in, while the people cannot be read", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const unread = await opened(["code", "invite"], true, undefined, async () => {
+        throw new Error("resources/people.ts: Unexpected token");
+      });
+      const { staff } = context;
+      // What the half is told: nobody is declared, and a sign-in it made is not the app's to fail.
+      expect(await staff!.admits({ email: "ada@acme.test" })).toBe(false);
+      await expect(staff!.record("code", { email: "ada@acme.test" })).resolves.toBeUndefined();
+      expect(client.recordSignIn).not.toHaveBeenCalled();
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining("resources/people.ts: Unexpected token"));
+      // The login's own pages: someone signed in is shown the sign-in page, as nobody admitted is.
+      const ada = { cookie: "who=ada@acme.test" };
+      expect((await unread.handle!(request("/auth/login", ada)))?.status).toBe(200);
+      expect((await unread.handle!(request("/auth/consent?client_id=x&sig=y", ada)))?.status).toBe(401);
+      const asked = await unread.handle!(request("/auth/invite", { ...ada, body: { email: "dee@acme.test" } }));
+      expect(asked?.status).toBe(401);
+      // Any other page is let on to the app's admission, which says the people could not be checked.
+      const page = request("/workflows", ada);
+      expect(await unread.handle!(page)).toBeUndefined();
+      const refused = (await admitting(unread, async () => {
+        throw new Error("resources/people.ts: Unexpected token");
+      }).handle!(page))!;
+      expect(refused.status).toBe(403);
+      expect(await refused.text()).toContain("Who is asking could not be checked");
+    } finally {
+      logged.mockRestore();
     }
   });
 

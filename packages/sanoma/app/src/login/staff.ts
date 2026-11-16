@@ -93,9 +93,20 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
   /** How the login's pages look: the kit's stylesheet, and the company they are for. */
   const frame = (): PageFrame =>
     app ? { ...(app.stylesheet && { stylesheet: app.stylesheet }), company: companyOf(app.resolved.name) } : {};
-  /** The declared person `identity` names, as admitted, or undefined. */
+  /**
+   * The same, or undefined when the files could not be read (a file that does not load, which
+   * the log then names): for what must not fail on it. Nobody is admitted meanwhile, as the app's
+   * own admission refuses every request then ("could not be checked", `admitting`).
+   */
+  const peopleIfRead = () =>
+    people().catch((err: unknown) => {
+      console.error(`sanoma app: who is declared could not be read: ${errorMessage(err)}`);
+      return undefined;
+    });
+  /** The declared person `identity` names, as admitted, or undefined: for anyone else, and while the people cannot be read. */
   const admitted = async (identity: LoginIdentity) => {
-    const declared = await people();
+    const declared = await peopleIfRead();
+    if (!declared) return undefined;
     try {
       return admit(identity, declared, true);
     } catch {
@@ -139,8 +150,10 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
             // The agent surface's authorization server: tokens for `/mcp`, and a client only as
             // the agent the files declare for it, as they read now.
             oauth: { resource: MCP, agentOf: async (id) => agentOfClient(id, (await people()).people) },
+            // Never throws: the half made the session already, and the ledger's line is not its to lose it for.
             async record(method, identity) {
-              const person = personOf(identity, (await people()).people);
+              const declared = await peopleIfRead();
+              const person = declared && personOf(identity, declared.people);
               if (person === undefined) return;
               await client
                 .recordSignIn(person, method)
