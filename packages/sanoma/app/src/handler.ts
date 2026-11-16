@@ -177,7 +177,8 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
       return asked === entry.domain ? answered : withHeader(answered, "x-robots-tag", "noindex");
     }
     // Then the login sees every request (pages, server functions and files alike): its own
-    // routes, and any it will not let through.
+    // routes, and any it will not let through. Who is declared it reads itself, as the files
+    // say then (`LoginProvider.open`'s `current`), only where it asks.
     return (await login.handle?.(request)) ?? served(request, (app) => ({ app, origin: requestOrigin(request) }));
   }
 

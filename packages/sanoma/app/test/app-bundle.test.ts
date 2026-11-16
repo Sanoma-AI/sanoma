@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
@@ -11,6 +12,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unstable_startWorker } from "wrangler";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
+import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, resetStaffSchema } from "./staff-oauth-helpers.ts";
 
 // The app bundle (`buildAppBundle`) of the fixture company, built and run on workerd (Miniflare)
 // over Postgres, behind a router standing in for the Cloudflare connector's: it hands the bundle
@@ -36,17 +38,40 @@ export default {
 };
 `;
 
+/**
+ * Where an answer of the provider's sends the browser: a redirect's location, or, for a request it
+ * takes for a page's own fetch (as Miniflare's dispatch says it is), the `url` of its JSON.
+ */
+async function nextOf(response: Response): Promise<string> {
+  if (response.status === 302) return response.headers.get("location")!;
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { url: string }).url;
+}
+
 /** Writes `content` to `file`, making its folder. */
 function write(file: string, content: string | Buffer): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, content);
 }
 
-/** The one declared person: whom the staff login admits, by invite here. */
+/** A declared client whose document redirects to Claude Code's: the Worker must not follow it. */
+const MOVED = "https://claude.ai/oauth/moved";
+
+/** The one declared person, whom the staff login admits (by invite here), and the agent Claude Code stands for. */
 const PEOPLE = `import { sanoma } from "sanoma/resources";
 
 export const ada = sanoma.person({ id: "ada", email: "ada@acme.test" });
+export const claudeCode = sanoma.agent({ id: "claude-code", client: "${CLAUDE_CODE}" });
+export const moved = sanoma.agent({ id: "moved", client: "${MOVED}" });
 `;
+
+/** Each URL the Worker fetched: none but Claude Code's document, which a stand-in for claude.ai answers. */
+const outbound: string[] = [];
+const claudeAi = async (request: Request): Promise<Response> => {
+  outbound.push(request.url);
+  if (request.url === MOVED) return new Response(null, { status: 302, headers: { location: CLAUDE_CODE } });
+  return request.url === CLAUDE_CODE ? Response.json(CLAUDE_CODE_DOCUMENT) : new Response("Not found", { status: 404 });
+};
 
 /**
  * A workflow file the config does not list, on a schedule: the Worker's config has it as `sanoma`
@@ -134,6 +159,8 @@ beforeAll(async () => {
   const client = await SanomaClient.connect(config);
   await client.secrets(["SANOMA_NOTHING"]);
   await client.close();
+  // The staff login's tables afresh: a consent an earlier run gave would skip the consent page.
+  await resetStaffSchema(databaseUrl);
   await Promise.all([prepareBetterAuth(databaseUrl), prepareBetterAuthStaff(databaseUrl)]);
   const dir = mkdtempSync(join(tmpdir(), "sanoma-bundle-upload-"));
   temporary.push(dir);
@@ -169,6 +196,11 @@ beforeAll(async () => {
       config: join(dir, file),
       dev: {
         server: { hostname: "127.0.0.1", port: 0 },
+        // The Worker's `fetch` (a client's metadata document), answered here: nothing leaves the machine.
+        outboundService: claudeAi,
+        // The Worker's own URL as Cloudflare gives it, https: wrangler's dev proxy otherwise
+        // rewrites a request's `Origin` to http, which no page on the app's https host sends.
+        origin: { secure: true },
         inspector: false,
         persist: false,
         watch: false,
@@ -399,6 +431,82 @@ describe("buildAppBundle", () => {
     const listed = await listTools({ cookie: cookie! });
     expect(listed.status).toBe(200);
     expect(await listed.text()).toContain('"name":"start_run"');
+
+    // A client of her own (Claude Code) on the Worker: the 401 that starts its sign-in, the
+    // metadata, authorize for her (signed in already), her consent, the token endpoint's form
+    // with no Origin, and its token at /mcp as the declared agent for her.
+    const challenged = await listTools({});
+    const metadataUrl = `${app}/.well-known/oauth-protected-resource/mcp`;
+    expect(challenged.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${metadataUrl}"`);
+    expect(await (await secure(metadataUrl)).json()).toMatchObject({
+      resource: `${app}/mcp`,
+      authorization_servers: [`${app}/auth/better-auth`],
+    });
+    const server = (await (
+      await secure(`${app}/.well-known/oauth-authorization-server/auth/better-auth`)
+    ).json()) as Record<string, unknown>;
+    expect(server).toMatchObject({
+      client_id_metadata_document_supported: true,
+      code_challenge_methods_supported: ["S256"],
+    });
+    expect(server.token_endpoint_auth_methods_supported).toContain("none");
+    const verifier = "v".repeat(43);
+    const authorize = (client: string) =>
+      secure(
+        `${app}/auth/better-auth/oauth2/authorize?${new URLSearchParams({
+          response_type: "code",
+          client_id: client,
+          redirect_uri: "http://127.0.0.1:53682/callback",
+          code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+          code_challenge_method: "S256",
+          state: "s1",
+          resource: `${app}/mcp`,
+        })}`,
+        { headers: { cookie: cookie!, accept: "text/html" }, redirect: "manual" },
+      );
+    const asked = await authorize(CLAUDE_CODE);
+    const consentAt = new URL(await nextOf(asked), app);
+    expect(consentAt.pathname).toBe("/auth/consent");
+    expect(await (await secure(consentAt.href, { headers: { cookie: cookie! } })).text()).toContain(
+      "Let claude-code act for you?",
+    );
+    const allowed = await secure(`${app}/auth/better-auth/oauth2/consent`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app, cookie: cookie! },
+      body: JSON.stringify({ accept: true, oauth_query: consentAt.search.slice(1) }),
+    });
+    const code = new URL(((await allowed.json()) as { url: string }).url).searchParams.get("code")!;
+    const exchanged = await secure(`${app}/auth/better-auth/oauth2/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "http://127.0.0.1:53682/callback",
+        client_id: CLAUDE_CODE,
+        code_verifier: verifier,
+        resource: `${app}/mcp`,
+      }).toString(),
+    });
+    expect(exchanged.status).toBe(200);
+    const { access_token } = (await exchanged.json()) as { access_token: string };
+    expect(JSON.parse(Buffer.from(access_token.split(".")[1]!, "base64url").toString())).toMatchObject({
+      aud: `${app}/mcp`,
+      azp: CLAUDE_CODE,
+    });
+    const asClient = await listTools({ authorization: `Bearer ${access_token}` });
+    expect(asClient.status).toBe(200);
+    expect(await asClient.text()).toContain('"name":"start_run"');
+    expect(outbound).toEqual([CLAUDE_CODE]);
+    // A client no agent declares: refused at authorize, its document never fetched.
+    const undeclared = await authorize("https://elsewhere.example/oauth/client.json");
+    expect(undeclared.status).toBe(403);
+    expect(await undeclared.text()).toContain("resources/people.ts");
+    expect(outbound).toEqual([CLAUDE_CODE]);
+    // A declared client whose document redirects: refused, the redirect never followed.
+    const redirected = await authorize(MOVED);
+    expect([302, 200]).not.toContain(redirected.status);
+    expect(outbound).toEqual([CLAUDE_CODE, MOVED]);
   });
 
   it("answers a page of a site with a login from the assets, whoever asks, and renders one that imports a call on each request", async () => {

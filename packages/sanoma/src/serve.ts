@@ -1,3 +1,4 @@
+import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
@@ -257,7 +258,13 @@ export async function appOptions(
     throw new UsageError(`GitHub sign-in needs ${GITHUB.join(", ")}: ${missing.join(", ")} not set`);
   }
   const social = clientId && clientSecret ? { github: { clientId, clientSecret } } : undefined;
-  return { ...options, login: staffLogin(betterAuthStaffLogin, social), social };
+  // A client's metadata document fetched as Node can: the name resolved once, every address it
+  // has a public one, that address pinned, no redirect followed (the Worker cannot, and does less).
+  const login = staffLogin(
+    (context) => betterAuthStaffLogin(context, { fetchClientMetadata: fetchClientMetadataResource }),
+    social,
+  );
+  return { ...options, login, social };
 }
 
 /** How long a reload waits after it is asked (`WorkerOptions.reload`): the save that asked it ends first. */

@@ -30,8 +30,13 @@ export interface LoginProvider {
   handle?(request: Request): Response | undefined | Promise<Response | undefined>;
   /** The path the page POSTs to to sign out, which `handle` serves; none, no Sign out. */
   signOut?: string;
-  /** Called once the app listens, with what it serves: a login that needs the client or the files starts here. */
-  open?(app: AppContext): Promise<void>;
+  /**
+   * Called once the app listens, with what it serves: a login that needs the client or the files
+   * starts here. `current` is the company as its files say when asked (the Node adapter's live
+   * snapshot, the build's own on a Worker): a login reads who is declared from it, at each
+   * request that asks.
+   */
+  open?(app: AppContext, current: () => AppSnapshot | Promise<AppSnapshot>): Promise<void>;
   /** Called when the app stops. */
   close?(): Promise<void>;
   /**
