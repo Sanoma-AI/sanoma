@@ -24,6 +24,8 @@ const DECLARED = "alice@example.com";
 const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
 /** Another client's, which no agent declares. */
 const UNDECLARED = "https://elsewhere.example/oauth/client.json";
+/** A declared client whose own document asks for DPoP-bound tokens (RFC 9449 §5.2). */
+const BOUND = "https://bound.example/oauth/client.json";
 const REDIRECT = "http://localhost:53682/callback";
 
 /** Claude Code's document, as claude.ai serves it. */
@@ -44,6 +46,7 @@ async function network(input: string | URL | Request, init?: RequestInit): Promi
   fetched.push(url);
   redirects.add(init?.redirect);
   if (url === CLAUDE_CODE) return Response.json(DOCUMENT, { headers: { "cache-control": "max-age=3600" } });
+  if (url === BOUND) return Response.json({ ...DOCUMENT, client_id: BOUND, dpop_bound_access_tokens: true });
   if (url === "https://claude.ai/oauth/moved")
     return new Response(null, { status: 302, headers: { location: CLAUDE_CODE } });
   return new Response("Not found", { status: 404 });
@@ -52,6 +55,7 @@ async function network(input: string | URL | Request, init?: RequestInit): Promi
 /** Which agent stands for which client, as the people files say: changed by a test to undeclare one. */
 const agents = new Map([
   [CLAUDE_CODE, "claude-code"],
+  [BOUND, "bound"],
   ["https://claude.ai/oauth/moved", "moved"],
 ]);
 const codes = new Map<string, string>();
@@ -182,10 +186,10 @@ async function token(form: Record<string, string>) {
 const refreshWith = (refresh_token: string) =>
   token({ grant_type: "refresh_token", refresh_token, client_id: CLAUDE_CODE, resource: MCP });
 
-/** The whole flow for Claude Code: authorize, sign in by code, consent, the code for tokens. */
-async function connect() {
+/** The whole flow for a client, Claude Code unless said: authorize, sign in by code, consent, the code for tokens. */
+async function connect(client = CLAUDE_CODE) {
   const { verifier, challenge } = pkce();
-  const asked = (await half.handle(request(authorizePath(CLAUDE_CODE, challenge))))!;
+  const asked = (await half.handle(request(authorizePath(client, challenge))))!;
   expect(asked.status).toBe(302);
   const login = asked.headers.get("location")!;
   const { cookie, next } = await signInFrom(login);
@@ -198,7 +202,7 @@ async function connect() {
       grant_type: "authorization_code",
       code,
       redirect_uri: REDIRECT,
-      client_id: CLAUDE_CODE,
+      client_id: client,
       code_verifier: verifier,
       resource: MCP,
     })),
@@ -441,6 +445,23 @@ describe("a declared client", () => {
     expect(refreshed.status).toBe(200);
   });
 
+  it("gets a plain Bearer token though its own document asks for DPoP-bound ones", async () => {
+    const { status, body } = await connect(BOUND);
+    expect(status, JSON.stringify(body)).toBe(200);
+    expect(body.token_type).toMatch(/^bearer$/i);
+    expect(decode(body.access_token!).payload.cnf).toBeUndefined();
+    expect(await half.bearer!(request("/mcp", { bearer: body.access_token, origin: null }))).toMatchObject({
+      client: BOUND,
+    });
+    const refreshed = await token({
+      grant_type: "refresh_token",
+      refresh_token: body.refresh_token!,
+      client_id: BOUND,
+      resource: MCP,
+    });
+    expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
+  });
+
   it("is refused at consent once no agent declares it any more, though the page was shown", async () => {
     const { cookie } = await connect();
     const { challenge } = pkce();
@@ -517,7 +538,7 @@ describe("a declared client", () => {
     expect(await resourceRows()).toContain("https://fresh.example/mcp");
   });
 
-  it("is refused once no agent declares it any more: at authorize, and at the token endpoint", async () => {
+  it("is refused once no agent declares it any more: at authorize, the token endpoint and revocation", async () => {
     const { body } = await connect();
     agents.delete(CLAUDE_CODE);
     try {
@@ -532,6 +553,15 @@ describe("a declared client", () => {
       });
       expect(refreshed.status).toBe(400);
       expect(refreshed.body.error).toBe("invalid_client");
+      // Nor is it a client at revocation: the provider finds none by that id.
+      const revoked = (await half.handle(
+        request("/auth/better-auth/oauth2/revoke", {
+          form: { token: body.refresh_token!, token_type_hint: "refresh_token", client_id: CLAUDE_CODE },
+          origin: null,
+        }),
+      ))!;
+      expect(revoked.status).toBe(400);
+      expect(await revoked.json()).toMatchObject({ error: "invalid_client" });
     } finally {
       agents.set(CLAUDE_CODE, "claude-code");
     }

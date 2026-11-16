@@ -263,11 +263,8 @@ export function betterAuthStaffLogin(
           // hook, so a run of requests with made-up hosts is held to it. The provider checks
           // the resource before it looks for a session, so the row is there before a sign-in.
           if (oauth && ctx.path === AUTHORIZE && ctx.request) {
-            const { resource } = oauthOrigin(ctx.request, oauth);
-            const query = ctx.query as { client_id?: unknown; resource?: unknown } | undefined;
-            const client = typeof query?.client_id === "string" ? query.client_id : "";
-            if (query?.resource === resource && (await oauth.agentOf(client)) !== undefined)
-              await ensureResource(ctx.context.adapter, resource);
+            const { refused, resource } = await authorizeAsked(ctx.request, oauth);
+            if (!refused) await ensureResource(ctx.context.adapter, resource);
             return;
           }
           // An undeclared email is answered as a declared one is, and nothing is stored or sent.
@@ -391,22 +388,15 @@ export function betterAuthStaffLogin(
         return new Response("Forbidden", { status: 403 });
       // Any host is allowed, so Better Auth trusts any redirect: only a path on this host is taken.
       if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
-      let asked = request;
       if (oauth && route === AUTHORIZE) {
         const refused = await authorizing(request, oauth);
         if (refused) return refused;
-        asked = withoutDpop(request);
       }
       if (oauth && route === CONSENT && request.method === "POST") {
         const refused = await consenting(request, oauth);
         if (refused) return refused;
       }
-      if (oauth && route === TOKEN) {
-        const refused = await tokenFor(request, oauth);
-        if (refused) return refused;
-        asked = withoutDpop(request);
-      }
-      return (await authFor(request)).handler(withSignOutBody(asked, SIGN_OUT));
+      return (await authFor(request)).handler(withSignOutBody(withoutDpop(request), SIGN_OUT));
     },
     ...(oauth && {
       async bearer(request: Request) {
@@ -459,16 +449,34 @@ export function betterAuthStaffLogin(
 }
 
 /**
- * What authorize refuses before the provider sees it: a method but a browser's GET; a client no
- * declared agent stands for (whose document is then never fetched), with what to declare; a
- * resource other than this host's own. Otherwise undefined: the resource's row is made in the
- * provider's pipeline (`hooks.before`), past Better Auth's rate limit.
+ * What an authorize asks, and what is wrong with it: its client one no declared agent stands for
+ * (`client`), or its resource not this host's own (`resource`). The one check `authorizing` and
+ * the resource's row (`hooks.before`) share.
+ */
+async function authorizeAsked(request: Request, surface: OAuthContext) {
+  const query = new URL(request.url).searchParams;
+  const client = query.get("client_id") ?? "";
+  const { resource } = oauthOrigin(request, surface);
+  const refused =
+    (await surface.agentOf(client)) === undefined
+      ? ("client" as const)
+      : query.get("resource") === resource
+        ? undefined
+        : ("resource" as const);
+  return { client, resource, refused };
+}
+
+/**
+ * What authorize refuses before the provider sees it, on a page a person reads: a method but a
+ * browser's GET; a client no declared agent stands for (the provider would only redirect to its
+ * error page), saying where one is declared; a resource other than this host's own. Otherwise
+ * undefined: the resource's row is made in the provider's pipeline (`hooks.before`), past Better
+ * Auth's rate limit.
  */
 async function authorizing(request: Request, surface: OAuthContext): Promise<Response | undefined> {
   if (request.method !== "GET") return new Response(null, { status: 405, headers: { allow: "GET" } });
-  const query = new URL(request.url).searchParams;
-  const client = query.get("client_id") ?? "";
-  if ((await surface.agentOf(client)) === undefined) {
+  const { client, resource, refused } = await authorizeAsked(request, surface);
+  if (refused === "client") {
     // What is missing and where, never a declaration to paste: the client id is whatever the
     // link that sent the person here says, and a link anyone can send.
     return refusalPage(
@@ -480,8 +488,7 @@ async function authorizing(request: Request, surface: OAuthContext): Promise<Res
         `add would act for the people who sign in to it.`,
     );
   }
-  const { resource } = oauthOrigin(request, surface);
-  if (query.get("resource") !== resource) {
+  if (refused === "resource") {
     return refusalPage(
       400,
       "This sign-in asks for a resource this company does not serve.",
@@ -493,8 +500,10 @@ async function authorizing(request: Request, surface: OAuthContext): Promise<Res
 
 /**
  * What the consent refuses before the provider: an answer for a client no declared agent stands
- * for any more, though the consent page was shown while one did. Its client is the signed
- * request's (`oauth_query`, whose signature the provider checks next). Otherwise undefined.
+ * for any more, though the consent page was shown while one did. The provider finds no such
+ * client either (`oauthPlugins`' gate) and gives no code, but answers 200 with where its error
+ * page is: here it is a 403. Its client is the signed request's (`oauth_query`, whose signature
+ * the provider checks next). Otherwise undefined.
  */
 async function consenting(request: Request, surface: OAuthContext): Promise<Response | undefined> {
   // The consent page posts JSON; a form is read too, so no shape of the body passes unread.
@@ -524,32 +533,6 @@ function jsonField(text: string, field: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-/**
- * What the token endpoint refuses before the provider: a client no declared agent stands for
- * any more (a refresh token outlives a declaration). It makes no row: a request here needs no
- * sign-in, so a resource no authorize was accepted for is the provider's `invalid_target`.
- */
-async function tokenFor(request: Request, surface: OAuthContext): Promise<Response | undefined> {
-  if (request.method !== "POST") return undefined;
-  const form = new URLSearchParams(
-    await request
-      .clone()
-      .text()
-      .catch(() => ""),
-  );
-  const client = form.get("client_id");
-  if (client !== null && (await surface.agentOf(client)) === undefined) {
-    return Response.json(
-      {
-        error: "invalid_client",
-        error_description: `No agent in this company's resources/people.ts stands for the client ${client}`,
-      },
-      { status: 400, headers: { "cache-control": "no-store" } },
-    );
-  }
-  return undefined;
 }
 
 /**
@@ -593,8 +576,8 @@ async function serverMetadata(answered: Response): Promise<Response> {
 }
 
 /**
- * The request with DPoP (RFC 9449) left out: authorize's `dpop_jkt` and the token endpoint's
- * `DPoP` proof. The provider cannot be told not to bind a token to a key, and `/mcp` takes Bearer
+ * The request with DPoP (RFC 9449) left out, whatever the route: authorize's `dpop_jkt` and the
+ * token endpoint's `DPoP` proof. The provider cannot be told not to bind a token to a key, and `/mcp` takes Bearer
  * tokens alone, so a DPoP-capable client would be issued a token it cannot use, and sign in again
  * for ever. The metadata names no DPoP algorithm, so a client asks for none; one that does anyway
  * is answered as a server without DPoP answers it: the proof ignored, the `token_type` it gets `Bearer`.

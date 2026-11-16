@@ -33,14 +33,25 @@ export interface OAuthSetup {
  * an object of its own, which the provider's shared options then refuse the second time.
  */
 export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
-  const discovery = createCimdClientDiscovery({
+  const cimd = createCimdClientDiscovery({
     fetchClientMetadataResource: fetchClientMetadata,
     metadataProfile: "mcp-2026-07-28",
-    // Only a document a declared agent names is ever fetched: the URL is the company's choice,
-    // never a caller's (`handle` refuses any other client before the provider sees it; this
-    // holds for the token endpoint too, which may fetch the document again).
-    isMetadataDocumentUrlAllowed: async (url) => (await agentOf(url)) !== undefined,
   });
+  // The one gate: the provider finds every client, at every route, through its discovery's
+  // `resolve` (its `getClient`, which awaits it and takes null as no such client; `matches` it
+  // does not await). A client is one only while a declared agent stands for it, as the files say
+  // at that request: no other's document is ever fetched (the URL is the company's choice, never
+  // a caller's), and one undeclared since is no client at the token endpoint, consent or
+  // revocation either. And no client is bound to DPoP, whatever its own document asks
+  // (`dpop_bound_access_tokens`): the provider would demand a proof `handle` drops.
+  const discovery: typeof cimd = {
+    ...cimd,
+    async resolve(ctx, clientId, existing) {
+      if ((await agentOf(clientId)) === undefined) return null;
+      const client = await cimd.resolve(ctx, clientId, existing);
+      return client && { ...client, dpopBoundAccessTokens: false };
+    },
+  };
   return [
     // The access tokens' keys, in the `jwks` table; no JWT on a session's responses.
     jwt({ disableSettingJwtHeader: true }),
@@ -68,8 +79,9 @@ export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
 /**
  * What a consent is kept by, from the authorization request the provider holds for this request
  * (authorize's own query, or the signed one a sign-in or the consent posts): `agent:<id>`, the
- * agent its client stands for now. A client no agent stands for gets a reference no consent has,
- * so it is never let through on an earlier one (and `handle` refuses it at authorize and consent).
+ * agent its client stands for now. A client no agent stands for is none the provider finds
+ * (`oauthPlugins`' gate); should one get here all the same (the files changed under the request),
+ * its reference is one no consent has, so it is never let through on an earlier one.
  */
 async function consentReference(agentOf: OAuthSetup["agentOf"], state: { query?: string } | null): Promise<string> {
   const client = new URLSearchParams(state?.query ?? "").get("client_id") ?? "";
