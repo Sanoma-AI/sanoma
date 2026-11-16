@@ -54,21 +54,43 @@ const ROUTES = new Set([
 
 const AUTHORIZE = "/oauth2/authorize";
 const TOKEN = "/oauth2/token";
+const REVOKE = "/oauth2/revoke";
 /**
  * The OAuth provider's routes, with the app's OAuth context only (`staff.oauth`): authorize (a
- * browser's GET), the consent the app's page posts, the token endpoint and the signing keys'
- * public half. Not registration (no client registers: a declared agent names it), introspection,
- * revocation or userinfo, which the provider would answer to a client's own credentials, and
- * which no public client here has.
+ * browser's GET), the consent the app's page posts, the token endpoint, revocation (RFC 7009: a
+ * public client revokes its own tokens with its client id) and the signing keys' public half.
+ * Not registration (no client registers: a declared agent names it), introspection or userinfo,
+ * which no resource or client here uses.
  */
-const OAUTH_ROUTES = new Set([AUTHORIZE, "/oauth2/consent", TOKEN, "/jwks"]);
+const OAUTH_ROUTES = new Set([AUTHORIZE, "/oauth2/consent", TOKEN, REVOKE, "/jwks"]);
 
 /**
- * The one route a non-browser client POSTs to without an `Origin`: the token endpoint (RFC 6749
- * §3.2), its form a code and its PKCE verifier, or a refresh token, never a cookie. Every other
- * change keeps the same-origin rule.
+ * The routes a non-browser client POSTs to without an `Origin`, each named here on purpose: the
+ * token endpoint (RFC 6749 §3.2), its form a code and its PKCE verifier, or a refresh token, and
+ * revocation (RFC 7009 §2.1), its form a token to end; never a cookie. Every other change keeps
+ * the same-origin rule.
  */
-const NO_ORIGIN = new Set([TOKEN]);
+const NO_ORIGIN = new Set([TOKEN, REVOKE]);
+
+/**
+ * What RFC 8414's metadata says, of what the provider would: only what is served and supported
+ * here. Public clients alone (`none`, at the token endpoint and revocation), so no client secret
+ * or assertion; no introspection, DPoP or back-channel logout, which nothing here serves.
+ */
+const SERVER_METADATA_FIELDS = [
+  "issuer",
+  "authorization_endpoint",
+  "token_endpoint",
+  "revocation_endpoint",
+  "jwks_uri",
+  "scopes_supported",
+  "response_types_supported",
+  "response_modes_supported",
+  "grant_types_supported",
+  "code_challenge_methods_supported",
+  "authorization_response_iss_parameter_supported",
+  "client_id_metadata_document_supported",
+] as const;
 
 /** The routes of the email code, which answer only when the app can send one. */
 const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
@@ -280,7 +302,7 @@ export function betterAuthStaffLogin(
         { headers: { "cache-control": "public, max-age=300" } },
       );
     }
-    if (pathname === SERVER_METADATA) return (await authFor(request)).handler(request);
+    if (pathname === SERVER_METADATA) return serverMetadata(await (await authFor(request)).handler(request));
     return undefined;
   }
 
@@ -481,6 +503,20 @@ async function ensureResource(adapter: ResourceAdapter, identifier: string): Pro
     .catch(async (err: unknown) => {
       if (!(await adapter.findOne({ model: "oauthResource", where }))) throw err;
     });
+}
+
+/** The provider's RFC 8414 answer, narrowed to `SERVER_METADATA_FIELDS`, public clients alone; any other answer as it is. */
+async function serverMetadata(answered: Response): Promise<Response> {
+  // A HEAD's answer has no body to narrow: its headers are the GET's.
+  if (answered.status !== 200 || answered.body === null) return answered;
+  const full = (await answered.json()) as Record<string, unknown>;
+  const metadata: Record<string, unknown> = {};
+  for (const field of SERVER_METADATA_FIELDS) if (full[field] !== undefined) metadata[field] = full[field];
+  metadata.token_endpoint_auth_methods_supported = ["none"];
+  metadata.revocation_endpoint_auth_methods_supported = ["none"];
+  const headers = new Headers(answered.headers);
+  headers.delete("content-length");
+  return new Response(JSON.stringify(metadata), { status: 200, headers });
 }
 
 /** The issuer and the resource on the request's own origin: `<origin>/auth/better-auth` and `<origin><resource>`. */

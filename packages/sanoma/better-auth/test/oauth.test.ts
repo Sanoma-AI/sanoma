@@ -225,22 +225,29 @@ describe("the staff login's discovery", () => {
     }
   });
 
-  it("serves its authorization server metadata where RFC 8414 puts it for its issuer: CIMD, public clients and S256", async () => {
+  it("serves its authorization server metadata where RFC 8414 puts it for its issuer: only what it serves", async () => {
     const answered = (await half.handle(
       request("/.well-known/oauth-authorization-server/auth/better-auth", { origin: null }),
     ))!;
     expect(answered.status).toBe(200);
-    const metadata = (await answered.json()) as Record<string, unknown>;
-    expect(metadata).toMatchObject({
+    // Every field: CIMD, public clients alone, PKCE S256, revocation; no registration,
+    // introspection, DPoP or back-channel logout, none of which is served.
+    expect(await answered.json()).toEqual({
       issuer: ISSUER,
       authorization_endpoint: `${ISSUER}/oauth2/authorize`,
       token_endpoint: `${ISSUER}/oauth2/token`,
-      client_id_metadata_document_supported: true,
+      revocation_endpoint: `${ISSUER}/oauth2/revoke`,
+      jwks_uri: `${ISSUER}/jwks`,
+      scopes_supported: ["offline_access"],
+      response_types_supported: ["code"],
+      response_modes_supported: ["query"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      token_endpoint_auth_methods_supported: ["none"],
+      revocation_endpoint_auth_methods_supported: ["none"],
       code_challenge_methods_supported: ["S256"],
       authorization_response_iss_parameter_supported: true,
+      client_id_metadata_document_supported: true,
     });
-    expect(metadata.token_endpoint_auth_methods_supported).toContain("none");
-    expect(metadata.registration_endpoint).toBeUndefined();
   });
 
   it("serves from each instance the login makes, as a Worker makes one per request: here one per protocol", async () => {
@@ -316,6 +323,25 @@ describe("a declared client", () => {
       agents.set(CLAUDE_CODE, "claude-code");
     }
     expect(await where()).toBe(REDIRECT);
+  });
+
+  it("revokes its own refresh token with its client id alone, which is then refused", async () => {
+    const { body } = await connect();
+    const revoked = (await half.handle(
+      request("/auth/better-auth/oauth2/revoke", {
+        form: { token: body.refresh_token!, token_type_hint: "refresh_token", client_id: CLAUDE_CODE },
+        origin: null,
+      }),
+    ))!;
+    expect(revoked.status).toBe(200);
+    const refreshed = await token({
+      grant_type: "refresh_token",
+      refresh_token: body.refresh_token!,
+      client_id: CLAUDE_CODE,
+      resource: MCP,
+    });
+    expect(refreshed.status).toBe(400);
+    expect(refreshed.body.error).toBe("invalid_grant");
   });
 
   it("is refused a resource that is not this instance's own /mcp", async () => {
