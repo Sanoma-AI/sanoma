@@ -394,7 +394,8 @@ export function betterAuthStaffLogin(
       if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
       const refused = oauth && (await GUARDS.get(route)?.(request, oauth));
       if (refused) return refused;
-      return (await authFor(request)).handler(withSignOutBody(withoutDpop(request), SIGN_OUT));
+      const asked = route === AUTHORIZE ? withConsentAsked(request) : request;
+      return (await authFor(request)).handler(withSignOutBody(withoutDpop(asked), SIGN_OUT));
     },
     ...(oauth && {
       async bearer(request: Request) {
@@ -604,6 +605,42 @@ function withoutDpop(request: Request): Request {
   const headers = new Headers(request.headers);
   headers.delete("dpop");
   return new Request(url, new Request(request, { headers }));
+}
+
+/**
+ * An authorize with the consent page always shown (`prompt=consent`, as the client itself may
+ * ask), unless its redirect is the client's alone (`ownAddress`). The provider remembers a
+ * consent and, finding one, sends the code on with nothing shown: right for a site, whose
+ * redirect only it answers, but a loopback redirect matches on any port, so any program on the
+ * person's computer that opened the same link would be handed a code for a client they once
+ * allowed (RFC 8252 §8.6). With `prompt=none` too the provider refuses the two together, so such
+ * a client gets an error at its redirect, never a code unseen.
+ */
+function withConsentAsked(request: Request): Request {
+  const url = new URL(request.url);
+  if (ownAddress(url.searchParams.get("redirect_uri"))) return request;
+  const prompt = new Set((url.searchParams.get("prompt") ?? "").split(" ").filter(Boolean));
+  if (prompt.has("consent")) return request;
+  url.searchParams.set("prompt", [...prompt, "consent"].join(" "));
+  return new Request(url, request);
+}
+
+/**
+ * Whether a redirect is an address only its client answers at: HTTPS, and not this computer
+ * (`localhost`, `127.0.0.0/8`, `[::1]`). Not a loopback address, nor an app's own scheme, which
+ * any program on the computer may take.
+ */
+function ownAddress(redirect: string | null): boolean {
+  let url: URL;
+  try {
+    url = new URL(redirect ?? "");
+  } catch {
+    return false;
+  }
+  const host = url.hostname;
+  const loopback =
+    host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || /^127(\.\d+){3}$/.test(host);
+  return url.protocol === "https:" && !loopback;
 }
 
 /** The issuer and the resource on the request's own origin: `<origin>/auth/better-auth` and `<origin><resource>`. */

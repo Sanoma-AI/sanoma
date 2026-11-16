@@ -26,6 +26,9 @@ const UNDECLARED = "https://elsewhere.example/oauth/client.json";
 /** A declared client whose own document asks for DPoP-bound tokens (RFC 9449 §5.2). */
 const BOUND = "https://bound.example/oauth/client.json";
 const REDIRECT = "http://localhost:53682/callback";
+/** A declared client that is a site: its redirect an HTTPS address of its own, which no other program answers at. */
+const WEB = "https://web.example/oauth/client.json";
+const WEB_REDIRECT = "https://web.example/callback";
 
 /** Each document fetched, by URL, and how it was asked to treat a redirect: the stand-in for the network the CIMD plugin reaches. */
 const fetched: string[] = [];
@@ -37,6 +40,7 @@ async function network(input: string | URL | Request, init?: RequestInit): Promi
   if (url === CLAUDE_CODE) return Response.json(CLAUDE_CODE_DOCUMENT, { headers: { "cache-control": "max-age=3600" } });
   if (url === BOUND)
     return Response.json({ ...CLAUDE_CODE_DOCUMENT, client_id: BOUND, dpop_bound_access_tokens: true });
+  if (url === WEB) return Response.json({ ...CLAUDE_CODE_DOCUMENT, client_id: WEB, redirect_uris: [WEB_REDIRECT] });
   if (url === "https://claude.ai/oauth/moved")
     return new Response(null, { status: 302, headers: { location: CLAUDE_CODE } });
   return new Response("Not found", { status: 404 });
@@ -46,6 +50,7 @@ async function network(input: string | URL | Request, init?: RequestInit): Promi
 const agents = new Map([
   [CLAUDE_CODE, "claude-code"],
   [BOUND, "bound"],
+  [WEB, "web-bot"],
   ["https://claude.ai/oauth/moved", "moved"],
 ]);
 /** Runs `run` while `agent` stands for `client` (no agent, undefined), then puts the declaration back as it was. */
@@ -181,12 +186,18 @@ async function token(form: Record<string, string>, headers: Record<string, strin
 }
 
 /** A code for tokens at the token endpoint, with its PKCE verifier, as `client` (Claude Code unless said) sends it. */
-const exchange = (code: string, verifier: string, client = CLAUDE_CODE, headers: Record<string, string> = {}) =>
+const exchange = (
+  code: string,
+  verifier: string,
+  client = CLAUDE_CODE,
+  headers: Record<string, string> = {},
+  redirect = REDIRECT,
+) =>
   token(
     {
       grant_type: "authorization_code",
       code,
-      redirect_uri: REDIRECT,
+      redirect_uri: redirect,
       client_id: client,
       code_verifier: verifier,
       resource: MCP,
@@ -205,14 +216,25 @@ const bearerOf = (bearer?: string, at: { host?: string; login?: LoginHalf; path?
   );
 
 /** The whole flow for a client, Claude Code unless said: authorize, sign in by code, consent, the code for tokens. */
-async function connect(client = CLAUDE_CODE) {
+async function connect(client = CLAUDE_CODE, redirect = REDIRECT) {
   const { verifier, challenge } = pkce();
-  const asked = (await half.handle(request(authorizePath(client, challenge))))!;
+  const asked = (await half.handle(request(authorizePath(client, challenge, { redirect_uri: redirect }))))!;
   expect(asked.status).toBe(302);
   const login = asked.headers.get("location")!;
   const { cookie, next } = await signInFrom(login);
-  const back = next.startsWith(REDIRECT) ? new URL(next) : await consent(next, cookie);
-  return { cookie, back, ...(await exchange(back.searchParams.get("code")!, verifier, client)) };
+  const back = next.startsWith(redirect) ? new URL(next) : await consent(next, cookie);
+  return { cookie, back, ...(await exchange(back.searchParams.get("code")!, verifier, client, {}, redirect)) };
+}
+
+/** Where an authorize of `client`'s sends the person signed in with `cookie`: a page of the login's by its path, or the client's redirect. */
+async function sentTo(client: string, redirect: string, cookie: string, extra: Record<string, string> = {}) {
+  const { challenge } = pkce();
+  const asked = (await half.handle(
+    request(authorizePath(client, challenge, { redirect_uri: redirect, ...extra }), { cookie }),
+  ))!;
+  expect(asked.status).toBe(302);
+  const to = new URL(asked.headers.get("location")!, ORIGIN);
+  return { to, at: to.origin === ORIGIN ? to.pathname : `${to.origin}${to.pathname}` };
 }
 
 beforeAll(async () => {
@@ -347,17 +369,36 @@ describe("a declared client", () => {
   });
 
   it("is asked consent again once it stands for another agent than the one consented to", async () => {
-    const { cookie } = await connect();
-    const where = async () => {
-      const { challenge } = pkce();
-      const asked = (await half.handle(request(authorizePath(CLAUDE_CODE, challenge), { cookie })))!;
-      expect(asked.status).toBe(302);
-      const to = new URL(asked.headers.get("location")!, ORIGIN);
-      return to.origin === ORIGIN ? to.pathname : `${to.origin}${to.pathname}`;
-    };
-    expect(await where()).toBe(REDIRECT);
-    expect(await withAgent(CLAUDE_CODE, "admin-bot", where)).toBe("/auth/consent");
-    expect(await where()).toBe(REDIRECT);
+    const { cookie } = await connect(WEB, WEB_REDIRECT);
+    const where = async () => (await sentTo(WEB, WEB_REDIRECT, cookie)).at;
+    expect(await where()).toBe(WEB_REDIRECT);
+    expect(await withAgent(WEB, "admin-bot", where)).toBe("/auth/consent");
+    expect(await where()).toBe(WEB_REDIRECT);
+  });
+
+  it("is asked consent at every sign-in when its redirect is this computer's, which any program there could answer", async () => {
+    // RFC 8252 §8.6: a loopback redirect on any port proves nothing of who listens there.
+    for (const redirect of [REDIRECT, "http://127.0.0.1:41000/callback"]) {
+      const { cookie, status } = await connect(CLAUDE_CODE, redirect);
+      expect(status, redirect).toBe(200);
+      const again = await sentTo(CLAUDE_CODE, redirect, cookie);
+      expect(again.at, redirect).toBe("/auth/consent");
+      // Allowed there, it goes on as before.
+      expect((await consent(again.to.href, cookie)).searchParams.get("code"), redirect).toEqual(expect.any(String));
+      // Asked to show nothing (`prompt=none`), it gets no code either: there is a page to show.
+      const silent = await sentTo(CLAUDE_CODE, redirect, cookie, { prompt: "none" });
+      expect(silent.to.searchParams.get("code"), redirect).toBeNull();
+      expect(silent.to.searchParams.get("error"), redirect).toEqual(expect.any(String));
+    }
+  });
+
+  it("is asked consent once when its redirect is an HTTPS address of its own", async () => {
+    const { cookie, status, back } = await connect(WEB, WEB_REDIRECT);
+    expect(status).toBe(200);
+    expect(back.origin + back.pathname).toBe(WEB_REDIRECT);
+    const again = await sentTo(WEB, WEB_REDIRECT, cookie);
+    expect(again.at).toBe(WEB_REDIRECT);
+    expect(again.to.searchParams.get("code")).toEqual(expect.any(String));
   });
 
   it("holds tokens only for the agent their person consented to, whatever its client stands for since", async () => {
@@ -435,7 +476,7 @@ describe("a declared client", () => {
     const asked = (await half.handle(
       request(authorizePath(CLAUDE_CODE, challenge, { dpop_jkt: thumbprint }), { cookie }),
     ))!;
-    const code = new URL(asked.headers.get("location")!).searchParams.get("code")!;
+    const code = (await consent(asked.headers.get("location")!, cookie)).searchParams.get("code")!;
     const { status, body } = await exchange(code, verifier, CLAUDE_CODE, { dpop: proof() });
     expect(status).toBe(200);
     expect(body.token_type).toMatch(/^bearer$/i);
