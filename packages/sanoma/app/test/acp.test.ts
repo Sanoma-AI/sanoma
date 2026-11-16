@@ -24,7 +24,7 @@ import { resolveConfig } from "sanoma/workflows";
 import { runEnded } from "sanoma/testing/host";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { copyFixture, ensureBuilt } from "../../test/fixture.ts";
+import { copyFixture, ensureBuilt, installInClone } from "../../test/fixture.ts";
 import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
@@ -150,9 +150,10 @@ export default defineWorkflow({
   plant("pi", { signIn: "once", mode: "hello" });
   plant("codex", { signIn: "url", mode: "hello" });
   plant("claude-code", { signIn: "none", mode: "hello" });
-  const source = localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! });
+  installInClone(dir, join(dir, ".sanoma/agent-home/boxes", boxName("acp-test", "ada"), "repo"));
+  const source = localGitSource(dir);
   // The worker runs the turns: with the checkout and the app's steps.
-  await testApp.restart({ source, app: appSteps });
+  await testApp.restart({ source, app: appSteps, loopbackLogin: true });
   app = await startApp(testApp.config, { port: 0, source });
 }, 600_000);
 
@@ -205,7 +206,7 @@ const paste = (chat: string, code: string, actor = "ada") =>
   });
 
 describe("the chat on a person's own agent", () => {
-  it("edits the box's clone of the draft as the checkout rule answers, relays the agent's updates, carries its commit back, checks the draft, and shows its card", async () => {
+  it("approves every permission request, keeps its file calls through this client to the box's clone, relays the agent's updates, carries its commit back, checks the draft, and shows its card", async () => {
     const id = `work-${RUN}`;
     const draftRoot = join(dir, ".sanoma/drafts", id);
     // The draft's clone in the person's box, where the agent works.
@@ -218,31 +219,39 @@ describe("the chat on a person's own agent", () => {
     const steps = reply!.parts.filter(isToolUIPart);
     expect(steps.map((step) => [getToolName(step), step.title, step.state])).toEqual([
       ["read", "Read workflows/offboarding.ts", "output-available"],
-      ["edit", "Write node_modules/evil.js", "output-error"],
-      ["execute", "cat /etc/hosts", "output-error"],
+      ["edit", "Write node_modules/evil.js", "output-available"],
+      ["execute", "cat /etc/hosts", "output-available"],
       ["edit", "Edit workflows/offboarding.ts", "output-available"],
     ]);
     expect(steps[0]!.output).toBe('import { defineWorkflow, z } from "sanoma";');
-    expect(steps[1]).toMatchObject({
-      errorText: expect.stringContaining("is outside your checkout, or under .git or node_modules"),
-    });
-    expect(steps[2]).toMatchObject({ errorText: expect.stringMatching(/^No shell commands in this chat/) });
     expect(steps[3]!.output).toBe(`Changed ${join(clone, "workflows/offboarding.ts")}`);
 
-    // The checkout rule's answers: only an option offered, never allow_always.
+    // Every request approved, whatever its kind or path (the box is the boundary): its allow_once,
+    // else the allow_always it offered alone.
     const log = logged("opencode");
     expect(log.filter((entry) => "asked" in entry)).toEqual([
-      { asked: "Write node_modules/evil.js", chosen: "reject_once" },
-      { asked: "cat /etc/hosts", chosen: "reject_once" },
-      { asked: "mcp__sanoma__start_run", chosen: "reject_once" },
+      { asked: "Write node_modules/evil.js", chosen: "allow_once" },
+      { asked: "cat /etc/hosts", chosen: "allow_once" },
+      { asked: "mcp__sanoma__start_run", chosen: "allow_once" },
       { asked: "Edit workflows/offboarding.ts", chosen: "allow_once" },
-      { asked: "Edit always", chosen: "cancelled" },
+      { asked: "Edit always", chosen: "allow_always" },
+      { asked: "Never allowed", chosen: "reject_once" },
     ]);
     // No MCP server is offered (stable ACP's would need a URL and its credential, or a process, in
-    // the box), and an MCP tool's call is refused as any tool but an edit, delete, move or read is.
+    // the box), so an MCP tool's call it is allowed has nothing to reach, and the prompt names none
+    // of the catalog.
     expect(log.find((entry) => "mcpServers" in entry)).toEqual({ mcpServers: [] });
     expect(log.find((entry) => "prompt" in entry)!.prompt).not.toMatch(/start_run|The company's tools/);
-    expect(log.find((entry) => "wroteOutside" in entry)).toMatchObject({ wroteOutside: false });
+    // What this process does for it stays in the clone: its write under node_modules, and its
+    // read of another person's box, through the client, are refused.
+    expect(log.find((entry) => "wroteOutside" in entry)).toMatchObject({
+      wroteOutside: false,
+      error: expect.stringContaining("is outside your checkout, or under .git or node_modules"),
+    });
+    expect(log.find((entry) => "terminalOutside" in entry)).toEqual({
+      terminalOutside: false,
+      error: expect.stringContaining("is outside your checkout"),
+    });
     expect(log.find((entry) => "readOther" in entry)).toEqual({
       readOther: false,
       error: expect.stringContaining("is outside your checkout"),

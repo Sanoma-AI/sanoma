@@ -310,7 +310,7 @@ describe("describeConfig", () => {
   });
 
   it("refuses a coding agent its package.json does not name, one id given by two vendors, and an id no engine can take", () => {
-    const own = { packages: [], bin: "x", args: [], signIn: { run: [] } };
+    const own = { packages: [], bin: "x", args: [], signIn: { run: [] }, hosts: [] };
     const nameless = withSetup(defineConnector("acme", {}, { title: "Acme" }), { agent: { own } });
     expect(() => resolveConfig({ ...base, connectors: [...base.connectors, nameless] })).toThrow(
       'The "acme" connector attaches a coding agent but does not say who it is',
@@ -520,6 +520,7 @@ describe("a workflow's name in a site's api", () => {
         [[1, 1, 'A site calls this workflow api.outboundNext, as workflow "outbound-next" is: rename it']],
       ],
       ["patch", []],
+      ["reshape", []],
       ["save-draft", []],
       ["then", [[1, 1, "A site calls this workflow api.then, which a promise would take for its own: rename it"]]],
     ]);

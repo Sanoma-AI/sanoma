@@ -214,6 +214,76 @@ describe("githubToken", () => {
   });
 });
 
+/** `cloud-token`'s run at the Cloud's api: started, then its output. */
+const cloudToken = (expiresAt: string, token = "ghs_cloud"): Exchange[] => [
+  { method: "POST", path: "/api/call", status: 200, body: { runId: "run-1" } },
+  { method: "POST", path: "/api/call", status: 200, body: { token, expiresAt } },
+];
+
+describe("a token from Sanoma Cloud", () => {
+  const cloud = { SANOMA_CLOUD_TOKEN: "sca_test" };
+  const pulled: Exchange = { method: "GET", path: "/repos/acme/acme-ops/pulls/12", status: 200, body: pull(12) };
+
+  it.skipIf(live)(
+    "is asked for the repository alone with neither the App nor GITHUB_TOKEN, as the Cloud token",
+    async () => {
+      play("cloud-token", [...cloudToken("2099-01-01T00:00:00Z"), pulled, pulled]);
+      const host = githubRemote.open(acme, only(cloud));
+      await host.pullRequest(12);
+      await host.pullRequest(12);
+      expect(sent.slice(0, 2).map((s) => s.body)).toEqual([
+        { name: "cloudToken.start", input: { repository: "acme/acme-ops", scope: "write" } },
+        { name: "cloudToken.result", input: { runId: "run-1" } },
+      ]);
+      expect(sent.slice(0, 2).map((s) => s.headers.get("authorization"))).toEqual([
+        "Bearer sca_test",
+        "Bearer sca_test",
+      ]);
+      // Kept while it lasts: one run for both calls.
+      expect(sent.slice(2).map((s) => s.headers.get("authorization"))).toEqual([
+        "Bearer ghs_cloud",
+        "Bearer ghs_cloud",
+      ]);
+    },
+  );
+
+  it.skipIf(live)("is asked again once its hour is nearly out", async () => {
+    const soon = new Date(Date.now() + 240_000).toISOString();
+    play("cloud-token-expiring", [...cloudToken(soon, "ghs_one"), pulled, ...cloudToken(soon, "ghs_two"), pulled]);
+    const host = githubRemote.open(acme, only(cloud));
+    await host.pullRequest(12);
+    await host.pullRequest(12);
+    expect(sent.filter((s) => s.path.startsWith("/repos/")).map((s) => s.headers.get("authorization"))).toEqual([
+      "Bearer ghs_one",
+      "Bearer ghs_two",
+    ]);
+  });
+
+  it.skipIf(live)("is not asked when GITHUB_TOKEN is stored, nor without a repository", async () => {
+    play("cloud-token-unused", [pulled]);
+    await githubRemote.open(acme, only({ ...cloud, GITHUB_TOKEN: "ghp_person" })).pullRequest(12);
+    expect(sent.map((s) => s.headers.get("authorization"))).toEqual(["Bearer ghp_person"]);
+    await expect(githubToken(only(cloud).secrets, "acme")).rejects.toMatchObject({ vendorCode: "no_token" });
+  });
+
+  it.skipIf(live)("fails when the Cloud answers no token, and with the Cloud's refusal", async () => {
+    play("cloud-token-wrong", [
+      { method: "POST", path: "/api/call", status: 200, body: { runId: "run-1" } },
+      { method: "POST", path: "/api/call", status: 200, body: { token: "ghs_cloud" } },
+      { method: "POST", path: "/api/call", status: 401, body: { error: "Unauthorized" } },
+    ]);
+    const host = githubRemote.open(acme, only(cloud));
+    await expect(host.token()).rejects.toMatchObject({
+      retryable: false,
+      message: expect.stringContaining("github: Sanoma Cloud's cloud-token answered what Sanoma cannot read"),
+    });
+    await expect(host.token()).rejects.toMatchObject({
+      status: 401,
+      message: "Sanoma Cloud: cloud-token: SANOMA_CLOUD_TOKEN was refused: it is unknown or revoked",
+    });
+  });
+});
+
 describe("a repository opened", () => {
   it("reads a merged pull request, by number and by branch", async () => {
     play("remote-pull-request");

@@ -12,5 +12,8 @@ export const codex: CodingAgent = {
     bin: "codex-acp",
     args: [],
     signIn: { authenticate: "chat-gpt-device-code" },
+    // Its device-code sign-in, and its model on the ChatGPT plan (chatgpt.com/backend-api/codex):
+    // https://learn.chatgpt.com/docs/app-server and .../config-file/config-sample.
+    hosts: ["auth.openai.com", "chatgpt.com"],
   },
 };

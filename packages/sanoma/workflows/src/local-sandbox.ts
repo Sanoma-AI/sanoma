@@ -14,8 +14,9 @@ export const LOCAL_SANDBOX: SandboxCapabilities = { snapshot: true, pause: false
 /**
  * The boxes under `dir`: the box `name` is the directory `<dir>/<name>`, its home, made on its
  * first `open`, deleted by `discard`. This machine is its image and its size, so it takes neither.
- * A command's environment is `env(home)` (default: this Node and this process's `PATH`, and
- * `HOME`), never this process's, under the caller's `env`.
+ * It enforces no network allowlist: `open`'s `hosts` are ignored, and a box reaches whatever this
+ * machine reaches. A command's environment is `env(home)` (default: this Node and this process's
+ * `PATH`, and `HOME`), never this process's, under the caller's `env`.
  */
 export const localBackend = (
   dir: string,

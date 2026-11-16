@@ -59,9 +59,7 @@ export function StartForm({
 }) {
   const { fields, whole } = useMemo(() => {
     const read = fieldsOf(workflow.input);
-    const all: SchemaField[] = read ?? [
-      { key: WHOLE, label: "Input (JSON)", kind: "json", required: true, default: {} },
-    ];
+    const all: SchemaField[] = read ?? [{ key: WHOLE, label: "Input", kind: "json", required: true, default: {} }];
     return { fields: all, whole: !read };
   }, [workflow.input]);
   const form = useStartForm(workflow.name, fields, whole, scenario, onStarted);
@@ -298,7 +296,9 @@ function ScalarView({ form, field, name }: { form: SchemaFormApi; field: ScalarF
         const description = (
           <>
             {field.description && <FieldDescription>{field.description}</FieldDescription>}
-            {field.kind === "json" && <FieldDescription>Entered as JSON.</FieldDescription>}
+            {field.kind === "json" && (
+              <FieldDescription>Free-form: text, a number, or a list in [ ] or values in {"{ }"}.</FieldDescription>
+            )}
           </>
         );
 
@@ -357,9 +357,7 @@ function ScalarView({ form, field, name }: { form: SchemaFormApi; field: ScalarF
             );
             break;
           case "json":
-            control = (
-              <Textarea {...common} className="font-mono" rows={4} placeholder="JSON" value={text} onChange={onText} />
-            );
+            control = <Textarea {...common} className="font-mono" rows={4} value={text} onChange={onText} />;
             break;
         }
         return (

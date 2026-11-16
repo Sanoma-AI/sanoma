@@ -1,5 +1,13 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
-import { errorMessage, type ListQuery, type Saved } from "sanoma/workflows/shared";
+import {
+  errorMessage,
+  isFreeForm,
+  linkOf,
+  linkTarget,
+  type ListQuery,
+  missingText,
+  type Saved,
+} from "sanoma/workflows/shared";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useNavigate } from "@tanstack/react-router";
@@ -137,8 +145,9 @@ export function DataGrid({
   const fields = useMemo(
     () =>
       new Map(
+        // A free-form field's value is changed in the record form, not in its cell.
         (fieldsOf(collection.record) ?? []).flatMap((f) =>
-          f.kind === "object" || f.kind === "array" ? [] : [[f.key, f] as const],
+          f.kind === "object" || f.kind === "array" || f.kind === "json" ? [] : [[f.key, f] as const],
         ),
       ),
     [collection.record],
@@ -454,7 +463,13 @@ export function DataGrid({
 
   const exportCsv = () => {
     const heads = visible.map((c) => HEADS[c.id] ?? c.id);
-    const values = rows.map((row) => row.getVisibleCells().map((cell) => cell.getValue()));
+    // A free-form value as JSON text, which Import reads back as it was.
+    const values = rows.map((row) =>
+      row.getVisibleCells().map((cell) => {
+        const value = cell.getValue();
+        return isFreeForm(collection.fields[cell.column.id]) && value !== undefined ? JSON.stringify(value) : value;
+      }),
+    );
     const url = URL.createObjectURL(new Blob([csv([heads, ...values])], { type: "text/csv" }));
     const link = Object.assign(document.createElement("a"), { href: url, download: `${name}.csv` });
     link.click();
@@ -525,7 +540,14 @@ export function DataGrid({
                     {resizer}
                   </TableHead>
                 ) : (
-                  <SortHead key={header.id} field={header.id} order={order} staged={staged !== undefined} {...head}>
+                  <SortHead
+                    key={header.id}
+                    field={header.id}
+                    order={order}
+                    staged={staged !== undefined}
+                    sortable={!isFreeForm(collection.fields[header.id])}
+                    {...head}
+                  >
                     {collection.declared && (
                       <ColumnMenu collection={collection} field={header.id} rows={listed} hide={hide} />
                     )}
@@ -649,6 +671,13 @@ export function DataGrid({
                           )
                         ) : id === BY ? (
                           saved.updatedBy
+                        ) : linkOf(collection.fields[id]) !== undefined && !conflict ? (
+                          <LinkedKey
+                            name={linkTarget(name, linkOf(collection.fields[id])!)}
+                            field={id}
+                            value={saved.record[id]}
+                            issues={saved.issues}
+                          />
                         ) : (
                           <Value value={conflict ? conflict.mine : saved.record[id]} />
                         )}
@@ -737,6 +766,35 @@ export function DataGrid({
       </footer>
     </div>
   );
+}
+
+/**
+ * A link cell's value: the key of a record of the collection it links to (`name`), opening that
+ * record there (whatever is staged here: that collection's form saves); one that names no record
+ * there (the read's issue at its field saying so, `missingText`) struck through, with what it
+ * lacks in its tooltip.
+ */
+function LinkedKey({
+  name,
+  field,
+  value,
+  issues,
+}: {
+  name: string;
+  field: string;
+  value: unknown;
+  issues: Saved["issues"];
+}) {
+  if (typeof value !== "string") return <Value value={value} />;
+  const said = missingText({ key: "", field, value, target: name });
+  if (issues?.some(({ path, message }) => path[0] === field && message === said)) {
+    return (
+      <span title={`There is no record ${value} in ${name}`} className="text-tone-bad-foreground line-through">
+        {value}
+      </span>
+    );
+  }
+  return <KeyLink name={name} recordKey={value} staged={false} />;
 }
 
 /**

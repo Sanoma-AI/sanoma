@@ -8,7 +8,7 @@ import { collection } from "sanoma/data";
 import { resolveConfig, type SanomaConfig, type Source } from "sanoma/workflows";
 import { readPeople } from "sanoma/workflows/describe";
 import { and, eq } from "drizzle-orm";
-import { executablePath, launch } from "puppeteer-core";
+import { executablePath, launch, type Page } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { lazyDb } from "../../workflows/src/db.ts";
 import { data } from "../../workflows/src/db/company.ts";
@@ -16,7 +16,9 @@ import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
+import { createApi, type UntypedApi } from "../src/api-client.ts";
 import { planColumnChange, proposeColumnChange } from "../src/server/columns.ts";
+import { callApi } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { pageOf, PEOPLE } from "./fixtures/change.ts";
@@ -28,8 +30,10 @@ import { ensureSanomaBuilt } from "../../test/fixture.ts";
 // leaves empty the values that won't convert when that is the choice (refused, nothing written,
 // once the records changed since the count the person was shown), and `patch`'s output says what
 // became of them. The outbound fixture's collection, with a hidden field (`notes`), which
-// the grid and the record form leave out and an edit keeps. The tests in a browser need Google
-// Chrome, or `CHROME_PATH`, and skip without either.
+// the grid and the record form leave out and an edit keeps, Fields lists under Hidden columns,
+// and a change shows again or removes for good, its values deleted only for the count the
+// person confirmed. The tests in a browser need Google Chrome, or `CHROME_PATH`, and skip without
+// either.
 
 const FIELDS = {
   company: "text",
@@ -39,6 +43,7 @@ const FIELDS = {
   lastTouched: { type: "date", optional: true },
   seats: { type: "number", optional: true },
   notes: { type: "text", optional: true, hidden: true },
+  meta: { type: "json", optional: true },
 } as const;
 /** The collection the data file declares, as the worker runs it. */
 const outbound = collection({ name: "outbound", title: "Outbound", key: "company", fields: FIELDS });
@@ -50,7 +55,7 @@ writeFileSync(
   join(root, "resources/data.ts"),
   readFileSync(join(root, "resources/data.ts"), "utf8").replace(
     '    seats: { type: "number", optional: true },\n',
-    '    seats: { type: "number", optional: true },\n    notes: { type: "text", optional: true, hidden: true },\n',
+    '    seats: { type: "number", optional: true },\n    notes: { type: "text", optional: true, hidden: true },\n    meta: { type: "json", optional: true },\n',
   ),
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -71,7 +76,14 @@ beforeAll(async () => {
   ensureSanomaBuilt();
   app = await startApp(testApp.config, { port: 0, source });
   for (const record of [
-    { company: "Acme Plumbing", contact: "dana@acme.test", lastTouched: "2026-11-01", seats: 4, notes: "call back" },
+    {
+      company: "Acme Plumbing",
+      contact: "dana@acme.test",
+      lastTouched: "2026-11-01",
+      seats: 4,
+      notes: "call back",
+      meta: { "Lead source": "referral" },
+    },
     { company: "Brightwater Dental", contact: "sam@brightwater.test", seats: 2 },
     { company: "Cedar & Finch", contact: "42" },
   ]) {
@@ -113,6 +125,13 @@ async function stored(key: string) {
   return row?.record;
 }
 
+/** A plan, made by hand, that removes `field` of outbound and claims it deletes nothing. */
+const removing = (field: string) => ({
+  collection: "outbound",
+  changes: [{ kind: "remove", field, filled: 0 }],
+  rows: 3,
+});
+
 /** Chrome, at the data page as ada; skipped without it. */
 async function chrome(ctx: { skip: (note: string) => void }) {
   const path = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
@@ -124,11 +143,21 @@ async function chrome(ctx: { skip: (note: string) => void }) {
   return { browser, tab };
 }
 
+/**
+ * Waits for every menu open in `tab` to finish coming in: while a menu grows and slides in from
+ * its trigger, an item's box is not where it comes to rest, and a point read from it lands on the
+ * item above (the Fields menu's last items by most).
+ */
+const menusSettled = (tab: Page) =>
+  tab.waitForFunction(
+    `[...document.querySelectorAll('[role="menu"]')].every((menu) => menu.getAnimations({ subtree: true }).length === 0)`,
+  );
+
 describe("a collection's columns with no remote", () => {
   it("leaves a hidden field out of the grid and the record form", async () => {
     const { html } = await pageOf(app, "/data/outbound");
     const menus = [...html.matchAll(/aria-label="Change the column (\w+)"/g)].map(([, field]) => field);
-    expect(menus).toEqual(["contact", "stage", "owner", "lastTouched", "seats"]);
+    expect(menus).toEqual(["contact", "stage", "owner", "lastTouched", "seats", "meta"]);
     expect(html).not.toContain(">notes<");
     expect(html).not.toContain(">call back<");
     const form = (await pageOf(app, `/data/outbound?record=${encodeURIComponent("Acme Plumbing")}`)).html;
@@ -220,6 +249,141 @@ describe("a collection's columns with no remote", () => {
     expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toContain('contact: "number",');
     expect(await stored("Cedar & Finch")).toMatchObject({ contact: 42 });
     expect(await stored("Brightwater Dental")).not.toHaveProperty("contact");
+  });
+
+  it("lists a hidden column under Fields, whose Remove for good… asks to confirm the values it deletes before it goes on", async (ctx) => {
+    const { browser, tab } = await chrome(ctx);
+    try {
+      await tab.goto(new URL("/data/outbound", app.url).href, { waitUntil: "networkidle0" });
+      await (await tab.waitForSelector("button::-p-text(Fields)"))!.click();
+      await tab.waitForSelector('[role="menu"] ::-p-text(Hidden columns)');
+      await menusSettled(tab);
+      // A hidden column's menu opens as the pointer rests on it (a press of it is ignored).
+      await (await tab.waitForSelector('[role="menuitem"]::-p-text(notes)'))!.hover();
+      await tab.waitForSelector('[role="menuitem"]::-p-text(Remove for good…)');
+      await menusSettled(tab);
+      await (await tab.waitForSelector('[role="menuitem"]::-p-text(Remove for good…)'))!.click();
+      const panel = '[aria-label="Remove notes for good"]';
+      await tab.waitForSelector(`${panel} ::-p-text(Its values in 1 record are deleted)`);
+      const submit = `${panel} button[type="submit"]`;
+      expect(await tab.$eval(submit, (b) => [b.textContent, b.hasAttribute("disabled")])).toEqual([
+        "Remove for good",
+        true,
+      ]);
+      await (await tab.waitForSelector(`${panel} [role="checkbox"]`))!.click();
+      await tab.waitForSelector(`${submit}:not([disabled])`);
+      expect(await tab.$eval(`label[for="column-remove-sure"]`, (l) => l.textContent)).toBe(
+        "Delete this value for good",
+      );
+      // Nothing sent: the value is there still.
+      expect(await stored("Acme Plumbing")).toMatchObject({ notes: "call back" });
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it("shows a hidden column again, writing it without hidden and leaving the records as they are", async () => {
+    const landed = await proposeColumnChange(await contextOf(), ada, {
+      collection: "outbound",
+      change: { kind: "show", field: "notes" },
+    });
+    expect(landed).toEqual({ file: "resources/data.ts", revision: "abcdef0123456789", running: false });
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toContain('notes: { type: "text", optional: true },');
+    expect(await stored("Acme Plumbing")).toMatchObject({ notes: "call back" });
+  });
+
+  it("refuses to remove a column for good unless the person confirmed the count of values it deletes, writing nothing", async () => {
+    const context = await contextOf();
+    const file = readFileSync(join(root, "resources/data.ts"), "utf8");
+    const change = { kind: "remove", field: "notes" } as const;
+    for (const clears of [0, undefined]) {
+      const answer = await proposeColumnChange(context, ada, { collection: "outbound", change, clears });
+      expect(answer).toEqual({ recounted: expect.objectContaining({ changes: [{ ...change, filled: 1 }] }) });
+    }
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toBe(file);
+    expect(await stored("Acme Plumbing")).toMatchObject({ notes: "call back" });
+  });
+
+  it("removes a hidden column for good: its declaration gone and its values deleted from every record", async () => {
+    // The running declaration still has notes hidden; the file has it shown since the test before.
+    const landed = await proposeColumnChange(await contextOf(), ada, {
+      collection: "outbound",
+      change: { kind: "remove", field: "notes" },
+      clears: 1,
+    });
+    expect(landed).toMatchObject({
+      file: "resources/data.ts",
+      reshaped: { rows: 3, changed: 1, converted: 0, cleared: 1, kept: 0 },
+    });
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).not.toContain("notes");
+    expect(await stored("Acme Plumbing")).not.toHaveProperty("notes");
+  });
+
+  it("makes a key of a free-form column a column of its own under another name, moving its values", async () => {
+    const landed = await proposeColumnChange(await contextOf(), ada, {
+      collection: "outbound",
+      change: { kind: "convert", field: "meta", key: "Lead source", to: "leadSource", type: "text" },
+    });
+    expect(landed).toMatchObject({
+      file: "resources/data.ts",
+      reshaped: { rows: 3, changed: 1, converted: 1, cleared: 0, kept: 0 },
+    });
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toContain(
+      'leadSource: { type: "text", optional: true },',
+    );
+    expect(await stored("Acme Plumbing")).toMatchObject({ leadSource: "referral", meta: {} });
+  });
+
+  it("refuses a hand-made plan that removes a field the save does not remove, one not hidden, or one beside another change, writing nothing", async () => {
+    const context = await contextOf();
+    const api: UntypedApi = createApi((request) => callApi(context, ada, request));
+    const at = context.snapshot.description.collections.find((c) => c.name === "outbound")!.declared!.at;
+    const file = readFileSync(join(root, "resources/data.ts"), "utf8");
+    // A removal under the cover of another edit to the field, one of a field that is not hidden,
+    // and one of a hidden field beside a rename onto its name, which would delete that column's values.
+    const beside = {
+      ...removing("notes"),
+      changes: [{ kind: "rename", from: "contact", to: "notes" }, ...removing("notes").changes],
+    };
+    for (const input of [
+      { at, fields: { "fields.contact": "number" }, plan: removing("contact") },
+      { at, fields: {}, rename: { "fields.contact": null }, plan: removing("contact") },
+      { at, fields: {}, rename: { "fields.contact": "notes", "fields.notes": null }, plan: beside },
+    ]) {
+      await expect(api.patch(input)).rejects.toThrow("The plan is not of the fields this saves");
+    }
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toBe(file);
+    expect(await stored("Cedar & Finch")).toMatchObject({ contact: 42 });
+  });
+
+  it("refuses a new column under a name records still hold values under, writing nothing", async () => {
+    // A removal whose records weren't brought along leaves its values under a name no field has.
+    const db = await pool.db();
+    const cedar = and(eq(data.collection, "outbound"), eq(data.key, "Cedar & Finch"));
+    const [{ record }] = (await db.select({ record: data.record }).from(data).where(cedar)) as [
+      { record: Record<string, unknown> },
+    ];
+    await db
+      .update(data)
+      .set({ record: { ...record, legacyId: "L-1" } })
+      .where(cedar);
+    const file = readFileSync(join(root, "resources/data.ts"), "utf8");
+    const request = {
+      collection: "outbound",
+      change: { kind: "add", field: "legacyId", type: "text", required: false },
+    } as const;
+    const refusal = {
+      status: 400,
+      body: expect.objectContaining({
+        // No remote, so no change page to try it again on.
+        error:
+          "1 record still holds a value under legacyId, left from a column change whose records weren't updated: choose another name",
+      }),
+    };
+    await expect(planColumnChange(await contextOf(), ada, request)).rejects.toMatchObject(refusal);
+    await expect(proposeColumnChange(await contextOf(), ada, request)).rejects.toMatchObject(refusal);
+    expect(readFileSync(join(root, "resources/data.ts"), "utf8")).toBe(file);
+    await db.update(data).set({ record }).where(cedar);
   });
 
   it("says in the panel's toast what became of the records, and that it shows once Sanoma starts again", async (ctx) => {

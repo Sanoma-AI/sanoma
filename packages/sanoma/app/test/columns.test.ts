@@ -45,7 +45,8 @@ const config: SanomaConfig = { workflows: [], connectors: [remote.connector], co
 const testApp = useTestApp(config, {
   databaseUrl: testDatabaseUrl("app_columns"),
   source: repo.source,
-  app: appSteps,
+  // The draft's check as the box would answer it: the repository in memory has no box to carry to.
+  app: { ...appSteps, check: repo.app.check },
 });
 let app: App;
 
@@ -102,8 +103,8 @@ describe("a collection's columns", () => {
       "Date",
       "A person",
       "A choice",
-      "Link to another table (off)",
-      "Free-form (off)",
+      "Link to another table",
+      "Free-form",
     ]);
     expect(html).toContain("existing records stay valid with it empty");
     // No name yet: What will happen says what is missing, and Review the change waits for it.

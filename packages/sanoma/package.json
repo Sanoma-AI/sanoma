@@ -107,6 +107,11 @@
       "types": "./workflows/dist/claims.d.ts",
       "default": "./workflows/dist/claims.js"
     },
+    "./init": {
+      "sanoma-source": "./src/template-files.ts",
+      "types": "./dist/template-files.d.ts",
+      "default": "./dist/template-files.js"
+    },
     "./invoices": {
       "sanoma-source": "./invoices/src/index.ts",
       "types": "./invoices/dist/index.d.ts",

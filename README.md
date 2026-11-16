@@ -292,6 +292,7 @@ Contributions are accepted under the [Developer Certificate of Origin](https://d
 | [`sanoma`](packages/sanoma/README.md)                                    | The bin a company repo runs, checks and exports itself with; what its workflows import                                               |
 | [`sanoma/workflows`](packages/sanoma/workflows/README.md)                | Define connectors and workflows, run them durably on DBOS, and lint them                                                             |
 | [`sanoma/app`](packages/sanoma/app/README.md)                            | Web UI over a config, started with `startApp(config)`                                                                                |
+| [`sanoma/init`](packages/sanoma/README.md#template-files)                | The company template's files with a company's own name, slug and founder, for `sanoma init`, workflows and sites                     |
 | [`sanoma/invoices`](packages/sanoma/invoices/README.md)                  | An invoice's shape, exact arithmetic and PDF, for workflows and sites                                                                |
 | [`sanoma/testing`](packages/sanoma/testing/README.md)                    | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing                                         |
 | [`sanoma/internal/bridge`](packages/sanoma/bridge/README.md)             | OpenTofu providers: the provider-bridge client, its fake, the resource generator                                                     |

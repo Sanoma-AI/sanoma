@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { DBOS, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
+import { isDeepStrictEqual } from "node:util";
+import { DBOS } from "@dbos-inc/dbos-sdk";
+import { child, step } from "./app-steps.ts";
 import { type ApprovalMessage, nextApprovalId, topicOf, withdrawApprovals } from "./approvals.ts";
 import { decide } from "./call.ts";
 import {
@@ -19,8 +21,9 @@ import {
   touchesOf,
 } from "./change.ts";
 import type { ChangeSteps } from "./change-workflow.ts";
+import { type Field, recordsOps } from "./collection.ts";
+import type { ColumnType, ReshapeChange, ReshapeInput } from "./description.ts";
 import type { DriftReport } from "./drift.ts";
-import { causes, isRunControlError } from "./errors.ts";
 import { warn } from "./log.ts";
 import { inside } from "./paths.ts";
 import { peopleSources, readPeople } from "./resources.ts";
@@ -28,18 +31,21 @@ import { runNow, type Run } from "./run.ts";
 import {
   AGENTS,
   APPLY_WORKFLOW,
+  approverLabel,
   CHANGE_EVENT,
   CHANGE_MERGE,
   CHANGE_TOPIC,
   DRIFT_WORKFLOW,
-  errorMessage,
   mayDecide,
+  reshapeOf,
+  typeOf,
 } from "./shared.ts";
-import type { CheckResult, RemoteHalf } from "./source.ts";
+import type { RemoteHalf } from "./source.ts";
 
 // The change workflow's steps that are not one of its operations: checking and planning the
 // draft, asking the policy ahead, waiting for what happens to the change, retiring approvals,
-// deploying and verifying after the merge, and publishing where the change is. Here, not in
+// deploying and verifying after the merge, and publishing where the change is; and what the
+// built-in `reshape` reads, the plan a merged change carries. Here, not in
 // change-workflow.ts, which is held to the workflow lint and imports no DBOS; each reads its run
 // from `currentRun`.
 
@@ -103,35 +109,6 @@ async function drain(
   return strongest;
 }
 
-/**
- * Starts a run of the built-in `name` as a child of this one, with the id `<run>:<suffix>` (so a
- * replay finds it), as the run's own actor, and waits for its output, counted as a wait for
- * another run: undefined and the error's message when it failed, or was cancelled (a worker on a
- * new version cancels an apply started on other code, `carryBuiltInRuns`).
- */
-export async function child(
-  run: Run,
-  name: string,
-  suffix: string,
-  input: unknown,
-): Promise<{ runId: string; output?: unknown; error?: string }> {
-  const runId = `${run.id}:${suffix}`;
-  const handle = await run.state.startRun(name, runId, {
-    input,
-    startedBy: run.actor,
-    ...(run.sandbox !== undefined && { sandbox: run.sandbox }),
-  });
-  try {
-    return { runId, output: await run.state.deadlines.waiting(run.id, { kind: "run" }, () => handle.getResult()) };
-  } catch (err) {
-    // The child's cancellation, not this run's own (`DBOSWorkflowCancelledError`, which ends it).
-    if (causes(err).some((e) => e instanceof DBOSErrors.DBOSAwaitedWorkflowCancelledError))
-      return { runId, error: "it was cancelled: the worker restarted on a new version before it ended" };
-    if (isRunControlError(err)) throw err;
-    return { runId, error: errorMessage(err) };
-  }
-}
-
 /** A file's path relative to `root` with `/`, as git names it; undefined when it is outside. */
 const pathIn = (root: string, file: string) =>
   inside(root, file) ? relative(root, file).split(sep).join("/") : undefined;
@@ -158,15 +135,8 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     );
 
   return {
-    check: (id) =>
-      DBOS.runStep(
-        async (): Promise<CheckResult> => {
-          const source = sourceOfRun();
-          if (!source.check) throw new Error("This repository cannot check a draft (`Source.check`)");
-          return source.check(id);
-        },
-        { name: "change:check" },
-      ),
+    // In the box of whoever the change is by, through the app's steps: never on this instance.
+    check: (id) => step(runNow("A change step"), "check", { id }, "change:check"),
 
     plan: (id, check) =>
       DBOS.runStep(
@@ -295,5 +265,79 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     publish: async (state: ChangeState) => {
       await DBOS.setEvent(CHANGE_EVENT, state);
     },
+
+    held: (reshaping) =>
+      DBOS.runStep(
+        async () => {
+          const run = runNow("A change step");
+          const op = run.state.ops.get(recordsOps.records.reshape.id)!;
+          const decision = await decide(run, op, op.input.parse(reshaping));
+          if (decision.kind !== "approve") return undefined;
+          return decision.title ?? `the policy holds it for ${approverLabel(decision.approver)}`;
+        },
+        { name: "change:reshape-policy" },
+      ),
+
+    reshaping: (id) =>
+      DBOS.runStep(
+        async (): Promise<ReshapeInput> => {
+          const { state } = runNow("A reshape step");
+          const change = await (await state.client()).change(id);
+          if (!change?.state.merged) {
+            throw new Error(
+              `The draft ${id} has no published change: its records follow a change once it is published`,
+            );
+          }
+          const reshaping = reshapeOf(change.state.plan);
+          if (!reshaping) throw new Error(`The change of the draft ${id} brings no records along`);
+          // A plan replayed over columns a later change made again would move or clear their values.
+          const fields = state.collections.get(reshaping.collection)?.fields;
+          if (!fields || !stillMade(fields, reshaping.changes)) {
+            throw new Error(
+              `The columns of ${reshaping.collection} are no longer what the change of the draft ${id} made them, so its records are not brought along by it again`,
+            );
+          }
+          return reshaping;
+        },
+        { name: "reshape:plan" },
+      ),
   };
+}
+
+/**
+ * Whether `fields` (the running declaration) are still what `changes` (a plan's that bring the
+ * records along, in order) made of them, so replaying them does to the records what the first
+ * call would have: a renamed or removed field not declared (a column declared under its name since
+ * would have its values moved or deleted), a rename's new name declared, a retyped field and a
+ * conversion's new column (`to`) of the type they took (a link to the same collection, whose keys
+ * the replay reads as the first call did), and the free-form field a conversion took its key out
+ * of free-form still. Each name is judged by the last change that made it. Hidden or shown, a
+ * field is the same: hide and show (with add and require) change the declaration alone, never
+ * reach the records, and so constrain nothing.
+ */
+export function stillMade(fields: Readonly<Record<string, Field>>, changes: readonly ReshapeChange[]): boolean {
+  const made = new Map<string, ColumnType | "declared" | "gone">();
+  for (const change of changes) {
+    switch (change.kind) {
+      case "rename": {
+        const was = made.get(change.from);
+        made.set(change.from, "gone").set(change.to, was === undefined || was === "gone" ? "declared" : was);
+        break;
+      }
+      case "retype":
+        made.set(change.field, change.to);
+        break;
+      case "convert":
+        made.set(change.field, "json").set(change.to, change.type);
+        break;
+      case "remove":
+        made.set(change.field, "gone");
+        break;
+    }
+  }
+  return [...made].every(([name, wanted]) => {
+    const field = Object.hasOwn(fields, name) ? fields[name] : undefined;
+    if (wanted === "gone" || field === undefined) return wanted === "gone" && field === undefined;
+    return wanted === "declared" || isDeepStrictEqual(typeOf(field), wanted);
+  });
 }

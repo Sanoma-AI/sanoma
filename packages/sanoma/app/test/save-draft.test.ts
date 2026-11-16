@@ -44,7 +44,7 @@ beforeAll(async () => {
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
   config = { workflows: [], connectors: [], root: dir, ledger: memoryLedger(), databaseUrl };
-  source = localGitSource(dir, { databaseUrl });
+  source = localGitSource(dir);
   worker = await startTestWorker(config, { databaseUrl, source, app: appSteps, reload: () => void reloads++ });
   client = await SanomaClient.connect(config);
   app = { client, resolved: resolveConfig(config), snapshot: await appSnapshot(config, { source }) };
@@ -110,6 +110,7 @@ describe("saving a chat's draft without a remote", () => {
       resolved: app.resolved,
       by: { id: "alice" },
       runId: "save:welcome",
+      loopbackLogin: false,
       reload: () => void asked++,
     };
     const again = await appSteps.saveDraft(step, { id: "welcome", title: "Welcome a new client", head: welcomed });

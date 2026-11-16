@@ -59,8 +59,8 @@ export const IMPORT_BATCH = 200;
 /** The sheet's row the first of `rows` is: the header is row 1. */
 const FIRST_ROW = 2;
 
-/** A collection's field as an import reads its declaration: a type, `{ type, optional }` or `{ enum, optional }`. */
-type Declared = string | { type?: string; enum?: readonly string[]; optional?: boolean };
+/** A collection's field as an import reads its declaration: a type, `{ type, optional }`, `{ enum, optional }` or `{ link, optional }`. */
+type Declared = string | { type?: string; enum?: readonly string[]; link?: string; optional?: boolean };
 
 /** What an import reads of a collection: its key and its fields as declared. */
 export interface ImportTarget {
@@ -88,8 +88,10 @@ export function mappingProblems({ key, fields }: ImportTarget, mapping: ImportIn
  * (an empty cell fills none), and the rows they refuse: a value its field does not take, no key,
  * or a key an earlier row has. A cell is trimmed, then given its column's `values`, then read as
  * its field's type: a number as JavaScript writes one, true or false as yes, no, y, n, true, false,
- * 1 or 0, a date as ISO 8601 (a day, or a time with its offset), an enum's value as written, and a
- * person as one of `people` when any are given. Throws on a mapping `mappingProblems` refuses.
+ * 1 or 0, a date as ISO 8601 (a day, or a time with its offset), an enum's value as written, a
+ * person as one of `people` when any are given, a free-form value as the JSON it reads as (an
+ * export writes it so), else as its text, and a link as the key it names (the save checks it is
+ * there). Throws on a mapping `mappingProblems` refuses.
  */
 export function importRows(
   collection: ImportTarget,
@@ -218,6 +220,12 @@ function valueOf(kind: Declared, text: string, people: ReadonlySet<string> | und
       return isDate(text) ? { value: text } : { refused: "is not a date as 2026-11-01 writes one" };
     case "person":
       return !people || people.has(text) ? { value: text } : { refused: "is nobody declared" };
+    case "json":
+      try {
+        return { value: JSON.parse(text) as unknown };
+      } catch {
+        return { value: text };
+      }
     default:
       return { value: text };
   }

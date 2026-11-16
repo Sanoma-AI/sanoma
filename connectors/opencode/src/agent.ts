@@ -12,5 +12,8 @@ export const opencodeAgent: CodingAgent = {
     bin: "opencode",
     args: ["acp"],
     signIn: { once: { bin: "opencode", args: ["auth", "login"] } },
+    // Its free models (opencode.ai/inference) and its model catalogue: https://opencode.ai/docs/network/.
+    // A provider's account (opencode auth login) reaches that provider's hosts, which are not here.
+    hosts: ["opencode.ai", "*.opencode.ai"],
   },
 };

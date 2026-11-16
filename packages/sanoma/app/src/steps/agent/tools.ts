@@ -29,12 +29,15 @@ import {
   stillHeld,
 } from "../../server/catalog.ts";
 import { type CallHost, noRun, RESULT_WAIT_MS } from "../../server/core.ts";
-import { checks, drafting, mustAllow, openDraft, tellCommits } from "./checkout.ts";
+import { checkDraft } from "./box-session.ts";
+import { drafting, mustAllow, openDraft, tellCommits } from "./checkout.ts";
 
 // Our loop's tools: reading the repository, editing the chat's draft (opened by the first edit,
-// committed at each), taking and updating an app there (a git merge of its source), its checks,
-// and the agent catalog (`catalogTools`), which both engines get. No shell: the draft sits in the
-// live checkout until previews exist. Every path goes through the checkout rule (`allowedPaths`).
+// committed at each), taking and updating an app there (a git merge of its source), its checks
+// (in the person's box, `checkDraft`), and the agent catalog (`catalogTools`), which both engines
+// get. No shell: these tools run in this process, on the draft's worktree beside the live
+// checkout, so every path goes through the checkout rule (`mustAllow`); a coding agent's shell
+// runs in its box.
 
 /** What the tools act for: the turn's step (the worker's client and repository, the person), the chat (whose `draftId` the first edit sets) and the id of the person's message the turn answers (`ChatTurnInput.message`). */
 export interface ToolsTurn {
@@ -266,7 +269,9 @@ export function loopTools(turn: ToolsTurn) {
       execute: () =>
         inTurn(async () => {
           if (!(await hasDraft())) throw new Error("Nothing is drafted yet: edit a file first");
-          checked = await checks(step, chat.id);
+          // Every edit is committed, so the box's clone is the draft as it stands.
+          const { grid: _, ...result } = await checkDraft(step, { id: chat.id });
+          checked = result;
           await showCard();
           return checked;
         }),

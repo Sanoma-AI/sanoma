@@ -434,6 +434,12 @@ export interface OwnAgent {
   bin: string;
   args: readonly string[];
   signIn: AgentSignIn;
+  /**
+   * The hosts it reaches from the person's box over HTTPS (its sign-in, its model's API, what it
+   * fetches at its first run), as its vendor publishes them: a hosted box reaches no other
+   * (`SandboxBackend.open`'s `hosts`). Its install's are the package registry's, which every box reaches.
+   */
+  hosts: readonly string[];
 }
 
 /** How a person signs in to their own coding agent from the chat (`OwnAgent.signIn`). */
@@ -461,6 +467,12 @@ export interface KeyAgent {
   qualified: boolean;
   /** Whether it runs through a bridge, a child of the session: its first start in a box installs it under the box's home. */
   bridge: boolean;
+  /**
+   * The hosts what it runs in the box reaches over HTTPS (its model's API, what its bridge fetches
+   * at its first start), as its vendor publishes them: a hosted box reaches no other. None for an
+   * agent that runs in the app's process, whose calls never leave from the box.
+   */
+  hosts: readonly string[];
   /**
    * Its adapter, loaded when first used, on the key as an explicit `auth` record (never the app's
    * environment or keychain), keeping its own state under `home`, the session's home.

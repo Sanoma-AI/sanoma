@@ -37,6 +37,7 @@ export {
   withSetup,
 } from "./op.ts";
 export { SanomaPackageField, vendorInfo } from "./vendor-info.ts";
+export { CLOUD_TOKEN, cloudRun, type CloudRunOptions } from "./cloud-run.ts";
 export {
   defineWorkflow,
   Principal,
@@ -270,6 +271,7 @@ export {
   type Box,
   IMAGE_AGENTS,
   type Process,
+  REGISTRY,
   type SandboxBackend,
   type SandboxCapabilities,
   type SandboxContext,

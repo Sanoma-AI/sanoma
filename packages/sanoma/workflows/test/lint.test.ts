@@ -47,6 +47,7 @@ describe("lintWorkflow", () => {
       import { z } from "zod";
       import { calculateInvoice } from "sanoma/invoices";
       import { renderInvoice } from "sanoma/invoices/pdf";
+      import { declareFounder, type Creator } from "sanoma/init";
       import { other } from "./other.ts";
       const m = await import("./lazy.ts");
     `);

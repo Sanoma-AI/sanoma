@@ -12,7 +12,6 @@ import {
   isLoopback,
   type ResolvedConfig,
   resolveConfig,
-  resolveDatabaseUrl,
   SanomaClient,
   type SanomaConfig,
   superviseWorker,
@@ -38,9 +37,6 @@ export interface Served extends Stoppable {
 /** The checkout the config was loaded from (`loadConfig` sets its `file`). */
 export const rootOf = (config: SanomaConfig) => config.root ?? dirname(config.file!);
 
-/** The checkout, as the worker's and the app's `source`, a draft's check on the config's database. */
-const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config), { databaseUrl: resolveDatabaseUrl(config) });
-
 /**
  * What a worker of the launcher's starts with: promoted, since a local worker is always the
  * version to take queued runs, even one seen before; the checkout as its source; the app's steps,
@@ -49,7 +45,7 @@ const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config), { data
  */
 export const workerOptions = (config: SanomaConfig) => ({
   promote: true,
-  source: sourceOf(config),
+  source: localGitSource(rootOf(config)),
   app: appSteps,
   prepare: [prepareBetterAuthStaff],
 });
@@ -116,7 +112,7 @@ async function appStart(
 
 /** Starts the app with `options`, the checkout as its source, and the machine routes `ingress` (`/wake`). */
 async function served(config: SanomaConfig, options: AppOptions, ingress: IngressRoute[]): Promise<Served> {
-  const app = await startApp(config, { ...options, source: sourceOf(config), ingress });
+  const app = await startApp(config, { ...options, source: localGitSource(rootOf(config)), ingress });
   return { url: app.url, sites: app.sites, stop: () => app.close() };
 }
 
@@ -300,8 +296,11 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
         .catch((err: unknown) => log(`could not start again on the saved files: ${errorMessage(err)}`));
     }, RELOAD_MS);
   };
+  // `appOptions` gives a login provider only for a host beyond this machine; without one the app
+  // runs the loopback login, where a coding agent's box may be a folder of this machine.
+  const loopbackLogin = options.login === undefined;
   const supervise = (files: SanomaConfig) =>
-    superviseWorker(files, { ...workerOptions(files), selfStop: !here, reload });
+    superviseWorker(files, { ...workerOptions(files), selfStop: !here, reload, loopbackLogin });
   let supervised = await supervise(config);
   let wakeup: WakeupService | undefined;
   const start = (files: SanomaConfig, started: AppOptions) =>

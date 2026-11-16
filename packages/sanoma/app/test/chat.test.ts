@@ -13,6 +13,7 @@ import {
   defineWorkflow,
   isEnded,
   localBackend,
+  resolveConfig,
   SanomaClient,
   withSetup,
 } from "sanoma/workflows";
@@ -21,7 +22,7 @@ import { createUIMessageStream, customProvider, getToolName, isToolUIPart, readU
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { copyFixture, ensureBuilt } from "../../test/fixture.ts";
+import { copyFixture, ensureBuilt, installInClone } from "../../test/fixture.ts";
 import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
@@ -29,7 +30,7 @@ import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
 import { catalogCallId, type ChatMessage, chatTransport, isIntro } from "../src/lib/chat.ts";
 import { INTRO } from "../src/server/chat.ts";
-import { allowedPaths, here, realIn } from "../src/steps/agent/checkout.ts";
+import { boxName, here, mustAllow, realIn } from "../src/steps/agent/checkout.ts";
 import { suggestedAsks } from "../src/steps/agent/transcript.ts";
 import { ENGINES } from "../src/steps/agent/turn.ts";
 import { appSteps } from "../src/steps/index.ts";
@@ -211,7 +212,7 @@ let app: App | undefined;
 const start = async () =>
   (app = await startApp(testApp.config, {
     port: 0,
-    source: localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! }),
+    source: localGitSource(dir),
   }));
 
 beforeAll(async () => {
@@ -246,8 +247,11 @@ export default defineWorkflow({
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
+  // Where run_checks checks: ada's local box.
+  const box = boxName(resolveConfig(testApp.config).appName, "ada");
+  installInClone(dir, join(dir, ".sanoma/agent-home/boxes", box, "repo"));
   // The worker runs the turns, in the repository.
-  await testApp.restart({ source: localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! }), app: appSteps });
+  await testApp.restart({ source: localGitSource(dir), app: appSteps, loopbackLogin: true });
   await start();
 }, 600_000);
 
@@ -822,11 +826,11 @@ describe("suggestedAsks", () => {
   });
 });
 
-describe("allowedPaths", () => {
+describe("mustAllow", () => {
   it("allows a path inside the worktree, and refuses one outside it, under .git or node_modules, or through a symlink out, on this machine and in a box", async () => {
     const boxes = mkdtempSync(join(tmpdir(), "sanoma-allowed-"));
     // The worktree is a box's home: the box checks the same paths on its own files.
-    const box = await localBackend(boxes).open({ name: "tree" });
+    const box = await localBackend(boxes).open({ name: "tree", hosts: [] });
     const tree = join(boxes, "tree");
     try {
       mkdirSync(join(tree, "workflows"));
@@ -844,15 +848,18 @@ describe("allowedPaths", () => {
         "workflows/../../x",
       ];
       for (const real of [here, realIn(box)]) {
-        expect(
-          await allowedPaths(tree, [".", "workflows/new.ts", "new/deep/file.ts", "in/x.ts", ...refused], real),
-        ).toEqual([
+        const allowed = await Promise.all(
+          [".", "workflows/new.ts", "new/deep/file.ts", "in/x.ts"].map((path) => mustAllow(tree, path, real)),
+        );
+        expect(allowed).toEqual([
           at,
           join(at, "workflows/new.ts"),
           join(at, "new/deep/file.ts"),
           join(at, "workflows/x.ts"),
-          ...refused.map(() => undefined),
         ]);
+        for (const path of refused) {
+          await expect(mustAllow(tree, path, real), path).rejects.toThrow(/is outside your checkout/);
+        }
       }
     } finally {
       rmSync(boxes, { recursive: true, force: true });

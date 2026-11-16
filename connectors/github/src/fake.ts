@@ -61,7 +61,8 @@ export const FAKE_TEMPLATE = "Sanoma-AI/company-template";
  * The operations through the App, over an in-memory GitHub: installation 7 on the personal account
  * `acme`, 9 on the organization `acme-inc`, and the public template `Sanoma-AI/company-template` (`main`, a README). An installation
  * reaches the repositories of its own account; a commit's SHA is the same for the same parent,
- * message and files.
+ * message and files; a token minted (`ghs_…`, good for an hour) is the same for the same
+ * installation, repository and permissions.
  */
 export function fakeGithubApp(options: FakeOptions = {}) {
   return defineFake(
@@ -147,6 +148,19 @@ export function fakeGithubApp(options: FakeOptions = {}) {
               repo.branches[branch] = { sha, files: { ...head.files, ...files } };
               return { sha };
             },
+            files: async ({ installation, repository, paths, ref }) => {
+              const repo = reached(installation, repository, "GET /contents");
+              const name = ref ?? repo.defaultBranch;
+              const at = repo.branches[name] ?? Object.values(repo.branches).find((b) => b.sha === name);
+              if (!at) {
+                throw fail(
+                  `GET /repos/${repository}/commits/${branchPath(name)}`,
+                  422,
+                  `No commit found for SHA: ${name}`,
+                );
+              }
+              return Object.fromEntries(paths.flatMap((path) => (path in at.files ? [[path, at.files[path]!]] : [])));
+            },
             head: async ({ installation, repository, branch }) => {
               const repo = reached(installation, repository, `GET /branches/${branchPath(branch)}`);
               const head = repo.branches[branch];
@@ -162,6 +176,19 @@ export function fakeGithubApp(options: FakeOptions = {}) {
               const id = ++state.seq;
               repo.keys.push({ id, title, key, readOnly });
               return { id };
+            },
+            token: async ({ installation, repository, permissions }) => {
+              if (!state.repositories[repository] || !owns(installation, repository.split("/")[0]!)) {
+                throw fail(
+                  `POST /app/installations/${installation}/access_tokens`,
+                  422,
+                  "There is at least one repository that does not exist or is not accessible to the parent installation.",
+                );
+              }
+              return {
+                token: `ghs_${shaOf(installation, repository, permissions).slice(0, 36)}`,
+                expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              };
             },
           },
         };

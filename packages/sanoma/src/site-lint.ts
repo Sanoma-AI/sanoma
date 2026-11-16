@@ -2,8 +2,8 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 // The oxlint rule `sanoma/site-file`: what the generated `oxlint.json`'s `sites/**` override cannot
 // say with oxlint's own rules. A site is client code with no server of its own: no `*.server.*`
-// file, no server function or middleware, no `server` handlers on a route, and no relative import
-// out of `sites/`. Typed here by the little it uses, so the package needs no oxlint types.
+// file, no `server` handlers on a route, and no relative import out of `sites/`. Typed here by the
+// little it uses, so the package needs no oxlint types.
 
 /** An ESTree node, by the little this rule reads of it. */
 interface AstNode {
@@ -19,12 +19,6 @@ interface RuleContext {
 
 /** What a site does instead of server code: the remedy every refusal under `sites/` names. */
 export const REMEDY = "call an operation or start a workflow through `api` from `sanoma/site`.";
-
-/** The server-side builders TanStack Start exports; a site has no server code. */
-const SERVER_CALLS = new Set(["createServerFn", "createServerOnlyFn", "createMiddleware"]);
-
-/** `f` for a call `f(…)`: a namespace import of TanStack Start is refused by the imports rule. */
-const calleeName = (callee: AstNode): string | undefined => (callee.type === "Identifier" ? callee.name : undefined);
 
 /** Whether `path` is `dir` or inside it. */
 const inside = (dir: string, path: string): boolean => {
@@ -44,7 +38,7 @@ export const siteFile = {
     type: "problem",
     docs: {
       description:
-        "A file under sites/ is client code: no *.server.* file, server function, middleware, route `server` handlers or relative import out of sites/",
+        "A file under sites/ is client code: no *.server.* file, route `server` handlers or relative import out of sites/",
     },
   },
   create(context: RuleContext) {
@@ -67,6 +61,8 @@ export const siteFile = {
     };
     return {
       Program(program: AstNode) {
+        // Start's import protection refuses a `*.server.*` file only when a page imports it: not
+        // one nothing imports, nor a route file, which the generated route tree imports.
         if (basename(context.filename).includes(".server.")) {
           context.report({
             message: `A site has no server code, so no *.server.* file: ${REMEDY}`,
@@ -79,13 +75,10 @@ export const siteFile = {
       ExportAllDeclaration: imported,
       ImportExpression: imported,
       CallExpression(call: AstNode) {
-        const name = calleeName(call.callee);
-        if (name !== undefined && SERVER_CALLS.has(name)) {
-          context.report({ message: `A site has no server code, so no ${name}: ${REMEDY}`, node: call.callee });
-          return;
-        }
         // createFileRoute("/path")({ server: { handlers } })
-        if (call.callee.type !== "CallExpression" || calleeName(call.callee.callee) !== "createFileRoute") return;
+        const { callee } = call;
+        if (callee.type !== "CallExpression" || callee.callee.type !== "Identifier") return;
+        if (callee.callee.name !== "createFileRoute") return;
         const server = (call.arguments[0]?.properties as AstNode[] | undefined)?.find(
           (p) => p.type === "Property" && !p.computed && (p.key.name ?? p.key.value) === "server",
         );

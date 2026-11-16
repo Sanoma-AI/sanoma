@@ -20,12 +20,17 @@ export const piAgent: CodingAgent = {
     args: [],
     // Its terminal method (`pi-acp --terminal-login`) starts pi's interactive terminal UI, which prints nothing to a pipe.
     signIn: { once: { bin: "pi", args: [], after: "/login" } },
+    // A Claude plan's token refresh and model, and a ChatGPT plan's (its own sign-ins'
+    // hosts, pi-ai's dist/auth/oauth): Pi publishes no network list.
+    hosts: ["api.anthropic.com", "platform.claude.com", "auth.openai.com", "chatgpt.com"],
   },
   onKey: {
     model: "anthropic",
     baseUrl: "ANTHROPIC_BASE_URL",
     qualified: true,
     bridge: false,
+    // Pi itself runs in the app's process, so the box reaches no host of its.
+    hosts: [],
     harness: async (auth, home) => {
       const { createPi }: typeof import("@ai-sdk/harness-pi") = await import(/* @vite-ignore */ ADAPTER);
       // Pi's own settings under the session's home, not this user's ~/.pi.

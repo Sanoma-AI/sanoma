@@ -8,6 +8,13 @@
       "when": 1793847455326,
       "tag": "0000_natural_dexter_bennett",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794595517197,
+      "tag": "0001_row_level_security",
+      "breakpoints": true
     }
   ]
 }

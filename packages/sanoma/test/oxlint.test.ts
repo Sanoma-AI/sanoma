@@ -25,7 +25,8 @@ export const all = [defineWorkflow, z, defineConfig, main, Date.now()] as [unkno
   // `sanoma`'s entries that compute locally, which a workflow and a site alike may import.
   const invoices = `import { calculateInvoice } from "sanoma/invoices";
 import { renderInvoice } from "sanoma/invoices/pdf";
-export const all = [calculateInvoice, renderInvoice];
+import { declareSlug } from "sanoma/init";
+export const all = [calculateInvoice, renderInvoice, declareSlug];
 `;
   writeFileSync(join(dir, "workflows/invoice.ts"), invoices);
   // A data file is loaded, not linted: a computed value is fine.
@@ -38,6 +39,10 @@ export const all = [calculateInvoice, renderInvoice];
   mkdirSync(join(dir, "sites/x/routes"), { recursive: true });
   mkdirSync(join(dir, "sites/x/components"));
   writeFileSync(join(dir, "sites/x/components/card.tsx"), "export const Card = 1;\n");
+  writeFileSync(
+    join(dir, "sites/x/components/later.ts"),
+    'export const a = import("/later.ts");\nexport const b = import("#later");\n',
+  );
   writeFileSync(
     join(dir, "sites/x/routes/index.tsx"),
     `import { createFileRoute } from "sanoma/site";
@@ -61,7 +66,10 @@ import { hello } from "../../../workflows/hello";
 import { handler } from "sanoma/app/build";
 import { Badge } from "sanoma/internal/bridge";
 import kinds from "virtual:sanoma/content";
-export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, secret, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, Badge, kinds, process.env.KEY];
+import logo from "/logo.svg";
+import { lib } from "#lib";
+import * as start from "@tanstack/start-client-core";
+export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, secret, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, Badge, kinds, logo, lib, start, process.env.KEY];
 export const pg = require("pg");
 export type Types = [Ctx<[]>, typeof Hello];
 `,
@@ -71,7 +79,10 @@ export type Types = [Ctx<[]>, typeof Hello];
   writeFileSync(
     join(dir, "sites/x/routes/fn.ts"),
     `import { createFileRoute } from "sanoma/site";
-export const f = createServerFn({ method: "GET" });
+import { createServerFn as serverFn } from "@tanstack/start-client-core";
+export { createMiddleware } from "@tanstack/react-start";
+export const only = import("@tanstack/start-fn-stubs").then((start) => start.createServerOnlyFn);
+export const f = serverFn({ method: "GET" });
 export const Route = createFileRoute("/fn")({ server: { handlers: {} } });
 `,
   );
@@ -119,7 +130,7 @@ describe("the shipped oxlint.json", () => {
     expect(names("sanoma")).toContain("z");
   });
 
-  it("refuses what a workflow may not import from sanoma and the clock, and nothing in a data file or of sanoma/invoices", () => {
+  it("refuses what a workflow may not import from sanoma and the clock, and nothing in a data file or of sanoma/invoices and sanoma/init", () => {
     const imports = "eslint(no-restricted-imports)";
     expect(found.filter((f) => !f.file.startsWith("sites/"))).toEqual([
       {
@@ -145,7 +156,7 @@ describe("the shipped oxlint.json", () => {
     ]);
   });
 
-  it("refuses a site's server code, one problem each, and passes what a site may import (sanoma/invoices too) and the build's listing", () => {
+  it("refuses a site's server code, one problem each, and passes what a site may import (sanoma/invoices and sanoma/init too) and the build's listing", () => {
     const imports = "eslint(no-restricted-imports)";
     const site = "sanoma(site-file)";
     const globals = "eslint(no-restricted-globals)";
@@ -153,15 +164,25 @@ describe("the shipped oxlint.json", () => {
     const server = /A site has no server code: call an operation or start a workflow through `api` from `sanoma\/site`/;
     expect(found.filter((f) => f.file.startsWith("sites/"))).toEqual([
       {
+        file: "sites/x/components/later.ts",
+        line: 1,
+        rule: imports,
+        text: expect.stringMatching(/^'\/later\.ts'.*by a relative path/),
+      },
+      { file: "sites/x/components/later.ts", line: 2, rule: imports, text: expect.stringMatching(/^'#later'/) },
+      {
         file: "sites/x/routes/a.server.ts",
         line: 1,
         rule: site,
         text: expect.stringMatching(/no \*\.server\.\* file/),
       },
-      { file: "sites/x/routes/fn.ts", line: 2, rule: site, text: expect.stringMatching(/no createServerFn/) },
+      // TanStack Start's server builders: renamed, re-exported and by import().
+      { file: "sites/x/routes/fn.ts", line: 2, rule: imports, text: expect.stringMatching(server) },
+      { file: "sites/x/routes/fn.ts", line: 3, rule: imports, text: expect.stringMatching(server) },
+      { file: "sites/x/routes/fn.ts", line: 4, rule: imports, text: expect.stringMatching(server) },
       {
         file: "sites/x/routes/fn.ts",
-        line: 3,
+        line: 6,
         rule: site,
         text: expect.stringMatching(/route has no `server` handlers/),
       },
@@ -205,8 +226,16 @@ describe("the shipped oxlint.json", () => {
         rule: imports,
         text: expect.stringMatching(/^'virtual:sanoma\/content'.*through `content` from `sanoma\/site`/),
       },
-      { file: index, line: 22, rule: globals, text: expect.stringMatching(/'process'.*no credentials/) },
-      { file: index, line: 23, rule: globals, text: expect.stringMatching(/'require'.*imports with `import`/) },
+      {
+        file: index,
+        line: 22,
+        rule: imports,
+        text: expect.stringMatching(/^'\/logo\.svg'.*by a relative path.*`public\/` folder/),
+      },
+      { file: index, line: 23, rule: imports, text: expect.stringMatching(/^'#lib'.*by a relative path/) },
+      { file: index, line: 24, rule: imports, text: expect.stringMatching(server) },
+      { file: index, line: 25, rule: globals, text: expect.stringMatching(/'process'.*no credentials/) },
+      { file: index, line: 26, rule: globals, text: expect.stringMatching(/'require'.*imports with `import`/) },
     ]);
   });
 });

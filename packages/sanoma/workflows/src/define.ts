@@ -28,7 +28,8 @@ export interface Principal {
   github?: string;
   /**
    * For an api token (`token:<id>`): the subject its row acts for, which `SanomaClient.start`
-   * reads from the row, never from the caller; a run's `ctx.startedBy.subject`.
+   * reads from the row, never from the caller, but for a sandbox run, which takes the one given
+   * (a scenario's token has no row); a run's `ctx.startedBy.subject`.
    */
   subject?: string;
 }

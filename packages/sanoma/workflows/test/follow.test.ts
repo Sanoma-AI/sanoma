@@ -26,7 +26,7 @@ describe("follow on a change", () => {
   const source = memorySource({ root, remote });
   const app = useTestApp(
     { workflows: [], connectors: [remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl: freshDatabase("follow"), source: source.source },
+    { databaseUrl: freshDatabase("follow"), source: source.source, app: source.app },
   );
   afterAll(() => source.remove());
 
@@ -166,7 +166,7 @@ describe("follow a push to main", () => {
   source.behindBy.set("crm", 2);
   const app = useTestApp(
     { workflows: [], connectors: [host.connector, remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl: freshDatabase("follow-main"), source: source.source },
+    { databaseUrl: freshDatabase("follow-main"), source: source.source, app: source.app },
   );
   // Gone live: its apply binds the host, which a push to main then deploys.
   beforeAll(async () => {

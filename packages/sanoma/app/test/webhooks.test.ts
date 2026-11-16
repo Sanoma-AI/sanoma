@@ -36,7 +36,7 @@ const testApp = useTestApp(
     root,
     secrets: { bindings: { [FAKE_WEBHOOK_SECRET]: { env: FAKE_WEBHOOK_SECRET } } },
   },
-  { databaseUrl: freshDatabase("webhooks"), source: source.source },
+  { databaseUrl: freshDatabase("webhooks"), source: source.source, app: source.app },
 );
 let app: App;
 /** The app's handler alone, as the Worker's bundle makes it: its pages answer nothing here. */
