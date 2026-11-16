@@ -405,7 +405,8 @@ export function betterAuthStaffLogin(
     },
     ...(oauth && {
       async bearer(request: Request) {
-        const token = /^Bearer ([\w-]+\.[\w-]+\.[\w-]+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
+        // The scheme in any case (RFC 9110 §11.1); the token a JWS in compact form.
+        const token = /^bearer ([\w-]+\.[\w-]+\.[\w-]+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
         if (!token) return null;
         const own = await authFor(request);
         const { issuer, resource } = oauthOrigin(request, oauth);

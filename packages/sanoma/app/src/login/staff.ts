@@ -50,11 +50,17 @@ const CONSENT = "/auth/consent";
 /** The agent surface (`routes/mcp.ts`): the resource the half issues tokens for, and the one path a bearer is taken at. */
 const MCP = "/mcp";
 
-/** A bearer, `Authorization: Bearer …`: what a client sends `/mcp` once signed in. */
-const hasBearer = (request: Request) => /^Bearer \S/.test(request.headers.get("authorization") ?? "");
+/** A bearer, `Authorization: Bearer …` (the scheme in any case, RFC 9110 §11.1): what a client sends `/mcp` once signed in. */
+const hasBearer = (request: Request) => /^bearer \S/i.test(request.headers.get("authorization") ?? "");
 
-/** Whether the request is a client's, by its bearer at `/mcp`: then it is that, never a cookie's. */
-const byToken = (request: Request) => hasBearer(request) && new URL(request.url).pathname === MCP;
+/** Whether `pathname` is the agent surface's: `/mcp`, or `/mcp/`, which its route answers too. */
+const atMcp = (pathname: string) => pathname === MCP || pathname === `${MCP}/`;
+
+/**
+ * Whether the request is a client's: any `Authorization` at `/mcp`, then that alone says who
+ * (a bearer the half checks; any other scheme, a DPoP token among them, nobody), never a cookie's.
+ */
+const byToken = (request: Request) => request.headers.has("authorization") && atMcp(new URL(request.url).pathname);
 
 /** Whether a page was sent here by the half's authorize: its query is signed (`sig`), which the half checks. */
 const signedQuery = (url: URL) => url.searchParams.has("sig");
@@ -170,8 +176,12 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       if (pathname.startsWith(`${INVITE}/`) && request.method === "GET")
         return landing(pathname.slice(INVITE.length + 1));
       if (lookFile(pathname, app?.stylesheet)) return undefined;
-      // A client's request: its bearer alone says who, or the 401 that sends it to sign in again.
-      if (byToken(request)) return (await tokenOf(request)) ? undefined : challenge(request, "invalid_token");
+      // A client's request: its bearer alone says who, or the 401 that sends it to sign in again;
+      // another scheme gets the challenge that names the one taken here.
+      if (byToken(request)) {
+        if (!hasBearer(request)) return challenge(request);
+        return (await tokenOf(request)) ? undefined : challenge(request, "invalid_token");
+      }
       const signedIn = await identityOf(request);
       if (pathname === LOGIN && request.method === "GET") {
         // On to the app only for someone it admits: a session of someone no longer declared signs
@@ -185,7 +195,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
         return person ? consentPage(url, person) : signInPage(half, frame(), 401);
       }
       if (signedIn) return undefined;
-      if (pathname === MCP) return challenge(request);
+      if (atMcp(pathname)) return challenge(request);
       return wantsJson(request) ? refuse(401, "Sign in first") : signInPage(half, frame(), 401);
     },
     async invite(email, { origin, by }) {

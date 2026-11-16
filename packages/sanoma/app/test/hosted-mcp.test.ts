@@ -201,20 +201,27 @@ async function connect() {
     }),
   });
   expect(exchanged.status).toBe(200);
-  const tokens = (await exchanged.json()) as { access_token: string; refresh_token: string };
-  return { ...tokens, server, resource, cookie };
+  const issued = (await exchanged.json()) as { access_token: string; refresh_token: string };
+  return { ...issued, server, resource, cookie };
 }
 
+/**
+ * Claude Code's tokens for Ada, from one sign-in for the tests that need them: a sign-in by code
+ * is rate limited per address (three in ten seconds), and every request here is from this one.
+ */
+let connected: ReturnType<typeof connect> | undefined;
+const tokens = () => (connected ??= connect());
+
 /** The token endpoint's refresh, as the client sends it. */
-const refresh = (tokens: { refresh_token: string; resource: string; server: { token_endpoint: string } }) =>
-  fetch(tokens.server.token_endpoint, {
+const refresh = (issued: { refresh_token: string; resource: string; server: { token_endpoint: string } }) =>
+  fetch(issued.server.token_endpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: tokens.refresh_token,
+      refresh_token: issued.refresh_token,
       client_id: CLAUDE_CODE,
-      resource: tokens.resource,
+      resource: issued.resource,
     }),
   });
 
@@ -325,11 +332,11 @@ describe("the agent surface on a host", () => {
   });
 
   it("reads the people as the files say now at the login's own routes, with no page asked in between", async () => {
-    const tokens = await connect();
+    const signedIn = await tokens();
     // Undeclared: the token endpoint and authorize are all that is asked, and both refuse.
     writeFileSync(join(root, "resources/people.ts"), PEOPLE.replace(/^export const claudeCode.*$/m, ""));
     try {
-      const refreshed = await refresh(tokens);
+      const refreshed = await refresh(signedIn);
       expect(refreshed.status).toBe(400);
       expect(await refreshed.json()).toMatchObject({ error: "invalid_client" });
       expect((await signIn()).authorized.status).toBe(403);
@@ -340,6 +347,56 @@ describe("the agent surface on a host", () => {
     const { authorized } = await signIn();
     expect(authorized.status).toBe(302);
     expect(new URL(authorized.headers.get("location")!, app.url).pathname).toBe("/auth/login");
+  });
+
+  it("takes a bearer at /mcp alone, by its scheme in any case, and challenges anything else there", async () => {
+    const { access_token } = await tokens();
+    const challenge = `Bearer resource_metadata="${app.url}/.well-known/oauth-protected-resource/mcp"`;
+    // The scheme is case-insensitive (RFC 9110 §11.1).
+    expect((await mcp("tools/list", {}, { authorization: `bearer ${access_token}` })).status).toBe(200);
+    // `/mcp/` is `/mcp`: the same token, the same challenges.
+    const slash = (headers: Record<string, string>) =>
+      fetch(at("/mcp/"), {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      });
+    const none = await slash({});
+    expect(none.status).toBe(401);
+    expect(none.headers.get("www-authenticate")).toBe(challenge);
+    const bad = await slash({ authorization: "Bearer a.b.c" });
+    expect(bad.status).toBe(401);
+    expect(bad.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
+    expect((await slash({ authorization: `Bearer ${access_token}` })).status).not.toBe(401);
+    // A DPoP token, or any other scheme, is not a bearer: the challenge names the one taken here.
+    const dpop = await mcp("tools/list", {}, { authorization: `DPoP ${access_token}` });
+    expect(dpop.status).toBe(401);
+    expect(dpop.headers.get("www-authenticate")).toBe(challenge);
+    // Anywhere but /mcp a bearer is nobody: a page and a server function are the sign-in's.
+    const page = await fetch(at("/"), { headers: { authorization: `Bearer ${access_token}` } });
+    expect(page.status).toBe(401);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    const call = await fetch(at("/auth/invite"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${access_token}`, "content-type": "application/json", origin: app.url },
+      body: JSON.stringify({ email: ADA }),
+    });
+    expect(call.status).toBe(401);
+  });
+
+  it("refuses a bearer once the person it was issued for is no longer declared", async () => {
+    const { access_token } = await tokens();
+    writeFileSync(
+      join(root, "resources/people.ts"),
+      PEOPLE.replace(/^export const ada.*$/m, 'export const bo = sanoma.person({ id: "bo", email: "bo@acme.test" });'),
+    );
+    try {
+      const refused = await mcp("tools/list", {}, { authorization: `Bearer ${access_token}` });
+      expect(refused.status).toBe(403);
+      expect(refused.body).toMatchObject({ code: "not_admitted" });
+    } finally {
+      writeFileSync(join(root, "resources/people.ts"), PEOPLE);
+    }
   });
 
   it("refuses an undeclared client at authorize, naming what to declare, and fetches nothing of it", async () => {
