@@ -1,5 +1,5 @@
 import { createCimdClientDiscovery } from "@better-auth/cimd";
-import { type ClientMetadataResourceFetch, oauthProvider } from "@better-auth/oauth-provider";
+import { type ClientMetadataResourceFetch, getOAuthProviderState, oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins/jwt";
 
 // The staff login as an OAuth 2.1 authorization server for the agent surface (`/mcp`), whose
@@ -53,8 +53,28 @@ export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
       // staff.ts), one row per host, every one this instance's: a client is not linked to each.
       enforcePerClientResources: false,
       extensions: [{ clientDiscovery: discovery }],
+      // A consent is to let a client act as the agent the consent page named: kept by that agent
+      // (the consent's reference), so a client the files map to another agent since is asked
+      // again, and one mapped back finds its consent. Only for that: no page after the sign-in.
+      postLogin: {
+        page: LOGIN_PAGE,
+        shouldRedirect: () => false,
+        consentReferenceId: async () => consentReference(agentOf, await getOAuthProviderState()),
+      },
     }),
   ];
+}
+
+/**
+ * What a consent is kept by, from the authorization request the provider holds for this request
+ * (authorize's own query, or the signed one a sign-in or the consent posts): `agent:<id>`, the
+ * agent its client stands for now. A client no agent stands for gets a reference no consent has,
+ * so it is never let through on an earlier one (and `handle` refuses it at authorize and consent).
+ */
+function consentReference(agentOf: OAuthSetup["agentOf"], state: { query?: string } | null): string {
+  const client = new URLSearchParams(state?.query ?? "").get("client_id") ?? "";
+  const agent = agentOf(client);
+  return agent === undefined ? `undeclared:${client}` : `agent:${agent}`;
 }
 
 /**

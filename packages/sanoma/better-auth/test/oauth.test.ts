@@ -299,6 +299,25 @@ describe("a declared client", () => {
     expect(decode(refreshed.body.access_token!).payload.aud).toBe(MCP);
   });
 
+  it("is asked consent again once it stands for another agent than the one consented to", async () => {
+    const { cookie } = await connect();
+    const where = async () => {
+      const { challenge } = pkce();
+      const asked = (await half.handle(request(authorizePath(CLAUDE_CODE, challenge), { cookie })))!;
+      expect(asked.status).toBe(302);
+      const to = new URL(asked.headers.get("location")!, ORIGIN);
+      return to.origin === ORIGIN ? to.pathname : `${to.origin}${to.pathname}`;
+    };
+    expect(await where()).toBe(REDIRECT);
+    agents.set(CLAUDE_CODE, "admin-bot");
+    try {
+      expect(await where()).toBe("/auth/consent");
+    } finally {
+      agents.set(CLAUDE_CODE, "claude-code");
+    }
+    expect(await where()).toBe(REDIRECT);
+  });
+
   it("is refused a resource that is not this instance's own /mcp", async () => {
     const { challenge } = pkce();
     for (const resource of ["https://elsewhere.example/mcp", `${ORIGIN}/api/call`]) {
