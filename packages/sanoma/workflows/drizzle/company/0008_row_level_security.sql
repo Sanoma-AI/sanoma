@@ -1,0 +1,19 @@
+ALTER TABLE "sanoma_api_tokens" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_app_behind" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_chat_chunks" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_chat_messages" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_chats" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_connection_attempts" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_connection_health" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_connection_renewals" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_connection_setups" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_connections" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_credentials" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_data" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_invite_requests" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_ledger" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_run_checks" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_secret_move_items" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_secret_moves" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_token_handoffs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sanoma_wakeup" ENABLE ROW LEVEL SECURITY;

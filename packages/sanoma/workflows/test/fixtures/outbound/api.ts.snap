@@ -2,6 +2,20 @@
 // The types of `api` from sanoma/site: what a site may call, as the person on the page.
 import type { CollectionApi, OpFn, WorkflowFn } from "sanoma/site";
 
+/** A record of customers. */
+type CustomersRecord = {
+  id: string;
+  meta: unknown;
+};
+
+/** A record of orders. */
+type OrdersRecord = {
+  id: string;
+  /** The key of a record of customers. */
+  customer: string;
+  extra?: unknown;
+};
+
 /** A record of Outbound. */
 type OutboundRecord = {
   company: string;
@@ -121,6 +135,10 @@ interface CompanyApi {
       a: string;
     } | "none")[];
     other: unknown;
+  }, unknown>;
+  /** Bring a change's records along: the workflow `reshape`, built in. */
+  reshape: WorkflowFn<{
+    id: string;
   }, unknown>;
   /** Save a draft: the workflow `save-draft`, built in. */
   saveDraft: WorkflowFn<{
@@ -311,6 +329,10 @@ interface CompanyApi {
   };
   /** The company's collections. */
   data: {
+    /** customers: the collection `customers`, keyed by `id`. */
+    customers: CollectionApi<CustomersRecord>;
+    /** orders: the collection `orders`, keyed by `id`. */
+    orders: CollectionApi<OrdersRecord>;
     /** Outbound: the collection `outbound`, keyed by `company`. */
     outbound: CollectionApi<OutboundRecord>;
   };

@@ -53,8 +53,10 @@ import {
   ChangeEventSchema,
   ChangeInput,
   type ChangeReport,
+  type ChangeReshaped,
   type ChangeState,
   initialChangeState,
+  ReshapeChangeInput,
 } from "./change.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { isDirect } from "./direct.ts";
@@ -113,6 +115,7 @@ import {
   LIST_LIMIT,
   refusalOf,
   type RunStatus,
+  RESHAPE_WORKFLOW,
   SAVE_DRAFT_WORKFLOW,
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
@@ -239,6 +242,16 @@ export interface ChangeView {
   state: ChangeState;
   /** The run's output, once it has finished. */
   report?: ChangeReport;
+  /**
+   * Its latest Try again (`reshapeChange`), when it merged without its records: started since, its
+   * run and, once finished, what became of the records this time.
+   */
+  retry?: ReshapeView;
+}
+
+/** A Try again of a change's records (`SanomaClient.reshapeChange`) as the app shows it: its run, and once finished what became of them. */
+export interface ReshapeView extends RunSummary {
+  reshaped?: ChangeReshaped;
 }
 
 /** A save of a draft as the app shows it (`SanomaClient.saves`): its run, its input, and once finished its output. */
@@ -1060,6 +1073,19 @@ export class SanomaClient {
     return this.startOnDraft(SAVE_DRAFT_WORKFLOW, id, input, options);
   }
 
+  /**
+   * Starts the built-in `reshape` on the draft `id` as `startedBy`: Try again, bringing along the
+   * records of its change, merged without them (`ChangeState.merged.reshaped` an error), by the plan
+   * the change carries, so the policy decides `sanoma.records.reshape` as the person who asks, a
+   * hold waits for its approver, and the ledger records it under them. Its run id is `reshape:<id>`,
+   * or `reshape:<id>~<n>` once that run has ended; while one has not, returns its id and starts
+   * nothing. The run fails when the draft's change has not merged or carries no records to bring along.
+   */
+  async reshapeChange(id: string, options: StartOptions): Promise<string> {
+    const input = parseOrThrow(ReshapeChangeInput, { id }, "Not a draft's id");
+    return this.startOnDraft(RESHAPE_WORKFLOW, id, input, options);
+  }
+
   /** The saves of the draft `id` (`saveDraft`), newest first, each with its input and, once finished, its output. */
   async saves(id: string): Promise<SaveView[]> {
     const rows = await this.draftRuns(SAVE_DRAFT_WORKFLOW, id, { load: true });
@@ -1294,6 +1320,7 @@ export class SanomaClient {
     const input = (row.input as [RunArgs])[0].input as ChangeInput;
     const state = published ?? initialChangeState(input);
     const { runId, status, startedBy, createdAt, updatedAt, approvals } = summary;
+    const retry = await this.retryOf(state);
     return {
       runId,
       status,
@@ -1303,7 +1330,19 @@ export class SanomaClient {
       approvals,
       state,
       ...(row.status === "SUCCESS" && { report: row.output as ChangeReport }),
+      ...(retry && { retry }),
     } satisfies ChangeView;
+  }
+
+  /** The latest Try again of a change merged without its records (`reshapeChange`), started since it merged; undefined for none. */
+  private async retryOf({ id, merged }: ChangeState): Promise<ReshapeView | undefined> {
+    if (!merged?.reshaped || !("error" in merged.reshaped)) return undefined;
+    const row = (await this.draftRuns(RESHAPE_WORKFLOW, id, { load: true })).find((r) => r.createdAt >= merged.at);
+    if (!row) return undefined;
+    return {
+      ...(await this.summarize(row)),
+      ...(row.status === "SUCCESS" && { reshaped: row.output as ChangeReshaped }),
+    };
   }
 
   /**
@@ -1957,6 +1996,7 @@ const draftRun = (prefix: string) => ({ prefix, idOf: draftRunOf(prefix) });
 const DRAFT_RUNS = {
   [CHANGE_WORKFLOW]: draftRun("change"),
   [SAVE_DRAFT_WORKFLOW]: draftRun("save"),
+  [RESHAPE_WORKFLOW]: draftRun("reshape"),
 } as const;
 
 /** Whether a start of `workflow` is `startOnDraft`'s: under a run id of the draft its input names. */
@@ -1968,7 +2008,8 @@ function admitsDraftRun(workflow: keyof typeof DRAFT_RUNS) {
 /**
  * The built-ins only one of the client's methods starts, by name: that method (`by`), and whether
  * a start is its own (`admits`), which `start` asks once the policy has (a visitor is denied
- * first), refusing any other: a change or a save under the id `openChange` or `saveDraft` names; a
+ * first), refusing any other: a change, a save or a Try again of a change's records under the id
+ * `openChange`, `saveDraft` or `reshapeChange` names; a
  * follow as `host-check` under its event's id; a chat turn under its chat's and message's id, after
  * a turn of the same chat, as the chat's person.
  */
@@ -1986,6 +2027,7 @@ const OWN_STARTS: Record<
 > = {
   [CHANGE_WORKFLOW]: { by: "openChange", admits: admitsDraftRun(CHANGE_WORKFLOW) },
   [SAVE_DRAFT_WORKFLOW]: { by: "saveDraft", admits: admitsDraftRun(SAVE_DRAFT_WORKFLOW) },
+  [RESHAPE_WORKFLOW]: { by: "reshapeChange", admits: admitsDraftRun(RESHAPE_WORKFLOW) },
   [FOLLOW_WORKFLOW]: {
     by: "follow",
     admits: (event: RemoteEvent, by, runId) => runId === followRunId(event) && by.id === HOST_CHECK_AGENT,

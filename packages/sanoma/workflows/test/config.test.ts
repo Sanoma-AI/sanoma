@@ -251,7 +251,7 @@ describe("a change's operations, built in", () => {
       run: async () => 1,
     });
     expect(() => resolveConfig(config({ workflows: [reshaping] }))).toThrow(
-      "Workflow \"reshaping\": sanoma.records.reshape rewrites a collection's records, which only change and patch do: change the collection's columns from its grid instead",
+      "Workflow \"reshaping\": sanoma.records.reshape rewrites a collection's records, which only change, patch and reshape do: change the collection's columns from its grid instead",
     );
     const named = defineWorkflow({
       name: "change",
