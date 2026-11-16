@@ -102,6 +102,10 @@ interface HookContext {
     };
   };
 }
+/** What `ensureResource` uses of Better Auth's adapter. */
+type ResourceAdapter = HookContext["context"]["adapter"] & {
+  create(query: { model: string; data: Record<string, unknown> }): Promise<unknown>;
+};
 /** What the account hooks read of Better Auth's account row. */
 interface Account {
   providerId: string;
@@ -215,8 +219,20 @@ export function betterAuthStaffLogin(
         emailCode(sendCode),
       ],
       hooks: {
-        // An undeclared email is answered as a declared one is, and nothing is stored or sent.
         before: createAuthMiddleware(async (ctx) => {
+          // An authorize `handle` accepted (a declared client, this host's own resource): its
+          // resource's row, made here, behind Better Auth's rate limit, which runs before any
+          // hook, so a run of requests with made-up hosts is held to it. The provider checks
+          // the resource before it looks for a session, so the row is there before a sign-in.
+          if (oauth && ctx.path === AUTHORIZE && ctx.request) {
+            const { resource } = oauthOrigin(ctx.request, oauth);
+            const query = ctx.query as { client_id?: unknown; resource?: unknown } | undefined;
+            const client = typeof query?.client_id === "string" ? query.client_id : "";
+            if (query?.resource === resource && oauth.agentOf(client) !== undefined)
+              await ensureResource(ctx.context.adapter, resource);
+            return;
+          }
+          // An undeclared email is answered as a declared one is, and nothing is stored or sent.
           if (ctx.path !== SEND_CODE) return;
           const email = (ctx.body as { email?: unknown } | undefined)?.email;
           if (typeof email !== "string" || !staff.admits({ email })) return ctx.json({ success: true });
@@ -266,84 +282,6 @@ export function betterAuthStaffLogin(
     }
     if (pathname === SERVER_METADATA) return (await authFor(request)).handler(request);
     return undefined;
-  }
-
-  /**
-   * What authorize refuses before the provider sees it: a method but a browser's GET; a client no
-   * declared agent stands for (whose document is then never fetched), with what to declare; a
-   * resource other than this host's own. Otherwise the resource's row is made, and undefined.
-   */
-  async function authorizing(request: Request, surface: OAuthContext): Promise<Response | undefined> {
-    if (request.method !== "GET") return new Response(null, { status: 405, headers: { allow: "GET" } });
-    const query = new URL(request.url).searchParams;
-    const client = query.get("client_id") ?? "";
-    if (surface.agentOf(client) === undefined) {
-      return refusalPage(
-        403,
-        `This company declares no agent for the client ${client || "this request names"}.`,
-        `To let it act for its people, declare an agent for it in <code>resources/people.ts</code>: ` +
-          `<code>sanoma.agent({ id: "&lt;its name&gt;", client: ${escape(JSON.stringify(client))} })</code>, ` +
-          `then sign in again.`,
-      );
-    }
-    const { resource } = oauthOrigin(request, surface);
-    if (query.get("resource") !== resource) {
-      return refusalPage(
-        400,
-        "This sign-in asks for a resource this company does not serve.",
-        `Its agent surface is <code>${escape(resource)}</code>: ask for it as the <code>resource</code>.`,
-      );
-    }
-    await ensureResource(request, resource);
-    return undefined;
-  }
-
-  /**
-   * What the token endpoint refuses before the provider: a client no declared agent stands for
-   * any more (a refresh token outlives a declaration); otherwise this host's resource's row is
-   * there for the provider, and undefined.
-   */
-  async function tokenFor(request: Request, surface: OAuthContext): Promise<Response | undefined> {
-    if (request.method !== "POST") return undefined;
-    const form = new URLSearchParams(
-      await request
-        .clone()
-        .text()
-        .catch(() => ""),
-    );
-    const client = form.get("client_id");
-    if (client !== null && surface.agentOf(client) === undefined) {
-      return Response.json(
-        {
-          error: "invalid_client",
-          error_description: `No agent in this company's resources/people.ts stands for the client ${client}`,
-        },
-        { status: 400, headers: { "cache-control": "no-store" } },
-      );
-    }
-    await ensureResource(request, oauthOrigin(request, surface).resource);
-    return undefined;
-  }
-
-  /**
-   * The provider's row for `identifier`, this host's own `/mcp`, made the first time it is asked
-   * for: the provider issues a token only for a resource it has a row for, and which hosts the
-   * app answers on is the request's to say, so the rows are made as they are asked, each one this
-   * instance's own resource. Two at once make one (the identifier is unique).
-   */
-  async function ensureResource(request: Request, identifier: string): Promise<void> {
-    const { adapter } = await (await authFor(request)).$context;
-    const where = [{ field: "identifier", value: identifier }];
-    if (await adapter.findOne({ model: "oauthResource", where })) return;
-    const now = new Date();
-    await adapter
-      .create({
-        model: "oauthResource",
-        data: { identifier, name: "Agent surface", createdAt: now, updatedAt: now },
-      })
-      .catch(async (err: unknown) => {
-        if (!(await adapter.findOne({ model: "oauthResource", where }))) throw err;
-      });
   }
 
   /** The mints of this process, one after another. */
@@ -467,6 +405,82 @@ export function betterAuthStaffLogin(
       return { email, path: `${BASE_PATH}/magic-link/verify?${query}` };
     },
   };
+}
+
+/**
+ * What authorize refuses before the provider sees it: a method but a browser's GET; a client no
+ * declared agent stands for (whose document is then never fetched), with what to declare; a
+ * resource other than this host's own. Otherwise undefined: the resource's row is made in the
+ * provider's pipeline (`hooks.before`), past Better Auth's rate limit.
+ */
+async function authorizing(request: Request, surface: OAuthContext): Promise<Response | undefined> {
+  if (request.method !== "GET") return new Response(null, { status: 405, headers: { allow: "GET" } });
+  const query = new URL(request.url).searchParams;
+  const client = query.get("client_id") ?? "";
+  if (surface.agentOf(client) === undefined) {
+    return refusalPage(
+      403,
+      `This company declares no agent for the client ${client || "this request names"}.`,
+      `To let it act for its people, declare an agent for it in <code>resources/people.ts</code>: ` +
+        `<code>sanoma.agent({ id: "&lt;its name&gt;", client: ${escape(JSON.stringify(client))} })</code>, ` +
+        `then sign in again.`,
+    );
+  }
+  const { resource } = oauthOrigin(request, surface);
+  if (query.get("resource") !== resource) {
+    return refusalPage(
+      400,
+      "This sign-in asks for a resource this company does not serve.",
+      `Its agent surface is <code>${escape(resource)}</code>: ask for it as the <code>resource</code>.`,
+    );
+  }
+  return undefined;
+}
+
+/**
+ * What the token endpoint refuses before the provider: a client no declared agent stands for
+ * any more (a refresh token outlives a declaration). It makes no row: a request here needs no
+ * sign-in, so a resource no authorize was accepted for is the provider's `invalid_target`.
+ */
+async function tokenFor(request: Request, surface: OAuthContext): Promise<Response | undefined> {
+  if (request.method !== "POST") return undefined;
+  const form = new URLSearchParams(
+    await request
+      .clone()
+      .text()
+      .catch(() => ""),
+  );
+  const client = form.get("client_id");
+  if (client !== null && surface.agentOf(client) === undefined) {
+    return Response.json(
+      {
+        error: "invalid_client",
+        error_description: `No agent in this company's resources/people.ts stands for the client ${client}`,
+      },
+      { status: 400, headers: { "cache-control": "no-store" } },
+    );
+  }
+  return undefined;
+}
+
+/**
+ * The provider's row for `identifier`, this host's own `/mcp`, made the first time an authorize
+ * for it is accepted: the provider issues a token only for a resource it has a row for, and
+ * which hosts the app answers on is the request's to say, so the rows are made as they are
+ * asked, each one this instance's own resource. Two at once make one (the identifier is unique).
+ */
+async function ensureResource(adapter: ResourceAdapter, identifier: string): Promise<void> {
+  const where = [{ field: "identifier", value: identifier }];
+  if (await adapter.findOne({ model: "oauthResource", where })) return;
+  const now = new Date();
+  await adapter
+    .create({
+      model: "oauthResource",
+      data: { identifier, name: "Agent surface", createdAt: now, updatedAt: now },
+    })
+    .catch(async (err: unknown) => {
+      if (!(await adapter.findOne({ model: "oauthResource", where }))) throw err;
+    });
 }
 
 /** The issuer and the resource on the request's own origin: `<origin>/auth/better-auth` and `<origin><resource>`. */

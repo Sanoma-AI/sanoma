@@ -163,6 +163,12 @@ async function consent(page: string, cookie: string): Promise<URL> {
   return new URL(((await allowed.json()) as { url: string }).url);
 }
 
+/** The identifiers of the provider's resource rows, sorted. */
+const resourceRows = async () =>
+  (await pool.query<{ identifier: string }>("SELECT identifier FROM better_auth_staff.oauth_resource")).rows
+    .map((row) => row.identifier)
+    .toSorted();
+
 /** The token endpoint, as a client calls it: a form, no Origin, no cookie. */
 async function token(form: Record<string, string>) {
   const answered = (await half.handle(request("/auth/better-auth/oauth2/token", { form, origin: null })))!;
@@ -300,6 +306,50 @@ describe("a declared client", () => {
       expect(asked.status, resource).toBe(400);
       expect(await asked.text(), resource).toContain(MCP);
     }
+  });
+
+  it("gets a host's resource row made only at an authorize that is accepted, never at the token endpoint", async () => {
+    const before = await resourceRows();
+    const { body } = await connect();
+    // The token endpoint, on hosts never asked for: junk grants, and a real refresh token.
+    for (const host of ["junk-1.example", "junk-2.example"]) {
+      const junk = (await half.handle(
+        request("/auth/better-auth/oauth2/token", { form: { grant_type: "nothing" }, origin: null, host }),
+      ))!;
+      expect(junk.status, host).not.toBe(200);
+    }
+    const elsewhere = (await half.handle(
+      request("/auth/better-auth/oauth2/token", {
+        form: {
+          grant_type: "refresh_token",
+          refresh_token: body.refresh_token!,
+          client_id: CLAUDE_CODE,
+          resource: "https://junk-3.example/mcp",
+        },
+        origin: null,
+        host: "junk-3.example",
+      }),
+    ))!;
+    expect(elsewhere.status).toBe(400);
+    expect(await elsewhere.json()).toMatchObject({ error: "invalid_target" });
+    // Authorize refused: an undeclared client, another host's resource.
+    const { challenge } = pkce();
+    const host = "junk-4.example";
+    for (const path of [
+      authorizePath(UNDECLARED, challenge, { resource: `https://${host}/mcp` }),
+      authorizePath(CLAUDE_CODE, challenge, { resource: MCP }),
+    ]) {
+      expect((await half.handle(request(path, { host })))!.status, path).not.toBe(302);
+    }
+    expect(await resourceRows()).toEqual(before.includes(MCP) ? before : [...before, MCP].toSorted());
+    // Accepted, on a host of its own: its row is there for the provider.
+    const own = (await half.handle(
+      request(authorizePath(CLAUDE_CODE, challenge, { resource: "https://fresh.example/mcp" }), {
+        host: "fresh.example",
+      }),
+    ))!;
+    expect(own.status).toBe(302);
+    expect(await resourceRows()).toContain("https://fresh.example/mcp");
   });
 
   it("is refused once no agent declares it any more: at authorize, and at the token endpoint", async () => {
