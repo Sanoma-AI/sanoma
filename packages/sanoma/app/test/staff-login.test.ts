@@ -400,6 +400,60 @@ describe("staffLogin", () => {
     }
   });
 
+  it("reads the people once for a request, however often the request asks, and again for the next", async () => {
+    let reads = 0;
+    /** A half whose authorize asks what Better Auth's asks of the app: the client's agent four times over, and who is admitted. */
+    const asking: LoginHalf = {
+      ...fakeHalf(["code", "invite"]),
+      async handle(asked) {
+        if (new URL(asked.url).pathname !== "/auth/better-auth/oauth2/authorize") return undefined;
+        const { admits, oauth } = context.staff!;
+        const agents = [];
+        for (let times = 0; times < 4; times++) agents.push(await oauth!.agentOf(CLAUDE_CODE));
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return Response.json({ agents, admitted: await admits({ email: "ada@acme.test" }) });
+      },
+      async bearer(asked) {
+        const agent = await context.staff!.oauth!.agentOf(CLAUDE_CODE);
+        return agent && asked.headers.has("authorization")
+          ? { subject: "ada", email: "ada@acme.test", client: CLAUDE_CODE }
+          : null;
+      },
+    };
+    const provider = staffLogin(async (given) => {
+      context = given;
+      return asking;
+    });
+    const snapshot = { people: readPeople(root) } as AppSnapshot;
+    const app = { resolved: { appName: "acme-plumbing", name: "Acme Plumbing", root }, client, snapshot };
+    await provider.open!(app as unknown as AppContext, () => {
+      reads++;
+      return snapshot;
+    });
+    const authorize = await provider.handle!(request("/auth/better-auth/oauth2/authorize"));
+    expect(await authorize!.json()).toEqual({ agents: Array(4).fill("claude-code"), admitted: true });
+    expect(reads).toBe(1);
+    // The login's own pages: who is admitted, then the consent page's client and person.
+    reads = 0;
+    const query = new URLSearchParams({ client_id: CLAUDE_CODE, sig: "x" });
+    const consent = await provider.handle!(request(`/auth/consent?${query}`, { cookie: "who=ada@acme.test" }));
+    expect(consent?.status).toBe(200);
+    expect(reads).toBe(1);
+    // A bearer at /mcp: the half's check, then who the app's own resolve asks, the one request's.
+    reads = 0;
+    const call = mcp(`at.ada@acme.test.${CLAUDE_CODE}`);
+    expect(await provider.handle!(call)).toBeUndefined();
+    expect(await provider.resolveActor(call)).toMatchObject({ client: CLAUDE_CODE });
+    expect(reads).toBe(1);
+    // Two requests at once read once each: neither is answered with what the other read.
+    reads = 0;
+    await Promise.all([
+      provider.handle!(request("/auth/better-auth/oauth2/authorize")),
+      provider.handle!(request("/auth/better-auth/oauth2/authorize")),
+    ]);
+    expect(reads).toBe(2);
+  });
+
   it("goes back to the page asked for on this host once signed in, never to another a path names", async () => {
     const html = await (await login.handle!(request("/workflows")))!.text();
     const line = /const here=[^\n]*?const back=[^;]+;/.exec(html)?.[0];

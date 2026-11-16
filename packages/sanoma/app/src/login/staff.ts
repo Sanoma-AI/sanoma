@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   ADMIN,
   CONSENT_PAGE,
@@ -86,10 +87,28 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
   /** The company as its files say when asked (`open`'s `current`). */
   let current: (() => AppSnapshot | Promise<AppSnapshot>) | undefined;
   /**
-   * Who the files declare, as they say now: read at each request that asks, so a person or a
-   * client taken out is refused at the login's own routes too, with no page asked in between.
+   * What each request under way has read of the files. The half asks who is declared through
+   * callbacks that carry no request (`admits`, `agentOf`, several times in one authorize), so
+   * the request is found by the call it is made in, as the Worker's entry finds its client.
    */
-  const people = async () => (await current!()).people;
+  const underWay = new AsyncLocalStorage<Reading>();
+  const readings = new WeakMap<Request, Reading>();
+  /** Runs `answer` as part of `request`: what it reads of the files, the request reads once. */
+  const during = <T>(request: Request, answer: () => T): T => {
+    let reading = readings.get(request);
+    if (!reading) readings.set(request, (reading = {}));
+    return underWay.run(reading, answer);
+  };
+  /**
+   * Who the files declare, as they say now: read at each request that asks, so a person or a
+   * client taken out is refused at the login's own routes too, with no page asked in between;
+   * and once for that request, however often it asks (on Node each read checks every file's
+   * stamp, `liveSnapshot`). Outside a request (`invite`), read as asked.
+   */
+  const people = (): Promise<AppSnapshot["people"]> => {
+    const reading = underWay.getStore();
+    return reading ? (reading.people ??= declaredBy(current!)) : declaredBy(current!);
+  };
   /** How the login's pages look: the kit's stylesheet, and the company they are for. */
   const frame = (): PageFrame =>
     app ? { ...(app.stylesheet && { stylesheet: app.stylesheet }), company: companyOf(app.resolved.name) } : {};
@@ -331,7 +350,19 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     return { person, ...(sender && { sender }) };
   }
 
-  return provider;
+  return {
+    ...provider,
+    resolveActor: (request) => during(request, () => provider.resolveActor(request)),
+    handle: (request) => during(request, () => provider.handle!(request)),
+  };
+}
+
+/** The people a snapshot read now declares. */
+const declaredBy = async (current: () => AppSnapshot | Promise<AppSnapshot>) => (await current()).people;
+
+/** What a request has read of the company's files so far: the people, once it asked. */
+interface Reading {
+  people?: Promise<AppSnapshot["people"]>;
 }
 
 /**
