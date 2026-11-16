@@ -623,6 +623,48 @@ describe("the same-origin rule", () => {
 });
 
 describe("a bearer", () => {
+  it("is checked against keys read once, not at every call", async () => {
+    const { body } = await connect();
+    // Each read of the keys' table, as the adapter asks the pool.
+    const reads: string[] = [];
+    const ask = pool.query.bind(pool) as (...args: unknown[]) => unknown;
+    const query = vi.spyOn(pool, "query").mockImplementation(((...args: unknown[]) => {
+      const text = typeof args[0] === "string" ? args[0] : (args[0] as { text?: string }).text;
+      if (text?.includes('"jwks"')) reads.push(text);
+      return ask(...args);
+    }) as typeof pool.query);
+    try {
+      // A login of its own, so nothing is kept yet.
+      const fresh = betterAuthStaffLogin(context, { fetchClientMetadata: declaredMetadataFetch(network) });
+      for (let i = 0; i < 3; i++) {
+        expect(await fresh.bearer!(request("/mcp", { bearer: body.access_token, origin: null }))).toMatchObject({
+          client: CLAUDE_CODE,
+        });
+      }
+      expect(reads).toHaveLength(1);
+    } finally {
+      query.mockRestore();
+    }
+  });
+
+  it("fails, rather than calling the token bad, when its keys cannot be read", async () => {
+    const { body } = await connect();
+    const down = new Pool({ connectionString: "postgres://postgres@127.0.0.1:1/nothing" });
+    try {
+      const unread = betterAuthStaffLogin(
+        { ...context, database: async () => down },
+        { fetchClientMetadata: declaredMetadataFetch(network) },
+      );
+      await expect(unread.bearer!(request("/mcp", { bearer: body.access_token, origin: null }))).rejects.toThrow(
+        "ECONNREFUSED",
+      );
+      // A token that is no JWT is refused before anything is read.
+      expect(await unread.bearer!(request("/mcp", { bearer: "sca_nothing", origin: null }))).toBeNull();
+    } finally {
+      await down.end();
+    }
+  });
+
   it("is refused for another audience, another issuer, a bad signature or once expired", async () => {
     const { body } = await connect();
     const access = body.access_token!;

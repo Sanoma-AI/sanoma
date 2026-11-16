@@ -3,6 +3,7 @@ import {
   type LoginContext,
   type LoginHalf,
   type LoginMethod,
+  requestOrigin,
   sameOrigin,
   type SignInMethod,
 } from "sanoma/workflows";
@@ -184,6 +185,12 @@ export function betterAuthStaffLogin(
   const oauth = staff.oauth;
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
   const minted = new Map<string, string>();
+  /**
+   * What the access tokens' public keys are kept by (`verifyJwsAccessToken`'s `jwksCacheKey`):
+   * one for the login, whichever instance read them. Only the keys' public halves are kept,
+   * never an instance or its pool.
+   */
+  const keysCache = {};
   /** The login GitHub's profile names, by the request it came in, until `keepLogin` writes it. */
   const logins = new WeakMap<object, string>();
   /** Keeps the login GitHub named for this request on the account's user, once the account is made or refreshed. */
@@ -405,15 +412,19 @@ export function betterAuthStaffLogin(
         if (!token) return null;
         const own = await authFor(request);
         const { issuer, resource } = oauthOrigin(request, oauth);
-        // This login's public keys, from its table (never over HTTP): a failure to read them is the
-        // app's to report, not a bad token.
-        const keys = await own.api.getJwks({ headers: request.headers });
         let payload: Awaited<ReturnType<typeof verifyJwsAccessToken>>;
         try {
-          // Signed with one of those keys, for this host's issuer and this host's resource alone,
-          // unexpired: jose checks `exp` and `nbf`.
+          // Signed with one of this login's keys, for this host's issuer and this host's resource
+          // alone, unexpired: jose checks `exp` and `nbf`. The public keys are read from the
+          // login's table (never over HTTP) through this request's instance, and kept by
+          // `verifyJwsAccessToken` under `keysCache`: five minutes, read again at once for a key
+          // id they lack (at most every thirty seconds), one read shared by those that wait.
           payload = await verifyJwsAccessToken(token, {
-            jwksFetch: async () => keys,
+            jwksCacheKey: keysCache,
+            jwksFetch: () =>
+              own.api.getJwks({ headers: request.headers }).catch((err: unknown) => {
+                throw new KeysUnread(err);
+              }),
             verifyOptions: {
               issuer,
               audience: resource,
@@ -421,7 +432,11 @@ export function betterAuthStaffLogin(
               requiredClaims: ["sub", "azp", "exp", "iat"],
             },
           });
-        } catch {
+        } catch (err) {
+          // The keys not read (or not in the five seconds a read another request began is waited
+          // for) is the app's to report, not a bad token.
+          if (err instanceof KeysUnread) throw err.cause;
+          if ((err as { code?: unknown } | null)?.code === "ERR_JWKS_TIMEOUT") throw err;
           return null;
         }
         // A sender-constrained (DPoP) token is not a bearer.
@@ -593,7 +608,7 @@ function withoutDpop(request: Request): Request {
 
 /** The issuer and the resource on the request's own origin: `<origin>/auth/better-auth` and `<origin><resource>`. */
 function oauthOrigin(request: Request, oauth: { resource: string }) {
-  const origin = `${protocolOf(request)}://${new URL(request.url).host}`;
+  const origin = requestOrigin(request);
   return { issuer: `${origin}${BASE_PATH}`, resource: `${origin}${oauth.resource}` };
 }
 
@@ -616,6 +631,13 @@ function refusalPage(status: number, title: string, body: string): Response {
       },
     },
   );
+}
+
+/** The token keys' table could not be read (`cause` says why): never a bad token. */
+class KeysUnread extends Error {
+  constructor(cause: unknown) {
+    super("better-auth: the token keys could not be read", { cause });
+  }
 }
 
 /** A token as the magic link plugin stores it (`storeToken: "hashed"`): SHA-256, base64url without padding. */
