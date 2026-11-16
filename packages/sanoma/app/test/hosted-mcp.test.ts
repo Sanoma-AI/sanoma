@@ -164,6 +164,60 @@ async function signIn(client = CLAUDE_CODE) {
   return { authorized, verifier, server, resource: resource.resource };
 }
 
+/**
+ * The whole sign-in for Claude Code, Ada's: from the 401 to its tokens, consenting when asked.
+ * Every request is the client's or the login's own: none of them is a page of the app.
+ */
+async function connect() {
+  const { authorized, verifier, server, resource } = await signIn();
+  expect(authorized.status).toBe(302);
+  const login = new URL(authorized.headers.get("location")!, app.url);
+  await fromPage("/auth/better-auth/email-otp/send-verification-otp", { email: ADA, type: "sign-in" });
+  const signed = await fromPage("/auth/better-auth/sign-in/email-otp", {
+    email: ADA,
+    otp: codes.get(ADA),
+    oauth_query: login.search.slice(1),
+  });
+  const cookie = cookieOf(signed);
+  let next = new URL(((await signed.json()) as { url: string }).url, app.url);
+  if (next.pathname === "/auth/consent") {
+    const allowed = await fromPage(
+      "/auth/better-auth/oauth2/consent",
+      { accept: true, oauth_query: next.search.slice(1) },
+      cookie,
+    );
+    next = new URL(((await allowed.json()) as { url: string }).url);
+  }
+  const exchanged = await fetch(server.token_endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: next.searchParams.get("code")!,
+      redirect_uri: REDIRECT,
+      client_id: CLAUDE_CODE,
+      code_verifier: verifier,
+      resource,
+    }),
+  });
+  expect(exchanged.status).toBe(200);
+  const tokens = (await exchanged.json()) as { access_token: string; refresh_token: string };
+  return { ...tokens, server, resource, cookie };
+}
+
+/** The token endpoint's refresh, as the client sends it. */
+const refresh = (tokens: { refresh_token: string; resource: string; server: { token_endpoint: string } }) =>
+  fetch(tokens.server.token_endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: tokens.refresh_token,
+      client_id: CLAUDE_CODE,
+      resource: tokens.resource,
+    }),
+  });
+
 describe("the agent surface on a host", () => {
   it("answers /mcp without a token 401, pointing at its metadata: CIMD, public clients and S256", async () => {
     const { status, headers } = await mcp("tools/list", {});
@@ -268,6 +322,24 @@ describe("the agent surface on a host", () => {
     } finally {
       writeFileSync(join(root, "resources/people.ts"), PEOPLE);
     }
+  });
+
+  it("reads the people as the files say now at the login's own routes, with no page asked in between", async () => {
+    const tokens = await connect();
+    // Undeclared: the token endpoint and authorize are all that is asked, and both refuse.
+    writeFileSync(join(root, "resources/people.ts"), PEOPLE.replace(/^export const claudeCode.*$/m, ""));
+    try {
+      const refreshed = await refresh(tokens);
+      expect(refreshed.status).toBe(400);
+      expect(await refreshed.json()).toMatchObject({ error: "invalid_client" });
+      expect((await signIn()).authorized.status).toBe(403);
+    } finally {
+      writeFileSync(join(root, "resources/people.ts"), PEOPLE);
+    }
+    // Declared again: authorize goes on to the sign-in, again with nothing else asked.
+    const { authorized } = await signIn();
+    expect(authorized.status).toBe(302);
+    expect(new URL(authorized.headers.get("location")!, app.url).pathname).toBe("/auth/login");
   });
 
   it("refuses an undeclared client at authorize, naming what to declare, and fetches nothing of it", async () => {
