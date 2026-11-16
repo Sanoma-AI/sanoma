@@ -8,6 +8,7 @@ import type { AppSnapshot } from "../src/snapshot.ts";
 import { admitting } from "../src/login/admission.ts";
 import { staffLogin } from "../src/login/staff.ts";
 import { readPeople } from "sanoma/workflows/describe";
+import { CLAUDE_CODE } from "./staff-oauth-helpers.ts";
 
 // The app's side of the staff login, over a login half of its own: what it gives the half (who
 // is declared, the sender, the ledger), the sign-in page, an invite's landing page and
@@ -26,13 +27,10 @@ export const cy = sanoma.person({ id: "cy" });
 export const dee = sanoma.person({ id: "dee", name: "Dee Park", email: "dee@acme.test" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 export const office = sanoma.group({ name: "office", members: [dee] });
-export const claudeCode = sanoma.agent({ id: "claude-code", client: "https://claude.ai/oauth/claude-code-client-metadata" });
+export const claudeCode = sanoma.agent({ id: "claude-code", client: "${CLAUDE_CODE}" });
 `,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
-
-/** Claude Code's client id, which the people file's `claude-code` agent stands for. */
-const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
 
 /**
  * A login half that takes the cookie `who=<email>` as signed in, mints invites `tok-<email>`, and

@@ -7,11 +7,11 @@ import { betterAuthStaffLogin, declaredMetadataFetch, prepareBetterAuthStaff } f
 import { testDatabaseUrl } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { defineWorkflow, type SanomaConfig } from "sanoma/workflows";
-import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ACTOR_HEADER, AGENT_HEADER } from "../src/api.ts";
 import { type App, startApp, staffLogin } from "../src/index.ts";
+import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-oauth-helpers.ts";
 
 // Needs Postgres (`pnpm db:up`) and the app built (`pnpm --filter sanoma build`). `/mcp` on a
 // hosted instance, through the app on Node with the staff login (Better Auth's): a client of its
@@ -21,7 +21,6 @@ import { type App, startApp, staffLogin } from "../src/index.ts";
 // tools as the declared agent on that person's behalf. Claude Code's metadata document is served
 // by a stand-in for claude.ai: nothing here leaves the machine.
 
-const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
 const UNDECLARED = "https://elsewhere.example/oauth/client.json";
 const REDIRECT = "http://127.0.0.1:53682/callback";
 const ADA = "ada@acme.test";
@@ -35,6 +34,18 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "${CLAUDE_CO
 `;
 writeFileSync(join(root, "resources/people.ts"), PEOPLE);
 afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+/** Runs `run` while `resources/people.ts` says `people`, then puts the file back as it was. */
+async function withPeople<T>(people: string, run: () => Promise<T>): Promise<T> {
+  writeFileSync(join(root, "resources/people.ts"), people);
+  try {
+    return await run();
+  } finally {
+    writeFileSync(join(root, "resources/people.ts"), PEOPLE);
+  }
+}
+/** The people with no agent for Claude Code. */
+const UNDECLARED_CLIENT = PEOPLE.replace(/^export const claudeCode.*$/m, "");
 
 const hello = defineWorkflow({
   name: "say-hello",
@@ -56,24 +67,12 @@ const fetched: string[] = [];
 const claudeAi = async (input: string | URL | Request): Promise<Response> => {
   const url = String(input instanceof Request ? input.url : input);
   fetched.push(url);
-  if (url !== CLAUDE_CODE) return new Response("Not found", { status: 404 });
-  return Response.json({
-    client_id: CLAUDE_CODE,
-    client_name: "Claude Code",
-    redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"],
-    grant_types: ["authorization_code", "refresh_token"],
-    response_types: ["code"],
-    token_endpoint_auth_method: "none",
-  });
+  return url === CLAUDE_CODE ? Response.json(CLAUDE_CODE_DOCUMENT) : new Response("Not found", { status: 404 });
 };
 
 let app: App;
 beforeAll(async () => {
-  const db = new Client({ connectionString: databaseUrl });
-  await db.connect();
-  await db.query("DROP SCHEMA IF EXISTS better_auth_staff CASCADE");
-  await db.query("DROP TABLE IF EXISTS drizzle.__drizzle_migrations_better_auth_staff");
-  await db.end();
+  await resetStaffSchema(databaseUrl);
   await prepareBetterAuthStaff(databaseUrl);
   app = await startApp(testApp.config, {
     port: 0,
@@ -97,15 +96,18 @@ const fromPage = (path: string, body: unknown, cookie?: string) =>
     headers: { "content-type": "application/json", origin: app.url, ...(cookie && { cookie }) },
     body: JSON.stringify(body),
   });
-const cookieOf = (response: Response) =>
-  response.headers
-    .getSetCookie()
-    .find((c) => c.includes("session_token="))
-    ?.split(";")[0] ?? "";
 
-/** A JSON-RPC request to `/mcp`, as an MCP client sends it: no Origin. */
-async function mcp(method: string, params: Record<string, unknown>, headers: Record<string, string> = {}) {
-  const res = await fetch(at("/mcp"), {
+/** A bearer, as a client sends its access token. */
+const bearerOf = (token: string) => ({ authorization: `Bearer ${token}` });
+
+/** A JSON-RPC request to `/mcp` (or to `url`, another address of it), as an MCP client sends it: no Origin. */
+async function mcp(
+  method: string,
+  params: Record<string, unknown>,
+  headers: Record<string, string> = {},
+  url = at("/mcp"),
+) {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
@@ -164,6 +166,21 @@ async function signIn(client = CLAUDE_CODE) {
   return { authorized, verifier, server, resource: resource.resource };
 }
 
+/** The token endpoint's exchange, as Claude Code sends it: a form, no Origin, no cookie; its code and PKCE verifier for tokens. */
+const exchange = (server: { token_endpoint: string }, code: string, verifier: string, resource: string) =>
+  fetch(server.token_endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: REDIRECT,
+      client_id: CLAUDE_CODE,
+      code_verifier: verifier,
+      resource,
+    }),
+  });
+
 /**
  * The whole sign-in for Claude Code, Ada's: from the 401 to its tokens, consenting when asked.
  * Every request is the client's or the login's own: none of them is a page of the app.
@@ -188,18 +205,7 @@ async function connect() {
     );
     next = new URL(((await allowed.json()) as { url: string }).url);
   }
-  const exchanged = await fetch(server.token_endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code: next.searchParams.get("code")!,
-      redirect_uri: REDIRECT,
-      client_id: CLAUDE_CODE,
-      code_verifier: verifier,
-      resource,
-    }),
-  });
+  const exchanged = await exchange(server, next.searchParams.get("code")!, verifier, resource);
   expect(exchanged.status).toBe(200);
   const issued = (await exchanged.json()) as { access_token: string; refresh_token: string };
   return { ...issued, server, resource, cookie };
@@ -283,25 +289,14 @@ describe("the agent surface on a host", () => {
     const back = new URL(((await allowed.json()) as { url: string }).url);
     expect(back.origin + back.pathname).toBe(REDIRECT);
     // The token endpoint: a form, no Origin, no cookie.
-    const exchanged = await fetch(server.token_endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code: back.searchParams.get("code")!,
-        redirect_uri: REDIRECT,
-        client_id: CLAUDE_CODE,
-        code_verifier: verifier,
-        resource,
-      }),
-    });
+    const exchanged = await exchange(server, back.searchParams.get("code")!, verifier, resource);
     expect(exchanged.status).toBe(200);
     const { access_token } = (await exchanged.json()) as { access_token: string };
     const claims = JSON.parse(Buffer.from(access_token.split(".")[1]!, "base64url").toString());
     expect(claims).toMatchObject({ aud: `${app.url}/mcp`, iss: `${app.url}/auth/better-auth`, azp: CLAUDE_CODE });
     expect(fetched).toEqual([CLAUDE_CODE]);
 
-    const bearer = { authorization: `Bearer ${access_token}` };
+    const bearer = bearerOf(access_token);
     const listed = await mcp("tools/list", {}, bearer);
     expect(listed.status).toBe(200);
     expect(listed.body.result.tools.map((t: { name: string }) => t.name)).toContain("start_run");
@@ -316,11 +311,7 @@ describe("the agent surface on a host", () => {
     expect(run?.startedBy).toEqual({ id: "claude-code", groups: ["agents"], onBehalfOf: "ada" });
 
     // The token is for this host's /mcp alone: another host's /mcp refuses it, 401.
-    const elsewhere = await fetch(at("/mcp").replace("127.0.0.1", "localhost"), {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...bearer },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
-    });
+    const elsewhere = await mcp("tools/list", {}, bearer, at("/mcp").replace("127.0.0.1", "localhost"));
     expect(elsewhere.status).toBe(401);
     expect(elsewhere.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
     // A loopback header is no sign-in on a host, beside a token or not.
@@ -328,14 +319,11 @@ describe("the agent surface on a host", () => {
     expect((await mcp("tools/list", {}, { [ACTOR_HEADER]: "ada" })).status).toBe(401);
 
     // Once no agent declares the client, its token is refused, however recent.
-    writeFileSync(join(root, "resources/people.ts"), PEOPLE.replace(/^export const claudeCode.*$/m, ""));
-    try {
+    await withPeople(UNDECLARED_CLIENT, async () => {
       const refused = await mcp("tools/list", {}, bearer);
       expect(refused.status).toBe(403);
       expect(refused.body).toMatchObject({ code: "not_admitted", error: expect.stringContaining(CLAUDE_CODE) });
-    } finally {
-      writeFileSync(join(root, "resources/people.ts"), PEOPLE);
-    }
+    });
   });
 
   it("reads the people as the files say now at the login's own routes, with no page asked in between", async () => {
@@ -362,30 +350,25 @@ describe("the agent surface on a host", () => {
     // The scheme is case-insensitive (RFC 9110 §11.1).
     expect((await mcp("tools/list", {}, { authorization: `bearer ${access_token}` })).status).toBe(200);
     // `/mcp/` is `/mcp`: the same token, the same challenges.
-    const slash = (headers: Record<string, string>) =>
-      fetch(at("/mcp/"), {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
-      });
+    const slash = (headers: Record<string, string>) => mcp("tools/list", {}, headers, at("/mcp/"));
     const none = await slash({});
     expect(none.status).toBe(401);
     expect(none.headers.get("www-authenticate")).toBe(challenge);
     const bad = await slash({ authorization: "Bearer a.b.c" });
     expect(bad.status).toBe(401);
     expect(bad.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
-    expect((await slash({ authorization: `Bearer ${access_token}` })).status).not.toBe(401);
+    expect((await slash(bearerOf(access_token))).status).not.toBe(401);
     // A DPoP token, or any other scheme, is not a bearer: the challenge names the one taken here.
     const dpop = await mcp("tools/list", {}, { authorization: `DPoP ${access_token}` });
     expect(dpop.status).toBe(401);
     expect(dpop.headers.get("www-authenticate")).toBe(challenge);
     // Anywhere but /mcp a bearer is nobody: a page and a server function are the sign-in's.
-    const page = await fetch(at("/"), { headers: { authorization: `Bearer ${access_token}` } });
+    const page = await fetch(at("/"), { headers: bearerOf(access_token) });
     expect(page.status).toBe(401);
     expect(page.headers.get("content-type")).toContain("text/html");
     const call = await fetch(at("/auth/invite"), {
       method: "POST",
-      headers: { authorization: `Bearer ${access_token}`, "content-type": "application/json", origin: app.url },
+      headers: { ...bearerOf(access_token), "content-type": "application/json", origin: app.url },
       body: JSON.stringify({ email: ADA }),
     });
     expect(call.status).toBe(401);
@@ -393,17 +376,15 @@ describe("the agent surface on a host", () => {
 
   it("refuses a bearer once the person it was issued for is no longer declared", async () => {
     const { access_token } = await tokens();
-    writeFileSync(
-      join(root, "resources/people.ts"),
-      PEOPLE.replace(/^export const ada.*$/m, 'export const bo = sanoma.person({ id: "bo", email: "bo@acme.test" });'),
+    const withoutAda = PEOPLE.replace(
+      /^export const ada.*$/m,
+      'export const bo = sanoma.person({ id: "bo", email: "bo@acme.test" });',
     );
-    try {
-      const refused = await mcp("tools/list", {}, { authorization: `Bearer ${access_token}` });
+    await withPeople(withoutAda, async () => {
+      const refused = await mcp("tools/list", {}, bearerOf(access_token));
       expect(refused.status).toBe(403);
       expect(refused.body).toMatchObject({ code: "not_admitted" });
-    } finally {
-      writeFileSync(join(root, "resources/people.ts"), PEOPLE);
-    }
+    });
   });
 
   it("refuses an undeclared client at authorize, saying where one is declared, and fetches nothing of it", async () => {
@@ -417,5 +398,19 @@ describe("the agent surface on a host", () => {
     // No declaration ready to paste: the client's id is whatever the link that sent here said.
     expect(page).not.toContain("sanoma.agent(");
     expect(fetched).toEqual([]);
+  });
+
+  it("answers a well-known path it does not serve 404, signed in or not: never the sign-in page", async () => {
+    const { cookie } = await tokens();
+    for (const path of [
+      "/.well-known/x",
+      "/.well-known/openid-configuration",
+      "/.well-known/oauth-authorization-server",
+    ]) {
+      for (const headers of [{}, { cookie }]) {
+        const lost = await fetch(at(path), { headers: { accept: "text/html", ...headers } });
+        expect([lost.status, lost.headers.get("content-type")], path).toEqual([404, "text/plain;charset=UTF-8"]);
+      }
+    }
   });
 });

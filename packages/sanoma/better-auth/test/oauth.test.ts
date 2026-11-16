@@ -1,11 +1,12 @@
 import { createHash, createHmac, generateKeyPairSync, hkdfSync, randomBytes, sign } from "node:crypto";
 import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "sanoma/workflows";
 import { testDatabaseUrl } from "sanoma/testing";
-import { Client, Pool } from "pg";
+import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prepareBetterAuthStaff } from "../src/instance.ts";
 import { declaredMetadataFetch } from "../src/oauth.ts";
 import { betterAuthStaffLogin } from "../src/staff.ts";
+import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-helpers.ts";
 
 // The staff login as the agent surface's authorization server: its metadata, a declared client's
 // sign-in by email code with PKCE, consent and a JWT for the instance's own `/mcp`, the token
@@ -20,23 +21,11 @@ const ORIGIN = `https://${HOST}`;
 const MCP = `${ORIGIN}/mcp`;
 const ISSUER = `${ORIGIN}/auth/better-auth`;
 const DECLARED = "alice@example.com";
-/** Claude Code's published client id: the URL of its metadata document. */
-const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
 /** Another client's, which no agent declares. */
 const UNDECLARED = "https://elsewhere.example/oauth/client.json";
 /** A declared client whose own document asks for DPoP-bound tokens (RFC 9449 §5.2). */
 const BOUND = "https://bound.example/oauth/client.json";
 const REDIRECT = "http://localhost:53682/callback";
-
-/** Claude Code's document, as claude.ai serves it. */
-const DOCUMENT = {
-  client_id: CLAUDE_CODE,
-  client_name: "Claude Code",
-  redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"],
-  grant_types: ["authorization_code", "refresh_token"],
-  response_types: ["code"],
-  token_endpoint_auth_method: "none",
-};
 
 /** Each document fetched, by URL, and how it was asked to treat a redirect: the stand-in for the network the CIMD plugin reaches. */
 const fetched: string[] = [];
@@ -45,8 +34,9 @@ async function network(input: string | URL | Request, init?: RequestInit): Promi
   const url = String(input instanceof Request ? input.url : input);
   fetched.push(url);
   redirects.add(init?.redirect);
-  if (url === CLAUDE_CODE) return Response.json(DOCUMENT, { headers: { "cache-control": "max-age=3600" } });
-  if (url === BOUND) return Response.json({ ...DOCUMENT, client_id: BOUND, dpop_bound_access_tokens: true });
+  if (url === CLAUDE_CODE) return Response.json(CLAUDE_CODE_DOCUMENT, { headers: { "cache-control": "max-age=3600" } });
+  if (url === BOUND)
+    return Response.json({ ...CLAUDE_CODE_DOCUMENT, client_id: BOUND, dpop_bound_access_tokens: true });
   if (url === "https://claude.ai/oauth/moved")
     return new Response(null, { status: 302, headers: { location: CLAUDE_CODE } });
   return new Response("Not found", { status: 404 });
@@ -58,6 +48,18 @@ const agents = new Map([
   [BOUND, "bound"],
   ["https://claude.ai/oauth/moved", "moved"],
 ]);
+/** Runs `run` while `agent` stands for `client` (no agent, undefined), then puts the declaration back as it was. */
+async function withAgent<T>(client: string, agent: string | undefined, run: () => Promise<T>): Promise<T> {
+  const before = agents.get(client);
+  if (agent === undefined) agents.delete(client);
+  else agents.set(client, agent);
+  try {
+    return await run();
+  } finally {
+    if (before === undefined) agents.delete(client);
+    else agents.set(client, before);
+  }
+}
 const codes = new Map<string, string>();
 const pool = new Pool({ connectionString: databaseUrl });
 const context: LoginContext = {
@@ -103,12 +105,6 @@ function request(
   }
   return new Request(`http://${host}${path}`, { method: body === undefined ? "GET" : "POST", headers, body });
 }
-
-const cookieOf = (response: Response) =>
-  response.headers
-    .getSetCookie()
-    .find((c) => c.includes("session_token="))
-    ?.split(";")[0] ?? "";
 
 /** A PKCE pair: the verifier, and its S256 challenge. */
 function pkce() {
@@ -176,15 +172,37 @@ const resourceRows = async () =>
     .map((row) => row.identifier)
     .toSorted();
 
-/** The token endpoint, as a client calls it: a form, no Origin, no cookie. */
-async function token(form: Record<string, string>) {
-  const answered = (await half.handle(request("/auth/better-auth/oauth2/token", { form, origin: null })))!;
+/** The token endpoint, as a client calls it: a form, no Origin, no cookie; `headers` besides, when it sends any. */
+async function token(form: Record<string, string>, headers: Record<string, string> = {}) {
+  const asking = request("/auth/better-auth/oauth2/token", { form, origin: null });
+  for (const [name, value] of Object.entries(headers)) asking.headers.set(name, value);
+  const answered = (await half.handle(asking))!;
   return { status: answered.status, body: (await answered.json()) as Record<string, string> };
 }
 
-/** A refresh at the token endpoint, as Claude Code sends one. */
-const refreshWith = (refresh_token: string) =>
-  token({ grant_type: "refresh_token", refresh_token, client_id: CLAUDE_CODE, resource: MCP });
+/** A code for tokens at the token endpoint, with its PKCE verifier, as `client` (Claude Code unless said) sends it. */
+const exchange = (code: string, verifier: string, client = CLAUDE_CODE, headers: Record<string, string> = {}) =>
+  token(
+    {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: REDIRECT,
+      client_id: client,
+      code_verifier: verifier,
+      resource: MCP,
+    },
+    headers,
+  );
+
+/** A refresh at the token endpoint, as `client` (Claude Code unless said) sends one. */
+const refreshWith = (refresh_token: string, client = CLAUDE_CODE) =>
+  token({ grant_type: "refresh_token", refresh_token, client_id: client, resource: MCP });
+
+/** What a login's `bearer` (this one's unless said) says of a client's request to `/mcp` with the token `bearer`, or with none. */
+const bearerOf = (bearer?: string, at: { host?: string; login?: LoginHalf; path?: string } = {}) =>
+  (at.login ?? half).bearer!(
+    request(at.path ?? "/mcp", { origin: null, ...(bearer && { bearer }), ...(at.host && { host: at.host }) }),
+  );
 
 /** The whole flow for a client, Claude Code unless said: authorize, sign in by code, consent, the code for tokens. */
 async function connect(client = CLAUDE_CODE) {
@@ -194,33 +212,11 @@ async function connect(client = CLAUDE_CODE) {
   const login = asked.headers.get("location")!;
   const { cookie, next } = await signInFrom(login);
   const back = next.startsWith(REDIRECT) ? new URL(next) : await consent(next, cookie);
-  const code = back.searchParams.get("code")!;
-  return {
-    cookie,
-    back,
-    ...(await token({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: REDIRECT,
-      client_id: client,
-      code_verifier: verifier,
-      resource: MCP,
-    })),
-  };
+  return { cookie, back, ...(await exchange(back.searchParams.get("code")!, verifier, client)) };
 }
 
 beforeAll(async () => {
-  const admin = new Client({ connectionString: Object.assign(new URL(databaseUrl), { pathname: "/postgres" }).href });
-  await admin.connect();
-  const name = new URL(databaseUrl).pathname.slice(1);
-  const { rowCount } = await admin.query("SELECT 1 FROM pg_database WHERE datname = $1", [name]);
-  if (!rowCount) await admin.query(`CREATE DATABASE "${name}"`);
-  await admin.end();
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-  await client.query("DROP SCHEMA IF EXISTS better_auth_staff CASCADE");
-  await client.query("DROP TABLE IF EXISTS drizzle.__drizzle_migrations_better_auth_staff");
-  await client.end();
+  await resetStaffSchema(databaseUrl);
   await prepareBetterAuthStaff(databaseUrl);
   half = betterAuthStaffLogin(context, { fetchClientMetadata: declaredMetadataFetch(network) });
 });
@@ -320,7 +316,7 @@ describe("a declared client", () => {
 
   it("says who a bearer is for, and which client it was issued to", async () => {
     const { body } = await connect();
-    expect(await half.bearer!(request("/mcp", { bearer: body.access_token, origin: null }))).toEqual({
+    expect(await bearerOf(body.access_token)).toEqual({
       subject: expect.any(String),
       email: DECLARED,
       client: CLAUDE_CODE,
@@ -331,12 +327,7 @@ describe("a declared client", () => {
     const first = await connect();
     const again = await connect();
     expect(again.status).toBe(200);
-    const refreshed = await token({
-      grant_type: "refresh_token",
-      refresh_token: first.body.refresh_token!,
-      client_id: CLAUDE_CODE,
-      resource: MCP,
-    });
+    const refreshed = await refreshWith(first.body.refresh_token!);
     expect(refreshed.status).toBe(200);
     expect(refreshed.body.refresh_token).not.toBe(first.body.refresh_token);
     expect(decode(refreshed.body.access_token!).payload.aud).toBe(MCP);
@@ -365,12 +356,7 @@ describe("a declared client", () => {
       return to.origin === ORIGIN ? to.pathname : `${to.origin}${to.pathname}`;
     };
     expect(await where()).toBe(REDIRECT);
-    agents.set(CLAUDE_CODE, "admin-bot");
-    try {
-      expect(await where()).toBe("/auth/consent");
-    } finally {
-      agents.set(CLAUDE_CODE, "claude-code");
-    }
+    expect(await withAgent(CLAUDE_CODE, "admin-bot", where)).toBe("/auth/consent");
     expect(await where()).toBe(REDIRECT);
   });
 
@@ -383,12 +369,7 @@ describe("a declared client", () => {
       }),
     ))!;
     expect(revoked.status).toBe(200);
-    const refreshed = await token({
-      grant_type: "refresh_token",
-      refresh_token: body.refresh_token!,
-      client_id: CLAUDE_CODE,
-      resource: MCP,
-    });
+    const refreshed = await refreshWith(body.refresh_token!);
     expect(refreshed.status).toBe(400);
     expect(refreshed.body.error).toBe("invalid_grant");
   });
@@ -416,34 +397,13 @@ describe("a declared client", () => {
       request(authorizePath(CLAUDE_CODE, challenge, { dpop_jkt: thumbprint }), { cookie }),
     ))!;
     const code = new URL(asked.headers.get("location")!).searchParams.get("code")!;
-    const asking = request("/auth/better-auth/oauth2/token", {
-      form: {
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: REDIRECT,
-        client_id: CLAUDE_CODE,
-        code_verifier: verifier,
-        resource: MCP,
-      },
-      origin: null,
-    });
-    asking.headers.set("dpop", proof());
-    const answered = (await half.handle(asking))!;
-    expect(answered.status).toBe(200);
-    const body = (await answered.json()) as Record<string, string>;
+    const { status, body } = await exchange(code, verifier, CLAUDE_CODE, { dpop: proof() });
+    expect(status).toBe(200);
     expect(body.token_type).toMatch(/^bearer$/i);
     expect(decode(body.access_token!).payload.cnf).toBeUndefined();
-    expect(await half.bearer!(request("/mcp", { bearer: body.access_token, origin: null }))).toMatchObject({
-      client: CLAUDE_CODE,
-    });
+    expect(await bearerOf(body.access_token)).toMatchObject({ client: CLAUDE_CODE });
     // Its refresh token is no key's either: refreshed with no proof.
-    const refreshed = await token({
-      grant_type: "refresh_token",
-      refresh_token: body.refresh_token!,
-      client_id: CLAUDE_CODE,
-      resource: MCP,
-    });
-    expect(refreshed.status).toBe(200);
+    expect((await refreshWith(body.refresh_token!)).status).toBe(200);
   });
 
   it("gets a plain Bearer token though its own document asks for DPoP-bound ones", async () => {
@@ -451,15 +411,8 @@ describe("a declared client", () => {
     expect(status, JSON.stringify(body)).toBe(200);
     expect(body.token_type).toMatch(/^bearer$/i);
     expect(decode(body.access_token!).payload.cnf).toBeUndefined();
-    expect(await half.bearer!(request("/mcp", { bearer: body.access_token, origin: null }))).toMatchObject({
-      client: BOUND,
-    });
-    const refreshed = await token({
-      grant_type: "refresh_token",
-      refresh_token: body.refresh_token!,
-      client_id: BOUND,
-      resource: MCP,
-    });
+    expect(await bearerOf(body.access_token)).toMatchObject({ client: BOUND });
+    const refreshed = await refreshWith(body.refresh_token!, BOUND);
     expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
   });
 
@@ -471,8 +424,7 @@ describe("a declared client", () => {
     ))!;
     const page = new URL(asked.headers.get("location")!, ORIGIN);
     expect(page.pathname).toBe("/auth/consent");
-    agents.delete(CLAUDE_CODE);
-    try {
+    await withAgent(CLAUDE_CODE, undefined, async () => {
       const allowed = (await half.handle(
         request("/auth/better-auth/oauth2/consent", {
           body: { accept: true, oauth_query: page.search.slice(1) },
@@ -481,9 +433,7 @@ describe("a declared client", () => {
       ))!;
       expect(allowed.status).toBe(403);
       expect(await allowed.text()).not.toContain("code=");
-    } finally {
-      agents.set(CLAUDE_CODE, "claude-code");
-    }
+    });
   });
 
   it("is refused a resource that is not this instance's own /mcp", async () => {
@@ -541,17 +491,11 @@ describe("a declared client", () => {
 
   it("is refused once no agent declares it any more: at authorize, the token endpoint and revocation", async () => {
     const { body } = await connect();
-    agents.delete(CLAUDE_CODE);
-    try {
+    await withAgent(CLAUDE_CODE, undefined, async () => {
       const { challenge } = pkce();
       const asked = (await half.handle(request(authorizePath(CLAUDE_CODE, challenge))))!;
       expect(asked.status).toBe(403);
-      const refreshed = await token({
-        grant_type: "refresh_token",
-        refresh_token: body.refresh_token!,
-        client_id: CLAUDE_CODE,
-        resource: MCP,
-      });
+      const refreshed = await refreshWith(body.refresh_token!);
       expect(refreshed.status).toBe(400);
       expect(refreshed.body.error).toBe("invalid_client");
       // Nor is it a client at revocation: the provider finds none by that id.
@@ -563,9 +507,7 @@ describe("a declared client", () => {
       ))!;
       expect(revoked.status).toBe(400);
       expect(await revoked.json()).toMatchObject({ error: "invalid_client" });
-    } finally {
-      agents.set(CLAUDE_CODE, "claude-code");
-    }
+    });
   });
 });
 
@@ -638,9 +580,7 @@ describe("a bearer", () => {
       // A login of its own, so nothing is kept yet.
       const fresh = betterAuthStaffLogin(context, { fetchClientMetadata: declaredMetadataFetch(network) });
       for (let i = 0; i < 3; i++) {
-        expect(await fresh.bearer!(request("/mcp", { bearer: body.access_token, origin: null }))).toMatchObject({
-          client: CLAUDE_CODE,
-        });
+        expect(await bearerOf(body.access_token, { login: fresh })).toMatchObject({ client: CLAUDE_CODE });
       }
       expect(reads).toHaveLength(1);
     } finally {
@@ -656,11 +596,9 @@ describe("a bearer", () => {
         { ...context, database: async () => down },
         { fetchClientMetadata: declaredMetadataFetch(network) },
       );
-      await expect(unread.bearer!(request("/mcp", { bearer: body.access_token, origin: null }))).rejects.toThrow(
-        "ECONNREFUSED",
-      );
+      await expect(bearerOf(body.access_token, { login: unread })).rejects.toThrow("ECONNREFUSED");
       // A token that is no JWT is refused before anything is read.
-      expect(await unread.bearer!(request("/mcp", { bearer: "sca_nothing", origin: null }))).toBeNull();
+      expect(await bearerOf("sca_nothing", { login: unread })).toBeNull();
     } finally {
       await down.end();
     }
@@ -670,45 +608,43 @@ describe("a bearer", () => {
     const { body } = await connect();
     const access = body.access_token!;
     // The same instance's token, for /mcp on another host: neither the audience nor the issuer there.
-    expect(await half.bearer!(request("/mcp", { bearer: access, origin: null, host: "other.example" }))).toBeNull();
+    expect(await bearerOf(access, { host: "other.example" })).toBeNull();
     // A token another resource of this login was issued for: the same issuer and keys, another audience.
     const other = betterAuthStaffLogin(
       { ...context, staff: { ...context.staff!, oauth: { ...context.staff!.oauth!, resource: "/elsewhere" } } },
       { fetchClientMetadata: declaredMetadataFetch(network) },
     );
     expect(decode(access).payload.aud).toBe(MCP);
-    expect(await other.bearer!(request("/elsewhere", { bearer: access, origin: null }))).toBeNull();
+    expect(await bearerOf(access, { login: other, path: "/elsewhere" })).toBeNull();
     // One character of the signature changed.
     const [head, payload, signature] = access.split(".");
     const flipped = `${head}.${payload}.${signature!.slice(0, -2)}${signature!.endsWith("AA") ? "BB" : "AA"}`;
-    expect(await half.bearer!(request("/mcp", { bearer: flipped, origin: null }))).toBeNull();
+    expect(await bearerOf(flipped)).toBeNull();
     // Forged: no signature (`alg: none`), and HS256 keyed with the public key (the confusion of
     // an asymmetric key for a shared secret): only the login's own algorithm and keys are taken.
     const { header: realHeader } = decode(access);
     const none = `${jsonPart({ ...realHeader, alg: "none" })}.${payload}.`;
-    expect(await half.bearer!(request("/mcp", { bearer: none, origin: null }))).toBeNull();
-    expect(await half.bearer!(request("/mcp", { bearer: `${none}x`, origin: null }))).toBeNull();
+    expect(await bearerOf(none)).toBeNull();
+    expect(await bearerOf(`${none}x`)).toBeNull();
     const jwks = (await (await half.handle(request("/auth/better-auth/jwks", { origin: null })))!.json()) as {
       keys: { x: string }[];
     };
     const hs = `${jsonPart({ ...realHeader, alg: "HS256" })}.${payload}`;
     for (const secret of [JSON.stringify(jwks.keys[0]), Buffer.from(jwks.keys[0]!.x, "base64url")]) {
       const forged = `${hs}.${createHmac("sha256", secret).update(hs).digest("base64url")}`;
-      expect(await half.bearer!(request("/mcp", { bearer: forged, origin: null }))).toBeNull();
+      expect(await bearerOf(forged)).toBeNull();
     }
     // Not a JWT, and no bearer at all.
-    expect(await half.bearer!(request("/mcp", { bearer: "sca_nothing", origin: null }))).toBeNull();
-    expect(await half.bearer!(request("/mcp", { origin: null }))).toBeNull();
+    expect(await bearerOf("sca_nothing")).toBeNull();
+    expect(await bearerOf()).toBeNull();
     // An hour on, the token has expired.
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000);
-      expect(await half.bearer!(request("/mcp", { bearer: access, origin: null }))).toBeNull();
+      expect(await bearerOf(access)).toBeNull();
     } finally {
       vi.useRealTimers();
     }
-    expect(await half.bearer!(request("/mcp", { bearer: access, origin: null }))).toMatchObject({
-      client: CLAUDE_CODE,
-    });
+    expect(await bearerOf(access)).toMatchObject({ client: CLAUDE_CODE });
   });
 });

@@ -12,6 +12,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unstable_startWorker } from "wrangler";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
+import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, resetStaffSchema } from "./staff-oauth-helpers.ts";
 
 // The app bundle (`buildAppBundle`) of the fixture company, built and run on workerd (Miniflare)
 // over Postgres, behind a router standing in for the Cloudflare connector's: it hands the bundle
@@ -53,8 +54,6 @@ function write(file: string, content: string | Buffer): void {
   writeFileSync(file, content);
 }
 
-/** Claude Code's published client id: the URL of its metadata document, which `claudeAi` serves here. */
-const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
 /** A declared client whose document redirects to Claude Code's: the Worker must not follow it. */
 const MOVED = "https://claude.ai/oauth/moved";
 
@@ -71,15 +70,7 @@ const outbound: string[] = [];
 const claudeAi = async (request: Request): Promise<Response> => {
   outbound.push(request.url);
   if (request.url === MOVED) return new Response(null, { status: 302, headers: { location: CLAUDE_CODE } });
-  if (request.url !== CLAUDE_CODE) return new Response("Not found", { status: 404 });
-  return Response.json({
-    client_id: CLAUDE_CODE,
-    client_name: "Claude Code",
-    redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"],
-    grant_types: ["authorization_code", "refresh_token"],
-    response_types: ["code"],
-    token_endpoint_auth_method: "none",
-  });
+  return request.url === CLAUDE_CODE ? Response.json(CLAUDE_CODE_DOCUMENT) : new Response("Not found", { status: 404 });
 };
 
 /**
@@ -169,11 +160,7 @@ beforeAll(async () => {
   await client.secrets(["SANOMA_NOTHING"]);
   await client.close();
   // The staff login's tables afresh: a consent an earlier run gave would skip the consent page.
-  const db = new Client({ connectionString: databaseUrl });
-  await db.connect();
-  await db.query("DROP SCHEMA IF EXISTS better_auth_staff CASCADE");
-  await db.query("DROP TABLE IF EXISTS drizzle.__drizzle_migrations_better_auth_staff");
-  await db.end();
+  await resetStaffSchema(databaseUrl);
   await Promise.all([prepareBetterAuth(databaseUrl), prepareBetterAuthStaff(databaseUrl)]);
   const dir = mkdtempSync(join(tmpdir(), "sanoma-bundle-upload-"));
   temporary.push(dir);

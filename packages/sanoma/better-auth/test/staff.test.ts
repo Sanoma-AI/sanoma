@@ -10,6 +10,7 @@ import { testDatabaseUrl } from "sanoma/testing";
 import { Client, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareBetterAuthStaff } from "../src/instance.ts";
+import { cookieOf, resetStaffSchema } from "./staff-helpers.ts";
 import { betterAuthStaffLogin } from "../src/staff.ts";
 
 // The staff login: codes only to declared emails, no row for anyone else, invites as one-use
@@ -55,12 +56,6 @@ function request(path: string, init: { body?: unknown; cookie?: string; origin?:
 }
 let nextIp = 1;
 
-const cookieOf = (response: Response) =>
-  response.headers
-    .getSetCookie()
-    .find((c) => c.includes("session_token="))
-    ?.split(";")[0] ?? "";
-
 /** A JSON answer, as GitHub gives one. */
 const answer = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -89,20 +84,8 @@ async function rows(table: string, email?: string): Promise<number> {
 }
 
 beforeAll(async () => {
-  const admin = new Client({
-    connectionString: Object.assign(new URL(databaseUrl), { pathname: "/postgres" }).href,
-  });
-  await admin.connect();
-  const name = new URL(databaseUrl).pathname.slice(1);
-  const { rowCount } = await admin.query("SELECT 1 FROM pg_database WHERE datname = $1", [name]);
-  if (!rowCount) await admin.query(`CREATE DATABASE "${name}"`);
-  await admin.end();
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
   // The schema and its journal: a database as the worker first finds it.
-  await client.query("DROP SCHEMA IF EXISTS better_auth_staff CASCADE");
-  await client.query("DROP TABLE IF EXISTS drizzle.__drizzle_migrations_better_auth_staff");
-  await client.end();
+  await resetStaffSchema(databaseUrl);
   // The worker's part: the login only opens on a prepared schema.
   await prepareBetterAuthStaff(databaseUrl);
 });
