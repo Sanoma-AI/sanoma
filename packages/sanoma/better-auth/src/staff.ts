@@ -55,6 +55,7 @@ const ROUTES = new Set([
 const AUTHORIZE = "/oauth2/authorize";
 const TOKEN = "/oauth2/token";
 const REVOKE = "/oauth2/revoke";
+const CONSENT = "/oauth2/consent";
 /**
  * The OAuth provider's routes, with the app's OAuth context only (`staff.oauth`): authorize (a
  * browser's GET), the consent the app's page posts, the token endpoint, revocation (RFC 7009: a
@@ -62,7 +63,7 @@ const REVOKE = "/oauth2/revoke";
  * Not registration (no client registers: a declared agent names it), introspection or userinfo,
  * which no resource or client here uses.
  */
-const OAUTH_ROUTES = new Set([AUTHORIZE, "/oauth2/consent", TOKEN, REVOKE, "/jwks"]);
+const OAUTH_ROUTES = new Set([AUTHORIZE, CONSENT, TOKEN, REVOKE, "/jwks"]);
 
 /**
  * The routes a non-browser client POSTs to without an `Origin`, each named here on purpose: the
@@ -396,6 +397,10 @@ export function betterAuthStaffLogin(
         if (refused) return refused;
         asked = withoutDpop(request);
       }
+      if (oauth && route === CONSENT && request.method === "POST") {
+        const refused = await consenting(request, oauth);
+        if (refused) return refused;
+      }
       if (oauth && route === TOKEN) {
         const refused = await tokenFor(request, oauth);
         if (refused) return refused;
@@ -464,12 +469,15 @@ async function authorizing(request: Request, surface: OAuthContext): Promise<Res
   const query = new URL(request.url).searchParams;
   const client = query.get("client_id") ?? "";
   if (surface.agentOf(client) === undefined) {
+    // What is missing and where, never a declaration to paste: the client id is whatever the
+    // link that sent the person here says, and a link anyone can send.
     return refusalPage(
       403,
-      `This company declares no agent for the client ${client || "this request names"}.`,
-      `To let it act for its people, declare an agent for it in <code>resources/people.ts</code>: ` +
-        `<code>sanoma.agent({ id: "&lt;its name&gt;", client: ${escape(JSON.stringify(client))} })</code>, ` +
-        `then sign in again.`,
+      "This company declares no agent for the client this sign-in names.",
+      `The client is <code>${escape(client || "(none)")}</code>. An agent that may act for this ` +
+        `company's people is declared in <code>resources/people.ts</code>, by its client. ` +
+        `Declare only a client you chose to connect yourself: one a link or a message asks you to ` +
+        `add would act for the people who sign in to it.`,
     );
   }
   const { resource } = oauthOrigin(request, surface);
@@ -481,6 +489,41 @@ async function authorizing(request: Request, surface: OAuthContext): Promise<Res
     );
   }
   return undefined;
+}
+
+/**
+ * What the consent refuses before the provider: an answer for a client no declared agent stands
+ * for any more, though the consent page was shown while one did. Its client is the signed
+ * request's (`oauth_query`, whose signature the provider checks next). Otherwise undefined.
+ */
+async function consenting(request: Request, surface: OAuthContext): Promise<Response | undefined> {
+  // The consent page posts JSON; a form is read too, so no shape of the body passes unread.
+  const text = await request
+    .clone()
+    .text()
+    .catch(() => "");
+  const form = request.headers.get("content-type")?.includes("application/x-www-form-urlencoded");
+  const said = form ? new URLSearchParams(text).get("oauth_query") : jsonField(text, "oauth_query");
+  const query = typeof said === "string" ? said : "";
+  const client = new URLSearchParams(query).get("client_id") ?? "";
+  if (surface.agentOf(client) !== undefined) return undefined;
+  return Response.json(
+    {
+      error: "invalid_client",
+      error_description: "No agent in this company's resources/people.ts stands for this client",
+    },
+    { status: 403, headers: { "cache-control": "no-store" } },
+  );
+}
+
+/** `field` of the JSON object `text`, or undefined when it is not one. */
+function jsonField(text: string, field: string): unknown {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>)[field] : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -579,7 +622,16 @@ function refusalPage(status: number, title: string, body: string): Response {
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
       `<title>Sign-in refused</title></head><body><main><h1>${escape(title)}</h1><p>${body}</p></main></body></html>`,
-    { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
+    {
+      status,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        // Framed by no page: no other site lays it under a click of its own.
+        "content-security-policy": "frame-ancestors 'none'",
+        "x-frame-options": "DENY",
+      },
+    },
   );
 }
 

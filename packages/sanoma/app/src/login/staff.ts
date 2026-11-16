@@ -228,7 +228,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       return smallPage(
         403,
         "Not declared",
-        `<p>${escapeHtml(company)} declares no agent for ${escapeHtml(client)}. Declare one in <code>resources/people.ts</code> to let it in.</p>`,
+        `<p>${escapeHtml(company)} declares no agent for the client <code>${escapeHtml(client)}</code>. Agents are declared in <code>resources/people.ts</code>: declare one only for a client you chose to connect.</p>`,
         look,
       );
     }

@@ -424,6 +424,29 @@ describe("a declared client", () => {
     expect(refreshed.status).toBe(200);
   });
 
+  it("is refused at consent once no agent declares it any more, though the page was shown", async () => {
+    const { cookie } = await connect();
+    const { challenge } = pkce();
+    const asked = (await half.handle(
+      request(authorizePath(CLAUDE_CODE, challenge, { prompt: "consent" }), { cookie }),
+    ))!;
+    const page = new URL(asked.headers.get("location")!, ORIGIN);
+    expect(page.pathname).toBe("/auth/consent");
+    agents.delete(CLAUDE_CODE);
+    try {
+      const allowed = (await half.handle(
+        request("/auth/better-auth/oauth2/consent", {
+          body: { accept: true, oauth_query: page.search.slice(1) },
+          cookie,
+        }),
+      ))!;
+      expect(allowed.status).toBe(403);
+      expect(await allowed.text()).not.toContain("code=");
+    } finally {
+      agents.set(CLAUDE_CODE, "claude-code");
+    }
+  });
+
   it("is refused a resource that is not this instance's own /mcp", async () => {
     const { challenge } = pkce();
     for (const resource of ["https://elsewhere.example/mcp", `${ORIGIN}/api/call`]) {
@@ -499,14 +522,19 @@ describe("a declared client", () => {
 });
 
 describe("an undeclared client", () => {
-  it("is refused at authorize with what to declare, before its document is fetched", async () => {
+  it("is refused at authorize, saying where one is declared, before its document is fetched", async () => {
     fetched.length = 0;
     const { challenge } = pkce();
     const asked = (await half.handle(request(authorizePath(UNDECLARED, challenge))))!;
     expect(asked.status).toBe(403);
+    expect(asked.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    expect(asked.headers.get("x-frame-options")).toBe("DENY");
     const page = await asked.text();
     expect(page).toContain("resources/people.ts");
-    expect(page).toContain(`client: &quot;${UNDECLARED}&quot;`);
+    expect(page).toContain(UNDECLARED);
+    expect(page).toMatch(/only a client you chose/i);
+    // Nothing ready to paste: a link anyone sends names whatever client it likes.
+    expect(page).not.toContain("sanoma.agent(");
     expect(fetched).toEqual([]);
   });
 

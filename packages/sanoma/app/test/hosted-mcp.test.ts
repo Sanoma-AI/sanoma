@@ -252,7 +252,13 @@ describe("the agent surface on a host", () => {
     const login = new URL(authorized.headers.get("location")!, app.url);
     expect(login.pathname).toBe("/auth/login");
     // The sign-in page carries the signed request on; a code to the declared email, then the code.
-    const page = await (await fetch(login)).text();
+    const signInPage = await fetch(login);
+    // No other site may frame a page that asks for a code or an answer.
+    for (const framed of [signInPage]) {
+      expect(framed.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+      expect(framed.headers.get("x-frame-options")).toBe("DENY");
+    }
+    const page = await signInPage.text();
     expect(page).toContain("oauth_query");
     expect(
       (await fromPage("/auth/better-auth/email-otp/send-verification-otp", { email: ADA, type: "sign-in" })).status,
@@ -266,7 +272,10 @@ describe("the agent surface on a host", () => {
     const cookie = cookieOf(signed);
     const consentAt = new URL(((await signed.json()) as { url: string }).url, app.url);
     expect(consentAt.pathname).toBe("/auth/consent");
-    const consentPage = await (await fetch(consentAt, { headers: { cookie } })).text();
+    const consentAnswer = await fetch(consentAt, { headers: { cookie } });
+    expect(consentAnswer.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    expect(consentAnswer.headers.get("x-frame-options")).toBe("DENY");
+    const consentPage = await consentAnswer.text();
     expect(consentPage).toContain("Let claude-code act for you?");
     const allowed = await fromPage(
       "/auth/better-auth/oauth2/consent",
@@ -399,13 +408,16 @@ describe("the agent surface on a host", () => {
     }
   });
 
-  it("refuses an undeclared client at authorize, naming what to declare, and fetches nothing of it", async () => {
+  it("refuses an undeclared client at authorize, saying where one is declared, and fetches nothing of it", async () => {
     fetched.length = 0;
     const { authorized } = await signIn(UNDECLARED);
     expect(authorized.status).toBe(403);
+    expect(authorized.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
     const page = await authorized.text();
     expect(page).toContain("resources/people.ts");
-    expect(page).toContain(`client: &quot;${UNDECLARED}&quot;`);
+    expect(page).toContain(UNDECLARED);
+    // No declaration ready to paste: the client's id is whatever the link that sent here said.
+    expect(page).not.toContain("sanoma.agent(");
     expect(fetched).toEqual([]);
   });
 });
