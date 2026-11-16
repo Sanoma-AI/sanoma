@@ -387,6 +387,24 @@ describe("the agent surface on a host", () => {
     });
   });
 
+  it("refuses a client's tokens once the files move it to another agent than its person consented to", async () => {
+    const signedIn = await tokens();
+    const moved = PEOPLE.replace('id: "claude-code"', 'id: "other-bot"');
+    await withPeople(moved, async () => {
+      // Its access token: the 401 that sends the client to sign in again, where the person is asked about the new agent.
+      const refused = await mcp("tools/list", {}, bearerOf(signedIn.access_token));
+      expect(refused.status).toBe(401);
+      expect(refused.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
+      // Its refresh token gets no token for the new agent either.
+      const refreshed = await refresh(signedIn);
+      expect(refreshed.status).toBe(400);
+      expect(await refreshed.json()).toMatchObject({ error: "invalid_grant" });
+    });
+    // Moved back, both are the consented agent's again.
+    expect((await mcp("tools/list", {}, bearerOf(signedIn.access_token))).status).toBe(200);
+    expect((await refresh(signedIn)).status).toBe(200);
+  });
+
   it("refuses an undeclared client at authorize, saying where one is declared, and fetches nothing of it", async () => {
     fetched.length = 0;
     const { authorized } = await signIn(UNDECLARED);

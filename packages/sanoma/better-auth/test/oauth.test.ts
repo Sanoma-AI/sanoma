@@ -360,6 +360,45 @@ describe("a declared client", () => {
     expect(await where()).toBe(REDIRECT);
   });
 
+  it("holds tokens only for the agent their person consented to, whatever its client stands for since", async () => {
+    const { body } = await connect();
+    expect(decode(body.access_token!).payload.sanoma_agent).toBe("claude-code");
+    // The files move the client to another agent: nobody consented to that one.
+    await withAgent(CLAUDE_CODE, "admin-bot", async () => {
+      expect(await bearerOf(body.access_token)).toBeNull();
+      // Nor does a refresh make the old consent the new agent's, asked with the resource or without.
+      for (const form of [{ resource: MCP }, {}] as Record<string, string>[]) {
+        const refreshed = await token({
+          grant_type: "refresh_token",
+          refresh_token: body.refresh_token!,
+          client_id: CLAUDE_CODE,
+          ...form,
+        });
+        expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(400);
+        expect(refreshed.body.error).toBe("invalid_grant");
+        expect(refreshed.body.access_token).toBeUndefined();
+      }
+    });
+    // Mapped back, they are the consented agent's again: a refused refresh used nothing up.
+    expect(await bearerOf(body.access_token)).toMatchObject({ client: CLAUDE_CODE });
+    const refreshed = await refreshWith(body.refresh_token!);
+    expect(refreshed.status).toBe(200);
+    expect(decode(refreshed.body.access_token!).payload.sanoma_agent).toBe("claude-code");
+  });
+
+  it("is refused a code for tokens once it stands for another agent than the code was given for", async () => {
+    const { verifier, challenge } = pkce();
+    const asked = (await half.handle(request(authorizePath(CLAUDE_CODE, challenge))))!;
+    const { cookie, next } = await signInFrom(asked.headers.get("location")!);
+    const back = next.startsWith(REDIRECT) ? new URL(next) : await consent(next, cookie);
+    await withAgent(CLAUDE_CODE, "admin-bot", async () => {
+      const { status, body } = await exchange(back.searchParams.get("code")!, verifier);
+      expect(status).toBe(400);
+      expect(body.error).toBe("invalid_grant");
+      expect(body.access_token).toBeUndefined();
+    });
+  });
+
   it("revokes its own refresh token with its client id alone, which is then refused", async () => {
     const { body } = await connect();
     const revoked = (await half.handle(
@@ -633,6 +672,28 @@ describe("a bearer", () => {
     for (const secret of [JSON.stringify(jwks.keys[0]), Buffer.from(jwks.keys[0]!.x, "base64url")]) {
       const forged = `${hs}.${createHmac("sha256", secret).update(hs).digest("base64url")}`;
       expect(await bearerOf(forged)).toBeNull();
+    }
+    // Signed with a key of the login's, but naming no agent, as a token from before tokens named
+    // one: nobody consented to whichever agent the client stands for now.
+    const signer = generateKeyPairSync("ed25519");
+    const kid = `test-${randomBytes(8).toString("hex")}`;
+    await pool.query(
+      "INSERT INTO better_auth_staff.jwks (id, public_key, private_key, created_at) VALUES ($1, $2, 'none', to_timestamp(0))",
+      [kid, JSON.stringify(signer.publicKey.export({ format: "jwk" }))],
+    );
+    try {
+      const { payload: claims } = decode(access);
+      const signedBy = (said: Record<string, unknown>) => {
+        const signing = `${jsonPart({ alg: "EdDSA", typ: "at+jwt", kid })}.${jsonPart(said)}`;
+        return `${signing}.${sign(null, Buffer.from(signing), signer.privateKey).toString("base64url")}`;
+      };
+      const fresh = () => betterAuthStaffLogin(context, { fetchClientMetadata: declaredMetadataFetch(network) });
+      expect(await bearerOf(signedBy(claims), { login: fresh() })).toMatchObject({ client: CLAUDE_CODE });
+      const { sanoma_agent: _agent, ...unnamed } = claims;
+      expect(await bearerOf(signedBy(unnamed), { login: fresh() })).toBeNull();
+      expect(await bearerOf(signedBy({ ...unnamed, sanoma_agent: "admin-bot" }), { login: fresh() })).toBeNull();
+    } finally {
+      await pool.query("DELETE FROM better_auth_staff.jwks WHERE id = $1", [kid]);
     }
     // Not a JWT, and no bearer at all.
     expect(await bearerOf("sca_nothing")).toBeNull();

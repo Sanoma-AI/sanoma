@@ -638,9 +638,9 @@ export interface LoginHalf {
   /**
    * For a login with `staff.oauth`: the access token a request carries (`Authorization: Bearer`),
    * as the login checked it (its signature, its issuer and its audience the request's own
-   * resource, unexpired): the person it was issued for, as `verify` says one, and the OAuth
-   * client it was issued to. Null without one or for one that is not good here; never throws for
-   * a bad one.
+   * resource, unexpired, for the agent its person consented to and no other its client stands
+   * for since): the person it was issued for, as `verify` says one, and the OAuth client it was
+   * issued to. Null without one or for one that is not good here; never throws for a bad one.
    */
   bearer?(request: Request): Promise<{ subject: string; email?: string; github?: string; client: string } | null>;
   /** The path a page POSTs to sign out, which `handle` serves; the app's own Sign out POSTs it with no body. */

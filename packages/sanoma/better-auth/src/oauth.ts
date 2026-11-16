@@ -1,5 +1,6 @@
 import { createCimdClientDiscovery } from "@better-auth/cimd";
 import { type ClientMetadataResourceFetch, getOAuthProviderState, oauthProvider } from "@better-auth/oauth-provider";
+import { APIError } from "better-auth/api";
 import { jwt } from "better-auth/plugins/jwt";
 import { CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
 
@@ -13,6 +14,15 @@ import { CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
 
 /** The scopes there are: none of the policy's, which decides each call, so only a refresh token's. */
 const SCOPES = ["offline_access"];
+
+/**
+ * The access token's claim naming the agent its person consented to (`holding`): a token is that
+ * agent's alone, whichever agent its client (`azp`) stands for since.
+ */
+export const AGENT_CLAIM = "sanoma_agent";
+
+/** What a consent, and each code and refresh token it leads to, is kept by (their `referenceId`): the agent consented to. */
+const referenceOf = (agent: string) => `agent:${agent}`;
 
 export interface OAuthSetup {
   /** The declared agent that stands for an OAuth client (`agentOfClient`), by its id; undefined for one no agent does. */
@@ -59,7 +69,7 @@ export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
       // The resource is this instance's own `/mcp` on the host asked (`ensureResource` in
       // staff.ts), one row per host, every one this instance's: a client is not linked to each.
       enforcePerClientResources: false,
-      extensions: [{ clientDiscovery: discovery }],
+      extensions: [{ clientDiscovery: discovery, claims: { accessToken: holding(agentOf) } }],
       // A consent is to let a client act as the agent the consent page named: kept by that agent
       // (the consent's reference), so a client the files map to another agent since is asked
       // again, and one mapped back finds its consent. Only for that: no page after the sign-in.
@@ -82,8 +92,30 @@ export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
 async function consentReference(agentOf: OAuthSetup["agentOf"], state: { query?: string } | null): Promise<string> {
   const client = new URLSearchParams(state?.query ?? "").get("client_id") ?? "";
   const agent = await agentOf(client);
-  return agent === undefined ? `undeclared:${client}` : `agent:${agent}`;
+  return agent === undefined ? `undeclared:${client}` : referenceOf(agent);
 }
+
+/**
+ * What every access token says besides the provider's own claims, asked by the provider before it
+ * issues one (a code's, or a refresh's, before the refresh token is rotated): the agent it is for
+ * (`AGENT_CLAIM`), which is the one the person consented to. The code and the refresh token carry
+ * that consent's reference; when it is not the agent their client stands for now (the files moved
+ * the client to another agent since), nothing is issued: `invalid_grant`, and the client signs in
+ * again, where the person is asked about the new agent. Nothing is used up, so a client mapped
+ * back refreshes as before.
+ */
+const holding =
+  (agentOf: OAuthSetup["agentOf"]) =>
+  async ({ client, referenceId }: { client: { clientId: string }; referenceId?: string }) => {
+    const agent = await agentOf(client.clientId);
+    if (agent === undefined || referenceId !== referenceOf(agent)) {
+      throw new APIError("BAD_REQUEST", {
+        error: "invalid_grant",
+        error_description: "The person consented to another agent than the one this client stands for now",
+      });
+    }
+    return { [AGENT_CLAIM]: agent };
+  };
 
 /**
  * The fetch for a client's metadata document wherever the app runs (the Worker's, whose `fetch`

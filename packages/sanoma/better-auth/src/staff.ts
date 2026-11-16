@@ -24,7 +24,7 @@ import {
   type User,
   withSignOutBody,
 } from "./instance.ts";
-import { declaredMetadataFetch, oauthPlugins } from "./oauth.ts";
+import { AGENT_CLAIM, declaredMetadataFetch, oauthPlugins } from "./oauth.ts";
 
 /** Says nothing: a listener for a checked-out client's `error`, whose query fails on its own. */
 const quiet = () => undefined;
@@ -433,6 +433,12 @@ export function betterAuthStaffLogin(
         // A sender-constrained (DPoP) token is not a bearer.
         if (payload.cnf !== undefined || typeof payload.sub !== "string" || typeof payload.azp !== "string")
           return null;
+        // It is the agent's its person consented to (`AGENT_CLAIM`), and no other's: once the
+        // files move its client to another agent it is refused, as is one that names none. A
+        // client no agent stands for any more is the app's admission to refuse, by its name.
+        const consented = payload[AGENT_CLAIM];
+        const agent = await oauth.agentOf(payload.azp);
+        if (typeof consented !== "string" || (agent !== undefined && agent !== consented)) return null;
         // Who it is for, as their row says now: a user since removed holds nothing.
         const user = await (await own.$context).internalAdapter.findUserById(payload.sub);
         return user ? { subject: payload.sub, ...identityOf(user as User), client: payload.azp } : null;
