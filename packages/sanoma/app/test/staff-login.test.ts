@@ -379,6 +379,77 @@ describe("staffLogin", () => {
     expect(back("///evil.example")).toBe("/evil.example");
   });
 
+  /** The half's signed request, as authorize puts it in the sign-in page's address: each name it signed, then the signature. */
+  const SIGNED = "client_id=x&state=a*b&exp=1&ba_param=ba_param&ba_param=client_id&ba_param=exp&ba_param=state&sig=y";
+  const EXPIRED = "This sign-in from the agent has expired. Start it again from the agent.";
+
+  /**
+   * The sign-in page at `/auth/login?<search>` as a browser runs it: its script over stand-ins
+   * for the page's elements, with `answers` the login's answer to each POST, by its path.
+   */
+  async function signInPage(
+    search: string,
+    answers: Record<string, () => { status: number; body: unknown }>,
+    cookie?: string,
+  ) {
+    login = await opened(["code", "github", "invite"]);
+    const page = (await login.handle!(request(`/auth/login?${search}`, { ...(cookie && { cookie }) })))!;
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    // The page's last script: the one before it sets the theme.
+    const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)![1]!;
+    type Handler = (event: unknown) => Promise<void>;
+    const elements = new Map<string, { textContent: string; hidden: boolean; on: Record<string, Handler> }>();
+    const document = {
+      getElementById(id: string) {
+        if (!html.includes(`id="${id}"`)) return null;
+        if (!elements.has(id)) {
+          const on: Record<string, Handler> = {};
+          elements.set(id, {
+            textContent: "",
+            hidden: false,
+            on,
+            addEventListener: (type: string, handler: Handler) => void (on[type] = handler),
+            reset: () => undefined,
+            querySelector: () => ({ focus: () => undefined }),
+          } as never);
+        }
+        return elements.get(id);
+      },
+    };
+    const location = {
+      pathname: "/auth/login",
+      search: `?${search}`,
+      href: "",
+      assign: vi.fn<(to: string) => void>(),
+    };
+    const posted: { path: string; body: Record<string, unknown> }[] = [];
+    const fetch = async (path: string, init: { body: string }) => {
+      posted.push({ path, body: JSON.parse(init.body) as Record<string, unknown> });
+      const { status, body } = answers[path]?.() ?? { status: 200, body: { success: true } };
+      return Response.json(body, { status });
+    };
+    /** A form's fields, as the stand-in for the form (an event's target) holds them. */
+    class FormData {
+      readonly fields: Record<string, string>;
+      constructor(fields: Record<string, string>) {
+        this.fields = fields;
+      }
+      get = (name: string) => this.fields[name];
+    }
+    new Function("document", "location", "fetch", "FormData", script)(document, location, fetch, FormData);
+    const fire = (id: string, type: string, fields: Record<string, string> = {}) =>
+      elements.get(id)!.on[type]!({ preventDefault: () => undefined, target: fields });
+    return {
+      location,
+      posted,
+      message: () => elements.get("message")!.textContent,
+      email: (email: string) => fire("email", "submit", { email }),
+      code: (otp: string) => fire("code", "submit", { otp }),
+      github: () => fire("github", "click"),
+    };
+  }
+
   describe("the agent surface's sign-in", () => {
     const METADATA = `${APP}/.well-known/oauth-protected-resource/mcp`;
 
@@ -465,11 +536,69 @@ describe("staffLogin", () => {
     });
 
     it("shows the sign-in page a client's sign-in sends someone to, signed in or not, which posts its signed request along", async () => {
-      const page = (await login.handle!(request("/auth/login?client_id=x&sig=y", { cookie: "who=ada@acme.test" })))!;
-      expect(page.status).toBe(200);
-      const html = await page.text();
-      expect(html).toContain("oauth_query:location.search.slice(1)");
-      expect(html).toContain("...oauth}");
+      const consent = "/auth/consent?client_id=x&sig=z";
+      const answers = {
+        "/auth/better-auth/sign-in/email-otp": () => ({ status: 200, body: { redirect: true, url: consent } }),
+      };
+      const page = await signInPage(SIGNED, answers, "who=ada@acme.test");
+      await page.email("ada@acme.test");
+      await page.code("123456");
+      expect(page.posted.at(-1)).toEqual({
+        path: "/auth/better-auth/sign-in/email-otp",
+        body: { email: "ada@acme.test", otp: "123456", oauth_query: new URLSearchParams(SIGNED).toString() },
+      });
+      // On where the half says: the consent page, or the client's redirect.
+      expect(page.location.assign).toHaveBeenCalledWith(consent);
+    });
+
+    it("says a client's sign-in expired when the half no longer takes its signed request, and counts no wrong code", async () => {
+      const gone = { status: 400, body: { error: "invalid_signature" } };
+      let answer = gone;
+      const page = await signInPage(SIGNED, {
+        "/auth/better-auth/sign-in/email-otp": () => answer,
+        "/auth/better-auth/sign-in/social": () => gone,
+      });
+      await page.email("ada@acme.test");
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await page.code("123456");
+        expect(page.message()).toBe(EXPIRED);
+      }
+      // A wrong code is still told as one, the first of three.
+      answer = { status: 400, body: { code: "INVALID_OTP" } as never };
+      await page.code("000000");
+      expect(page.message()).toBe("That code did not work. Check it, or send a new one.");
+      // The GitHub button's start is refused the same way.
+      await page.github();
+      expect(page.message()).toBe(EXPIRED);
+      expect(page.location.assign).not.toHaveBeenCalled();
+    });
+
+    it("keeps a client's signed request through a GitHub sign-in that fails, so a code goes on with it", async () => {
+      const github = { status: 200, body: { url: "https://github.com/login/oauth/authorize?state=s" } };
+      // Back from GitHub with its error: the address is the signed request and `error`, which the half did not sign.
+      const page = await signInPage(`${SIGNED}&error=not_declared`, {
+        "/auth/better-auth/sign-in/social": () => github,
+      });
+      const signed = new URLSearchParams(SIGNED).toString();
+      await page.github();
+      expect(page.posted.at(-1)!.body).toEqual({
+        provider: "github",
+        callbackURL: "/",
+        errorCallbackURL: `/auth/login?${signed}`,
+        oauth_query: signed,
+      });
+      expect(page.location.href).toBe(github.body.url);
+      await page.email("ada@acme.test");
+      await page.code("123456");
+      expect(page.posted.at(-1)!.body).toMatchObject({ oauth_query: signed });
+      // With no client's sign-in, a failure comes back to the sign-in page alone, as before.
+      const plain = await signInPage("error=not_declared", { "/auth/better-auth/sign-in/social": () => github });
+      await plain.github();
+      expect(plain.posted.at(-1)!.body).toEqual({
+        provider: "github",
+        callbackURL: "/",
+        errorCallbackURL: "/auth/login",
+      });
     });
   });
 

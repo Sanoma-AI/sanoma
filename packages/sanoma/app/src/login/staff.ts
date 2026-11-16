@@ -491,15 +491,24 @@ document.getElementById("deny").addEventListener("click",()=>answer(false));
  * along, `oauth_query`, and the half answers the consent page or the client's redirect), else back
  * to the page asked for on this host (`/` from the sign-in page itself; leading slashes count as one, so
  * a path like `//elsewhere` never leads off it). A GitHub sign-in that fails comes back to
- * `/auth/login?error=<code>`.
+ * `/auth/login?error=<code>`, with the signed query before it when there is one, so a code after
+ * it still goes on with the client's sign-in.
+ *
+ * The signed query is the page's own without what the half did not sign (the parameters it names
+ * in `ba_param`, and `sig`): the `error` GitHub's failure adds would undo the signature. It lasts
+ * ten minutes; after that the half answers `invalid_signature`, to a code or to GitHub's start,
+ * which the page says as the client's sign-in having expired, never as a wrong code.
  */
 const SIGN_IN_SCRIPT = `
 const post=(path,body)=>fetch("/auth/better-auth"+path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
 const $=(id)=>document.getElementById(id);const message=$("message");const say=(text)=>{message.textContent=text};
 const here="/"+location.pathname.replace(/^[/]+/,"");const back=here===${JSON.stringify(LOGIN_PAGE)}?"/":here+location.search;
 const AGAIN="That did not work. Try again in a moment.";let email="";let wrong=0;
-const oauth=new URLSearchParams(location.search).has("sig")?{oauth_query:location.search.slice(1)}:{};
-const next=async(done)=>{const {url}=oauth.oauth_query?await done.json().catch(()=>({})):{};location.assign(url||back)};
+const asked=new URLSearchParams(location.search);const names=new Set(asked.getAll("ba_param"));
+const signed=asked.has("sig")?new URLSearchParams([...asked].filter(([name])=>!names.size||name==="sig"||name==="ba_param"||names.has(name))).toString():"";
+const oauth=signed?{oauth_query:signed}:{};
+const EXPIRED="This sign-in from the agent has expired. Start it again from the agent.";const expired=(said)=>said?.error==="invalid_signature";
+const next=async(done)=>{const {url}=signed?await done.json().catch(()=>({})):{};location.assign(url||back)};
 const send=()=>post("/email-otp/send-verification-otp",{email,type:"sign-in"}).then((r)=>r.ok,()=>false);
 $("email")?.addEventListener("submit",async(e)=>{e.preventDefault();email=String(new FormData(e.target).get("email"));
 if(!await send()){say(AGAIN);return}
@@ -508,7 +517,8 @@ $("code")?.addEventListener("submit",async(e)=>{e.preventDefault();
 const done=await post("/sign-in/email-otp",{email,otp:String(new FormData(e.target).get("otp")),...oauth}).catch(()=>null);
 if(done?.ok){await next(done);return}
 if(!done){say(AGAIN);return}
-const {code}=await done.json().catch(()=>({}));
+const said=await done.json().catch(()=>({}));const {code}=said;
+if(expired(said)){say(EXPIRED);return}
 if(code==="OTP_EXPIRED")say("That code has expired. Send a new one.");
 else if(code==="TOO_MANY_ATTEMPTS"||++wrong>=3)say("Three wrong codes: send a new one.");
 else say("That code did not work. Check it, or send a new one.")});
@@ -516,6 +526,6 @@ $("again")?.addEventListener("click",async()=>{if(!await send()){say(AGAIN);retu
 say("");wrong=0;$("resent").hidden=false;$("code").reset();$("code").querySelector("input").focus()});
 $("different")?.addEventListener("click",()=>{say("");$("code-step").hidden=true;$("email-step").hidden=false;$("email").querySelector("input").focus()});
 $("github")?.addEventListener("click",async()=>{
-const started=await post("/sign-in/social",{provider:"github",callbackURL:back,errorCallbackURL:${JSON.stringify(LOGIN_PAGE)},...oauth}).then((r)=>r.json()).catch(()=>({}));
-if(started.url)location.href=started.url;else say("GitHub sign-in did not start. Try again in a moment.")});
+const started=await post("/sign-in/social",{provider:"github",callbackURL:back,errorCallbackURL:${JSON.stringify(LOGIN_PAGE)}+(signed&&"?"+signed),...oauth}).then((r)=>r.json()).catch(()=>({}));
+if(started.url)location.href=started.url;else say(expired(started)?EXPIRED:"GitHub sign-in did not start. Try again in a moment.")});
 `;

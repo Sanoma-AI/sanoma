@@ -237,6 +237,15 @@ async function sentTo(client: string, redirect: string, cookie: string, extra: R
   return { to, at: to.origin === ORIGIN ? to.pathname : `${to.origin}${to.pathname}` };
 }
 
+/** The signed request as the sign-in page posts it: what the login signed, without what a redirect back added. */
+const signedOf = (search: string) => {
+  const asked = new URLSearchParams(search);
+  const names = new Set(asked.getAll("ba_param"));
+  return new URLSearchParams(
+    [...asked].filter(([name]) => name === "sig" || name === "ba_param" || names.has(name)),
+  ).toString();
+};
+
 beforeAll(async () => {
   await resetStaffSchema(databaseUrl);
   await prepareBetterAuthStaff(databaseUrl);
@@ -567,7 +576,7 @@ describe("a declared client", () => {
     expect(shown.headers.get("cache-control")).toBe("no-store");
     const page = await shown.text();
     expect(page).toContain("invalid_redirect");
-    expect(page).toMatch(/again from the agent/i);
+    expect(page).toMatch(/again: from the agent/i);
     // What the link says is shown as text, whatever it is: anyone can write such a link.
     const forged = (await half.handle(
       request(
@@ -654,6 +663,122 @@ describe("a declared client", () => {
       ))!;
       expect(revoked.status).toBe(400);
       expect(await revoked.json()).toMatchObject({ error: "invalid_client" });
+    });
+  });
+});
+
+describe("a sign-in a client's authorize began", () => {
+  it("is told its signed request expired, apart from a wrong code, which it does not spend", async () => {
+    const asked = (await half.handle(request(authorizePath(CLAUDE_CODE, pkce().challenge))))!;
+    const { search } = new URL(asked.headers.get("location")!, ORIGIN);
+    await half.handle(
+      request("/auth/better-auth/email-otp/send-verification-otp", { body: { email: DECLARED, type: "sign-in" } }),
+    );
+    const otp = codes.get(DECLARED)!;
+    // A wrong code, while the request is good: Better Auth's own code for it.
+    const wrong = (await half.handle(
+      request("/auth/better-auth/sign-in/email-otp", {
+        body: { email: DECLARED, otp: otp === "000000" ? "111111" : "000000", oauth_query: search.slice(1) },
+      }),
+    ))!;
+    expect(wrong.status).toBe(400);
+    expect(await wrong.json()).toMatchObject({ code: "INVALID_OTP" });
+    // Four minutes on the code is still good, and the request (ten minutes) too; eleven on, the request is not.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 11 * 60 * 1000);
+      for (const path of ["/auth/better-auth/sign-in/email-otp", "/auth/better-auth/sign-in/social"]) {
+        const late = (await half.handle(
+          request(path, {
+            body: { email: DECLARED, otp, provider: "github", callbackURL: "/", oauth_query: search.slice(1) },
+          }),
+        ))!;
+        expect(late.status, path).toBe(400);
+        const said = (await late.json()) as Record<string, unknown>;
+        expect(said, path).toMatchObject({ error: "invalid_signature" });
+        expect(said.code, path).toBeUndefined();
+        expect(cookieOf(late), path).toBe("");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    // The code was never tried against it: it still signs in, at a sign-in begun again.
+    const again = (await half.handle(request(authorizePath(CLAUDE_CODE, pkce().challenge))))!;
+    const signed = (await half.handle(
+      request("/auth/better-auth/sign-in/email-otp", {
+        body: { email: DECLARED, otp, oauth_query: new URL(again.headers.get("location")!, ORIGIN).search.slice(1) },
+      }),
+    ))!;
+    expect(signed.status).toBe(200);
+  });
+
+  describe("with GitHub", () => {
+    let social: LoginHalf;
+    beforeAll(() => {
+      const fetch = globalThis.fetch;
+      // GitHub's side: one account, which the files do not declare.
+      vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url === "https://github.com/login/oauth/access_token")
+          return Response.json({ access_token: "gho_mallory", token_type: "bearer", scope: "" });
+        if (url === "https://api.github.com/user")
+          return Response.json({ id: 4202, login: "mallory", name: null, email: null });
+        if (url === "https://api.github.com/user/emails")
+          return Response.json([{ email: "mallory@users.github.test", primary: true, verified: true }]);
+        return fetch(input, init);
+      });
+      social = betterAuthStaffLogin(
+        {
+          ...context,
+          staff: { ...context.staff!, social: { github: { clientId: "client-id", clientSecret: "client-secret" } } },
+        },
+        { fetchClientMetadata: declaredMetadataFetch(network) },
+      );
+    });
+    afterAll(() => vi.unstubAllGlobals());
+
+    it("comes back from a GitHub sign-in that failed with its signed request, and goes on by email code", async () => {
+      // A state such a client may send: every character a query may carry unencoded.
+      const asked = (await social.handle(
+        request(authorizePath(CLAUDE_CODE, pkce().challenge, { state: "a*b~c-d_e.f g" })),
+      ))!;
+      const page = new URL(asked.headers.get("location")!, ORIGIN);
+      const signed = signedOf(page.search);
+      const started = (await social.handle(
+        request("/auth/better-auth/sign-in/social", {
+          body: {
+            provider: "github",
+            callbackURL: "/",
+            errorCallbackURL: `${page.pathname}?${signed}`,
+            oauth_query: signed,
+          },
+        }),
+      ))!;
+      expect(started.status, await started.clone().text()).toBe(200);
+      const { url } = (await started.json()) as { url: string };
+      const cookies = started.headers.getSetCookie().map((c) => c.split(";")[0]);
+      const query = new URLSearchParams({ code: "code-mallory", state: new URL(url).searchParams.get("state")! });
+      const landed = (await social.handle(
+        request(`/auth/better-auth/callback/github?${query}`, { cookie: cookies.join("; ") }),
+      ))!;
+      expect(landed.status).toBe(302);
+      const back = new URL(landed.headers.get("location")!, ORIGIN);
+      expect(back.origin + back.pathname).toBe(`${ORIGIN}/auth/login`);
+      expect(back.searchParams.get("error")).toBe("not_declared");
+      expect(cookieOf(landed)).toBe("");
+      // The page there posts the request the login signed, without GitHub's error: the email code goes on to consent.
+      await social.handle(
+        request("/auth/better-auth/email-otp/send-verification-otp", { body: { email: DECLARED, type: "sign-in" } }),
+      );
+      const byCode = (await social.handle(
+        request("/auth/better-auth/sign-in/email-otp", {
+          body: { email: DECLARED, otp: codes.get(DECLARED)!, oauth_query: signedOf(back.search) },
+        }),
+      ))!;
+      expect(byCode.status, await byCode.clone().text()).toBe(200);
+      const next = new URL(((await byCode.json()) as { url: string }).url, ORIGIN);
+      expect(next.pathname).toBe("/auth/consent");
+      expect(next.searchParams.get("state")).toBe("a*b~c-d_e.f g");
     });
   });
 });

@@ -534,7 +534,7 @@ function sentBack(request: Request): Response {
     400,
     "This sign-in could not go on.",
     (error ? `The sign-in answered <code>${error}</code>${description ? `: ${description}` : ""}. ` : "") +
-      `Start it again from the agent. If it stops here again, the agent's client is not set up as this company's sign-in needs.`,
+      `Start the sign-in again: from the agent, when one sent you here. If it stops here again, the agent's client is not set up as this company's sign-in needs.`,
   );
 }
 
