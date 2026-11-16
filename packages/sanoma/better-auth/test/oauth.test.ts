@@ -263,6 +263,30 @@ describe("the staff login's discovery", () => {
     }
   });
 
+  it("lets no shared cache keep a document made from the request's Host and protocol", async () => {
+    for (const path of [
+      "/.well-known/oauth-protected-resource/mcp",
+      "/.well-known/oauth-authorization-server/auth/better-auth",
+    ]) {
+      const answered = (await half.handle(request(path, { origin: null })))!;
+      expect(answered.headers.get("cache-control"), path).toMatch(/^private\b/);
+      expect(answered.headers.get("vary")?.toLowerCase(), path).toBe("host, x-forwarded-proto");
+    }
+  });
+
+  it("answers 404 for the discovery documents it does not serve: the issuer has a path", async () => {
+    for (const path of [
+      "/.well-known/oauth-authorization-server",
+      "/.well-known/openid-configuration",
+      "/.well-known/openid-configuration/auth/better-auth",
+      "/.well-known/oauth-protected-resource/elsewhere",
+      "/auth/better-auth/.well-known/openid-configuration",
+      "/auth/better-auth/.well-known/oauth-authorization-server",
+    ]) {
+      expect((await half.handle(request(path, { origin: null })))?.status, path).toBe(404);
+    }
+  });
+
   it("serves no metadata without the app's OAuth context", async () => {
     const plain = betterAuthStaffLogin({ ...context, staff: { ...context.staff!, oauth: undefined } });
     expect(await plain.handle(request("/.well-known/oauth-protected-resource/mcp", { origin: null }))).toBeUndefined();

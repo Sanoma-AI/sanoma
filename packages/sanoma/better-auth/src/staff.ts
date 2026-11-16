@@ -100,6 +100,21 @@ const RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
 /** RFC 8414's metadata for the issuer, `<origin>/auth/better-auth`: the issuer's path appended to the well-known one. */
 const SERVER_METADATA = `/.well-known/oauth-authorization-server${BASE_PATH}`;
 
+/** The well-known paths of OAuth and OpenID discovery: what of them is not served is a 404. */
+const DISCOVERY_PREFIXES = [
+  RESOURCE_METADATA,
+  "/.well-known/oauth-authorization-server",
+  "/.well-known/openid-configuration",
+];
+
+/**
+ * How the metadata documents may be kept: each is made from the request's `Host` and protocol
+ * (`x-forwarded-proto`, which the login trusts for its own base URL too, as a proxy in front
+ * sets it; on Node with none in front, a client may set it, and fools only its own answer), so
+ * by the browser or the client alone, and only for that host and protocol.
+ */
+const DISCOVERY_CACHE = { "cache-control": "private, max-age=300", vary: "Host, X-Forwarded-Proto" };
+
 /** The app's OAuth context (`LoginContext.staff.oauth`). */
 type OAuthContext = NonNullable<NonNullable<LoginContext["staff"]>["oauth"]>;
 
@@ -290,7 +305,10 @@ export function betterAuthStaffLogin(
    * The well-known metadata, with the app's OAuth context: RFC 9728's for the resource (at its
    * path, and at the root for a client that looks there), naming this login, on the request's
    * own host, as its one authorization server; and RFC 8414's for that issuer, which the
-   * provider answers itself. Undefined for any other well-known path.
+   * provider answers itself. Both are made from the request's `Host` and protocol, so no shared
+   * cache may keep one for another (`DISCOVERY_CACHE`). Any other OAuth or OpenID discovery path
+   * is a 404, not the sign-in page: RFC 8414's at the root is not this issuer's, which has a path,
+   * and there is no OpenID provider. Undefined for any other well-known path.
    */
   async function discovery(request: Request, pathname: string): Promise<Response | undefined> {
     const { issuer, resource } = oauthOrigin(request, oauth!);
@@ -299,10 +317,12 @@ export function betterAuthStaffLogin(
         return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
       return Response.json(
         { resource, authorization_servers: [issuer], bearer_methods_supported: ["header"] },
-        { headers: { "cache-control": "public, max-age=300" } },
+        { headers: DISCOVERY_CACHE },
       );
     }
     if (pathname === SERVER_METADATA) return serverMetadata(await (await authFor(request)).handler(request));
+    if (DISCOVERY_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)))
+      return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
     return undefined;
   }
 
@@ -510,8 +530,13 @@ async function ensureResource(adapter: ResourceAdapter, identifier: string): Pro
 
 /** The provider's RFC 8414 answer, narrowed to `SERVER_METADATA_FIELDS`, public clients alone; any other answer as it is. */
 async function serverMetadata(answered: Response): Promise<Response> {
+  if (answered.status !== 200) return answered;
   // A HEAD's answer has no body to narrow: its headers are the GET's.
-  if (answered.status !== 200 || answered.body === null) return answered;
+  if (answered.body === null) {
+    const headers = new Headers(answered.headers);
+    for (const [name, value] of Object.entries(DISCOVERY_CACHE)) headers.set(name, value);
+    return new Response(null, { status: 200, headers });
+  }
   const full = (await answered.json()) as Record<string, unknown>;
   const metadata: Record<string, unknown> = {};
   for (const field of SERVER_METADATA_FIELDS) if (full[field] !== undefined) metadata[field] = full[field];
@@ -519,6 +544,7 @@ async function serverMetadata(answered: Response): Promise<Response> {
   metadata.revocation_endpoint_auth_methods_supported = ["none"];
   const headers = new Headers(answered.headers);
   headers.delete("content-length");
+  for (const [name, value] of Object.entries(DISCOVERY_CACHE)) headers.set(name, value);
   return new Response(JSON.stringify(metadata), { status: 200, headers });
 }
 
