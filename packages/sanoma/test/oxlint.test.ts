@@ -79,7 +79,10 @@ export type Types = [Ctx<[]>, typeof Hello];
   writeFileSync(
     join(dir, "sites/x/routes/fn.ts"),
     `import { createFileRoute } from "sanoma/site";
-export const f = createServerFn({ method: "GET" });
+import { createServerFn as serverFn } from "@tanstack/start-client-core";
+export { createMiddleware } from "@tanstack/react-start";
+export const only = import("@tanstack/start-fn-stubs").then((start) => start.createServerOnlyFn);
+export const f = serverFn({ method: "GET" });
 export const Route = createFileRoute("/fn")({ server: { handlers: {} } });
 `,
   );
@@ -173,10 +176,13 @@ describe("the shipped oxlint.json", () => {
         rule: site,
         text: expect.stringMatching(/no \*\.server\.\* file/),
       },
-      { file: "sites/x/routes/fn.ts", line: 2, rule: site, text: expect.stringMatching(/no createServerFn/) },
+      // TanStack Start's server builders: renamed, re-exported and by import().
+      { file: "sites/x/routes/fn.ts", line: 2, rule: imports, text: expect.stringMatching(server) },
+      { file: "sites/x/routes/fn.ts", line: 3, rule: imports, text: expect.stringMatching(server) },
+      { file: "sites/x/routes/fn.ts", line: 4, rule: imports, text: expect.stringMatching(server) },
       {
         file: "sites/x/routes/fn.ts",
-        line: 3,
+        line: 6,
         rule: site,
         text: expect.stringMatching(/route has no `server` handlers/),
       },
