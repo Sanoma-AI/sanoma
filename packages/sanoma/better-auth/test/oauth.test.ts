@@ -1,4 +1,4 @@
-import { createHash, hkdfSync, randomBytes } from "node:crypto";
+import { createHash, generateKeyPairSync, hkdfSync, randomBytes, sign } from "node:crypto";
 import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "sanoma/workflows";
 import { testDatabaseUrl } from "sanoma/testing";
 import { Client, Pool } from "pg";
@@ -127,6 +127,9 @@ function authorizePath(client: string, challenge: string, extra: Record<string, 
   });
   return `/auth/better-auth/oauth2/authorize?${query}`;
 }
+
+/** A JWT's header or payload, as it is written: JSON, base64url. */
+const jsonPart = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 
 /** A JWT's payload and header, unverified. */
 function decode(jwt: string) {
@@ -342,6 +345,59 @@ describe("a declared client", () => {
     });
     expect(refreshed.status).toBe(400);
     expect(refreshed.body.error).toBe("invalid_grant");
+  });
+
+  it("gets a plain Bearer token whether it sends a DPoP proof or binds the code to a key", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const jwk = publicKey.export({ format: "jwk" });
+    const proof = () => {
+      const signed = `${jsonPart({ typ: "dpop+jwt", alg: "ES256", jwk })}.${jsonPart({
+        htm: "POST",
+        htu: `${ISSUER}/oauth2/token`,
+        jti: randomBytes(16).toString("hex"),
+        iat: Math.floor(Date.now() / 1000),
+      })}`;
+      const signature = sign("sha256", Buffer.from(signed), { key: privateKey, dsaEncoding: "ieee-p1363" });
+      return `${signed}.${signature.toString("base64url")}`;
+    };
+    const { cookie } = await connect();
+    const { verifier, challenge } = pkce();
+    // The code asked for bound to a key (RFC 9449 §10), the token asked for with a proof.
+    const thumbprint = createHash("sha256")
+      .update(JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y }))
+      .digest("base64url");
+    const asked = (await half.handle(
+      request(authorizePath(CLAUDE_CODE, challenge, { dpop_jkt: thumbprint }), { cookie }),
+    ))!;
+    const code = new URL(asked.headers.get("location")!).searchParams.get("code")!;
+    const asking = request("/auth/better-auth/oauth2/token", {
+      form: {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT,
+        client_id: CLAUDE_CODE,
+        code_verifier: verifier,
+        resource: MCP,
+      },
+      origin: null,
+    });
+    asking.headers.set("dpop", proof());
+    const answered = (await half.handle(asking))!;
+    expect(answered.status).toBe(200);
+    const body = (await answered.json()) as Record<string, string>;
+    expect(body.token_type).toMatch(/^bearer$/i);
+    expect(decode(body.access_token!).payload.cnf).toBeUndefined();
+    expect(await half.bearer!(request("/mcp", { bearer: body.access_token, origin: null }))).toMatchObject({
+      client: CLAUDE_CODE,
+    });
+    // Its refresh token is no key's either: refreshed with no proof.
+    const refreshed = await token({
+      grant_type: "refresh_token",
+      refresh_token: body.refresh_token!,
+      client_id: CLAUDE_CODE,
+      resource: MCP,
+    });
+    expect(refreshed.status).toBe(200);
   });
 
   it("is refused a resource that is not this instance's own /mcp", async () => {

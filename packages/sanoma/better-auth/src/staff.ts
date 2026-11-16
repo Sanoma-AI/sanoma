@@ -370,15 +370,18 @@ export function betterAuthStaffLogin(
         return new Response("Forbidden", { status: 403 });
       // Any host is allowed, so Better Auth trusts any redirect: only a path on this host is taken.
       if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
+      let asked = request;
       if (oauth && route === AUTHORIZE) {
         const refused = await authorizing(request, oauth);
         if (refused) return refused;
+        asked = withoutDpop(request);
       }
       if (oauth && route === TOKEN) {
         const refused = await tokenFor(request, oauth);
         if (refused) return refused;
+        asked = withoutDpop(request);
       }
-      return (await authFor(request)).handler(withSignOutBody(request, SIGN_OUT));
+      return (await authFor(request)).handler(withSignOutBody(asked, SIGN_OUT));
     },
     ...(oauth && {
       async bearer(request: Request) {
@@ -517,6 +520,22 @@ async function serverMetadata(answered: Response): Promise<Response> {
   const headers = new Headers(answered.headers);
   headers.delete("content-length");
   return new Response(JSON.stringify(metadata), { status: 200, headers });
+}
+
+/**
+ * The request with DPoP (RFC 9449) left out: authorize's `dpop_jkt` and the token endpoint's
+ * `DPoP` proof. The provider cannot be told not to bind a token to a key, and `/mcp` takes Bearer
+ * tokens alone, so a DPoP-capable client would be issued a token it cannot use, and sign in again
+ * for ever. The metadata names no DPoP algorithm, so a client asks for none; one that does anyway
+ * is answered as a server without DPoP answers it: the proof ignored, the `token_type` it gets `Bearer`.
+ */
+function withoutDpop(request: Request): Request {
+  const url = new URL(request.url);
+  if (!url.searchParams.has("dpop_jkt") && !request.headers.has("dpop")) return request;
+  url.searchParams.delete("dpop_jkt");
+  const headers = new Headers(request.headers);
+  headers.delete("dpop");
+  return new Request(url, new Request(request, { headers }));
 }
 
 /** The issuer and the resource on the request's own origin: `<origin>/auth/better-auth` and `<origin><resource>`. */
