@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, hkdfSync, randomBytes, sign } from "node:crypto";
+import { createHash, createHmac, generateKeyPairSync, hkdfSync, randomBytes, sign } from "node:crypto";
 import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "sanoma/workflows";
 import { testDatabaseUrl } from "sanoma/testing";
 import { Client, Pool } from "pg";
@@ -178,6 +178,10 @@ async function token(form: Record<string, string>) {
   return { status: answered.status, body: (await answered.json()) as Record<string, string> };
 }
 
+/** A refresh at the token endpoint, as Claude Code sends one. */
+const refreshWith = (refresh_token: string) =>
+  token({ grant_type: "refresh_token", refresh_token, client_id: CLAUDE_CODE, resource: MCP });
+
 /** The whole flow for Claude Code: authorize, sign in by code, consent, the code for tokens. */
 async function connect() {
   const { verifier, challenge } = pkce();
@@ -331,6 +335,19 @@ describe("a declared client", () => {
     expect(refreshed.status).toBe(200);
     expect(refreshed.body.refresh_token).not.toBe(first.body.refresh_token);
     expect(decode(refreshed.body.access_token!).payload.aud).toBe(MCP);
+  });
+
+  it("loses the whole chain once a refresh token is used twice", async () => {
+    const { body } = await connect();
+    const first = await refreshWith(body.refresh_token!);
+    expect(first.status).toBe(200);
+    // The old one again: someone else holds a copy, so neither copy goes on.
+    const replayed = await refreshWith(body.refresh_token!);
+    expect(replayed.status).toBe(400);
+    expect(replayed.body.error).toBe("invalid_grant");
+    const next = await refreshWith(first.body.refresh_token!);
+    expect(next.status).toBe(400);
+    expect(next.body.error).toBe("invalid_grant");
   });
 
   it("is asked consent again once it stands for another agent than the one consented to", async () => {
@@ -592,6 +609,20 @@ describe("a bearer", () => {
     const [head, payload, signature] = access.split(".");
     const flipped = `${head}.${payload}.${signature!.slice(0, -2)}${signature!.endsWith("AA") ? "BB" : "AA"}`;
     expect(await half.bearer!(request("/mcp", { bearer: flipped, origin: null }))).toBeNull();
+    // Forged: no signature (`alg: none`), and HS256 keyed with the public key (the confusion of
+    // an asymmetric key for a shared secret): only the login's own algorithm and keys are taken.
+    const { header: realHeader } = decode(access);
+    const none = `${jsonPart({ ...realHeader, alg: "none" })}.${payload}.`;
+    expect(await half.bearer!(request("/mcp", { bearer: none, origin: null }))).toBeNull();
+    expect(await half.bearer!(request("/mcp", { bearer: `${none}x`, origin: null }))).toBeNull();
+    const jwks = (await (await half.handle(request("/auth/better-auth/jwks", { origin: null })))!.json()) as {
+      keys: { x: string }[];
+    };
+    const hs = `${jsonPart({ ...realHeader, alg: "HS256" })}.${payload}`;
+    for (const secret of [JSON.stringify(jwks.keys[0]), Buffer.from(jwks.keys[0]!.x, "base64url")]) {
+      const forged = `${hs}.${createHmac("sha256", secret).update(hs).digest("base64url")}`;
+      expect(await half.bearer!(request("/mcp", { bearer: forged, origin: null }))).toBeNull();
+    }
     // Not a JWT, and no bearer at all.
     expect(await half.bearer!(request("/mcp", { bearer: "sca_nothing", origin: null }))).toBeNull();
     expect(await half.bearer!(request("/mcp", { origin: null }))).toBeNull();

@@ -254,10 +254,8 @@ describe("the agent surface on a host", () => {
     // The sign-in page carries the signed request on; a code to the declared email, then the code.
     const signInPage = await fetch(login);
     // No other site may frame a page that asks for a code or an answer.
-    for (const framed of [signInPage]) {
-      expect(framed.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
-      expect(framed.headers.get("x-frame-options")).toBe("DENY");
-    }
+    expect(signInPage.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    expect(signInPage.headers.get("x-frame-options")).toBe("DENY");
     const page = await signInPage.text();
     expect(page).toContain("oauth_query");
     expect(
