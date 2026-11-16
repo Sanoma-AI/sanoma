@@ -73,6 +73,7 @@ import {
   getStoreMoves,
   openChangeFn,
   previewFn,
+  reshapeChangeFn,
   saveDraftFn,
   startRunFn,
 } from "./functions.ts";
@@ -696,13 +697,15 @@ export const runQuery = (id: string) =>
   });
 
 /**
- * How often a change is read again: every `POLL_MS` while its run is under way on its own
- * (opening to deploying), never once its run has ended (merged, closed, or failed), else every
- * 30 s: waiting on Publish or blocked on an event, it moves when someone acts, and a decision
- * from this tab refreshes it at once (RUNS_KEY).
+ * How often a change is read again: every `POLL_MS` while its run, or its Try again (`retry`), is
+ * under way on its own (opening to deploying), never once both have ended (merged, closed, or
+ * failed), else every 30 s: waiting on Publish, an approval or an event, it moves when someone
+ * acts, and a decision from this tab refreshes it at once (RUNS_KEY).
  */
-const changePoll = ({ status, state }: Pick<ChangeView, "status" | "state">): number | false =>
-  isEnded(status) ? false : state.phase === "waiting" || state.phase === "blocked" ? 30_000 : POLL_MS;
+const changePoll = ({ status, state, retry }: Pick<ChangeView, "status" | "state" | "retry">): number | false => {
+  if (retry && !isEnded(retry.status)) return retry.status === "waiting" ? 30_000 : POLL_MS;
+  return isEnded(status) ? false : state.phase === "waiting" || state.phase === "blocked" ? 30_000 : POLL_MS;
+};
 
 /** The changes, newest first (`ChangesQuery`), under RUNS_KEY: polled at the pace of the busiest (`changePoll`). */
 export const changesQuery = (query: ChangesQuery = {}) =>
@@ -740,6 +743,20 @@ export function useOpenChange() {
       await go({ to: "/changes/$id", params: { id } });
     },
     onError: (err) => toast.error(`Could not send it for review: ${errorBodyOf(err)?.error ?? errorMessage(err)}`),
+  });
+}
+
+/**
+ * Try again, on the change of the draft `id`, merged without its records (`reshapeChangeFn`), then
+ * refreshes the change, which follows the run; says so only when it could not start.
+ */
+export function useReshapeChange() {
+  const reshape = useServerFn(reshapeChangeFn);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => reshape({ data: { id } }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: RUNS_KEY }),
+    onError: (err) => toast.error(`Could not try again: ${errorBodyOf(err)?.error ?? errorMessage(err)}`),
   });
 }
 

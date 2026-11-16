@@ -43,8 +43,9 @@ export function rootWith(files: Record<string, string>, from?: string): string {
 }
 
 /** A people file declaring `alice` alone, for a root's `resources/people.ts`. */
-/** The built-ins every config has after `change`, in that order: `follow`, then the app's actions (`app-workflows.ts`). */
+/** The built-ins every config has after `change`, in that order: its Try again (`reshape`), `follow`, then the app's actions (`app-workflows.ts`). */
 export const AFTER_CHANGE = [
+  "reshape",
   "follow",
   "adopt",
   "patch",

@@ -148,6 +148,14 @@ export const openChangeFn = createServerFn(CHANGE)
   .validator(validate(z.object({ id: z.string().regex(DRAFT_ID) })))
   .handler(({ data, context }) => openChange(context.app, context.principal, data.id, context.origin));
 
+/** Try again, on a change merged without its records: they are brought along as the person; the run's id. */
+export const reshapeChangeFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(z.object({ id: z.string().regex(DRAFT_ID) })))
+  .handler(async ({ data, context }) => ({
+    runId: await context.app.client.reshapeChange(data.id, { startedBy: context.principal }),
+  }));
+
 /** The saves of a chat's draft, by the draft's id, newest first. */
 export const getSaves = createServerFn(READ)
   .validator(validate(z.object({ id: z.string().regex(DRAFT_ID) })))

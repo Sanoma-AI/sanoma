@@ -4,8 +4,9 @@ import { fileURLToPath } from "node:url";
 import { useTestApp } from "sanoma/testing/harness";
 import { fakeHost, testRepository } from "sanoma/testing/host";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { collection } from "../src/collection.ts";
 import { lazyDb } from "../src/db.ts";
 import { data } from "../src/db/company.ts";
 import type { TableChangePlan } from "../src/description.ts";
@@ -27,8 +28,9 @@ export const ada = sanoma.person({ id: "ada" });
 export const bob = sanoma.person({ id: "bob" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 `;
-// A change that touches secret/ is denied, and so is a reshape of the archive's records: anything
-// else is allowed, but for the runtime's own rule.
+// A change that touches secret/ is denied, and so is a reshape of the archive's records, and of the
+// leads' by alice; a reshape of the ledger's is held for admin: anything else is allowed, but for
+// the runtime's own rule.
 const POLICY = `@id("no-secrets")
 @reason("A change to secret/ is refused")
 forbid (principal, action == Sanoma::Action::"sanoma.change.merge", resource is Sanoma::Change)
@@ -37,6 +39,15 @@ when { resource.touches.contains("secret/") };
 @id("archive-held")
 @reason("The archive's records are held as they are")
 forbid (principal, action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:archive");
+
+@id("leads-not-alice")
+@reason("alice may not bring the leads along")
+forbid (principal == Sanoma::Principal::"alice", action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:leads");
+
+@id("ledger-held")
+@hold("admin")
+@title("Bringing the ledger along waits for admin")
+forbid (principal, action == Sanoma::Action::"sanoma.records.reshape", resource == Sanoma::Target::"data:ledger");
 `;
 const page = (id: string) => `https://sanoma.example/changes/${id}`;
 
@@ -55,13 +66,20 @@ const merges = (records: LedgerRecord[]) =>
   records.filter((r) => r.type === "op.called" && r.op === CHANGE_MERGE && !r.error);
 const opsOf = (records: LedgerRecord[]) => records.flatMap((r) => (r.type === "op.called" ? [r.op] : []));
 
+/** The collections Try again's tests bring along: `prospects` as it was before a rename to `contacted`. */
+const collections = [
+  collection({ name: "leads", key: "company", fields: { company: "text", contacted: "text" } }),
+  collection({ name: "ledger", key: "company", fields: { company: "text", contacted: "text" } }),
+  collection({ name: "prospects", key: "company", fields: { company: "text", touched: "text" } }),
+];
+
 describe("the change workflow", () => {
   const root = rootWith({ "resources/people.ts": PEOPLE, "policies/no-secrets.cedar": POLICY });
   const remote = fakeRemote();
   const repo = memorySource({ root: here, remote });
   const databaseUrl = freshDatabase("change");
   const app = useTestApp(
-    { workflows: [waits], connectors: [remote.connector], ledger: memoryLedger(), root },
+    { workflows: [waits], collections, connectors: [remote.connector], ledger: memoryLedger(), root },
     { databaseUrl, source: repo.source },
   );
   const pool = lazyDb(databaseUrl, "change test");
@@ -358,6 +376,127 @@ describe("the change workflow", () => {
     });
   });
 
+  it("brings the records along again on Try again, as the person who asks, as often as asked", async () => {
+    const db = await pool.db();
+    await db
+      .insert(data)
+      .values([
+        { collection: "leads", key: "Acme", record: { company: "Acme", touched: "2026-01-02" }, updatedBy: "leon" },
+      ]);
+    const plan: TableChangePlan = {
+      collection: "leads",
+      rows: 1,
+      changes: [{ kind: "rename", from: "touched", to: "contacted" }],
+    };
+    const head = repo.edit("leads", { "notes/leads.md": "\n" });
+    const runId = await app.client.openChange(
+      { id: "leads", title: "Leads", page: page("leads"), save: head, plan },
+      { startedBy: "alice" },
+    );
+    // Merged by alice, whom the policy refuses the records.
+    expect(await app.client.result(runId)).toMatchObject({
+      outcome: "merged",
+      reshaped: { error: expect.any(String) },
+    });
+    expect((await app.client.change("leads"))!.retry).toBeUndefined();
+
+    // Asked again by alice: refused again, as her.
+    const first = await app.client.reshapeChange("leads", { startedBy: "alice" });
+    expect(first).toBe("reshape:leads");
+    expect(await app.client.result(first)).toEqual({
+      error: expect.stringContaining("alice may not bring the leads along"),
+    });
+    expect((await app.client.change("leads"))!.retry).toMatchObject({
+      runId: first,
+      status: "finished",
+      startedBy: { id: "alice" },
+      reshaped: { error: expect.any(String) },
+    });
+
+    // By ada: brought along, under her, by her run.
+    const second = await app.client.reshapeChange("leads", { startedBy: "ada" });
+    expect(second).toBe("reshape:leads~2");
+    const reshaped = { rows: 1, changed: 1, converted: 0, cleared: 0, kept: 0 };
+    expect(await app.client.result(second)).toEqual(reshaped);
+    expect((await app.client.change("leads"))!.retry).toMatchObject({ runId: second, status: "finished", reshaped });
+    const [call] = (await app.client.ledger(second)).filter((r) => r.type === "op.called");
+    expect(call).toMatchObject({ op: "sanoma.records.reshape", actor: { id: "ada" }, decision: { kind: "allow" } });
+    const [row] = await db.select().from(data).where(eq(data.collection, "leads"));
+    expect([row!.record, row!.updatedBy]).toEqual([{ company: "Acme", contacted: "2026-01-02" }, `run:${second}`]);
+
+    // Again, once they are: nothing left to bring along.
+    const third = await app.client.reshapeChange("leads", { startedBy: "ada" });
+    expect(await app.client.result(third)).toEqual({ ...reshaped, changed: 0 });
+    // Started only by reshapeChange, which names its run; and only for a change that merged.
+    await expect(app.client.start("reshape", { id: "leads" }, { startedBy: "ada" })).rejects.toMatchObject({
+      code: "invalid_input",
+    });
+    await expect(app.client.result(await app.client.reshapeChange("nothing", { startedBy: "ada" }))).rejects.toThrow(
+      "The draft nothing has no published change",
+    );
+  });
+
+  it("refuses Try again once the collection's columns are no longer what the change made them", async () => {
+    // `prospects` declares `touched` (made again by a later change, say): renaming it again would move its values.
+    const plan: TableChangePlan = {
+      collection: "prospects",
+      rows: 0,
+      changes: [{ kind: "rename", from: "touched", to: "contacted" }],
+    };
+    const head = repo.edit("prospects", { "notes/prospects.md": "\n" });
+    const runId = await app.client.openChange(
+      { id: "prospects", title: "Prospects", page: page("prospects"), save: head, plan },
+      { startedBy: "alice" },
+    );
+    expect(await app.client.result(runId)).toMatchObject({ outcome: "merged", reshaped: { rows: 0 } });
+    const retry = await app.client.reshapeChange("prospects", { startedBy: "ada" });
+    await expect(app.client.result(retry)).rejects.toThrow(
+      "The columns of prospects are no longer what the change of the draft prospects made them",
+    );
+  });
+
+  it("reports a hold on the records Publish does not lift without waiting on it, and Try again waits for its approver", async () => {
+    const db = await pool.db();
+    await db
+      .insert(data)
+      .values([
+        { collection: "ledger", key: "Acme", record: { company: "Acme", touched: "2026-01-02" }, updatedBy: "leon" },
+      ]);
+    const plan: TableChangePlan = {
+      collection: "ledger",
+      rows: 1,
+      changes: [{ kind: "rename", from: "touched", to: "contacted" }],
+    };
+    repo.edit("ledger", { "notes/ledger.md": "\n" });
+    const runId = await app.client.openChange(
+      { id: "ledger", title: "Ledger", page: page("ledger"), plan },
+      { startedBy: "alice" },
+    );
+    await waitFor(pending(() => app.client, runId));
+    // Merged on the host, with Publish never given: the change deploys, the records wait.
+    const sha = remote.merge(remote.pullOf("draft/ledger")!.number);
+    await app.client.changeEvent("ledger", { kind: "merged", sha }, { by: "alice" });
+    const report = (await app.client.result(runId)) as ChangeReport;
+    expect(report).toMatchObject({
+      outcome: "merged",
+      reshaped: { error: "Bringing the ledger along waits for admin" },
+      deploy: { follow: { revision: expect.any(String) } },
+    });
+    // Asked, never called: no approval of it waits on the change.
+    expect(opsOf(await app.client.ledger(runId))).not.toContain("sanoma.records.reshape");
+    expect((await app.client.change("ledger"))!.approvals.filter((a) => a.status === "pending")).toEqual([]);
+
+    const retry = await app.client.reshapeChange("ledger", { startedBy: "alice" });
+    await waitFor(pending(() => app.client, retry));
+    expect((await app.client.change("ledger"))!.retry).toMatchObject({ runId: retry, status: "waiting" });
+    await app.client.decide(retry, { decision: "approve", by: { id: "ada" } });
+    const reshaped = { rows: 1, changed: 1, converted: 0, cleared: 0, kept: 0 };
+    expect(await app.client.result(retry)).toEqual(reshaped);
+    expect((await app.client.change("ledger"))!.retry).toMatchObject({ status: "finished", reshaped });
+    const [row] = await db.select().from(data).where(eq(data.collection, "ledger"));
+    expect(row!.record).toEqual({ company: "Acme", contacted: "2026-01-02" });
+  });
+
   it("closes the change when Publish is rejected", async () => {
     repo.edit("rejected", { "notes/no.md": "\n" });
     const runId = await open("rejected");
@@ -597,6 +736,8 @@ describe("a change whose deploy starts the worker again", () => {
       process.env.DBOS__APPVERSION = "moved";
       restarts.push(app.restart());
     };
+    // Started again from inside the apply's step, the worker carries the runs outside it.
+    const warn = vi.spyOn(console, "warn");
     try {
       // The host's source moved on, so the apply starts it again.
       await source.commit();
@@ -617,7 +758,9 @@ describe("a change whose deploy starts the worker again", () => {
       for (const id of [runId, `${runId}:deploy`]) {
         expect((await app.raw.getWorkflow(id))?.applicationVersion).toMatch(/@moved$/);
       }
+      expect(warn.mock.calls.flat().join("\n")).not.toMatch(/carrying the built-in runs|retrieveWorkflow/);
     } finally {
+      warn.mockRestore();
       delete process.env.DBOS__APPVERSION;
       reload = () => void restarts.push(app.restart());
     }
