@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "sanoma/testing";
-import { eq, getTableName, inArray } from "drizzle-orm";
+import { and, eq, getTableName, inArray, sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { collection, recordsOps } from "../src/collection.ts";
@@ -430,18 +430,264 @@ describe("sanoma.records.reshape on Postgres", () => {
     expect(await reshapeCall({ collection: "deals", changes: keep })).toMatchObject({ changed: 0, kept: 1 });
   });
 
-  it("writes a collection larger than one statement's chunk whole", async () => {
-    const many = Array.from({ length: 1234 }, (_, i) => ({ company: `c${String(i).padStart(4, "0")}`, seats: `${i}` }));
+  it("deletes a removed field's values from every record in the same call, once, as the rest of the change", async () => {
+    const db = await pool.db();
+    await db.insert(data).values(
+      [
+        { company: "Acme", seats: "12", legacyId: "L-1" },
+        { company: "Brightwater", legacyId: "" },
+        { company: "Cedar", seats: "about 40" },
+      ].map((record) => ({ collection: "deals", key: record.company, record, updatedBy: "leon" })),
+    );
+    const removing = [
+      { kind: "retype", field: "seats", to: "number", decision: "clear" },
+      { kind: "remove", field: "legacyId" },
+    ];
+    // The empty value is no value: deleted, not counted.
+    expect(await reshapeCall({ collection: "deals", changes: removing })).toEqual({
+      rows: 3,
+      changed: 3,
+      converted: 1,
+      cleared: 2,
+      kept: 0,
+    });
+    expect(await rowsOf("deals")).toEqual([
+      { key: "Acme", record: { company: "Acme", seats: 12 }, updatedBy: "run:t" },
+      { key: "Brightwater", record: { company: "Brightwater" }, updatedBy: "run:t" },
+      { key: "Cedar", record: { company: "Cedar" }, updatedBy: "run:t" },
+    ]);
+    // Again: nothing left to delete.
+    expect(await reshapeCall({ collection: "deals", changes: removing })).toMatchObject({ changed: 0, cleared: 0 });
+  });
+
+  /** `length` deals keyed `c0000`, `c0001`, …, their seats as text. */
+  const insertMany = async (length: number) => {
+    const many = Array.from({ length }, (_, i) => ({ company: `c${String(i).padStart(4, "0")}`, seats: `${i}` }));
     await (
       await pool.db()
     )
       .insert(data)
       .values(many.map((record) => ({ collection: "deals", key: record.company, record, updatedBy: "leon" })));
-    expect(
-      await reshapeCall({ collection: "deals", changes: [{ kind: "retype", field: "seats", to: "number" }] }),
-    ).toMatchObject({ rows: 1234, changed: 1234, converted: 1234 });
+  };
+  const toNumber = [{ kind: "retype", field: "seats", to: "number" }];
+
+  it("writes a collection larger than a page whole, a page at a time", async () => {
+    await insertMany(1234);
+    expect(await reshapeCall({ collection: "deals", changes: toNumber })).toMatchObject({
+      rows: 1234,
+      changed: 1234,
+      converted: 1234,
+    });
     const rows = await rowsOf("deals");
     expect(rows.every(({ record }, i) => record.seats === i && typeof record.seats === "number")).toBe(true);
+  });
+
+  it("is all or none: a failure on a later page leaves the pages before it as they were", async () => {
+    await insertMany(1234);
+    const db = await pool.db();
+    // A write the database refuses, on the third page's first key.
+    await db.execute(sql`CREATE OR REPLACE FUNCTION sanoma_test_refuse() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'refused %', NEW.key; END $$`);
+    await db.execute(sql`CREATE TRIGGER sanoma_test_refuse BEFORE UPDATE ON ${data} FOR EACH ROW
+      WHEN (NEW.collection = 'deals' AND NEW.key = 'c1000') EXECUTE FUNCTION sanoma_test_refuse()`);
+    onTestFinished(async () => {
+      await db.execute(sql`DROP TRIGGER IF EXISTS sanoma_test_refuse ON ${data}`);
+      await db.execute(sql`DROP FUNCTION IF EXISTS sanoma_test_refuse()`);
+    });
+    await expect(reshapeCall({ collection: "deals", changes: toNumber })).rejects.toThrow("refused c1000");
+    expect(
+      (await rowsOf("deals")).every(
+        ({ record, updatedBy }) => typeof record.seats === "string" && updatedBy === "leon",
+      ),
+    ).toBe(true);
+  });
+
+  it("is safe to call again after a part of it landed: what is brought along already is left alone", async () => {
+    // Part of the collection brought along already (an earlier call, or saves in the new shape), and
+    // records in the old shape besides, written after it: the call again brings along only those.
+    await insertMany(1234);
+    const renamed = [
+      { kind: "rename", from: "seats", to: "count" },
+      { kind: "retype", field: "count", to: "number" },
+    ];
+    const first = await reshapeCall({ collection: "deals", changes: renamed });
+    expect(first).toMatchObject({ rows: 1234, changed: 1234, converted: 1234 });
+    const db = await pool.db();
+    await db.insert(data).values([
+      { collection: "deals", key: "late", record: { company: "late", seats: "7" }, updatedBy: "leon" },
+      // Saved in the new shape with the old field left in it: the rename does not overwrite it.
+      { collection: "deals", key: "both", record: { company: "both", seats: "1", count: 2 }, updatedBy: "leon" },
+    ]);
+    const again = await reshapeCall({ collection: "deals", changes: renamed });
+    expect(again).toEqual({ rows: 1236, changed: 1, converted: 1, cleared: 0, kept: 0 });
+    const rows = new Map((await rowsOf("deals")).map((row) => [row.key, row]));
+    expect(rows.get("late")).toEqual({ key: "late", record: { company: "late", count: 7 }, updatedBy: "run:t" });
+    expect(rows.get("both")!.record).toEqual({ company: "both", seats: "1", count: 2 });
+    expect(rows.get("c0042")!.record).toEqual({ company: "c0042", count: 42 });
+    // And once more: nothing left.
+    expect(await reshapeCall({ collection: "deals", changes: renamed })).toMatchObject({ rows: 1236, changed: 0 });
+  });
+});
+
+describe("links and free-form fields on Postgres", () => {
+  const customers = collection({ name: "customers", key: "id", fields: { id: "text" } });
+  const orders = collection({
+    name: "orders",
+    key: "id",
+    fields: { id: "text", customer: { link: "customers" }, meta: { type: "json", optional: true } },
+  });
+  // A link hidden for everyone: kept as it is, neither checked nor flagged.
+  const invoices = collection({
+    name: "invoices",
+    key: "id",
+    fields: { id: "text", customer: { link: "customers", optional: true, hidden: true } },
+  });
+  const url = testDatabaseUrl("data");
+  const pool = lazyDb(url, "links test");
+  const driver = collectionsDriver([customers, orders, invoices], pool);
+  const records = recordsDriver(() => pool.db());
+  afterAll(() => pool.close());
+  beforeEach(async () => {
+    await (await pool.db()).delete(data).where(inArray(data.collection, ["customers", "orders", "invoices"]));
+  });
+  let n = 0;
+  const call = async (op: Op, input: unknown) => {
+    const fn = driver.ops[`${op.resource}.${op.name}`]!;
+    const context = { idempotencyKey: `l:${n++}`, runId: "t", opId: op.id, attempt: 1, secrets: memorySecrets() };
+    return op.output.parse(await fn(op.input.parse(input), context));
+  };
+  const order = { id: "o1", customer: "acme", meta: { source: "web", seats: [1, 2], note: null } };
+  const missing = { vendorCode: "link_missing", status: 422, retryable: false };
+
+  it("saves a free-form value as it is, and a link only to a record that is there, checked in the save's transaction", async () => {
+    await expect(call(orders.save, { record: order })).rejects.toMatchObject({
+      ...missing,
+      message: 'customer: customers has no record "acme"',
+      missing: [{ key: "o1", field: "customer", value: "acme", target: "customers" }],
+    });
+    expect(await call(orders.get, { key: "o1" })).toBeNull();
+    // A batch checks once every entry is made: the record it links to may be one of them, in any order.
+    await expect(
+      call(orders.saveMany, { records: [{ record: order }, { record: { ...order, id: "o2", customer: "globex" } }] }),
+    ).rejects.toMatchObject({ ...missing, missing: [{ key: "o1" }, { key: "o2" }] });
+    expect(await call(orders.count, {})).toEqual({ count: 0 });
+    await call(customers.save, { record: { id: "acme" } });
+    expect(await call(orders.save, { record: order })).toMatchObject({ key: "o1", record: order });
+    expect(await call(orders.get, { key: "o1" })).toEqual({
+      key: "o1",
+      record: order,
+      updatedAt: expect.any(String),
+      updatedBy: "run:t",
+    });
+    // The database does not keep a link: a record deleted since reads as a link to fix, and saves elsewhere.
+    await call(customers.delete, { key: "acme" });
+    const issues = [{ path: ["customer"], message: 'customers has no record "acme"' }];
+    expect(await call(orders.get, { key: "o1" })).toMatchObject({ record: order, issues });
+    expect(await call(orders.list, { order: "customer" })).toMatchObject([{ key: "o1", issues }]);
+    await expect(call(orders.save, { record: { ...order, meta: "edited" } })).rejects.toMatchObject(missing);
+    await call(customers.save, { record: { id: "globex" } });
+    expect(await call(orders.save, { record: { ...order, customer: "globex" } })).not.toHaveProperty("issues");
+  });
+
+  it("saves and reads a hidden link as it is: the person can't see it to fix it", async () => {
+    const invoice = { id: "i1", customer: "gone" };
+    expect(await call(invoices.save, { record: invoice })).toMatchObject({ record: invoice });
+    expect(await call(invoices.get, { key: "i1" })).not.toHaveProperty("issues");
+  });
+
+  it("holds the record a save links to against a delete until the save's transaction ends", async () => {
+    await call(customers.save, { record: { id: "acme" } });
+    const db = await pool.db();
+    await db.transaction(async (tx) => {
+      // The save in a transaction that stays open (as a direct call's, beside its ledger record).
+      const open = collectionsDriver([customers, orders], { db: async () => tx });
+      const context = {
+        idempotencyKey: "l:open",
+        runId: "t",
+        opId: orders.save.id,
+        attempt: 1,
+        secrets: memorySecrets(),
+      };
+      await open.ops["orders.save"]!(orders.save.input.parse({ record: order }), context);
+      // A delete of acme on another connection waits for it: here, given up by its lock timeout.
+      const deleting = db.transaction(async (other) => {
+        await other.execute(sql`set local lock_timeout = '200ms'`);
+        await other.delete(data).where(and(eq(data.collection, "customers"), eq(data.key, "acme")));
+      });
+      await expect(deleting).rejects.toMatchObject({ code: "55P03" });
+    });
+    expect(await call(customers.get, { key: "acme" })).toMatchObject({ key: "acme" });
+  });
+
+  it("matches a retype to a link against the keys there, and moves a free-form key to a column of its own", async () => {
+    const db = await pool.db();
+    await db.insert(data).values([
+      { collection: "customers", key: "acme", record: { id: "acme" }, updatedBy: "leon" },
+      ...[
+        { id: "o1", customer: "acme", meta: { source: "web", seats: "3" } },
+        { id: "o2", customer: "nobody", meta: { seats: "many" } },
+        { id: "o3", meta: "just text" },
+      ].map((record) => ({ collection: "orders", key: record.id, record, updatedBy: "leon" })),
+    ]);
+    const changes = [
+      { kind: "retype", field: "customer", to: { link: "customers" }, decision: "clear" },
+      { kind: "convert", field: "meta", key: "seats", to: "seats", type: "number" },
+    ];
+    const reshapeOp = recordsOps.records.reshape;
+    const reshapeCall = async () =>
+      reshapeOp.output.parse(
+        await records.ops["records.reshape"]!(reshapeOp.input.parse({ collection: "orders", changes }), {
+          idempotencyKey: "t:reshape",
+          runId: "t",
+          opId: reshapeOp.id,
+          attempt: 1,
+          secrets: memorySecrets(),
+        }),
+      );
+    expect(await reshapeCall()).toEqual({ rows: 3, changed: 2, converted: 1, cleared: 1, kept: 1 });
+    const rows = await db
+      .select({ key: data.key, record: data.record })
+      .from(data)
+      .where(eq(data.collection, "orders"))
+      .orderBy(data.key);
+    expect(rows).toEqual([
+      { key: "o1", record: { id: "o1", customer: "acme", meta: { source: "web" }, seats: 3 } },
+      { key: "o2", record: { id: "o2", meta: { seats: "many" } } },
+      { key: "o3", record: { id: "o3", meta: "just text" } },
+    ]);
+    expect(await reshapeCall()).toMatchObject({ changed: 0, kept: 1 });
+  });
+
+  it("matches a link a page at a time against the keys its values name, on every page", async () => {
+    // 1234 orders over three pages, each naming its own customer; only every other customer is there.
+    const db = await pool.db();
+    const keys = Array.from({ length: 1234 }, (_, i) => `c${String(i).padStart(4, "0")}`);
+    await db
+      .insert(data)
+      .values([
+        ...keys
+          .filter((_, i) => i % 2 === 0)
+          .map((id) => ({ collection: "customers", key: id, record: { id }, updatedBy: "leon" })),
+        ...keys.map((id) => ({ collection: "orders", key: id, record: { id, customer: id }, updatedBy: "leon" })),
+      ]);
+    const reshapeOp = recordsOps.records.reshape;
+    const changes = [{ kind: "retype", field: "customer", to: { link: "customers" }, decision: "clear" }];
+    const answer = await records.ops["records.reshape"]!(reshapeOp.input.parse({ collection: "orders", changes }), {
+      idempotencyKey: "t:pages",
+      runId: "t",
+      opId: reshapeOp.id,
+      attempt: 1,
+      secrets: memorySecrets(),
+    });
+    expect(reshapeOp.output.parse(answer)).toEqual({ rows: 1234, changed: 617, converted: 0, cleared: 617, kept: 0 });
+    const rows = await db
+      .select({ key: data.key, record: data.record })
+      .from(data)
+      .where(eq(data.collection, "orders"))
+      .orderBy(data.key);
+    expect(rows.every(({ key, record }, i) => (i % 2 === 0 ? record.customer === key : !("customer" in record)))).toBe(
+      true,
+    );
   });
 });
 

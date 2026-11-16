@@ -185,6 +185,76 @@ describe("the operations through the App", () => {
     },
   );
 
+  it.skipIf(live)("reads files at the default branch's head, waiting for a new repository to fill", async () => {
+    play("app-files");
+    const input = { installation: 7, repository: "acme/acme-ops", paths: ["sanoma.config.ts", "resources/people.ts"] };
+    expect(await call(githubDriver(), "repository.files", input)).toEqual({
+      "sanoma.config.ts": "export default defineConfig({\n  connectors: [],\n});\n",
+    });
+    // Minted for this repository alone; each file read at the one commit.
+    expect(sent[0]!.body).toEqual({ repositories: ["acme-ops"] });
+    expect(new Set(bearers())).toEqual(new Set(["Bearer ghs_recorded"]));
+  });
+
+  it.skipIf(live)("reads files at a ref", async () => {
+    play("app-files-ref");
+    const input = { installation: 7, repository: "acme/acme-ops", paths: ["README.md"], ref: "setup/acme" };
+    expect(await call(githubDriver(), "repository.files", input)).toEqual({ "README.md": "# acme\n" });
+  });
+
+  it.skipIf(live)("says so when a path is a directory or a file over 1 MB", async () => {
+    play("app-files-unreadable");
+    const input = { installation: 7, repository: "acme/acme-ops", ref: "main" };
+    await expect(call(githubDriver(), "repository.files", { ...input, paths: ["resources"] })).rejects.toMatchObject({
+      message: "github: repository.files: acme/acme-ops's resources is a directory: name its files",
+      retryable: false,
+    });
+    await expect(call(githubDriver(), "repository.files", { ...input, paths: ["data.csv"] })).rejects.toMatchObject({
+      message: "github: repository.files: acme/acme-ops's data.csv is over 1 MB, more than it reads",
+      retryable: false,
+    });
+  });
+
+  it.skipIf(live)("tries files at a ref again while the repository is empty, as one just generated is", async () => {
+    play("app-files-empty");
+    const input = { installation: 7, repository: "acme/acme-ops", paths: ["README.md"], ref: "main" };
+    await expect(call(githubDriver(), "repository.files", input)).rejects.toMatchObject({
+      status: 409,
+      retryable: true,
+      vendorCode: "no_branch",
+    });
+  });
+
+  it("refuses a file path or a ref that leaves the repository", () => {
+    const input = { installation: 7, repository: "acme/acme-ops" };
+    for (const path of ["../keys", "a/../../b", "/etc", "a//b", "."]) {
+      expect(() => github.repository.files.input.parse({ ...input, paths: [path] }), path).toThrow(
+        "a path inside the repository",
+      );
+    }
+    expect(() => github.repository.files.input.parse({ ...input, paths: [], ref: ".." })).toThrow(
+      "a path inside the repository",
+    );
+  });
+
+  it("refuses a token with no permissions named, which GitHub would give all the installation's", () => {
+    const input = { installation: 7, repository: "acme/acme-ops", permissions: {} };
+    expect(() => github.repository.token.input.parse(input)).toThrow("name at least one permission");
+  });
+
+  it.skipIf(live)("mints a token for one repository with only the permissions named, and returns it", async () => {
+    play("app-token");
+    const input = { installation: 7, repository: "acme/acme-ops", permissions: { contents: "write" } };
+    expect(await call(githubDriver(), "repository.token", input)).toEqual({
+      token: "ghs_recorded",
+      expiresAt: "2026-10-31T13:00:00.000Z",
+    });
+    expect(signer(sent[0]!.headers)).toBe("4242");
+    expect(sent[0]!.body).toEqual({ repositories: ["acme-ops"], permissions: { contents: "write" } });
+    // The ledger records it by name alone.
+    expect(github.repository.token.opaque).toEqual(["token"]);
+  });
+
   it.skipIf(live)("adds a read-only deploy key", async () => {
     play("app-deploy-key");
     const input = { installation: 7, repository: "acme/acme-ops", title: "acme host", key: KEY };
@@ -271,6 +341,41 @@ describe("fakeGithubApp", () => {
     await expect(
       call(fake.driver, "repository.head", { ...head, repository: "Sanoma-AI/company-template" }),
     ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("reads files at the default branch, a branch or a commit, leaving out a file not there", async () => {
+    const fake = fakeGithub();
+    await call(fake.driver, "repository.generate", generate);
+    const at = { installation: 7, repository: "acme/acme-ops" };
+    const paths = ["README.md", "sanoma.config.ts"];
+    expect(await call(fake.driver, "repository.files", { ...at, paths })).toEqual({ "README.md": "# Company\n" });
+    const { sha } = await call(fake.driver, "repository.commit", { ...at, branch: "setup", message: "Set up", files });
+    expect(await call(fake.driver, "repository.files", { ...at, paths, ref: "setup" })).toEqual({
+      "README.md": "# Company\n",
+      ...files,
+    });
+    expect(await call(fake.driver, "repository.files", { ...at, paths, ref: sha })).toMatchObject(files);
+    await expect(call(fake.driver, "repository.files", { ...at, paths, ref: "nope" })).rejects.toMatchObject({
+      status: 422,
+    });
+    await expect(
+      call(fake.driver, "repository.files", { ...at, repository: "Sanoma-AI/company-template", paths }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(fake.calls.filter((c) => c.op === "github.repository.files")).toHaveLength(5);
+  });
+
+  it("mints a token good for an hour for a repository of the installation's account, and no other", async () => {
+    const fake = fakeGithub();
+    await call(fake.driver, "repository.generate", generate);
+    const input = { installation: 7, repository: "acme/acme-ops", permissions: { contents: "write" } };
+    const minted = await call(fake.driver, "repository.token", input);
+    expect(minted.token).toMatch(/^ghs_[0-9a-f]{36}$/);
+    expect(Date.parse(minted.expiresAt) - Date.now()).toBeGreaterThan(3_500_000);
+    expect(github.repository.token.output.parse(minted)).toEqual(minted);
+    await expect(
+      call(fake.driver, "repository.token", { ...input, repository: "Sanoma-AI/company-template" }),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(fake.calls.map((c) => c.op)).toContain("github.repository.token");
   });
 
   it("makes the same SHA for the same parent, message and files", async () => {

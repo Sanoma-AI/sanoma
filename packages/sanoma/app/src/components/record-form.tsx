@@ -1,5 +1,5 @@
 import type { CollectionEntry } from "sanoma/workflows/describe";
-import { errorMessage, type Saved } from "sanoma/workflows/shared";
+import { errorMessage, isHidden, type Saved } from "sanoma/workflows/shared";
 import { useMutation } from "@tanstack/react-query";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
@@ -23,7 +23,6 @@ import { errorsOf, FieldView, FormFoot, useSchemaForm } from "../form/start-form
 import { api } from "../site-api.ts";
 import { Notice } from "./common.tsx";
 import { type RecordsView, savedIn } from "./grid/collection.ts";
-import { isHidden } from "./grid/plan.ts";
 import { STAGED_FIRST } from "./grid/staged.tsx";
 import { HistoryLink } from "./record-history.tsx";
 
@@ -62,10 +61,8 @@ export function RecordForm({
   actor: string | null | undefined;
   onDone: () => void;
 }) {
-  const fields = useMemo(
-    () => (fieldsOf(record) ?? []).filter((field) => !isHidden(declared[field.key])),
-    [record, declared],
-  );
+  // A hidden field's schema is marked `deprecated`, which `fieldsOf` leaves out.
+  const fields = useMemo(() => fieldsOf(record) ?? [], [record]);
   const defaultValues = useMemo(() => {
     if (saved) return initialValues(fields, saved.record);
     const people = actor ? fields.filter((f) => f.kind === "person").map((f) => [f.key, actor]) : [];

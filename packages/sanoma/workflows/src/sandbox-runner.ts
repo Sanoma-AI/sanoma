@@ -51,7 +51,7 @@ const { SANOMA_RUNNER_PORT: _, SANOMA_RUNNER_HOST: __, ...own } = process.env;
 const box = localBox("runner", homedir(), own as Record<string, string>);
 
 const server = createServer((req, res) => {
-  if (req.url !== RUNNER_HEALTH) return void res.writeHead(404).end();
+  if (req.url?.split("?")[0] !== RUNNER_HEALTH) return void res.writeHead(404).end();
   res
     .writeHead(200, { "content-type": "application/json" })
     .end(JSON.stringify({ protocol: RUNNER_PROTOCOL, pid: process.pid } satisfies RunnerHealth));

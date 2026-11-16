@@ -150,6 +150,12 @@ describe("login", () => {
     expect(first).not.toBe(second);
     await Promise.all([first(databaseUrl), second(databaseUrl)]);
     expect(await tables()).toEqual(TABLES);
+    // Row-level security on each, not forced, with no policy: only their owner, the worker's login, reads them.
+    const { rows } = await pool.query<{ relname: string }>(
+      "SELECT relname FROM pg_class WHERE relnamespace = 'better_auth'::regnamespace AND relkind = 'r' AND relrowsecurity AND NOT relforcerowsecurity ORDER BY 1",
+    );
+    expect(rows.map((r) => r.relname)).toEqual(TABLES);
+    expect((await pool.query("SELECT FROM pg_policies WHERE schemaname = 'better_auth'")).rowCount).toBe(0);
   });
 
   it("is prepared again on the migrated schema, the same tables", async () => {

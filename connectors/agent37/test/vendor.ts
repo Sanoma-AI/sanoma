@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -13,7 +14,9 @@ import { RUNNER_HEALTH, RUNNER_PORT } from "sanoma/workflows";
 // workspace templates are names in memory, an image registered at once. Its `PATH` is a template's:
 // no pnpm, but a corepack that makes one. A stop, a delete and `close` end what an instance's execs
 // left running, as a fresh boot would; a sleep keeps it. The edge answers `/health` itself, on every
-// port, as Agent37's does. `answer` puts a reply ahead of the next request.
+// port, as Agent37's does, and asks every other request for the key (`X-Agent37-Key`) or a signed
+// link's token (`a37_token`, for its one port until it expires), which it strips before it forwards
+// the request. `answer` puts a reply ahead of the next request.
 
 export const KEY = "sk_live_test";
 
@@ -39,6 +42,8 @@ export interface Sent {
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const problem = (status: number, code: string) => json(status, { error: { code, message: code } });
+/** The edge's refusal of a request with no credential it takes, flat as its errors are. */
+const unauthorized = () => json(401, { error: "unauthorized" });
 
 export async function fakeAgent37Vendor() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-agent37-")));
@@ -50,8 +55,12 @@ export async function fakeAgent37Vendor() {
   const sent: Sent[] = [];
   /** Replies to give before the API answers, in order, each to the first request it matches. */
   const answers: { method: string; path: string; status: number; body: unknown }[] = [];
+  /** The signed links' tokens: the origin each opens at the edge, and when it expires, in ms. */
+  const tokens = new Map<string, { origin: string; expires: number }>();
   let seq = 0;
   const home = (id: string) => join(root, id);
+  /** Where a port of an instance is: its runner's own port for 7700, any other this machine's. */
+  const edge = (id: string, at: number) => `http://127.0.0.1:${at === RUNNER_PORT ? (runners.get(id)?.port ?? 1) : at}`;
   // The template's own programs: node, and corepack as far as the backend uses it.
   const bin = join(root, "bin");
   mkdirSync(bin);
@@ -147,7 +156,7 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
       mkdirSync(home(id), { recursive: true });
       return json(201, made);
     }
-    const [, id, action] = path.match(/^\/instances\/([^/]+)(?:\/(\w+))?$/) ?? [];
+    const [, id, action] = path.match(/^\/instances\/([^/]+)(?:\/([\w-]+))?$/) ?? [];
     const found = id ? instances.get(id) : undefined;
     if (!found) return problem(404, "not_found");
     if (method === "GET" && !action) return json(200, found);
@@ -163,6 +172,16 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
       if (found.status === "sleeping") found.status = "running";
       if (found.status !== "running") return problem(400, "invalid_request");
       return exec(found.id, body!.command);
+    }
+    if (method === "POST" && action === "signed-url") {
+      if (!["running", "sleeping", "waking"].includes(found.status)) return problem(400, "invalid_request");
+      const { port, ttl_seconds = 3600 } = body!;
+      const expires_at = Math.floor(Date.now() / 1000) + Math.min(Math.max(ttl_seconds, 60), 604_800);
+      const token = randomBytes(16).toString("hex");
+      const at = new URL(edge(found.id, port));
+      tokens.set(token, { origin: at.origin, expires: expires_at * 1000 });
+      at.searchParams.set("a37_token", token);
+      return json(200, { url: at.href, domain_urls: [], port, expires_at });
     }
     const move = {
       start: { to: "running", from: ["stopped", "sleeping", "running"] },
@@ -187,7 +206,15 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     if (url.host !== "api.agent37.com") {
       // The edge's: it answers `/health` itself, and keeps what the runner's health check carried.
       if (url.pathname === "/health") return json(200, { ok: true });
+      const token = url.searchParams.get("a37_token");
+      if (token !== null) {
+        const signed = tokens.get(token);
+        if (!signed || signed.origin !== url.origin || Date.now() >= signed.expires) return unauthorized();
+        url.searchParams.delete("a37_token");
+        return realFetch(new Request(url, request));
+      }
       if (url.pathname === RUNNER_HEALTH) headersSeen.push(String(request.headers.get("x-agent37-key")));
+      if (request.headers.get("x-agent37-key") !== KEY) return unauthorized();
       return realFetch(input, init);
     }
     const path = url.pathname.replace(/^\/v1/, "");
@@ -209,8 +236,7 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     /** Gives `reply` to the next `method path` request, ahead of the API. */
     answer: (method: string, path: string, status: number, body: unknown) =>
       answers.push({ method, path, status, body }),
-    /** Where a port of an instance is: its runner's own port for 7700, any other this machine's. */
-    edge: (id: string, at: number) => `http://127.0.0.1:${at === RUNNER_PORT ? (runners.get(id)?.port ?? 1) : at}`,
+    edge,
     async close() {
       await Promise.all([...runners.keys()].map(boot));
       rmSync(root, { recursive: true, force: true });

@@ -13,8 +13,13 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
 import { Field, FieldLabel } from "#/components/ui/field.tsx";
@@ -22,10 +27,10 @@ import { Input } from "#/components/ui/input.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { TableHead } from "#/components/ui/table.tsx";
 import { issueText } from "../form/schema.ts";
-import { type DataSearch, enumFields, LIMIT_CHOICES } from "../queries.ts";
+import { type ColumnSearch, type DataSearch, enumFields, LIMIT_CHOICES } from "../queries.ts";
 import { plural, Tip, ToneBadge } from "./common.tsx";
 import { STAGED_FIRST } from "./grid/staged.tsx";
-import { shownFields } from "./grid/plan.ts";
+import { hiddenFields, shownFields } from "./grid/plan.ts";
 
 // A collection's grid's pieces around the cells (`grid/` draws the grid): its filters, sorted by
 // any field, filtered by key and by each enum field, at most `limit` of them, some fields hidden;
@@ -134,8 +139,9 @@ export function GridFilters({
 
 /**
  * Which fields the grid shows (`?hide=`): a menu of the fields but the key, which names each
- * row, and New column (the column panel, `grid/columns.tsx`); while some are hidden, a chip
- * saying how many that shows them all again.
+ * row, New column and Hidden columns, the fields hidden for everyone, each with Show again and
+ * Remove for good… (each a change in the column panel, `grid/columns.tsx`); while some are hidden
+ * in this view, a chip saying how many that shows them all again.
  */
 function HiddenFields({
   collection,
@@ -149,12 +155,14 @@ function HiddenFields({
   const fields = shownFields(collection.fields).filter((field) => field !== collection.key);
   // A collection declared in code (no data file) changes its columns there.
   const changes = collection.declared !== undefined;
+  const removed = changes ? hiddenFields(collection.fields) : [];
   if (fields.length === 0 && !changes) return null;
   const hidden = fields.filter((field) => hide.includes(field));
   const toggle = (field: string, shown: boolean) => {
     const next = shown ? hidden.filter((f) => f !== field) : [...hidden, field];
     set({ hide: next.length ? next : undefined });
   };
+  const open = (column: ColumnSearch) => set({ column, record: undefined, new: undefined });
   return (
     <div className="flex items-center gap-2">
       <DropdownMenu>
@@ -173,10 +181,23 @@ function HiddenFields({
             </DropdownMenuCheckboxItem>
           ))}
           {changes && fields.length > 0 && <DropdownMenuSeparator />}
-          {changes && (
-            <DropdownMenuItem onClick={() => set({ column: { change: "add" }, record: undefined, new: undefined })}>
-              New column
-            </DropdownMenuItem>
+          {changes && <DropdownMenuItem onClick={() => open({ change: "add" })}>New column</DropdownMenuItem>}
+          {removed.length > 0 && (
+            <DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Hidden columns</DropdownMenuLabel>
+              {removed.map((field) => (
+                <DropdownMenuSub key={field}>
+                  <DropdownMenuSubTrigger>{field}</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={() => open({ change: "show", field })}>Show again</DropdownMenuItem>
+                    <DropdownMenuItem variant="destructive" onClick={() => open({ change: "remove", field })}>
+                      Remove for good…
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ))}
+            </DropdownMenuGroup>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -194,14 +215,26 @@ function HiddenFields({
 /**
  * A field's heading, sorting by it: ascending, then descending, then by key again; disabled while
  * a change is `staged`. Not preloaded: hovering a heading would read the records in its order.
+ * A free-form field's (`sortable` false) is its name alone: `list` sorts by no free-form field.
  */
 export function SortHead({
   field,
   order,
   staged,
+  sortable = true,
   children,
   ...props
-}: { field: string; order: string | undefined; staged: boolean } & ComponentProps<typeof TableHead>) {
+}: { field: string; order: string | undefined; staged: boolean; sortable?: boolean } & ComponentProps<
+  typeof TableHead
+>) {
+  if (!sortable) {
+    return (
+      <TableHead {...props}>
+        {field}
+        {children}
+      </TableHead>
+    );
+  }
   const sort = order === field ? "ascending" : order === `-${field}` ? "descending" : undefined;
   const next = sort === undefined ? field : sort === "ascending" ? `-${field}` : undefined;
   const Icon = sort === "ascending" ? ArrowUpIcon : sort === "descending" ? ArrowDownIcon : ArrowsDownUpIcon;
@@ -239,7 +272,7 @@ export function Value({ value }: { value: unknown }) {
 export function IssuesFlag({ issues }: { issues: NonNullable<Saved["issues"]> }) {
   const text = issues.map(issueText).join("; ");
   return (
-    <Tip tip={`Saved before its fields changed: ${text}`}>
+    <Tip tip={`Fix before saving it again: ${text}`}>
       <ToneBadge tone="bad" tabIndex={0}>
         needs fixing
       </ToneBadge>

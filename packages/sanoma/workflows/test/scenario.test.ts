@@ -348,7 +348,7 @@ describe("parseFeature", () => {
       /^scenarios\/x\.feature:3: no operation "ghost\.post\.burn"; the config has bluesky\.post\.create, ghost\.post\.create, /,
     );
     expect(await thrown(`Feature: A\n  Scenario: S\n    When refund runs\n`)).toBe(
-      'scenarios/x.feature:3: no workflow "refund"; the config has adopt, announce, apply, call, change, chat, connect-existing, drift, follow, go-live, go-live-cloud, go-live-host, patch, save-draft',
+      'scenarios/x.feature:3: no workflow "refund"; the config has adopt, announce, apply, call, change, chat, connect-existing, drift, follow, go-live, go-live-cloud, go-live-host, patch, reshape, save-draft',
     );
   });
 
@@ -1673,6 +1673,20 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
         scenarioOf('    Given a visitor "a@example.com" is acting\n    And bo is acting\n    When refund runs\n'),
       ),
     ).rejects.toThrow("scenarios/people.feature:4: visitor:scenario:visitor is acting already: a run has one actor");
+  });
+
+  it("reads an api token acting for a subject, in visitors", async () => {
+    const [token] = await parsePeople(
+      scenarioOf('    Given an api token "cli" for "visitor:better-auth:ada" is acting\n    When refund runs\n'),
+    );
+    expect(token!.startedBy).toEqual({ id: "token:cli", groups: ["visitors"], subject: "visitor:better-auth:ada" });
+    expect(token!.steps[0]).toEqual({
+      text: 'an api token "cli" for "visitor:better-auth:ada" is acting',
+      kind: "given",
+    });
+    await expect(
+      parsePeople(scenarioOf('    Given an api token "two words" for "ada" is acting\n    When refund runs\n')),
+    ).rejects.toThrow('"two words" is no api token\'s id');
   });
 
   it("refuses someone, or a group, the data files do not declare, and a second actor", async () => {

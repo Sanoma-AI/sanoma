@@ -121,12 +121,26 @@ export const branchPath = (branch: string) => branch.split("/").map(encodeURICom
 
 const AccessToken = z.object({ token: z.string(), expires_at: z.string() });
 
+/** An installation token as `github.repository.token` answers it, and Sanoma Cloud's `cloud-token` too. */
+export const MintedToken = z.object({
+  token: z.string().describe("The installation token (`ghs_…`)"),
+  expiresAt: z.iso.datetime({ offset: true }).describe("When its hour is out, as GitHub says"),
+});
+
 /**
  * An installation token of the App, minted with its JWT, good for an hour; for the repository
- * `name` alone when given, which GitHub refuses (422) when the installation does not cover it.
+ * `name` alone when given, which GitHub refuses (422) when the installation does not cover it,
+ * and with only `permissions` when given (`{ contents: "write" }`), which GitHub refuses (422)
+ * beyond what the installation holds.
  */
-export async function installationToken(jwt: string, installation: number, name?: string) {
-  const scope = name === undefined ? undefined : { repositories: [name] };
-  const made = await ok(jwt, "POST", `/app/installations/${installation}/access_tokens`, AccessToken, scope);
+export async function installationToken(
+  jwt: string,
+  installation: number,
+  name?: string,
+  permissions?: Record<string, "read" | "write">,
+) {
+  const scope = { ...(name !== undefined && { repositories: [name] }), ...(permissions && { permissions }) };
+  const path = `/app/installations/${installation}/access_tokens`;
+  const made = await ok(jwt, "POST", path, AccessToken, Object.keys(scope).length ? scope : undefined);
   return { token: made.token, expiresAt: Date.parse(made.expires_at) };
 }

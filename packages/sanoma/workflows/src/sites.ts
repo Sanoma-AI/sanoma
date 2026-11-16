@@ -6,7 +6,7 @@ import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
 import { moduleSpecifier, stringValue, unwrap } from "./outline.ts";
 import { exportsOf, loadModules } from "./load.ts";
-import { APPS_DIR, appFolders, filesUnder, isDirectory, RELATIVE, relPath, SITE_ENTRIES } from "./paths.ts";
+import { APPS_DIR, appFolders, filesUnder, isDirectory, relPath, SITE_ENTRIES } from "./paths.ts";
 import { isObject } from "./resource.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { START } from "./schema.ts";
@@ -409,13 +409,14 @@ function readSiteFile({ program, at }: SourceFile, file: string, routed: boolean
       if (name !== undefined) found.push({ kind: "workflow", name, via: "RunForm", file, ...at(node.start) });
     } else if (node.importKind !== "type" && node.exportKind !== "type") {
       const source = moduleSpecifier(node);
-      if (source !== undefined && RELATIVE.test(source))
+      // A relative path, or a bare `.` or `..`, which Vite resolves as a path too.
+      if (source !== undefined && /^\.\.?(?:\/|$)/.test(source))
         imports.push(posix.join(posix.dirname(file), source).replace(/\/$/, ""));
-      // An `import()` not written out, a package's `#import`, a root's `/…` or a bare `.` or `..` (not followed), or `api` or `RunForm` taken.
+      // An `import()` not written out, a package's `#import` or a root's `/…` (not followed), or `api` or `RunForm` taken.
       else if (
         source === undefined
           ? node.type === "ImportExpression"
-          : /^(?:#|\/|\.\.?$)/.test(source) || (SITE_ENTRIES.has(source) && takesCallers(node))
+          : /^[#/]/.test(source) || (SITE_ENTRIES.has(source) && takesCallers(node))
       )
         calls = true;
     }

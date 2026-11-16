@@ -6,7 +6,7 @@ One workspace package per vendor, each built on `sanoma/workflows`. A connector 
 
 | Path                                      | What it is                                                                                                                                                              |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`agent37/`](agent37/AGENTS.md)           | `@sanoma-ai/connector-agent37`: Agent37 instances, the boxes coding agents work in (the `Sandbox` contract) once a company declares one, driven through the runner      |
+| [`agent37/`](agent37/AGENTS.md)           | `@sanoma-ai/connector-agent37`: Agent37 instances, the boxes coding agents work in (the `Sandbox` contract), driven through the runner; box operations mint signed URLs |
 | [`anthropic/`](anthropic/AGENTS.md)       | `@sanoma-ai/connector-anthropic`: Anthropic's Claude models (a model half) on the company's key, and Claude Code (an agent part)                                        |
 | [`bluesky/`](bluesky/AGENTS.md)           | `@sanoma-ai/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake                                                                             |
 | [`cloudflare/`](cloudflare/AGENTS.md)     | `@sanoma-ai/connector-cloudflare`: a Container host that stops when idle, its Durable Object alarm that wakes it, and a zone's DNS records                              |

@@ -27,6 +27,8 @@ interface InstanceCreate {
   metadata: Record<string, string>;
   auto_sleep: boolean;
   idle_timeout_seconds: number;
+  /** The domains and addresses it may reach, up to 100; anywhere when left out. */
+  network?: { allow: string[] };
 }
 
 /** Agent37's error body: `{ error: { code, message } }`, or a flat `{ error: code }` from its edge. */
@@ -81,6 +83,18 @@ export function agent37Api(key: string, timeoutMs = 30_000) {
   }
   return {
     list: async () => (await send<{ data: Instance[] }>("GET", "/instances")).data,
+    /**
+     * A link to the instance's `port` that needs no key, its token in the `a37_token` parameter, for
+     * `ttlSeconds` (Agent37 clamps it to 60 s–7 days); it cannot be revoked before it expires.
+     */
+    signedUrl: async (id: string, port: number, ttlSeconds: number) => {
+      const { url, expires_at } = await send<{ url: string; expires_at: number }>(
+        "POST",
+        `/instances/${id}/signed-url`,
+        { port, ttl_seconds: ttlSeconds },
+      );
+      return { url, expiresAt: new Date(expires_at * 1000).toISOString() };
+    },
     get: (id: string) => send<Instance>("GET", `/instances/${id}`),
     /** Answers once the instance is `running`, which takes as long as its image takes to start: `ms`. */
     create: (body: InstanceCreate, ms: number) => send<Instance>("POST", "/instances", body, ms),
@@ -92,10 +106,10 @@ export function agent37Api(key: string, timeoutMs = 30_000) {
     remove: (id: string) => send("DELETE", `/instances/${id}`).then(() => undefined, unless("not_found")),
     /**
      * Runs `command` with `sh -c` as the image's user, buffered: no stdin, its output back once it
-     * has exited (each stream up to 512 KB), its body up to 128 KB.
+     * has exited (each stream up to 512 KB), its body up to 128 KB; waited for up to `ms`.
      */
-    exec: (id: string, command: string) =>
-      send<{ exit_code: number; stdout: string; stderr: string }>("POST", `/instances/${id}/exec`, { command }),
+    exec: (id: string, command: string, ms?: number) =>
+      send<{ exit_code: number; stdout: string; stderr: string }>("POST", `/instances/${id}/exec`, { command }, ms),
     /** The workspace's template `name`: `not_found` when it has none. */
     template: (name: string) => send<{ name: string }>("GET", `/templates/${name}`),
     /**

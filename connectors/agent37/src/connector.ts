@@ -1,4 +1,4 @@
-import { defineConnector, defineResource, vendorInfo } from "sanoma/workflows";
+import { defineConnector, defineResource, type OpSpec, vendorInfo } from "sanoma/workflows";
 import { z } from "zod";
 
 /*
@@ -115,5 +115,109 @@ export const instance = defineResource({
   },
 });
 
-/** The connector's operations: the instance type's (`read`, `import`, `plan`, `create`, `update`, `delete`). */
-export const agent37Ops = defineConnector("agent37", { instance }, vendorInfo(import.meta.url));
+const boxName = z.string().min(1).describe("The box's name, which it is found by");
+const groupName = z.string().min(1).describe("The group the box is labelled with, such as the company it is for");
+const ttl = z
+  .number()
+  .int()
+  .min(60)
+  .max(604_800)
+  .describe("How long the link works, in seconds: 60 to 604800 (7 days). It cannot be revoked sooner");
+/** A signed link to one port of a box: it needs no key until it expires. */
+const link = {
+  url: z.string().describe("The link: the port's URL with its token in `a37_token`"),
+  expiresAt: z.iso.datetime().describe("When the link stops working, ISO 8601"),
+};
+const ids = z.object({ ids: z.array(z.string()).describe("The instances it acted on") });
+const byName = ({ name }: { name: string }) => name;
+const byGroup = ({ group }: { group: string }) => `group/${group}`;
+
+/**
+ * Boxes opened by a caller that holds the key for someone who must not (Sanoma's control plane, for
+ * a company's own instance): each open or expose hands back a signed link, which reaches one port
+ * of the box with no key. A box is found by its name in its metadata, as the sandbox half finds one.
+ */
+const boxSpecs = {
+  open: {
+    // It makes or wakes a box, and mints a link that reaches it.
+    effect: "access",
+    // A retry finds the box made; each try mints another link. Opens of one name wait for each
+    // other in one process, not across processes.
+    idempotent: true,
+    description:
+      "Open the box `name` (find it or make it, labelled with `group`, wake it, start Sanoma's runner and put pnpm in it) and mint a signed link to its runner's port. A box of that name in another group, or in none, is refused. Opens of one name at once in two processes can make two boxes",
+    input: z.object({
+      name: boxName,
+      group: groupName,
+      network: z
+        .array(z.string().min(1))
+        .min(1)
+        .max(100)
+        .optional()
+        .describe(
+          "The domains and addresses a new box may reach, up to 100; anywhere when left out. A box that exists keeps its own",
+        ),
+      ttl,
+    }),
+    output: z.object({
+      id: z.string().describe("The box's instance"),
+      ...link,
+      protocol: z.number().int().describe("The runner protocol of this release, which the box's runner now speaks"),
+    }),
+    target: byName,
+    // A link that opens the box: the ledger records that there was one, not what it was.
+    opaque: ["url"],
+  },
+  expose: {
+    effect: "access",
+    idempotent: true,
+    description: "Mint a signed link to another port of the box `name`, such as an agent's bridge",
+    input: z.object({ name: boxName, port: z.number().int().min(1).max(65_535).describe("The port"), ttl }),
+    output: z.object(link),
+    target: byName,
+    opaque: ["url"],
+  },
+  sleep: {
+    effect: "write",
+    idempotent: true,
+    description: "Put the box `name` to sleep, its memory kept; nothing when there is none",
+    input: z.object({ name: boxName }),
+    output: ids,
+    target: byName,
+  },
+  discard: {
+    effect: "write",
+    // A box gone already is done.
+    idempotent: true,
+    description: "Delete the box `name`, or every box labelled with `group`",
+    input: z
+      .object({ name: boxName.optional(), group: groupName.optional() })
+      .refine(({ name, group }) => (name === undefined) !== (group === undefined), "give `name` or `group`, not both"),
+    output: ids,
+    target: ({ name, group }: { name?: string; group?: string }) => name ?? `group/${group}`,
+  },
+  list: {
+    effect: "read",
+    idempotent: true,
+    description: "The boxes labelled with `group`",
+    input: z.object({ group: groupName }),
+    output: z.object({
+      boxes: z.array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          awake: z
+            .boolean()
+            .describe("It is neither asleep, stopped nor failed: it counts toward the workspace's limit"),
+        }),
+      ),
+    }),
+    target: byGroup,
+  },
+} satisfies Record<string, OpSpec>;
+
+/**
+ * The connector's operations: the instance type's (`read`, `import`, `plan`, `create`, `update`,
+ * `delete`), and the boxes' (`box.open`, `.expose`, `.sleep`, `.discard`, `.list`).
+ */
+export const agent37Ops = defineConnector("agent37", { instance, box: boxSpecs }, vendorInfo(import.meta.url));
