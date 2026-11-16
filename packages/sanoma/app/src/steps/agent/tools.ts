@@ -400,7 +400,11 @@ export function catalogTools(
           const runId = heldRun(err);
           if (runId === undefined) throw err;
           yield { held: { runId } };
-          const run = await poll(runId, Date.now() + heldMs, (r) => isEnded(r.status), abortSignal);
+          let run = await poll(runId, Date.now() + heldMs, (r) => isEnded(r.status), abortSignal);
+          // A run read before its approval is recorded names no one it waits for: read it until it does.
+          if (run && !isEnded(run.status) && run.status !== "waiting") {
+            run = await settled(runId, DECIDED_WAIT_MS, abortSignal);
+          }
           if (run && !isEnded(run.status)) {
             yield stillHeld(run);
             return;

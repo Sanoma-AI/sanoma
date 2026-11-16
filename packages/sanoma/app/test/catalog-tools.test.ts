@@ -259,7 +259,7 @@ describe("the chat's catalog tools", () => {
   }, 120_000);
 
   it("name a group a held lookup still waits for as the approvals' pages do", async () => {
-    const bo = toolsFor("bo", `c-group-${RUN}`, "m1", 100);
+    const bo = toolsFor("bo", `c-group-${RUN}`, "m1", 0);
     const runId = heldCallRunId(CHAT_AGENT, catalogCallId(`c-group-${RUN}`, "m1", "g1"));
     expect(
       await outputs(bo.lookup.execute!({ op: "crm.customer.find", input: { name: "Audit" } }, options("g1"))),
