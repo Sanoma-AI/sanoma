@@ -73,10 +73,13 @@ export async function adminToken(key: string): Promise<string> {
   if (!id || !secret) {
     throw misconfigured(`GHOST_ADMIN_API_KEY is not an Admin API key (${ADMIN_API_KEY_FORMAT})`);
   }
+  // One clock reading for both claims: `setIssuedAt()` and `setExpirationTime("5m")` each read the
+  // clock, and across a second's boundary the token lived 301 seconds.
+  const now = Math.floor(Date.now() / 1000);
   return new SignJWT({})
     .setProtectedHeader({ alg: "HS256", kid: id, typ: "JWT" })
-    .setIssuedAt()
-    .setExpirationTime("5m")
+    .setIssuedAt(now)
+    .setExpirationTime(now + 5 * 60)
     .setAudience("/admin/")
     .sign(Buffer.from(secret, "hex"));
 }

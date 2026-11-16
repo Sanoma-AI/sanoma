@@ -2312,7 +2312,9 @@ describe("an app configured otherwise", () => {
   });
 
   it("boots with broken data files: lists the resources it could read, and the problems", async () => {
-    expect(warned).toEqual([
+    // This app's own boot warnings only: an earlier block's runs, interrupted as its app closed, can warn
+    // while this one starts (`did not write run.failed …`, `Workflow … was cancelled`).
+    expect(warned.filter((line) => line.startsWith("sanoma app:"))).toEqual([
       expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:28: /s),
     ]);
     const body = otherCtx.snapshot.description;
