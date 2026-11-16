@@ -20,7 +20,7 @@ import { useTestApp } from "sanoma/testing/harness";
 import { fakeSandbox } from "sanoma/testing/sandbox";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { copyFixture, ensureBuilt } from "../../test/fixture.ts";
+import { copyFixture, ensureBuilt, installInClone } from "../../test/fixture.ts";
 import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
@@ -221,7 +221,8 @@ export default defineWorkflow({
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
-  const source = localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! });
+  installInClone(dir, join(sandbox.root, "sanoma-harness%2Dtest-ada", "repo"));
+  const source = localGitSource(dir);
   // The worker runs the turns: with the checkout and the app's steps.
   await testApp.restart({ source, app: appSteps });
   app = await startApp(testApp.config, { port: 0, source });

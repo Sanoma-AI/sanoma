@@ -85,6 +85,7 @@ describe("a chat turn, on a worker with the app's steps", () => {
     pushCloud: failing,
     connectExisting: failing,
     saveDraft: failing,
+    check: failing,
     chat,
   };
   const app = useTestApp(config(), { databaseUrl: freshDatabase("chat_turns"), source, app: steps });

@@ -45,7 +45,8 @@ const config: SanomaConfig = { workflows: [], connectors: [remote.connector], co
 const testApp = useTestApp(config, {
   databaseUrl: testDatabaseUrl("app_columns"),
   source: repo.source,
-  app: appSteps,
+  // The draft's check as the box would answer it: the repository in memory has no box to carry to.
+  app: { ...appSteps, check: repo.app.check },
 });
 let app: App;
 

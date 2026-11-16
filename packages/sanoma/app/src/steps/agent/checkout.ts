@@ -136,18 +136,6 @@ export function drafting({ source }: Pick<AppStepContext, "source">): Drafting {
 }
 
 /**
- * `sanoma check` on the draft `id`, as the repository runs it (`Source.check`), for a draft's card
- * and the agent that drafts: its problems and warnings, without the grid, which a change's review reads.
- */
-export async function checks({ source }: Pick<AppStepContext, "source">, id: string): Promise<CheckResult> {
-  if (!source?.check) {
-    return { ok: false, problems: ["sanoma check: this instance's repository cannot check a draft"], warnings: [] };
-  }
-  const { grid: _, ...checked } = await source.check(id);
-  return checked;
-}
-
-/**
  * The coding agents' state of the kind `kind`, kept across restarts under `.sanoma/agent-home`,
  * one directory per kind: `boxes`, the local backend's boxes (`boxes/<name>`, each a person's
  * home for the company: their company-key sessions' bridges' installs and run files, Pi's
@@ -203,24 +191,23 @@ export const turnMessage = ({ messages }: Pick<EngineTurn, "messages">, title: s
   `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
 
 /**
- * A coding agent's turn's new commits on the chat's draft, made in its box and carried back (`carryOut`), its
- * change told (`tellCommits`), then, unless a new message stopped the turn (the next turn shows
- * the card), the draft's card (`data-draft`) from its checks and its diff.
+ * A coding agent's turn's new commits on the chat's draft, made in its box and carried back
+ * (`carryOut`), its change told (`tellCommits`), then, unless a new message stopped the turn (the
+ * next turn shows the card), the draft's card (`data-draft`) from its diff and `checked`, the
+ * check the turn ran in its box (`checkIn`), without the grid, which a change's review reads.
  */
 export async function showCommits(
   { step, chat }: EngineTurn,
   draft: Draft,
   writer: UIMessageStreamWriter<ChatMessage>,
+  checked: CheckResult | undefined,
 ) {
   // Told even when the turn was stopped: the commit has landed.
   const told = tellCommits(step.client, chat.id, step.by);
-  if (step.signal.aborted) return told;
-  const [checked, diff] = await Promise.all([checks(step, chat.id), drafting(step).diff(chat.id), told]);
-  writer.write({
-    type: "data-draft",
-    id: "draft",
-    data: { draft: chat.id, branch: draft.branch, ...diff, checks: checked },
-  });
+  if (step.signal.aborted || !checked) return told;
+  const { grid: _, ...checks } = checked;
+  const [diff] = await Promise.all([drafting(step).diff(chat.id), told]);
+  writer.write({ type: "data-draft", id: "draft", data: { draft: chat.id, branch: draft.branch, ...diff, checks } });
 }
 
 /** The plans a coding agent runs on, by its part's name: a person's own, the company's key. */

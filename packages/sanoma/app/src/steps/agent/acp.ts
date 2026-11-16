@@ -1,12 +1,19 @@
 import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
-import { type Box, IMAGE_AGENTS, type OwnAgent, type Principal, type Process } from "sanoma/workflows";
+import {
+  type Box,
+  type CheckResult,
+  IMAGE_AGENTS,
+  type OwnAgent,
+  type Principal,
+  type Process,
+} from "sanoma/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "sanoma/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
 import { homeOf, OWN_AGENTS_DIR, personBox } from "./box-session.ts";
-import { boxTurn, carryIn, carryOut } from "./carrier.ts";
+import { boxTurn, carryIn, carryOut, checkIn } from "./carrier.ts";
 import {
   agentOn,
   allowedPaths,
@@ -33,7 +40,7 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // can reach other people's). One process per turn: the box opened (one turn in it at a time), the
 // chat's draft carried into its clone (`carryIn`), the agent started there, told the chat's earlier
 // messages as text, prompted, killed, what it changed committed in the box and carried back
-// (`carryOut`), the box stopped.
+// (`carryOut`) and checked there (`checkIn`), the box stopped.
 // Its permission requests, file reads and writes are answered by the checkout rule; the commands
 // it runs through our terminal are its own, in the box. A sign-in it asks for is shown in the chat
 // as the vendor's own flow.
@@ -128,9 +135,10 @@ async function runTurn(agent: TurnAgent<"own">, engineTurn: EngineTurn, writer: 
   const draft = await openDraft(step, chat);
   writer.write({ type: "start", messageId: generateId() });
   const relay = new Relay(writer);
-  /** Whether the box was opened, and whether its commits reached the draft. */
+  /** Whether the box was opened, whether its commits reached the draft, and their check in the box. */
   let opened = false;
   let carried = false;
+  let checked: CheckResult | undefined;
   try {
     // Opened last, so that nothing that fails before leaves it running; stopped however the turn ends.
     carried = await boxTurn(person.name, person.open, async (box) => {
@@ -172,10 +180,13 @@ async function runTurn(agent: TurnAgent<"own">, engineTurn: EngineTurn, writer: 
         await turn?.stop();
       }
       relay.finish();
-      // What it changed in the clone, committed there and carried back to the draft.
+      // What it changed in the clone, committed there and carried back to the draft, then checked
+      // there, unless a new message stopped the turn: its own turn checks.
       if (since === undefined) return false;
       const message = turnMessage(engineTurn, agent.title);
-      return carryOut(box, step.source, chat.id, { since, message, author: principal.id });
+      const moved = await carryOut(box, step.source, chat.id, { since, message, author: principal.id });
+      if (moved && !signal.aborted) checked = await checkIn(box, { signal });
+      return moved;
     });
   } catch (err) {
     if (opened) throw err;
@@ -183,8 +194,8 @@ async function runTurn(agent: TurnAgent<"own">, engineTurn: EngineTurn, writer: 
     if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
     relay.finish();
   } finally {
-    // Checked once the box is free: the turn's error, if any, follows the card.
-    if (carried) await showCommits(engineTurn, draft, writer);
+    // Shown once the box is free: the turn's error, if any, follows the card.
+    if (carried) await showCommits(engineTurn, draft, writer, checked);
   }
   writer.write({ type: "finish" });
 }

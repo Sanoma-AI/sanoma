@@ -26,7 +26,7 @@ import {
   undoDraftOf,
   type WorkflowFn,
 } from "./shared.ts";
-import type { RepoRef, Source } from "./source.ts";
+import type { CheckResult, RepoRef, Source } from "./source.ts";
 
 // The app's own actions on the company's repository, as built-in workflows: the app starts each
 // (its pages through `api.<name>`, polling `.result`) and the worker runs it, since only the
@@ -275,6 +275,12 @@ export interface AppSteps {
   /** A chat's draft saved: merged into `main` and run, without a remote; its change opened, with one. */
   saveDraft(step: AppStepContext, input: SaveDraftInput): Promise<SaveDraftOutput>;
   /**
+   * `sanoma check` on the draft `id`, in the box of the person the run is by, never on this
+   * instance (the change workflow's `check`): its result, every field kept; a box it cannot have
+   * is a result of one problem saying why.
+   */
+  check(step: AppStepContext, input: { id: string }): Promise<CheckResult>;
+  /**
    * A chat turn: the reply to the person's message, by the chat's engine, written to the chat's
    * transcript and, as it streams, to its chunks (`Chats.append`, then `Chats.end`). It writes its
    * own draft, not the checkout.
@@ -282,8 +288,8 @@ export interface AppSteps {
   chat(step: ChatTurnContext, input: ChatTurnInput): Promise<ChatTurnOutput>;
 }
 
-/** The app's steps an action's run calls (`AppRunner`): all but the chat's turn, which its own workflow runs. */
-export type AppAction = Exclude<keyof AppSteps, "chat">;
+/** The app's steps an action's run calls (`AppRunner`): all but the chat's turn and a draft's check, which their own workflows run. */
+export type AppAction = Exclude<keyof AppSteps, "chat" | "check">;
 
 /** The actions whose step answers what to apply after its write. */
 type Applying = {

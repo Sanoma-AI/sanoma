@@ -21,7 +21,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { localGitSource } from "../../src/source.ts";
-import { copyFixture, ensureBuilt } from "../../test/fixture.ts";
+import { copyFixture, ensureBuilt, installInClone } from "../../test/fixture.ts";
 import { gitIdentity } from "../../test/git.ts";
 import { type FakeRemote, fakeRemote } from "../../workflows/test/fakes/remote.ts";
 import { freshDatabase } from "../../workflows/test/harness.ts";
@@ -32,7 +32,8 @@ import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { proposeColumnChange } from "../src/server/columns.ts";
-import { checks, tellCommits } from "../src/steps/agent/checkout.ts";
+import { checkDraft } from "../src/steps/agent/box-session.ts";
+import { boxName, tellCommits } from "../src/steps/agent/checkout.ts";
 import { change, openChange } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { appSteps } from "../src/steps/index.ts";
@@ -142,7 +143,9 @@ beforeAll(async () => {
     ledger: memoryLedger(),
     databaseUrl,
   };
-  source = localGitSource(dir, { databaseUrl });
+  source = localGitSource(dir);
+  // Where alice's drafts are checked: her local box.
+  installInClone(dir, join(dir, ".sanoma/agent-home/boxes", boxName(resolveConfig(config).appName, "alice"), "repo"));
   worker = await startTestWorker(config, { databaseUrl, source, app: appSteps });
   client = await SanomaClient.connect(config);
   app = await startApp(config, { port: 0, source });
@@ -156,8 +159,8 @@ afterAll(async () => {
   for (const at of [dir, origin, gitConfig]) if (at) rmSync(at, { recursive: true, force: true });
 });
 
-/** How long a round may take to ask Publish: a push, `sanoma check` on the draft as a child process, the plan. */
-const ROUND_MS = 50_000;
+/** How long a round may take to ask Publish: a push, `sanoma check` on the draft in alice's box, the plan. */
+const ROUND_MS = 120_000;
 
 /** Opens the draft `id` of alice's chat titled `title`, committing `files` on it: the draft. */
 async function drafted(id: string, title: string, files: Record<string, string>) {
@@ -168,36 +171,43 @@ async function drafted(id: string, title: string, files: Record<string, string>)
   return draft;
 }
 
-// Each round runs `sanoma check` as a child process, so a test waits up to `ROUND_MS` for one, and more.
+// Each round runs `sanoma check` in alice's box, so a test waits up to `ROUND_MS` for one, and more.
 describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () => {
   let runId = "";
   let draft: Awaited<ReturnType<typeof drafted>>;
 
-  it("offers Save and Review on the draft's card once sanoma check passes on the draft", async () => {
-    draft = await drafted("rules", TITLE, { "policies/hello.cedar": ADMIN_SKIPS, "resources/people.ts": WITH_SUPPORT });
-    // The card as the agent's turn writes it: the draft's diff and its checks, as the app runs them.
-    const card = {
-      draft: "rules",
-      branch: draft.branch,
-      ...(await source.diff!("rules")),
-      checks: await checks({ source }, "rules"),
-    };
-    expect(card.files).toEqual(["policies/hello.cedar", "resources/people.ts"]);
-    expect(card.checks).toMatchObject({ ok: true, problems: [] });
-    // The app's own answers, as its root loader and the card's query read them.
-    const context = {
-      client,
-      resolved: resolveConfig(config),
-      snapshot: await appSnapshot(config, { source }),
-      local: { source },
-    } as unknown as AppContext;
-    const html = await renderDraftCard(card, {
-      remote: context.snapshot.repository?.remote !== undefined,
-      change: await change(context, "rules"),
-    });
-    expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Save to Maple Street Studio<\/button>/);
-    expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Review<\/button>/);
-  });
+  // The box's first check is cold: Postgres extracted and its cluster made, the bundle built.
+  it(
+    "offers Save and Review on the draft's card once sanoma check passes on the draft",
+    { timeout: 300_000 },
+    async () => {
+      draft = await drafted("rules", TITLE, {
+        "policies/hello.cedar": ADMIN_SKIPS,
+        "resources/people.ts": WITH_SUPPORT,
+      });
+      // The card as our loop's run_checks writes it: the draft's diff and its checks in alice's box.
+      const { grid: _, ...checks } = await checkDraft(
+        { source, resolved: resolveConfig(config), by: { id: "alice" }, client },
+        { id: "rules" },
+      );
+      const card = { draft: "rules", branch: draft.branch, ...(await source.diff!("rules")), checks };
+      expect(card.files).toEqual(["policies/hello.cedar", "resources/people.ts"]);
+      expect(card.checks).toMatchObject({ ok: true, problems: [] });
+      // The app's own answers, as its root loader and the card's query read them.
+      const context = {
+        client,
+        resolved: resolveConfig(config),
+        snapshot: await appSnapshot(config, { source }),
+        local: { source },
+      } as unknown as AppContext;
+      const html = await renderDraftCard(card, {
+        remote: context.snapshot.repository?.remote !== undefined,
+        change: await change(context, "rules"),
+      });
+      expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Save to Maple Street Studio<\/button>/);
+      expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Review<\/button>/);
+    },
+  );
 
   it("sends it for review: a pull request on the host, the change checked and waiting for admin", async () => {
     ({ runId } = await openChange({ client }, { id: "alice" }, "rules", app.url));

@@ -24,7 +24,7 @@ import { resolveConfig } from "sanoma/workflows";
 import { runEnded } from "sanoma/testing/host";
 import { getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { copyFixture, ensureBuilt } from "../../test/fixture.ts";
+import { copyFixture, ensureBuilt, installInClone } from "../../test/fixture.ts";
 import { gitIdentity } from "../../test/git.ts";
 import { localGitSource } from "../../src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
@@ -150,7 +150,8 @@ export default defineWorkflow({
   plant("pi", { signIn: "once", mode: "hello" });
   plant("codex", { signIn: "url", mode: "hello" });
   plant("claude-code", { signIn: "none", mode: "hello" });
-  const source = localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! });
+  installInClone(dir, join(dir, ".sanoma/agent-home/boxes", boxName("acp-test", "ada"), "repo"));
+  const source = localGitSource(dir);
   // The worker runs the turns: with the checkout and the app's steps.
   await testApp.restart({ source, app: appSteps });
   app = await startApp(testApp.config, { port: 0, source });
