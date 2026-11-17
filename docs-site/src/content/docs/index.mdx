@@ -1,0 +1,61 @@
+---
+title: Sanoma
+description: Run a company's operations as code. Workflows call vendors through connectors, policies say who may do what, and every call is kept in a ledger.
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+Sanoma runs a company's operations from one repository. Workflows are TypeScript functions that call vendors through connectors. Policies say who may start a workflow and which calls wait for approval. Every call is kept in a ledger.
+
+These pages are for the people and agents who write that repository.
+
+## Start here
+
+<CardGrid>
+  <LinkCard
+    title="Start a company"
+    href="/start/start-a-company/"
+    description="One command makes a repository and runs it."
+  />
+  <LinkCard
+    title="Install in a repository"
+    href="/start/install/"
+    description="What a repository holds and what the package brings."
+  />
+  <LinkCard
+    title="Writing workflows"
+    href="/workflows/writing-workflows/"
+    description="Define a connector's operations and the workflows that call them."
+  />
+  <LinkCard
+    title="People and policies"
+    href="/policies/people-and-policies/"
+    description="Who works here, and what each person and agent may do."
+  />
+  <LinkCard
+    title="Sites"
+    href="/sites/overview/"
+    description="Pages the app serves, inside the company or on a domain of their own."
+  />
+  <LinkCard
+    title="Scenarios and sandbox runs"
+    href="/testing/scenarios/"
+    description="Test a workflow against fake vendors, in plain steps."
+  />
+  <LinkCard
+    title="Hosting it yourself"
+    href="/hosting/self-hosting/"
+    description="Run the company on your own machines and accounts."
+  />
+  <LinkCard
+    title="Connectors"
+    href="/reference/connectors/"
+    description="Every connector's operations, with what each call sends and answers."
+  />
+</CardGrid>
+
+## Where things are
+
+- **Commands**: [the `sanoma` command](/reference/commands/) and [the files it writes](/reference/files/).
+- **Connectors**: each one's README on [GitHub](https://github.com/Sanoma-AI/sanoma/tree/main/connectors) says how to install and connect it. Its operations are listed under [Connectors](/reference/connectors/).
+- **Source**: [Sanoma-AI/sanoma](https://github.com/Sanoma-AI/sanoma).
