@@ -69,6 +69,12 @@ export interface BetterAuthSetup<O extends ExtraOptions> {
   hosts: ReadonlyMap<Protocol, readonly string[]>;
   /** The rest of the options, the same for each protocol's instance. */
   options: O;
+  /**
+   * What the login needs in its tables besides the migrations: `run` once per process for each
+   * database and `key`, on the first pool that finds the schema prepared, before any instance is
+   * made on it; a run that fails is tried again by the next request.
+   */
+  seed?: { key: string; run(pool: Pool): Promise<void> };
 }
 
 /**
@@ -84,8 +90,8 @@ export const TABLE_OPTIONS = {
 };
 
 /**
- * Each database and schema found prepared, for the process's life: a pool that finds its schema
- * prepared spares every pool on that database the check after it. A check in flight is its own
+ * Each database and schema found prepared (and seeded, with the seed's key), for the process's
+ * life: a pool that finds its schema prepared spares every pool on that database the check after it. A check in flight is its own
  * pool's and no one else's (on a Worker a request's pool goes with the request), so nothing waits
  * on another request's work, and a failed check leaves nothing behind.
  */
@@ -116,6 +122,7 @@ export function openBetterAuth<O extends ExtraOptions>({
   basePath,
   hosts,
   options,
+  seed,
 }: BetterAuthSetup<O>) {
   // Never Better Auth's own fallback (an environment variable, or its default secret).
   if (!/^[0-9a-f]{64}$/.test(key)) throw new Error("better-auth: the app gives no key to sign cookies with");
@@ -153,6 +160,10 @@ export function openBetterAuth<O extends ExtraOptions>({
     if (!prepared.has(found)) {
       await checkPrepared(pool, schema);
       prepared.add(found);
+    }
+    if (seed && !prepared.has(`${found}#${seed.key}`)) {
+      await seed.run(pool);
+      prepared.add(`${found}#${seed.key}`);
     }
     let auths = made.get(pool);
     if (!auths) made.set(pool, (auths = new Map()));

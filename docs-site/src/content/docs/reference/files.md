@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-`sanoma env` keeps `.env.example` the manual of the variables: `SANOMA_DATABASE_URL`, `SANOMA_APP_PORT`, `SANOMA_APP_HOST` and the GitHub sign-in variables first, with their defaults, then a block per vendor in the connectors' order, each variable its driver's `env` declares with its `.describe()` text. A required variable is `NAME=`; an optional one is commented out, `# NAME=`, with `Optional.` before its description. The same config gives the same text, which `--check` compares byte for byte. Copy bootstrap inputs to `.env` (ignored by git). Store-backed credential reads use `secrets.bindings` to select an environment variable explicitly; there is no environment-first fallback. Connector pages write to the selected store. Drivers still using their own `env` declarations remain a separate path until migrated to named authentication.
+`sanoma env` keeps `.env.example` the manual of the variables: `SANOMA_DATABASE_URL`, `SANOMA_APP_PORT`, `SANOMA_APP_HOST`, `SANOMA_HOSTNAME`, `SANOMA_HOST_URL` and the GitHub sign-in variables first, with their defaults, then a block per vendor in the connectors' order, each variable its driver's `env` declares with its `.describe()` text. A required variable is `NAME=`; an optional one is commented out, `# NAME=`, with `Optional.` before its description. The same config gives the same text, which `--check` compares byte for byte. Copy bootstrap inputs to `.env` (ignored by git). Store-backed credential reads use `secrets.bindings` to select an environment variable explicitly; there is no environment-first fallback. Connector pages write to the selected store. Drivers still using their own `env` declarations remain a separate path until migrated to named authentication.
 
 ## The lint
 
