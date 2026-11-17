@@ -518,6 +518,18 @@ export interface SocialClients {
 }
 
 /**
+ * An instance's one agent address, as it is configured, never read from a request: the issuer its
+ * staff login signs access tokens as (an OAuth authorization server's identifier, RFC 8414) and
+ * the resource they are for (the agent surface's URL, RFC 9728's resource identifier). Both are
+ * absolute URLs as a client compares them, with no trailing slash, on the app's own host or on
+ * another that reaches it.
+ */
+export interface AgentAddress {
+  issuer: string;
+  resource: string;
+}
+
+/**
  * What the app gives a connector's login half (`ConnectorSetup.login`) when it makes it: for a
  * public site, once per site; for the staff login, once, with `staff`.
  */
@@ -569,13 +581,12 @@ export interface LoginContext {
     /** Tells the app of a sign-in by `method` of the person `identity` names, which the ledger records. Must not throw. */
     record(method: SignInMethod, identity: LoginIdentity): Promise<void>;
     /**
-     * The agent surface's OAuth, when the app serves it: the path on the request's own origin
-     * that an access token is for (`/mcp`, its resource), and the declared agent that stands for
-     * an OAuth client, by the client's id (`agentOfClient`), as the files say when asked. The
-     * login is then the surface's authorization server, and refuses a client no agent stands for
-     * (`LoginHalf.bearer`).
+     * The agent surface's OAuth, when the instance has an agent address: that address, and the
+     * declared agent that stands for an OAuth client, by the client's id (`agentOfClient`), as
+     * the files say when asked. The login is then the surface's authorization server, and refuses
+     * a client no agent stands for (`LoginHalf.bearer`). Absent, the login serves no OAuth.
      */
-    oauth?: { resource: string; agentOf(client: string): string | undefined | Promise<string | undefined> };
+    oauth?: { address: AgentAddress; agentOf(client: string): string | undefined | Promise<string | undefined> };
   };
 }
 
@@ -592,8 +603,8 @@ export const LOGIN_PAGE = "/auth/login";
 export const CONSENT_PAGE = "/auth/consent";
 /**
  * RFC 9728's well-known path for a protected resource's metadata, the resource's own path
- * appended (`/.well-known/oauth-protected-resource/mcp`): what the login serves, and the app's
- * 401 at the resource points a client at.
+ * appended (`/.well-known/oauth-protected-resource/mcp`), on the resource's origin: what the login
+ * serves, and the app's 401 at the resource points a client at.
  */
 export const RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
 

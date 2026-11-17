@@ -446,6 +446,9 @@ describe("buildAppBundle", () => {
       await secure(`${app}/.well-known/oauth-authorization-server/auth/better-auth`)
     ).json()) as Record<string, unknown>;
     expect(server).toMatchObject({
+      // The Worker's agent address is its `SANOMA_HOSTNAME`'s: the issuer and its endpoints there.
+      issuer: `${app}/auth/better-auth`,
+      token_endpoint: `${app}/auth/better-auth/oauth2/token`,
       client_id_metadata_document_supported: true,
       code_challenge_methods_supported: ["S256"],
     });

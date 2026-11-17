@@ -25,7 +25,7 @@ import type { AdmittingLogin } from "../context.ts";
 import { type AppHandler, appHandler } from "../handler.ts";
 import { admitting } from "../login/admission.ts";
 import { publicFront, servedOnceMade, siteLogin } from "../login/public.ts";
-import { staffLogin } from "../login/staff.ts";
+import { agentAddressOf, staffLogin } from "../login/staff.ts";
 import { plain } from "../server/webhooks.ts";
 import { filePath, hasExtension, publicPath } from "../site-path.ts";
 import { servedOnWorker } from "../snapshot.ts";
@@ -79,7 +79,11 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
   // Each call made on the request's own client (`requests`), `tokens.resolve` and the logins' pool too.
   const client = member([]) as SanomaClient;
   const social = socialOf(env);
-  const staff = staffLogin(betterAuthStaffLogin, social);
+  // The agent address is the app's own hostname's (`SANOMA_HOSTNAME`), the one host besides the
+  // sites' the Worker answers on; a Worker with none (reached at its workers.dev name alone) has
+  // no address, and its staff login serves no OAuth.
+  const address = env.SANOMA_HOSTNAME ? agentAddressOf(env.SANOMA_HOSTNAME) : undefined;
+  const staff = staffLogin(betterAuthStaffLogin, social, address);
   const domains = env.SANOMA_DOMAINS ? domainsOf(env.SANOMA_DOMAINS) : {};
   // Each site the Worker serves, with its login half when it has one; another public site answers 503 on its hosts here.
   const sites = new Map<string, AdmittingLogin>();

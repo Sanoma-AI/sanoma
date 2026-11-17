@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { get } from "node:http";
+import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { betterAuthStaffLogin, declaredMetadataFetch, prepareBetterAuthStaff } from "sanoma/better-auth";
@@ -17,8 +18,9 @@ import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from ".
 // hosted instance, through the app on Node with the staff login (Better Auth's): a client of its
 // own (Claude Code's, by its published client id) finds the resource's and the authorization
 // server's metadata from the 401, signs a declared person in by email code, is asked their
-// consent, gets a JWT for the instance's own `/mcp` from a form POST with no Origin, and calls the
-// tools as the declared agent on that person's behalf. Claude Code's metadata document is served
+// consent, gets a JWT for the instance's configured `/mcp` from a form POST with no Origin, and
+// calls the tools as the declared agent on that person's behalf. The agent address is configured,
+// as `SANOMA_HOSTNAME` configures one: here the address the test's app listens on. Claude Code's metadata document is served
 // by a stand-in for claude.ai: nothing here leaves the machine.
 
 const UNDECLARED = "https://elsewhere.example/oauth/client.json";
@@ -70,19 +72,35 @@ const claudeAi = async (input: string | URL | Request): Promise<Response> => {
   return url === CLAUDE_CODE ? Response.json(CLAUDE_CODE_DOCUMENT) : new Response("Not found", { status: 404 });
 };
 
-let app: App;
-beforeAll(async () => {
-  await resetStaffSchema(databaseUrl);
-  await prepareBetterAuthStaff(databaseUrl);
-  app = await startApp(testApp.config, {
-    port: 0,
-    login: staffLogin((context) =>
+/** A port nothing listens on now: the address is configured before the app listens. */
+const freePort = () =>
+  new Promise<number>((resolve, reject) => {
+    const probe = createServer().once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+
+/** The staff login as `sanoma serve` composes it, its codes kept here and claude.ai a stand-in; `origin` is its agent address's, none without. */
+const loginAt = (origin?: string) =>
+  staffLogin(
+    (context) =>
       betterAuthStaffLogin(
         { ...context, sendCode: async (email, code) => void codes.set(email, code) },
         { fetchClientMetadata: declaredMetadataFetch(claudeAi) },
       ),
-    ),
-  });
+    {},
+    origin === undefined ? undefined : { issuer: `${origin}/auth/better-auth`, resource: `${origin}/mcp` },
+  );
+
+let app: App;
+beforeAll(async () => {
+  await resetStaffSchema(databaseUrl);
+  await prepareBetterAuthStaff(databaseUrl);
+  const port = await freePort();
+  app = await startApp(testApp.config, { port, login: loginAt(`http://127.0.0.1:${port}`) });
+  if (app.url !== `http://127.0.0.1:${port}`) throw new Error(`the app listens at ${app.url}, not at its address`);
 }, 60_000);
 afterAll(async () => {
   await app?.close();
@@ -310,10 +328,29 @@ describe("the agent surface on a host", () => {
     const run = await testApp.client.run(runId);
     expect(run?.startedBy).toEqual({ id: "claude-code", groups: ["agents"], onBehalfOf: "ada" });
 
-    // The token is for this host's /mcp alone: another host's /mcp refuses it, 401.
-    const elsewhere = await mcp("tools/list", {}, bearer, at("/mcp").replace("127.0.0.1", "localhost"));
-    expect(elsewhere.status).toBe(401);
-    expect(elsewhere.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
+    // The token is for the configured address's /mcp, whatever name the app is reached by: on
+    // another Host it is good too, and a client with none is sent to the configured address.
+    const elsewhere = at("/mcp").replace("127.0.0.1", "localhost");
+    expect((await mcp("tools/list", {}, bearer, elsewhere)).status).toBe(200);
+    const unsigned = await mcp("tools/list", {}, {}, elsewhere);
+    expect(unsigned.status).toBe(401);
+    expect(unsigned.headers.get("www-authenticate")).toBe(
+      `Bearer resource_metadata="${app.url}/.well-known/oauth-protected-resource/mcp"`,
+    );
+    const forged = await mcp("tools/list", {}, bearerOf(`${access_token.slice(0, -2)}AA`), elsewhere);
+    expect(forged.status).toBe(401);
+    expect(forged.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
+    // Nor is there a document for that Host: the one it serves there is the configured address's.
+    for (const path of [
+      "/.well-known/oauth-protected-resource/mcp",
+      "/.well-known/oauth-authorization-server/auth/better-auth",
+    ]) {
+      const document = await fetch(at(path).replace("127.0.0.1", "localhost"));
+      expect(document.headers.has("vary"), path).toBe(false);
+      const text = await document.text();
+      expect(text, path).not.toContain("localhost");
+      expect(text, path).toContain(`${app.url}/auth/better-auth`);
+    }
     // A loopback header is no sign-in on a host, beside a token or not.
     expect((await mcp("tools/list", {}, { ...bearer, [AGENT_HEADER]: "claude-code" })).status).toBe(400);
     expect((await mcp("tools/list", {}, { [ACTOR_HEADER]: "ada" })).status).toBe(401);
@@ -430,5 +467,57 @@ describe("the agent surface on a host", () => {
         expect([lost.status, lost.headers.get("content-type")], path).toEqual([404, "text/plain;charset=UTF-8"]);
       }
     }
+  });
+});
+
+describe("a host with no agent address", () => {
+  let plain: App;
+  beforeAll(async () => {
+    plain = await startApp(testApp.config, { port: 0, login: loginAt() });
+  }, 60_000);
+  afterAll(async () => {
+    await plain?.close();
+  });
+  const on = (path: string) => new URL(path, plain.url).href;
+
+  it("serves no OAuth for /mcp: its 401 names no scheme and says what to set, and nothing is discovered", async () => {
+    for (const headers of [{}, bearerOf("a.b.c")]) {
+      const refused = await mcp("tools/list", {}, headers, on("/mcp"));
+      expect([refused.status, refused.headers.get("www-authenticate")]).toEqual([401, null]);
+      expect(refused.body.error).toContain("Set SANOMA_HOSTNAME");
+    }
+    // A token the addressed app on the same database issued is nobody here.
+    const { access_token } = await tokens();
+    expect((await mcp("tools/list", {}, bearerOf(access_token), on("/mcp"))).status).toBe(401);
+    for (const path of [
+      "/.well-known/oauth-protected-resource/mcp",
+      "/.well-known/oauth-protected-resource",
+      "/.well-known/oauth-authorization-server/auth/better-auth",
+      "/auth/better-auth/oauth2/authorize?client_id=x",
+      "/auth/better-auth/jwks",
+    ]) {
+      expect((await fetch(on(path), { headers: { accept: "text/html" } })).status, path).toBe(404);
+    }
+    const token = await fetch(on("/auth/better-auth/oauth2/token"), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: "nothing", client_id: CLAUDE_CODE }),
+    });
+    expect(token.status).toBe(404);
+  });
+
+  it("still signs a person in, who reaches /mcp as themselves", async () => {
+    const post = (path: string, body: unknown) =>
+      fetch(on(path), {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: plain.url },
+        body: JSON.stringify(body),
+      });
+    await post("/auth/better-auth/email-otp/send-verification-otp", { email: ADA, type: "sign-in" });
+    const signed = await post("/auth/better-auth/sign-in/email-otp", { email: ADA, otp: codes.get(ADA) });
+    expect(signed.status).toBe(200);
+    const listed = await mcp("tools/list", {}, { cookie: cookieOf(signed) }, on("/mcp"));
+    expect(listed.status).toBe(200);
+    expect(listed.body.result.tools.map((t: { name: string }) => t.name)).toContain("start_run");
   });
 });

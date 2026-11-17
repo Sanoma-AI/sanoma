@@ -1,9 +1,9 @@
 import {
+  type AgentAddress,
   INVITE_SECONDS,
   type LoginContext,
   type LoginHalf,
   type LoginMethod,
-  requestOrigin,
   RESOURCE_METADATA,
   sameOrigin,
   type SignInMethod,
@@ -113,16 +113,19 @@ const SERVER_METADATA_FIELDS = [
 /** The routes of the email code, which answer only when the app can send one. */
 const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
 
-/** RFC 8414's metadata for the issuer, `<origin>/auth/better-auth`: the issuer's path appended to the well-known one. */
-const SERVER_METADATA = `/.well-known/oauth-authorization-server${BASE_PATH}`;
+/** RFC 8414's well-known path, which an issuer's own path is appended to. */
+const SERVER_METADATA = "/.well-known/oauth-authorization-server";
 
 /**
- * How the metadata documents may be kept: each is made from the request's `Host` and protocol
- * (`x-forwarded-proto`, which the login trusts for its own base URL too, as a proxy in front
- * sets it; on Node with none in front, a client may set it, and fools only its own answer), so
- * by the browser or the client alone, and only for that host and protocol.
+ * How the metadata documents may be kept: five minutes, by the browser or the client alone. Each
+ * is the configured address's, the same whatever the request says, and changes only with the
+ * instance's configuration, which a client should not go on reading from a cache between it and
+ * the instance.
  */
-const DISCOVERY_CACHE = { "cache-control": "private, max-age=300", vary: "Host, X-Forwarded-Proto" };
+const DISCOVERY_CACHE = { "cache-control": "private, max-age=300" };
+
+/** A path's own part of a URL, without a trailing slash: an issuer's or a resource's, as its well-known path takes it. */
+const pathOf = (url: string) => new URL(url).pathname.replace(/\/+$/, "");
 
 /** The app's OAuth context (`LoginContext.staff.oauth`). */
 type OAuthContext = NonNullable<NonNullable<LoginContext["staff"]>["oauth"]>;
@@ -148,10 +151,6 @@ interface HookContext {
     };
   };
 }
-/** What `ensureResource` uses of Better Auth's adapter. */
-type ResourceAdapter = HookContext["context"]["adapter"] & {
-  create(query: { model: string; data: Record<string, unknown> }): Promise<unknown>;
-};
 /** What the account hooks read of Better Auth's account row. */
 interface Account {
   providerId: string;
@@ -259,7 +258,11 @@ export function betterAuthStaffLogin(
       plugins: [
         // Always there, for one shape of the API; without the app's OAuth context no client is
         // declared and `handle` serves none of the provider's routes.
-        ...oauthPlugins({ agentOf: oauth?.agentOf ?? (() => undefined), fetchClientMetadata }),
+        ...oauthPlugins({
+          agentOf: oauth?.agentOf ?? (() => undefined),
+          fetchClientMetadata,
+          address: oauth?.address,
+        }),
         magicLink({
           expiresIn: INVITE_SECONDS,
           storeToken: "hashed",
@@ -270,15 +273,6 @@ export function betterAuthStaffLogin(
       ],
       hooks: {
         before: createAuthMiddleware(async (ctx) => {
-          // An authorize `handle` accepted (a declared client, this host's own resource): its
-          // resource's row, made here, behind Better Auth's rate limit, which runs before any
-          // hook, so a run of requests with made-up hosts is held to it. The provider checks
-          // the resource before it looks for a session, so the row is there before a sign-in.
-          if (oauth && ctx.path === AUTHORIZE && ctx.request) {
-            const { refused, resource } = await authorizeAsked(ctx.request, oauth);
-            if (!refused) await ensureResource(ctx.context.adapter, resource);
-            return;
-          }
           // An undeclared email is answered as a declared one is, and nothing is stored or sent.
           if (ctx.path !== SEND_CODE) return;
           const email = (ctx.body as { email?: unknown } | undefined)?.email;
@@ -313,25 +307,26 @@ export function betterAuthStaffLogin(
 
   /**
    * A well-known path's answer, with the app's OAuth context: RFC 9728's metadata for the
-   * resource (`RESOURCE_METADATA`, at its path, and at the root for a client that looks there),
-   * naming this login, on the request's own host, as its one authorization server; and RFC 8414's
-   * for that issuer, which the provider answers itself. Both are made from the request's `Host`
-   * and protocol, so no shared cache may keep one for another (`DISCOVERY_CACHE`). Any other
-   * well-known path is a 404, never the sign-in page a client would take for a document: RFC
-   * 8414's at the root is not this issuer's, which has a path, and there is no OpenID provider.
+   * resource (`RESOURCE_METADATA`, at the configured resource's path, and at the root for a
+   * client that looks there), naming the configured issuer as its one authorization server; and
+   * RFC 8414's for that issuer, at the path the issuer implies, which the provider answers
+   * itself (it finds the path by its `jwt.issuer` too). Both say the configured address alone,
+   * whatever `Host` the request names: no host a request makes up gets a document of its own.
+   * Any other well-known path is a 404, never the sign-in page a client would take for a
+   * document: RFC 8414's at another path is not this issuer's, and there is no OpenID provider.
    */
-  async function discovery(request: Request, pathname: string, surface: OAuthContext): Promise<Response> {
-    if (pathname === `${RESOURCE_METADATA}${surface.resource}` || pathname === RESOURCE_METADATA) {
+  async function discovery(request: Request, pathname: string, { address }: OAuthContext): Promise<Response> {
+    if (pathname === `${RESOURCE_METADATA}${pathOf(address.resource)}` || pathname === RESOURCE_METADATA) {
       if (request.method !== "GET" && request.method !== "HEAD")
         return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
-      const { issuer, resource } = oauthOrigin(request, surface);
       return Response.json(
-        { resource, authorization_servers: [issuer], bearer_methods_supported: ["header"] },
+        { resource: address.resource, authorization_servers: [address.issuer], bearer_methods_supported: ["header"] },
         { headers: DISCOVERY_CACHE },
       );
     }
-    if (pathname === SERVER_METADATA) return serverMetadata(await (await authFor(request)).handler(request));
-    return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
+    if (pathname === `${SERVER_METADATA}${pathOf(address.issuer)}`)
+      return serverMetadata(await (await authFor(request)).handler(request), address);
+    return notFound();
   }
 
   /** The mints of this process, one after another. */
@@ -389,7 +384,8 @@ export function betterAuthStaffLogin(
     },
     async handle(request) {
       const { pathname } = new URL(request.url);
-      if (oauth && pathname.startsWith("/.well-known/")) return discovery(request, pathname, oauth);
+      // With no agent address no well-known path is a document of this login's: a 404 too.
+      if (pathname.startsWith("/.well-known/")) return oauth ? discovery(request, pathname, oauth) : notFound();
       if (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`)) return undefined;
       const route = pathname.slice(BASE_PATH.length);
       if (oauth && route === ERROR) return sentBack(request);
@@ -410,11 +406,12 @@ export function betterAuthStaffLogin(
         const token = /^bearer ([\w-]+\.[\w-]+\.[\w-]+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
         if (!token) return null;
         const own = await authFor(request);
-        const { issuer, resource } = oauthOrigin(request, oauth);
+        const { issuer, resource } = oauth.address;
         let payload: Awaited<ReturnType<typeof verifyJwsAccessToken>>;
         try {
-          // Signed with one of this login's keys, for this host's issuer and this host's resource
-          // alone, unexpired: jose checks `exp` and `nbf`. The public keys are read from the
+          // Signed with one of this login's keys, as the configured issuer and for the configured
+          // resource alone, whatever host the request came in on, unexpired: jose checks `exp`
+          // and `nbf`. The public keys are read from the
           // login's table (never over HTTP) through this request's instance, and kept by
           // `verifyJwsAccessToken` under `keysCache`: five minutes, read again at once for a key
           // id they lack (at most every thirty seconds), one read shared by those that wait.
@@ -469,34 +466,18 @@ export function betterAuthStaffLogin(
 }
 
 /**
- * What an authorize asks, and what is wrong with it: its client one no declared agent stands for
- * (`client`), or its resource not this host's own (`resource`). The one check `authorizing` and
- * the resource's row (`hooks.before`) share.
- */
-async function authorizeAsked(request: Request, surface: OAuthContext) {
-  const query = new URL(request.url).searchParams;
-  const client = query.get("client_id") ?? "";
-  const { resource } = oauthOrigin(request, surface);
-  const refused =
-    (await surface.agentOf(client)) === undefined
-      ? ("client" as const)
-      : query.get("resource") === resource
-        ? undefined
-        : ("resource" as const);
-  return { client, resource, refused };
-}
-
-/**
  * What authorize refuses before the provider sees it, on a page a person reads: a method but a
  * browser's GET; a client no declared agent stands for (the provider would only redirect to its
- * error page), saying where one is declared; a resource other than this host's own. Otherwise
- * undefined: the resource's row is made in the provider's pipeline (`hooks.before`), past Better
- * Auth's rate limit.
+ * error page), saying where one is declared; a resource other than the configured address's,
+ * whatever host the request names (the provider would refuse it too, having no row for it, but
+ * at the client's redirect). Otherwise undefined.
  */
 async function authorizing(request: Request, surface: OAuthContext): Promise<Response | undefined> {
   if (request.method !== "GET") return new Response(null, { status: 405, headers: { allow: "GET" } });
-  const { client, resource, refused } = await authorizeAsked(request, surface);
-  if (refused === "client") {
+  const query = new URL(request.url).searchParams;
+  const client = query.get("client_id") ?? "";
+  const { resource } = surface.address;
+  if ((await surface.agentOf(client)) === undefined) {
     // What is missing and where, never a declaration to paste: the client id is whatever the
     // link that sent the person here says, and a link anyone can send.
     return refusalPage(
@@ -508,7 +489,7 @@ async function authorizing(request: Request, surface: OAuthContext): Promise<Res
         `add would act for the people who sign in to it.`,
     );
   }
-  if (refused === "resource") {
+  if (query.get("resource") !== resource) {
     return refusalPage(
       400,
       "This sign-in asks for a resource this company does not serve.",
@@ -583,27 +564,11 @@ const GUARDS = new Map([
 ]);
 
 /**
- * The provider's row for `identifier`, this host's own `/mcp`, made the first time an authorize
- * for it is accepted: the provider issues a token only for a resource it has a row for, and
- * which hosts the app answers on is the request's to say, so the rows are made as they are
- * asked, each one this instance's own resource. Two at once make one (the identifier is unique).
+ * The provider's RFC 8414 answer, narrowed to `SERVER_METADATA_FIELDS`, public clients alone,
+ * each endpoint the configured issuer's own (the provider writes them on its base URL, which is
+ * the request's host: the issuer and its routes are one address); any other answer as it is.
  */
-async function ensureResource(adapter: ResourceAdapter, identifier: string): Promise<void> {
-  const where = [{ field: "identifier", value: identifier }];
-  if (await adapter.findOne({ model: "oauthResource", where })) return;
-  const now = new Date();
-  await adapter
-    .create({
-      model: "oauthResource",
-      data: { identifier, name: "Agent surface", createdAt: now, updatedAt: now },
-    })
-    .catch(async (err: unknown) => {
-      if (!(await adapter.findOne({ model: "oauthResource", where }))) throw err;
-    });
-}
-
-/** The provider's RFC 8414 answer, narrowed to `SERVER_METADATA_FIELDS`, public clients alone; any other answer as it is. */
-async function serverMetadata(answered: Response): Promise<Response> {
+async function serverMetadata(answered: Response, { issuer }: AgentAddress): Promise<Response> {
   if (answered.status !== 200) return answered;
   const headers = new Headers(answered.headers);
   headers.delete("content-length");
@@ -613,6 +578,7 @@ async function serverMetadata(answered: Response): Promise<Response> {
   const full = (await answered.json()) as Record<string, unknown>;
   const metadata: Record<string, unknown> = {};
   for (const field of SERVER_METADATA_FIELDS) if (full[field] !== undefined) metadata[field] = full[field];
+  for (const [route, field] of OAUTH_ROUTES) if (field !== undefined) metadata[field] = `${issuer}${route}`;
   metadata.token_endpoint_auth_methods_supported = ["none"];
   metadata.revocation_endpoint_auth_methods_supported = ["none"];
   return new Response(JSON.stringify(metadata), { status: 200, headers });
@@ -670,11 +636,8 @@ function ownAddress(redirect: string | null): boolean {
   return url.protocol === "https:" && !loopback;
 }
 
-/** The issuer and the resource on the request's own origin: `<origin>/auth/better-auth` and `<origin><resource>`. */
-function oauthOrigin(request: Request, oauth: { resource: string }) {
-  const origin = requestOrigin(request);
-  return { issuer: `${origin}${BASE_PATH}`, resource: `${origin}${oauth.resource}` };
-}
+/** No document, or no route, of this login's: never kept. */
+const notFound = () => new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
 
 const escape = (text: string) =>
   text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);

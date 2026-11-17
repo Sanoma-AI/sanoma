@@ -2,12 +2,13 @@ import { createCimdClientDiscovery } from "@better-auth/cimd";
 import { type ClientMetadataResourceFetch, getOAuthProviderState, oauthProvider } from "@better-auth/oauth-provider";
 import { APIError } from "better-auth/api";
 import { jwt } from "better-auth/plugins/jwt";
-import { CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
+import { type AgentAddress, CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
 
 // The staff login as an OAuth 2.1 authorization server for the agent surface (`/mcp`), whose
 // resource server is the app: Better Auth's oauth-provider, its JWT plugin (the access tokens
 // are JWTs, signed with keys kept in the schema's `jwks` table, so an instance per request on a
-// Worker signs with the keys every other one does) and the Client ID Metadata Document discovery
+// Worker signs with the keys every other one does, as the one configured issuer, for the one
+// configured resource: the instance's agent address) and the Client ID Metadata Document discovery
 // of `@better-auth/cimd` (a client is the HTTPS URL of its metadata document, as Claude Code's
 // is). No dynamic client registration: a client is admitted only as the declared agent that
 // stands for it.
@@ -29,6 +30,12 @@ export interface OAuthSetup {
   agentOf(client: string): string | undefined | Promise<string | undefined>;
   /** How a client's metadata document is fetched (`fetchClientMetadataResource`); only a declared client's ever is. */
   fetchClientMetadata: ClientMetadataResourceFetch;
+  /**
+   * The instance's agent address (`LoginContext.staff.oauth.address`): the issuer every token and
+   * the metadata name, and the one resource a token is issued for. Without one nothing is issued:
+   * the provider has no resource, and the login serves none of its routes.
+   */
+  address?: AgentAddress;
 }
 
 /** The CIMD discovery, as the provider takes one. */
@@ -50,7 +57,7 @@ const LATE = Symbol("late");
  * own extension, not the `cimd()` plugin: that plugin registers it on each instance's start with
  * an object of its own, which the provider's shared options then refuse the second time.
  */
-export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
+export function oauthPlugins({ agentOf, fetchClientMetadata, address }: OAuthSetup) {
   const make = () =>
     createCimdClientDiscovery({
       fetchClientMetadataResource: fetchClientMetadata,
@@ -98,15 +105,22 @@ export function oauthPlugins({ agentOf, fetchClientMetadata }: OAuthSetup) {
     },
   };
   return [
-    // The access tokens' keys, in the `jwks` table; no JWT on a session's responses.
-    jwt({ disableSettingJwtHeader: true }),
+    // The access tokens' keys, in the `jwks` table; no JWT on a session's responses. Its issuer
+    // is the one setting the provider reads for an access token's `iss`, the `iss` of authorize's
+    // redirect back (RFC 9207) and its metadata's `issuer`: the configured one, so none of them
+    // is a request's host (unset, each would be the base URL, which is the request's).
+    jwt({ disableSettingJwtHeader: true, ...(address && { jwt: { issuer: address.issuer } }) }),
     oauthProvider({
       loginPage: LOGIN_PAGE,
       consentPage: CONSENT_PAGE,
       scopes: SCOPES,
       grantTypes: ["authorization_code", "refresh_token"],
-      // The resource is this instance's own `/mcp` on the host asked (`ensureResource` in
-      // staff.ts), one row per host, every one this instance's: a client is not linked to each.
+      // The one resource is the configured address's, its row the provider's own seed
+      // (`seedResourcesOnce`, at each instance's start: a read, an insert only when the row is
+      // missing), never made for a request: the provider issues a token only for a resource it
+      // has a row for, and compares none with the request's host. It is the instance's, for
+      // every declared client: a client is not linked to it.
+      ...(address && { resources: [{ identifier: address.resource, name: "Agent surface" }] }),
       enforcePerClientResources: false,
       extensions: [{ clientDiscovery: discovery, claims: { accessToken: holding(agentOf) } }],
       // A consent is to let a client act as the agent the consent page named: kept by that agent

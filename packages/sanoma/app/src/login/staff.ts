@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   ADMIN,
+  type AgentAddress,
   CONSENT_PAGE,
   errorMessage,
   INVITE_SECONDS,
@@ -35,11 +36,14 @@ import { escapeHtml, type PageFrame, smallPage, wantsJson } from "./page.ts";
 // sign-in goes to. On Node and on a Worker alike: the half reaches the database through the
 // request's client, and keeps nothing between requests.
 // Here too: the sign-in page (`/auth/login`, and any page asked for signed out), an invite's
-// landing page and `POST /auth/invite`. And the agent surface's own sign-in: the half is the
-// authorization server for `/mcp` (`LoginContext.staff.oauth`), whose sign-in and consent pages
-// are these, and a request to `/mcp` with a bearer is the client's, checked by the half and
-// admitted as the declared agent that stands for that client, for the person who signed it in;
-// without one, `/mcp` answers the 401 that starts a client's sign-in.
+// landing page and `POST /auth/invite`. And the agent surface's own sign-in, when the instance has
+// an agent address (`AgentAddress`, one, configured: `agentAddressOf` the app's public hostname):
+// the half is the authorization server for `/mcp` (`LoginContext.staff.oauth`), whose sign-in and
+// consent pages are these, and a request to `/mcp` with a bearer is the client's, checked by the
+// half and admitted as the declared agent that stands for that client, for the person who signed
+// it in; without one, `/mcp` answers the 401 that starts a client's sign-in, which names the
+// configured address's metadata whatever host the request came in on. With no address there is
+// no OAuth: `/mcp` is a signed-in person's alone, and its 401 says what to set.
 
 /** Makes the staff login half from the app's context: `betterAuthStaffLogin`. */
 export type MakeStaffLogin = (context: LoginContext) => LoginHalf | Promise<LoginHalf>;
@@ -48,8 +52,20 @@ export type MakeStaffLogin = (context: LoginContext) => LoginHalf | Promise<Logi
 export type StaffSocial = SocialClients;
 
 const INVITE = "/auth/invite";
-/** The agent surface (`routes/mcp.ts`): the resource the half issues tokens for, and the one path a bearer is taken at. */
+/** The agent surface (`routes/mcp.ts`): the one path a bearer is taken at, and the path of the resource the half issues tokens for. */
 const MCP = "/mcp";
+/** The half's own routes (Better Auth's), where it is the issuer: the sign-in page posts there too. */
+const HALF = "/auth/better-auth";
+
+/**
+ * The agent address of an app reached at `hostname` over HTTPS (`SANOMA_HOSTNAME`): the staff
+ * login there as the issuer, `https://<hostname>/auth/better-auth`, and the agent surface as the
+ * resource, `https://<hostname>/mcp`.
+ */
+export function agentAddressOf(hostname: string): AgentAddress {
+  const origin = `https://${hostname.toLowerCase()}`;
+  return { issuer: `${origin}${HALF}`, resource: `${origin}${MCP}` };
+}
 
 /** A bearer, `Authorization: Bearer …` (the scheme in any case, RFC 9110 §11.1): what a client sends `/mcp` once signed in. */
 const hasBearer = (request: Request) => /^bearer \S/i.test(request.headers.get("authorization") ?? "");
@@ -78,8 +94,10 @@ const InviteBody = z.union([z.object({ email: z.string().email() }), z.object({ 
  * routes: `GET /auth/invite/<token>`, an invite's
  * landing page, and `POST /auth/invite`, which mints one (`invite`) for `{ email }` from someone
  * signed in, or for `{ request }` sealed under `SANOMA_SIGNING_KEY` (`sealInvite`): `{ url }`.
+ * With `address`, the instance's one agent address, the half is the agent surface's authorization
+ * server for it; with none it serves no OAuth, and no agent signs in to `/mcp`.
  */
-export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): LoginProvider {
+export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, address?: AgentAddress): LoginProvider {
   let app: AppContext | undefined;
   let half: LoginHalf | undefined;
   /** Whether `open` failed: the half is then never made, and the pages say so rather than "starting". */
@@ -150,7 +168,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
   const provider: LoginProvider = {
     name: "staff",
     // The half's (Better Auth's), which the sign-in page posts to as well.
-    signOut: "/auth/better-auth/sign-out",
+    signOut: `${HALF}/sign-out`,
     check() {},
     async open(context, snapshot) {
       app = context;
@@ -166,9 +184,12 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
           staff: {
             admits: async (identity) => (await admitted(identity)) !== undefined,
             social,
-            // The agent surface's authorization server: tokens for `/mcp`, and a client only as
-            // the agent the files declare for it, as they read now.
-            oauth: { resource: MCP, agentOf: async (id) => agentOfClient(id, (await people()).people) },
+            // The agent surface's authorization server, for the one configured address: tokens
+            // for its resource, and a client only as the agent the files declare for it, as they
+            // read now. With no address the half serves no OAuth.
+            ...(address && {
+              oauth: { address, agentOf: async (id) => agentOfClient(id, (await people()).people) },
+            }),
             // Never throws: the half made the session already, and the ledger's line is not its to lose it for.
             async record(method, identity) {
               const declared = await peopleIfRead();
@@ -203,8 +224,8 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       // A client's request: its bearer alone says who, or the 401 that sends it to sign in again;
       // another scheme gets the challenge that names the one taken here.
       if (byToken(request)) {
-        if (!hasBearer(request)) return challenge(request);
-        return (await tokenOf(request)) ? undefined : challenge(request, "invalid_token");
+        if (!hasBearer(request)) return challenge(address);
+        return (await tokenOf(request)) ? undefined : challenge(address, "invalid_token");
       }
       const signedIn = await identityOf(request);
       if (pathname === LOGIN_PAGE && request.method === "GET") {
@@ -219,7 +240,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
         return person ? consentPage(url, person) : signInPage(half, frame(), 401);
       }
       if (signedIn) return undefined;
-      if (atMcp(pathname)) return challenge(request);
+      if (atMcp(pathname)) return challenge(address);
       // A well-known path nobody answered is no document of this host's: a 404, whatever the
       // half serves there, never the sign-in page, which a client would read as one.
       if (pathname.startsWith("/.well-known/"))
@@ -377,14 +398,25 @@ export async function sendLoginCode(client: AppContext["client"], email: string,
 /**
  * The 401 a client gets at `/mcp` without a token it may use (RFC 6750, with RFC 9728's pointer to
  * the resource's metadata), which is what starts its sign-in; `error` says why one was refused.
+ * The metadata is the configured address's, on the resource's own origin, whatever host the
+ * request came in on: a client that reached the app by another name is sent to the one address
+ * tokens are issued for. With no address no client can sign in: the 401 names no scheme, and says
+ * what to set.
  */
-function challenge(request: Request, error?: "invalid_token"): Response {
-  const metadata = `${requestOrigin(request)}${RESOURCE_METADATA}${MCP}`;
+function challenge(address: AgentAddress | undefined, error?: "invalid_token"): Response {
+  if (!address) return refuse(401, NO_ADDRESS);
+  const resource = new URL(address.resource);
+  const metadata = `${resource.origin}${RESOURCE_METADATA}${resource.pathname}`;
   const why = error
     ? `error="${error}", error_description="The access token is not one this company's sign-in issued for its agent surface, or it expired", `
     : "";
   return refuse(401, "Sign in first", { "www-authenticate": `Bearer ${why}resource_metadata="${metadata}"` });
 }
+
+/** What `/mcp` says to a client on an instance with no agent address: why no agent signs in, and the setting that gives it one. */
+const NO_ADDRESS =
+  "No agent can sign in here: this instance has no agent address. Set SANOMA_HOSTNAME to the hostname the app is " +
+  "reached at over HTTPS (on the Cloudflare host, the container's hostname), and an agent signs in at https://<hostname>/mcp";
 
 /** A refusal as JSON saying why (`POST /auth/invite`'s, a server function's, `/mcp`'s), never kept, with `headers` besides. */
 const refuse = (status: number, error: string, headers: Record<string, string> = {}) =>

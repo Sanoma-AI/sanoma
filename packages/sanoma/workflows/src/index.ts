@@ -23,6 +23,7 @@ export {
   isSvgElement,
   INVITE_SECONDS,
   type KeyAgent,
+  type AgentAddress,
   type LoginContext,
   type LoginHalf,
   type LoginIdentity,

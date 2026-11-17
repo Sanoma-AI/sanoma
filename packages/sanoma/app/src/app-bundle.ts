@@ -30,8 +30,9 @@ export interface AppBundleEnv {
   DATABASE: { connectionString: string };
   /**
    * The app's own hostname: the staff's pages are served there, and a public site's on its domain
-   * (`SANOMA_DOMAINS`); a request for any other host answers 404. Unset, every host that is no
-   * site's domain is the app's.
+   * (`SANOMA_DOMAINS`); a request for any other host answers 404. It is the instance's agent
+   * address too (`agentAddressOf`): agents sign in at `https://<hostname>/mcp`. Unset, every
+   * host that is no site's domain is the app's, and its staff login serves no OAuth for `/mcp`.
    */
   SANOMA_HOSTNAME?: string;
   /** `<site>=<hostname>,…`: the public sites' domains (`domainsText`). */

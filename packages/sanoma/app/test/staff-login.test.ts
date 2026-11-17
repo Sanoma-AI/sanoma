@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppContext, LoginProvider } from "../src/context.ts";
 import type { AppSnapshot } from "../src/snapshot.ts";
 import { admitting } from "../src/login/admission.ts";
-import { staffLogin } from "../src/login/staff.ts";
+import { agentAddressOf, staffLogin } from "../src/login/staff.ts";
 import { readPeople } from "sanoma/workflows/describe";
 import { CLAUDE_CODE } from "./staff-oauth-helpers.ts";
 
@@ -15,6 +15,8 @@ import { CLAUDE_CODE } from "./staff-oauth-helpers.ts";
 // `POST /auth/invite`. Better Auth itself is `packages/sanoma/better-auth/test/staff.test.ts`'s.
 
 const APP = "https://acme.example";
+/** The instance's agent address: the app's own hostname's. */
+const ADDRESS = agentAddressOf("acme.example");
 const root = mkdtempSync(join(tmpdir(), "sanoma-staff-"));
 mkdirSync(join(root, "resources"));
 writeFileSync(
@@ -62,12 +64,12 @@ function fakeHalf(methods: LoginMethod[]): LoginHalf {
 
 const request = (
   path: string,
-  init: { cookie?: string; method?: string; body?: unknown; origin?: string; bearer?: string } = {},
+  init: { cookie?: string; method?: string; body?: unknown; origin?: string; bearer?: string; host?: string } = {},
 ) =>
-  new Request(new URL(path, APP), {
+  new Request(new URL(path, init.host ? `https://${init.host}` : APP), {
     method: init.method ?? (init.body === undefined ? "GET" : "POST"),
     headers: {
-      host: "acme.example",
+      host: init.host ?? "acme.example",
       "x-forwarded-proto": "https",
       ...(init.cookie && { cookie: init.cookie }),
       ...(init.bearer && { authorization: `Bearer ${init.bearer}` }),
@@ -76,8 +78,9 @@ const request = (
     ...(init.body !== undefined && { body: JSON.stringify(init.body) }),
   });
 
-/** A JSON-RPC request to `/mcp`, as a client posts one: no Origin, maybe a bearer. */
-const mcp = (bearer?: string) => request("/mcp", { method: "POST", ...(bearer && { bearer }) });
+/** A JSON-RPC request to `/mcp`, as a client posts one: no Origin, maybe a bearer, on the app's host unless `host` says another. */
+const mcp = (bearer?: string, host?: string) =>
+  request("/mcp", { method: "POST", ...(bearer && { bearer }), ...(host && { host }) });
 
 describe("staffLogin", () => {
   /** The runtime's table of spent invite-request nonces, as the client keeps it. */
@@ -106,6 +109,8 @@ describe("staffLogin", () => {
     stylesheet?: string,
     /** The company as its files say at a request (`open`'s `current`): the one snapshot unless given. */
     current?: (snapshot: AppSnapshot) => AppSnapshot | Promise<AppSnapshot>,
+    /** The instance's agent address; null for an instance with none. */
+    address: typeof ADDRESS | null = ADDRESS,
   ): Promise<LoginProvider> {
     const provider = staffLogin(
       async (given) => {
@@ -113,6 +118,7 @@ describe("staffLogin", () => {
         return fakeHalf(methods);
       },
       { github: { clientId: "id", clientSecret: "secret" } },
+      address ?? undefined,
     );
     const snapshot = { people: readPeople(root) } as AppSnapshot;
     await provider.open!(
@@ -420,10 +426,14 @@ describe("staffLogin", () => {
           : null;
       },
     };
-    const provider = staffLogin(async (given) => {
-      context = given;
-      return asking;
-    });
+    const provider = staffLogin(
+      async (given) => {
+        context = given;
+        return asking;
+      },
+      {},
+      ADDRESS,
+    );
     const snapshot = { people: readPeople(root) } as AppSnapshot;
     const app = { resolved: { appName: "acme-plumbing", name: "Acme Plumbing", root }, client, snapshot };
     await provider.open!(app as unknown as AppContext, () => {
@@ -540,8 +550,11 @@ describe("staffLogin", () => {
   describe("the agent surface's sign-in", () => {
     const METADATA = `${APP}/.well-known/oauth-protected-resource/mcp`;
 
-    it("gives the half its OAuth: tokens for /mcp, and the agent each client stands for, as the files say", async () => {
-      expect(context.staff!.oauth!.resource).toBe("/mcp");
+    it("gives the half its OAuth: the configured address, and the agent each client stands for, as the files say", async () => {
+      expect(ADDRESS).toEqual({ issuer: `${APP}/auth/better-auth`, resource: `${APP}/mcp` });
+      // A hostname is one address, however it is written.
+      expect(agentAddressOf("ACME.Example")).toEqual(ADDRESS);
+      expect(context.staff!.oauth!.address).toEqual(ADDRESS);
       expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("claude-code");
       expect(await context.staff!.oauth!.agentOf("https://elsewhere.example/client.json")).toBeUndefined();
     });
@@ -553,6 +566,52 @@ describe("staffLogin", () => {
       // Anywhere else, the sign-in page's answer as before, with no challenge.
       const fn = (await login.handle!(request("/_serverFn/abc", { method: "POST" })))!;
       expect([fn.status, fn.headers.get("www-authenticate")]).toEqual([401, null]);
+    });
+
+    it("names the configured address's metadata in the 401, whatever host the request came in on", async () => {
+      // The app reached by another name (an address, a proxy's own): the one address tokens are for.
+      for (const host of ["10.0.0.7:3000", "made-up.example"]) {
+        const refused = (await login.handle!(mcp(undefined, host)))!;
+        expect([refused.status, refused.headers.get("www-authenticate")], host).toEqual([
+          401,
+          `Bearer resource_metadata="${METADATA}"`,
+        ]);
+        const bad = (await login.handle!(mcp("at.nothing", host)))!;
+        expect(bad.headers.get("www-authenticate"), host).toMatch(
+          new RegExp(`^Bearer error="invalid_token", error_description="[^"]+", resource_metadata="${METADATA}"$`),
+        );
+        expect(bad.headers.get("www-authenticate"), host).not.toContain(host);
+        // A bearer the half takes is taken there too: the half checks it against the address, not the Host.
+        expect(await login.handle!(mcp(`at.ada@acme.test.${CLAUDE_CODE}`, host)), host).toBeUndefined();
+      }
+    });
+
+    it("gives the half no OAuth without an agent address, and /mcp's 401 says what to set", async () => {
+      const plain = await opened(["code", "invite"], true, undefined, undefined, null);
+      expect(context.staff!.oauth).toBeUndefined();
+      // No client can sign in: no challenge to follow, with or without a token, and the setting named.
+      for (const asked of [mcp(), mcp("at.nothing"), request("/mcp/", { method: "POST" })]) {
+        const refused = (await plain.handle!(asked))!;
+        expect([refused.status, refused.headers.get("www-authenticate")]).toEqual([401, null]);
+        expect(refused.headers.get("cache-control")).toBe("no-store");
+        expect(((await refused.json()) as { error: string }).error).toMatch(/no agent address\. Set SANOMA_HOSTNAME /);
+      }
+      // A half with no OAuth has no `bearer`: a token is nobody, whatever it says.
+      const { bearer: _bearer, ...halfWithout } = fakeHalf(["code", "invite"]);
+      const without = staffLogin(async () => halfWithout);
+      await without.open!(
+        { resolved: { appName: "acme-plumbing", name: "Acme Plumbing", root }, client } as unknown as AppContext,
+        () => ({ people: readPeople(root) }) as AppSnapshot,
+      );
+      const token = mcp(`at.ada@acme.test.${CLAUDE_CODE}`);
+      expect((await without.handle!(token))?.status).toBe(401);
+      expect(await without.resolveActor(token)).toBeUndefined();
+      // Someone signed in still reaches /mcp as themselves, as before, and every page signs in as it did.
+      const signedIn = request("/mcp", { method: "POST", cookie: "who=ada@acme.test" });
+      expect(await plain.handle!(signedIn)).toBeUndefined();
+      expect(await plain.resolveActor(signedIn)).toEqual({ email: "ada@acme.test" });
+      expect((await plain.handle!(request("/workflows")))?.status).toBe(401);
+      expect((await plain.handle!(request("/.well-known/oauth-protected-resource/mcp")))?.status).toBe(404);
     });
 
     it("answers a well-known path the half does not 404, never the sign-in page", async () => {

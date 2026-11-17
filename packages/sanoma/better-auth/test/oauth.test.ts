@@ -9,7 +9,7 @@ import { betterAuthStaffLogin } from "../src/staff.ts";
 import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-helpers.ts";
 
 // The staff login as the agent surface's authorization server: its metadata, a declared client's
-// sign-in by email code with PKCE, consent and a JWT for the instance's own `/mcp`, the token
+// sign-in by email code with PKCE, consent and a JWT for the configured address's `/mcp`, the token
 // endpoint taking a form with no Origin, an undeclared client refused before its document is
 // fetched, and the bearer checked for its issuer, audience, signature and expiry. Claude Code's
 // client metadata document is served by a stand-in for claude.ai: nothing here leaves the machine.
@@ -18,6 +18,7 @@ const databaseUrl = testDatabaseUrl("better_auth_oauth");
 const key = Buffer.from(hkdfSync("sha256", process.env.SANOMA_SIGNING_KEY!, "", "login staff", 32)).toString("hex");
 const HOST = "company.example";
 const ORIGIN = `https://${HOST}`;
+/** The instance's agent address, as the app configures it: the resource and the issuer on its own host. */
 const MCP = `${ORIGIN}/mcp`;
 const ISSUER = `${ORIGIN}/auth/better-auth`;
 const DECLARED = "alice@example.com";
@@ -77,7 +78,7 @@ const context: LoginContext = {
     admits: ({ email }) => email?.toLowerCase() === DECLARED,
     social: {},
     record: async () => undefined,
-    oauth: { resource: "/mcp", agentOf: (client) => agents.get(client) },
+    oauth: { address: { issuer: ISSUER, resource: MCP }, agentOf: (client) => agents.get(client) },
   },
 };
 let half: LoginHalf;
@@ -246,6 +247,13 @@ const signedOf = (search: string) => {
   ).toString();
 };
 
+/** A login on the same tables and keys, configured with another agent address. */
+const configured = (address: { issuer: string; resource: string }) =>
+  betterAuthStaffLogin(
+    { ...context, staff: { ...context.staff!, oauth: { ...context.staff!.oauth!, address } } },
+    { fetchClientMetadata: declaredMetadataFetch(network) },
+  );
+
 beforeAll(async () => {
   await resetStaffSchema(databaseUrl);
   await prepareBetterAuthStaff(databaseUrl);
@@ -294,18 +302,28 @@ describe("the staff login's discovery", () => {
       const asked = new Request(`http://${HOST}${path}`, { headers: { host: HOST, "x-forwarded-proto": proto } });
       const answered = (await half.handle(asked))!;
       expect(answered.status, proto).toBe(200);
-      expect(await answered.json(), proto).toMatchObject({ issuer: `${proto}://${HOST}/auth/better-auth` });
+      // The configured issuer and its endpoints, whichever protocol the request came by.
+      expect(await answered.json(), proto).toMatchObject({ issuer: ISSUER, token_endpoint: `${ISSUER}/oauth2/token` });
     }
   });
 
-  it("lets no shared cache keep a document made from the request's Host and protocol", async () => {
+  it("lets no shared cache keep a document, which is the same for every Host and protocol", async () => {
     for (const path of [
       "/.well-known/oauth-protected-resource/mcp",
       "/.well-known/oauth-authorization-server/auth/better-auth",
     ]) {
       const answered = (await half.handle(request(path, { origin: null })))!;
-      expect(answered.headers.get("cache-control"), path).toMatch(/^private\b/);
-      expect(answered.headers.get("vary")?.toLowerCase(), path).toBe("host, x-forwarded-proto");
+      expect(answered.headers.get("cache-control"), path).toBe("private, max-age=300");
+      // Nothing of the request makes the document, so nothing of it is named to a cache.
+      expect(answered.headers.has("vary"), path).toBe(false);
+      const head = (await half.handle(
+        new Request(`http://${HOST}${path}`, { method: "HEAD", headers: { host: HOST, "x-forwarded-proto": "https" } }),
+      ))!;
+      expect([head.status, head.headers.get("cache-control"), head.headers.has("vary")], path).toEqual([
+        200,
+        "private, max-age=300",
+        false,
+      ]);
     }
   });
 
@@ -323,14 +341,20 @@ describe("the staff login's discovery", () => {
     }
   });
 
-  it("serves no metadata without the app's OAuth context", async () => {
+  it("serves no metadata without the app's OAuth context: a 404, as any well-known path it does not serve", async () => {
     const plain = betterAuthStaffLogin({ ...context, staff: { ...context.staff!, oauth: undefined } });
-    expect(await plain.handle(request("/.well-known/oauth-protected-resource/mcp", { origin: null }))).toBeUndefined();
+    for (const path of [
+      "/.well-known/oauth-protected-resource/mcp",
+      "/.well-known/oauth-authorization-server/auth/better-auth",
+      "/.well-known/x",
+    ]) {
+      expect((await plain.handle(request(path, { origin: null })))?.status, path).toBe(404);
+    }
   });
 });
 
 describe("a declared client", () => {
-  it("signs a person in by email code, asks their consent, and gets a JWT for the instance's own /mcp", async () => {
+  it("signs a person in by email code, asks their consent, and gets a JWT for the configured /mcp", async () => {
     const { status, body, back } = await connect();
     expect(back.origin + back.pathname).toBe(REDIRECT);
     expect(back.searchParams.get("state")).toBe("state-1");
@@ -592,7 +616,7 @@ describe("a declared client", () => {
     expect((await plain.handle(request("/auth/better-auth/error?error=x", { origin: null })))?.status).toBe(404);
   });
 
-  it("is refused a resource that is not this instance's own /mcp", async () => {
+  it("is refused a resource that is not the configured /mcp", async () => {
     const { challenge } = pkce();
     for (const resource of ["https://elsewhere.example/mcp", `${ORIGIN}/api/call`]) {
       const asked = (await half.handle(request(authorizePath(CLAUDE_CODE, challenge, { resource }))))!;
@@ -601,10 +625,12 @@ describe("a declared client", () => {
     }
   });
 
-  it("gets a host's resource row made only at an authorize that is accepted, never at the token endpoint", async () => {
-    const before = await resourceRows();
+  it("has the one resource row the login was configured with, whatever host and resource a request names", async () => {
+    // The provider's seed, there since the login's first request: never made by an authorize.
+    expect(await resourceRows()).toEqual([MCP]);
     const { body } = await connect();
-    // The token endpoint, on hosts never asked for: junk grants, and a real refresh token.
+    // The token endpoint, on hosts nobody configured: junk grants, and a real refresh token
+    // asked for such a host's own /mcp, which the provider has no row for.
     for (const host of ["junk-1.example", "junk-2.example"]) {
       const junk = (await half.handle(
         request("/auth/better-auth/oauth2/token", { form: { grant_type: "nothing" }, origin: null, host }),
@@ -625,24 +651,38 @@ describe("a declared client", () => {
     ))!;
     expect(elsewhere.status).toBe(400);
     expect(await elsewhere.json()).toMatchObject({ error: "invalid_target" });
-    // Authorize refused: an undeclared client, another host's resource.
+    // Authorize on a made-up host for that host's own /mcp: refused on a page, for a declared
+    // client as for an undeclared one, and no row made for it.
     const { challenge } = pkce();
     const host = "junk-4.example";
-    for (const path of [
-      authorizePath(UNDECLARED, challenge, { resource: `https://${host}/mcp` }),
-      authorizePath(CLAUDE_CODE, challenge, { resource: MCP }),
-    ]) {
-      expect((await half.handle(request(path, { host })))!.status, path).not.toBe(302);
+    const refusals: number[] = [];
+    for (const client of [UNDECLARED, CLAUDE_CODE]) {
+      const path = authorizePath(client, challenge, { resource: `https://${host}/mcp` });
+      refusals.push((await half.handle(request(path, { host })))!.status);
     }
-    expect(await resourceRows()).toEqual(before.includes(MCP) ? before : [...before, MCP].toSorted());
-    // Accepted, on a host of its own: its row is there for the provider.
-    const own = (await half.handle(
-      request(authorizePath(CLAUDE_CODE, challenge, { resource: "https://fresh.example/mcp" }), {
-        host: "fresh.example",
+    expect(refusals).toEqual([403, 400]);
+    // For the configured resource it goes on, on that host too: nothing is compared with the Host.
+    const own = (await half.handle(request(authorizePath(CLAUDE_CODE, challenge), { host })))!;
+    expect(own.status).toBe(302);
+    // And the refresh token is good from any host, for the configured resource.
+    const refreshed = (await half.handle(
+      request("/auth/better-auth/oauth2/token", {
+        form: {
+          grant_type: "refresh_token",
+          refresh_token: body.refresh_token!,
+          client_id: CLAUDE_CODE,
+          resource: MCP,
+        },
+        origin: null,
+        host: "junk-3.example",
       }),
     ))!;
-    expect(own.status).toBe(302);
-    expect(await resourceRows()).toContain("https://fresh.example/mcp");
+    expect(refreshed.status).toBe(200);
+    expect(decode(((await refreshed.json()) as { access_token: string }).access_token).payload).toMatchObject({
+      iss: ISSUER,
+      aud: MCP,
+    });
+    expect(await resourceRows()).toEqual([MCP]);
   });
 
   it("is refused once no agent declares it any more: at authorize, the token endpoint and revocation", async () => {
@@ -879,15 +919,21 @@ describe("a bearer", () => {
   it("is refused for another audience, another issuer, a bad signature or once expired", async () => {
     const { body } = await connect();
     const access = body.access_token!;
-    // The same instance's token, for /mcp on another host: neither the audience nor the issuer there.
-    expect(await bearerOf(access, { host: "other.example" })).toBeNull();
-    // A token another resource of this login was issued for: the same issuer and keys, another audience.
-    const other = betterAuthStaffLogin(
-      { ...context, staff: { ...context.staff!, oauth: { ...context.staff!.oauth!, resource: "/elsewhere" } } },
-      { fetchClientMetadata: declaredMetadataFetch(network) },
-    );
-    expect(decode(access).payload.aud).toBe(MCP);
-    expect(await bearerOf(access, { login: other, path: "/elsewhere" })).toBeNull();
+    // The Host a request names is nothing to it: the token says the configured issuer and resource.
+    expect(await bearerOf(access, { host: "other.example" })).toMatchObject({ client: CLAUDE_CODE });
+    // A login on the same tables and keys configured with another resource, or another issuer:
+    // the same signature, but not the audience, or not the issuer, it was configured with.
+    expect(decode(access).payload).toMatchObject({ aud: MCP, iss: ISSUER });
+    for (const address of [
+      { issuer: ISSUER, resource: `${ORIGIN}/elsewhere` },
+      { issuer: ISSUER, resource: "https://other.example/mcp" },
+      { issuer: "https://other.example/auth/better-auth", resource: MCP },
+    ]) {
+      for (const host of [HOST, "other.example"]) {
+        const at = { login: configured(address), path: new URL(address.resource).pathname, host };
+        expect(await bearerOf(access, at), JSON.stringify([address, host])).toBeNull();
+      }
+    }
     // One character of the signature changed.
     const [head, payload, signature] = access.split(".");
     const flipped = `${head}.${payload}.${signature!.slice(0, -2)}${signature!.endsWith("AA") ? "BB" : "AA"}`;
