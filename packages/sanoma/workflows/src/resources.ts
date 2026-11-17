@@ -13,6 +13,7 @@ import { rootSnapshot } from "./bundled.ts";
 import { Principal } from "./define.ts";
 import { NotAdmittedError } from "./errors.ts";
 import {
+  agentGroupsOf,
   AGENTS,
   ANONYMOUS,
   ANONYMOUS_PRINCIPAL,
@@ -221,8 +222,9 @@ export function admit(
       return agentActing(id, asking.onBehalfOf, { people, problems });
     }
     // A built-in client's agent acts only for the person who signed its client in, checked as
-    // `clientActing` checks it: never bare.
-    if (id !== undefined && !signIn && builtInAgentOf(id, people)) {
+    // `clientActing` checks it: never bare. Never a sign-in's id, which is a declared person's:
+    // a built-in whose id a person has is not accepted (`taken`).
+    if (id !== undefined && builtInAgentOf(id, people)) {
       if (asking.onBehalfOf === undefined) throw new NotAdmittedError(id, [], builtInAlone(id));
       return builtInActing(id, asking.onBehalfOf, { people, problems });
     }
@@ -240,7 +242,7 @@ const builtInAlone = (agent: string) =>
   `${agent} is Sanoma's built-in agent for the client ${builtInOfId(agent)!.client}, which acts only for the person who signed that client in`;
 
 /**
- * What every agent acting for a person is refused for (`agentActing`, `chatAgentActing`), each a
+ * What every agent acting for a person is refused for (`agentActing`, `builtInActing`, `chatAgentActing`), each a
  * `NotAdmittedError` as `agent`, checked in the caller's order: `files`, while the people's files
  * have problems, and `person`, when the one it would act for is no declared `sanoma.person`.
  */
@@ -253,6 +255,23 @@ const mustAct = {
     throw new NotAdmittedError(agent, [], `${agent} acts for no one but a declared person, and ${person} is not one`);
   },
 };
+
+/**
+ * The principal of the agent `agent` acting on behalf of `person`: its id, its groups (`agents`,
+ * and any a declared group gives it, `agentGroupsOf`) and `onBehalfOf` the person. Where
+ * `agentActing`, `builtInActing` and `chatAgentActing` end, each having checked that `agent` is
+ * an agent of its kind. Throws `mustAct.person`'s refusal unless `person` is a declared
+ * `sanoma.person` (or `known`, the chat's rule while nobody is declared).
+ */
+function actingFor(
+  agent: string,
+  person: string,
+  people: readonly PeopleResource[],
+  known = personsOf(people).some((p) => p.id === person),
+): Principal {
+  mustAct.person(agent, person, known);
+  return { id: agent, groups: agentGroupsOf(agent, people), onBehalfOf: person };
+}
 
 /**
  * The principal of the declared agent `agent` acting on behalf of the declared person `person`:
@@ -284,11 +303,7 @@ export function agentActing(
               : `${agent} is not an agent resources/people.ts declares`;
     throw new NotAdmittedError(agent, [], why);
   }
-  mustAct.person(
-    agent,
-    person,
-    personsOf(people).some((p) => p.id === person),
-  );
+  const acting = actingFor(agent, person, people);
   if (declared.onBehalfOf !== undefined && declared.onBehalfOf !== person) {
     throw new NotAdmittedError(
       agent,
@@ -296,7 +311,7 @@ export function agentActing(
       `${agent} acts for ${declared.onBehalfOf} alone, as resources/people.ts declares it, not for ${person}`,
     );
   }
-  return { id: agent, groups: principalOf(agent, people)!.groups ?? [], onBehalfOf: person };
+  return acting;
 }
 
 /**
@@ -306,8 +321,9 @@ export function agentActing(
  * `agentActing` for a declared agent, `builtInActing` for a built-in one. Asked on every request
  * a client's token makes, so a declaration removed (or a second agent declaring the same client),
  * or a built-in turned off, refuses its tokens at once, however recently issued. Throws
- * `NotAdmittedError`, saying why (`clientRefusal`: what to declare, or that the company turned
- * the built-in off), when no agent stands for the client, and as `agentActing` does.
+ * `NotAdmittedError`, saying why (`clientRefusal`: what to declare, which two agents declare it,
+ * or that the company turned the built-in off), when no agent stands for the client, and as
+ * `agentActing` does.
  */
 export function clientActing(
   client: string,
@@ -316,16 +332,17 @@ export function clientActing(
 ): Principal {
   mustAct.files(client, declared.problems);
   const standing = clientAgentOf(client, declared.people);
-  if (standing.agent === undefined) throw new NotAdmittedError(client, [], clientRefusal(client, standing));
+  if (standing.agent === undefined) throw new NotAdmittedError(client, [], clientRefusal(client, standing).detail);
+  // The standing says the built-in agent is accepted: what `builtInActing` would ask again.
   return standing.builtIn
-    ? builtInActing(standing.agent, person, declared)
+    ? actingFor(standing.agent, person, declared.people)
     : agentActing(standing.agent, person, declared);
 }
 
 /**
  * The principal of a built-in client's agent (`BUILT_IN_CLIENTS`) acting on behalf of the
  * declared person `person`, who signed its client in: its id, its groups (`agents`, and any a
- * declared group gives it, `principalOf`) and `onBehalfOf` the person, so the agent rules bind it
+ * declared group gives it, `actingFor`) and `onBehalfOf` the person, so the agent rules bind it
  * (`isDeclaredAgent`), a policy for `agents` reaches it, and the ledger records both. Made by
  * `clientActing` for a client's token; `admit` checks a principal naming it with an `onBehalfOf`
  * here, and `agentActing`, the `x-sanoma-agent` header's way in, refuses its id. Throws
@@ -342,18 +359,13 @@ export function builtInActing(
   if (!builtInAgentOf(agent, people)) {
     throw new NotAdmittedError(agent, [], `${agent} is not a built-in agent this company accepts`);
   }
-  mustAct.person(
-    agent,
-    person,
-    personsOf(people).some((p) => p.id === person),
-  );
-  return { id: agent, groups: principalOf(agent, people)!.groups ?? [], onBehalfOf: person };
+  return actingFor(agent, person, people);
 }
 
 /**
  * The principal of the in-app chat's agent (`CHAT_AGENT`) acting on behalf of `person`, the
  * person whose chat turn it is: its id, its groups (`agents`, and any a declared group gives it,
- * `principalOf`) and `onBehalfOf` the person, so the agent rules bind it (`isDeclaredAgent`) and
+ * `actingFor`) and `onBehalfOf` the person, so the agent rules bind it (`isDeclaredAgent`) and
  * the policy is asked as it and as the person. Made only by the worker's chat turn for the turn's
  * own person (`step.by`), never from a request: `agentActing`, the `x-sanoma-agent` header's way
  * in, refuses this id, and a sign-in admits a person alone. `admit` checks a principal naming it
@@ -367,8 +379,7 @@ export function chatAgentActing(
   mustAct.files(CHAT_AGENT, problems);
   // While no person is declared, whoever chats is taken as given, as `admit` takes them; never a visitor.
   const known = !declaresPeople(people) || personsOf(people).some((p) => p.id === person);
-  mustAct.person(CHAT_AGENT, person, known && !isVisitor({ id: person }));
-  return { id: CHAT_AGENT, groups: principalOf(CHAT_AGENT, people)!.groups ?? [], onBehalfOf: person };
+  return actingFor(CHAT_AGENT, person, people, known && !isVisitor({ id: person }));
 }
 
 /**
@@ -398,8 +409,9 @@ export function clientClashes(people: readonly DeclaredResource[]): ResourceProb
 /**
  * What is worth fixing in the people the data files declare (`readPeople`), but not wrong: an
  * agent with no fixed `onBehalfOf`, which acts for whoever names it (`agentActing`), in a declared
- * group, whose groups then reach whoever that is; and what keeps a built-in client from acting
- * as the company may not mean (`builtInWarnings`).
+ * group, whose groups then reach whoever that is; a declaration that only turns a built-in off
+ * listed in a group, which does nothing; and what keeps a built-in client from acting as the
+ * company may not mean (`builtInWarnings`).
  */
 export function peopleWarnings(people: readonly DeclaredResource[]): ResourceProblem[] {
   return [...groupWarnings(people), ...builtInWarnings(people)];
@@ -438,11 +450,14 @@ function builtInWarnings(people: readonly DeclaredResource[]): ResourceProblem[]
   });
 }
 
-/** An agent with no fixed `onBehalfOf` in a declared group (`peopleWarnings`). */
+/**
+ * An agent with no fixed `onBehalfOf` in a declared group, and a declaration that only turns a
+ * built-in off (`off: true`) in one: it is no agent, so the group gets nobody by it (`peopleWarnings`).
+ */
 function groupWarnings(people: readonly DeclaredResource[]): ResourceProblem[] {
   const groups = people.filter((r) => r.vendor === "sanoma" && r.type === "group");
   return people.flatMap((r) => {
-    const { id, onBehalfOf } = r.desired as { id?: string; onBehalfOf?: string };
+    const { id, onBehalfOf, off } = r.desired as { id?: string; onBehalfOf?: string; off?: boolean };
     if (r.vendor !== "sanoma" || r.type !== "agent" || onBehalfOf !== undefined || id === undefined) return [];
     const of = groups.filter((g) => (g.desired as { members?: string[] }).members?.includes(id)).map((g) => g.name);
     if (!of.length) return [];
@@ -450,7 +465,10 @@ function groupWarnings(people: readonly DeclaredResource[]): ResourceProblem[] {
     return [
       {
         ...r.at,
-        message: `${r.id} acts for whoever names it and is in ${named}: through it, whoever that is acts in ${of.length === 1 ? "that group" : "those groups"} too`,
+        message:
+          off === true
+            ? `${r.id} turns off the built-in agent ${id}, so it is no agent: listing it in ${named} does nothing`
+            : `${r.id} acts for whoever names it and is in ${named}: through it, whoever that is acts in ${of.length === 1 ? "that group" : "those groups"} too`,
       },
     ];
   });

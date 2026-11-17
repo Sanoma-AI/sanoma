@@ -5,7 +5,7 @@ import { z } from "zod";
 import { LIFETIMES } from "./host.ts";
 import type { Outline } from "./outline.ts";
 import type { ResourceFields } from "./resource.ts";
-import { COLLECTION_NAME, EFFECTS, FIELD_NAME, FIELD_TYPES } from "./shared.ts";
+import { BUILT_IN_CLIENT_STATES, COLLECTION_NAME, EFFECTS, FIELD_NAME, FIELD_TYPES } from "./shared.ts";
 
 /** A JSON Schema (draft 2020-12), as `jsonSchemaOf` writes one. */
 const JsonSchema = z.record(z.string(), z.unknown());
@@ -578,9 +578,8 @@ export const ConfigDescriptionSchema = z.strictObject({
         id: z.string(),
         name: z.string(),
         client: z.string(),
-        apps: z.string(),
-        state: z.enum(["accepted", "replaced", "off", "taken", "clash"]),
-        by: z.string().optional(),
+        state: z.enum(BUILT_IN_CLIENT_STATES),
+        by: z.strictObject({ kind: z.enum(["person", "agent"]), id: z.string() }).optional(),
       }),
     )
     .optional(),

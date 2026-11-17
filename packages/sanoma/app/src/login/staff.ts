@@ -9,7 +9,6 @@ import {
   LOGIN_AGENT,
   LOGIN_CODE_WORKFLOW,
   LOGIN_PAGE,
-  type ClientRefusal,
   type LoginContext,
   NO_AGENT_ADDRESS,
   resourceMetadataOf,
@@ -25,7 +24,7 @@ import {
   type SocialClients,
 } from "sanoma/workflows";
 import { admit } from "sanoma/workflows/describe";
-import { agentOfClient, type ClientAgent, clientAgentOf, personsOf } from "sanoma/workflows/shared";
+import { agentOfClient, type ClientAgent, clientAgentOf, clientRefusal, personsOf } from "sanoma/workflows/shared";
 import { z } from "zod";
 import type { AppContext, LoginProvider } from "../context.ts";
 import type { AppSnapshot } from "../snapshot.ts";
@@ -126,6 +125,18 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
   const frame = (): PageFrame =>
     app ? { ...(app.stylesheet && { stylesheet: app.stylesheet }), company: companyOf(app.resolved.name) } : {};
   /**
+   * Why a built-in client the company does not accept (`standing`) is refused, as the login's
+   * pages say it (the half's, at authorize: `LoginContext.staff.oauth.refusalOf`, and the consent
+   * page): `clientRefusal`'s words with the company's name, that it is turned off or that its
+   * agent's id is the company's own, never where to declare it. Undefined for any other client,
+   * which the pages say is undeclared.
+   */
+  const refusalOf = (client: string, standing: ClientAgent) => {
+    if (standing.why !== "off" && standing.why !== "taken") return undefined;
+    const { title, detail } = clientRefusal(client, standing, frame().company?.name);
+    return { title, detail: `${detail}.` };
+  };
+  /**
    * The same, or undefined when the files could not be read (a file that does not load, which
    * the log then names): for what must not fail on it. Nobody is admitted meanwhile, as the app's
    * own admission refuses every request then ("could not be checked", `admitting`).
@@ -187,8 +198,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
               oauth: {
                 address,
                 agentOf: async (id) => agentOfClient(id, (await people()).people),
-                refusalOf: async (id) =>
-                  builtInRefusal(clientAgentOf(id, (await people()).people), frame().company?.name ?? "This company"),
+                refusalOf: async (id) => refusalOf(id, clientAgentOf(id, (await people()).people)),
               },
             }),
             // Never throws: the half made the session already, and the ledger's line is not its to lose it for.
@@ -278,7 +288,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
     const look = frame();
     const company = look.company?.name ?? "this company";
     if (agent === undefined) {
-      const said = builtInRefusal(standing, look.company?.name ?? "This company");
+      const said = refusalOf(client, standing);
       if (said) {
         return smallPage(
           403,
@@ -394,26 +404,6 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
     resolveActor: (request) => during(request, () => provider.resolveActor(request)),
     handle: (request) => during(request, () => provider.handle!(request)),
   };
-}
-
-/**
- * Why a built-in client the company does not accept is refused, as the login's refusal page (the
- * half's, at authorize: `LoginContext.staff.oauth.refusalOf`) and the consent page say it: that it
- * is turned off, or that its agent's id is the company's own, never where to declare it.
- * Undefined for any other client, which the half says is undeclared.
- */
-function builtInRefusal(standing: ClientAgent, company: string): ClientRefusal | undefined {
-  if (standing.why !== "off" && standing.why !== "taken") return undefined;
-  const { name, id } = standing.builtIn;
-  return standing.why === "off"
-    ? {
-        title: `${name} is turned off here.`,
-        detail: `${company} turned off ${name}, Sanoma's built-in agent ${id}, so this sign-in cannot go on.`,
-      }
-    : {
-        title: `${name} is not accepted here.`,
-        detail: `${company} has a${standing.by === "agent" ? "n agent" : " person"} with the id ${id}, the id of Sanoma's built-in agent for ${name}, so the built-in agent does not act here and this sign-in cannot go on.`,
-      };
 }
 
 /** The people a snapshot read now declares. */

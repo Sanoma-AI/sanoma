@@ -72,7 +72,10 @@ describe("the people types", () => {
     [() => sanoma.person({ id: "ada", groups: ["admin"] } as never), "no field groups"],
     [() => sanoma.person({ id: "ada", github: "not a login" }), "is a GitHub login"],
     [() => sanoma.agent({ id: "bot", onBehalfOf: refundBot as never }), "names a resource of type sanoma.person"],
-    [() => sanoma.agent({ id: "bot", client: "claude code" }), 'is one word, such as "claude-code"'],
+    [
+      () => sanoma.agent({ id: "bot", client: "claude code" }),
+      'is one word, such as "https://claude.ai/oauth/claude-code-client-metadata"',
+    ],
     [() => sanoma.group({ name: "finance", members: [finance as never] }), "sanoma.person or sanoma.agent"],
   ])("refuse what is not well formed: %#", (make, message) => {
     expect(make).toThrow(message);
@@ -331,6 +334,9 @@ describe("people in a data file", () => {
   });
 });
 
+/** The built-in clients' ids: the client of Claude's apps, and Claude Code's. */
+const [CLAUDE, CLAUDE_CODE] = BUILT_IN_CLIENTS.map((b) => b.client) as [string, string];
+
 describe("an agent's client", () => {
   it("is one agent's: two agents declaring one client is a check's problem, which admits everyone still", () => {
     const root = mkdtempSync(join(tmpdir(), "sanoma-people-clients-"));
@@ -356,8 +362,13 @@ export const sales = sanoma.group({ name: "sales", members: [scout] });
       expect(clientClashes(read.people).map(problemLine)).toEqual([
         'resources/people.ts#twin: resources/people.ts#twin declares the client "claude-code", which resources/people.ts#claudeCode declares: give each agent its own',
       ]);
-      // A client two agents declare is no agent's.
+      // A client two agents declare is no agent's: its token is told which two, never to declare one.
       expect(agentOfClient("claude-code", read.people)).toBeUndefined();
+      expect(clientAgentOf("claude-code", read.people)).toEqual({
+        why: "clash",
+        agents: ["claude-code", "claude-twin"],
+      });
+      expect(() => clientActing("claude-code", "ada", read)).not.toThrow("declare one");
       expect(agentOfClient("chatgpt", read.people)).toBe("chatgpt");
       expect(agentOfClient("cursor", read.people)).toBeUndefined();
       // An agent with no fixed person in a declared group, client or not, gives it to whoever names it: a
@@ -438,7 +449,7 @@ describe("agentActing, and admit for an agent acting for someone", () => {
 });
 
 describe("clientActing: the agent that stands for an OAuth client, for the person who signed it in", () => {
-  const CLIENT = "https://claude.ai/oauth/claude-code-client-metadata";
+  const CLIENT = CLAUDE_CODE;
   const claudeCode = sanoma.agent({ id: "claude-code", client: CLIENT });
   const tools = sanoma.group({ name: "tools", members: [claudeCode] });
   const read = { people: [...people, claudeCode, tools], problems: [] };
@@ -449,17 +460,19 @@ describe("clientActing: the agent that stands for an OAuth client, for the perso
 
   // Claude Code's client is built in now, so a client nobody declares is one that is not: the
   // rule is the same for it. Two agents declaring one client still stand for nothing, built in or not.
-  it("refuses, not_admitted and naming what to declare, a client no agent declares that is not built in, or two do", () => {
+  it("refuses, not_admitted, a client no agent declares that is not built in (naming what to declare), or two do (naming them)", () => {
     const OTHER = "https://elsewhere.example/oauth/client.json";
     const twin = sanoma.agent({ id: "claude-twin", client: CLIENT });
     for (const [client, given, why] of [
-      [OTHER, { people, problems: [] }, "a client nobody declares"],
-      [CLIENT, { people: [...read.people, twin], problems: [] }, "a client two agents declare"],
+      [OTHER, { people, problems: [] }, `declare one, sanoma.agent({ id: "<its name>", client: "${OTHER}" })`],
+      [
+        CLIENT,
+        { people: [...read.people, twin], problems: [] },
+        `The agents claude-code and claude-twin in resources/people.ts both declare the client ${CLIENT}, so neither stands for it: one of them must go, or declare another client`,
+      ],
     ] as const) {
-      expect(() => clientActing(client, "ada", given), why).toThrow(
-        `declare one, sanoma.agent({ id: "<its name>", client: "${client}" })`,
-      );
-      expect(() => clientActing(client, "ada", given), why).toThrow(expect.objectContaining({ code: "not_admitted" }));
+      expect(() => clientActing(client, "ada", given)).toThrow(why);
+      expect(() => clientActing(client, "ada", given)).toThrow(expect.objectContaining({ code: "not_admitted" }));
     }
   });
 
@@ -474,7 +487,6 @@ describe("clientActing: the agent that stands for an OAuth client, for the perso
 const builtIn = (person: string) => ({ id: "claude-code", groups: ["agents"], onBehalfOf: person });
 
 describe("the built-in clients: Claude's, on every company unless it turns one off", () => {
-  const [CLAUDE, CLAUDE_CODE] = BUILT_IN_CLIENTS.map((b) => b.client) as [string, string];
   const read = { people, problems: [] };
 
   it("are Claude's two published clients, by their metadata documents' URLs, and nothing else", () => {
@@ -571,13 +583,13 @@ describe("the built-in clients: Claude's, on every company unless it turns one o
     expect(agentActing("claude-code", "ada", given)).toEqual(builtIn("ada"));
     expect(clientAgentOf(CLAUDE_CODE, given.people)).toMatchObject({ why: "taken", by: "agent" });
     expect(() => clientActing(CLAUDE_CODE, "ada", given)).toThrow(
-      "this company declares an agent with that id in resources/people.ts, so the built-in agent does not act here",
+      `This company declares an agent with the id claude-code in resources/people.ts, the id of Sanoma's built-in agent for the client ${CLAUDE_CODE}, so the built-in agent does not act here`,
     );
     const claude = sanoma.person({ id: "claude-ai", name: "Claude Dupont" });
     const withClaude = { people: [...people, claude], problems: [] };
     expect(clientAgentOf(CLAUDE, withClaude.people)).toMatchObject({ why: "taken", by: "person" });
     expect(admit({ id: "claude-ai" }, withClaude)).toEqual({ id: "claude-ai", groups: [] });
-    expect(() => clientActing(CLAUDE, "ada", withClaude)).toThrow("declares a person with that id");
+    expect(() => clientActing(CLAUDE, "ada", withClaude)).toThrow("declares a person with the id claude-ai");
   });
 
   it("are listed with what the company makes of each, as sanoma check prints them", () => {
@@ -586,6 +598,11 @@ describe("the built-in clients: Claude's, on every company unless it turns one o
     expect(builtInClientsOf(people).map((b) => [b.id, b.state])).toEqual([
       ["claude-ai", "accepted"],
       ["claude-code", "accepted"],
+    ]);
+    // What replaces a built-in, or has its agent's id, is named by its kind and id.
+    expect(builtInClientsOf([...people, sanoma.person({ id: "claude-ai" }), own]).map((b) => [b.state, b.by])).toEqual([
+      ["taken", { kind: "person", id: "claude-ai" }],
+      ["replaced", { kind: "agent", id: "our-claude" }],
     ]);
     expect(builtInClientsOf([...people, off, own]).map(builtInClientLine)).toEqual([
       "Claude (https://claude.ai/oauth/mcp-oauth-client-metadata): turned off",
@@ -620,6 +637,20 @@ export const noClaude = sanoma.agent({ id: "claude-ai", off: true });
       expect(peopleWarnings(got.people)).toEqual([]);
       expect(admit({ id: "ada" }, got)).toEqual({ id: "ada", groups: [] });
       expect(agentOfClient(CLAUDE, got.people)).toBeUndefined();
+      // Off and listed in a group: it is no agent, so the group gets nobody by it, which a warning says
+      // (never that it acts for whoever names it).
+      write(
+        `export const ada = sanoma.person({ id: "ada" });
+export const noClaude = sanoma.agent({ id: "claude-ai", off: true });
+export const tools = sanoma.group({ name: "tools", members: [ada, noClaude] });
+`,
+      );
+      got = readPeople(root);
+      expect(got.problems).toEqual([]);
+      expect(principalOf("claude-ai", got.people)).toBeUndefined();
+      expect(peopleWarnings(got.people).map(problemLine)).toEqual([
+        "resources/people.ts#noClaude: resources/people.ts#noClaude turns off the built-in agent claude-ai, so it is no agent: listing it in the group tools does nothing",
+      ]);
       // Off on any other agent, or beside a client or a person, is a problem: nobody is admitted.
       write(
         `export const ada = sanoma.person({ id: "ada" });

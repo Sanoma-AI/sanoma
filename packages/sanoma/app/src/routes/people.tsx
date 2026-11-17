@@ -5,7 +5,7 @@ import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useServerFn } from "@tanstack/react-start";
-import { ADMIN, AGENTS, type BuiltInClientState } from "sanoma/workflows/shared";
+import { ADMIN, AGENTS, type BuiltInClientState, builtInClientStateText } from "sanoma/workflows/shared";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Badge } from "#/components/ui/badge.tsx";
@@ -359,13 +359,10 @@ function AgentsTable({
   );
 }
 
-/** What the company's files make of a built-in client, as its line says it. */
-const BUILT_IN_STATE: Record<BuiltInClientState["state"], (client: BuiltInClientState) => string> = {
-  accepted: ({ id }) => `Accepted, as the built-in agent ${id}`,
-  replaced: ({ by }) => `Accepted, as the declared agent ${by}`,
-  off: () => "Turned off",
-  taken: ({ by }) => `Refused: ${by} has its built-in agent's id`,
-  clash: () => "Refused: two agents declare it",
+/** What the company's files make of a built-in client, in `sanoma check`'s words, capitalised. */
+const builtInStateOf = (client: BuiltInClientState) => {
+  const text = builtInClientStateText(client);
+  return `${text[0]!.toUpperCase()}${text.slice(1)}`;
 };
 
 /**
@@ -388,7 +385,7 @@ function BuiltInClients({ clients }: { clients: BuiltInClientState[] }) {
             <span className="font-medium">{client.name}</span>
             <code className="text-xs text-muted-foreground">{client.client}</code>
             <Badge variant={client.state === "accepted" || client.state === "replaced" ? "secondary" : "outline"}>
-              {BUILT_IN_STATE[client.state](client)}
+              {builtInStateOf(client)}
             </Badge>
           </li>
         ))}

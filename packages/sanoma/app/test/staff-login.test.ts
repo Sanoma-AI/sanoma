@@ -16,7 +16,7 @@ import type { AppSnapshot } from "../src/snapshot.ts";
 import { admitting } from "../src/login/admission.ts";
 import { staffLogin } from "../src/login/staff.ts";
 import { readPeople } from "sanoma/workflows/describe";
-import { CLAUDE_CODE } from "./staff-oauth-helpers.ts";
+import { CLAUDE, CLAUDE_CODE } from "./staff-oauth-helpers.ts";
 
 // The app's side of the staff login, over a login half of its own: what it gives the half (who
 // is declared, the sender, the ledger), the sign-in page, an invite's landing page and
@@ -704,7 +704,6 @@ describe("staffLogin", () => {
     });
 
     describe("a built-in client, which no agent declares", () => {
-      const CLAUDE = "https://claude.ai/oauth/mcp-oauth-client-metadata";
       const PERSONS = `import { sanoma } from "sanoma/resources";
 
 export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@acme.test" });
@@ -763,8 +762,7 @@ export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@
         // Authorize is the half's to refuse: the app tells it why, which its page says.
         expect(await context.staff!.oauth!.refusalOf!(CLAUDE_CODE)).toEqual({
           title: "Claude Code is turned off here.",
-          detail:
-            "Acme Plumbing turned off Claude Code, Sanoma's built-in agent claude-code, so this sign-in cannot go on.",
+          detail: `Acme Plumbing turned off Claude Code, Sanoma's built-in agent claude-code for the client ${CLAUDE_CODE} (off: true in resources/people.ts).`,
         });
         expect(await context.staff!.oauth!.refusalOf!(CLAUDE)).toBeUndefined();
         expect(await context.staff!.oauth!.refusalOf!("https://elsewhere.example/client.json")).toBeUndefined();
@@ -774,7 +772,10 @@ export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@
         expect(refused.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
         const html = await refused.text();
         expect(html).toContain("Claude Code is turned off here.");
-        expect(html).toContain("Acme Plumbing turned off Claude Code, Sanoma&#39;s built-in agent claude-code");
+        // One wording: the page's sentence is the one /mcp answers below, with the company's name.
+        expect(html).toContain(
+          `Acme Plumbing turned off Claude Code, Sanoma&#39;s built-in agent claude-code for the client ${CLAUDE_CODE} (off: true in resources/people.ts).`,
+        );
         expect(html).toContain(CLAUDE_CODE);
         expect(html).not.toMatch(/declare/i);
         const admitted = admitting(provider, () => people);
@@ -782,7 +783,9 @@ export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@
         expect(token.status).toBe(403);
         const said = (await token.json()) as { code: string; error: string };
         expect(said.code).toBe("not_admitted");
-        expect(said.error).toContain("This company turned off Claude Code, Sanoma's built-in agent claude-code");
+        expect(said.error).toBe(
+          `This company turned off Claude Code, Sanoma's built-in agent claude-code for the client ${CLAUDE_CODE} (off: true in resources/people.ts)`,
+        );
         expect(said.error).not.toContain("declare one");
         // A client that is not built in is still the half's to refuse, as before.
         expect(await (await authorizeFor(provider, "https://elsewhere.example/client.json"))!.text()).toBe("half");
@@ -810,8 +813,7 @@ export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@
         expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBeUndefined();
         expect(await context.staff!.oauth!.refusalOf!(CLAUDE_CODE)).toEqual({
           title: "Claude Code is not accepted here.",
-          detail:
-            "Acme Plumbing has an agent with the id claude-code, the id of Sanoma's built-in agent for Claude Code, so the built-in agent does not act here and this sign-in cannot go on.",
+          detail: `Acme Plumbing declares an agent with the id claude-code in resources/people.ts, the id of Sanoma's built-in agent for the client ${CLAUDE_CODE}, so the built-in agent does not act here.`,
         });
         const refused = (await consentFor(taken.provider, CLAUDE_CODE))!;
         expect(refused.status).toBe(403);
