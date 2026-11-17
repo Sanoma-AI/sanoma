@@ -133,6 +133,50 @@ export default defineWorkflow({
     }
   }, 180_000);
 
+  it("refuses a router whose collection the company lacks or whose hostname is none, and passes one it can serve", async () => {
+    const copies: string[] = [];
+    /** A fixture copy with a collection of companies, and `router` in its config: a copy each, since Node imports a config once. */
+    const withRouter = (router: string) => {
+      const own = copyFixture();
+      copies.push(own);
+      const configFile = join(own, "sanoma.config.ts");
+      writeFileSync(
+        configFile,
+        readFileSync(configFile, "utf8").replace("connectors: [ghost],", `connectors: [ghost],\n  router: ${router},`),
+      );
+      mkdirSync(join(own, "resources"));
+      writeFileSync(
+        join(own, "resources/data.ts"),
+        'import { collection } from "sanoma/data";\n\nexport const companies = collection({ name: "companies", key: "slug", fields: { slug: "text", url: "text", status: { enum: ["pending", "live"] } } });\n',
+      );
+      return own;
+    };
+    try {
+      // As the bin resolves the config before it checks: a config that does not resolve is its error.
+      await expect(
+        loadIn(withRouter('{ hostname: "mcp.acme.example", companies: { collection: "customers" } }')),
+      ).rejects.toThrow(
+        'The config\'s `router.companies.collection`, "customers", is no collection of this company: declare it in resources/data.ts (it has companies)',
+      );
+      await expect(
+        loadIn(withRouter('{ hostname: "https://mcp.acme.example/mcp", companies: { collection: "companies" } }')),
+      ).rejects.toThrow('The config\'s `router.hostname`, "https://mcp.acme.example/mcp", is not a hostname');
+      const loaded = await loadIn(
+        withRouter(
+          '{ hostname: "mcp.acme.example", companies: { collection: "companies", live: { field: "status", is: "live" } } }',
+        ),
+      );
+      expect(loaded.resolved.router).toEqual({
+        hostname: "mcp.acme.example",
+        companies: { collection: "companies", url: "url", live: { field: "status", is: ["live"] } },
+      });
+      const result = await check(loaded, { databaseUrl, log: () => undefined });
+      expect(result).toEqual({ ok: true, problems: [], warnings: [], grid: expect.any(Object) });
+    } finally {
+      for (const own of copies) rmSync(own, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it("passes a company of apps: each app's workflows, collections, policies and scenarios, named by its folder", async () => {
     const own = copyFixture(fileURLToPath(new URL("../workflows/test/fixtures/company-apps/", import.meta.url)));
     try {

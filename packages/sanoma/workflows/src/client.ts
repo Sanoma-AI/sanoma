@@ -118,6 +118,7 @@ import {
   type RunStatus,
   RESHAPE_WORKFLOW,
   SAVE_DRAFT_WORKFLOW,
+  type Saved,
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
@@ -1757,6 +1758,26 @@ export class SanomaClient {
         });
     }
     return found;
+  }
+
+  /**
+   * A collection's record by its key, as the runtime itself reads it for the app's own routing
+   * (the agents' router's list of companies, `ResolvedConfig.router`): nobody's call, so no
+   * policy is asked and nothing is recorded. Server code only, and never what a page, a person
+   * or an agent is answered with: those read through `call`, as someone. Null when there is no
+   * such record; throws for a name that is no collection of the config.
+   */
+  async record(collection: string, key: string): Promise<Saved | null> {
+    const get = this.config.collections.get(collection)?.get.id;
+    const fn = get === undefined ? undefined : this.config.drivers.get(get);
+    if (get === undefined || !fn) {
+      throw new SanomaError("invalid_input", `${collection} is no collection of this company`);
+    }
+    const runId = `runtime:record:${collection}`;
+    return (await fn(
+      { key },
+      { idempotencyKey: runId, runId, opId: get, attempt: 1, secrets: this.storedSecrets, by: "sanoma" },
+    )) as Saved | null;
   }
 
   /** Non-secret statuses for the selected store and declared bindings. */

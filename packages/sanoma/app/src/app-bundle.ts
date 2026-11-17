@@ -41,6 +41,19 @@ export interface AppBundleEnv {
    * (`agentAddressFrom`). With neither, the staff login serves no OAuth for `/mcp`.
    */
   SANOMA_HOST_URL?: string;
+  /**
+   * Behind a router (`agentAddressFrom`, read before the two above): the router's agent surface
+   * (`https://mcp.sanoma.example/mcp`), which is then this instance's agent address, and this
+   * company's id there. With `SANOMA_ROUTER_SECRET`.
+   */
+  SANOMA_AGENT_URL?: string;
+  SANOMA_COMPANY?: string;
+  /**
+   * The secret a router sends with what it forwards: on a company behind one, what its staff
+   * login believes the caller's address by; on an instance whose config has a `router`, what
+   * that router forwards with, and without which it forwards nothing.
+   */
+  SANOMA_ROUTER_SECRET?: string;
   /** `<site>=<hostname>,…`: the public sites' domains (`domainsText`). */
   SANOMA_DOMAINS?: string;
   /** The deployment's signing key, each login's key derived from it (`deploymentKey`). */

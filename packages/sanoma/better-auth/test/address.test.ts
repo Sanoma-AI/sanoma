@@ -125,12 +125,25 @@ describe("an agent address", () => {
     // The login's routes are at /auth/better-auth alone: an issuer at a root, or another path, would name endpoints that 404.
     for (const issuer of ["https://mcp.router.example", `${ORIGIN}/auth`, `${ORIGIN}/auth/better-auth/v2`]) {
       expect(() => loginAt({ ...ADDRESS, issuer }), issuer).toThrow(
-        /^better-auth: the agent address's issuer is .*: its path must be \/auth\/better-auth.*sanoma#777/,
+        /^better-auth: the agent address's issuer is .*: its path must be \/auth\/better-auth/,
       );
     }
     expect(() => loginAt({ ...ADDRESS, resource: ORIGIN })).toThrow(
-      /^better-auth: the agent address's resource is .*: it needs a path.*sanoma#777/,
+      /^better-auth: the agent address's resource is .*: it needs a path/,
     );
+    // A router's address is the other shape, whole (`routed.test.ts`): never the app's own with a company.
+    const router = { company: "acme", secret: "s3cret" };
+    expect(() => loginAt({ ...ADDRESS, router })).toThrow(/^better-auth: .*a router's issuer is its origin/);
+    expect(() =>
+      loginAt({ issuer: "https://mcp.router.example", resource: "https://mcp.router.example/mcp", router }),
+    ).not.toThrow();
+    expect(() =>
+      loginAt({
+        issuer: "https://mcp.router.example",
+        resource: "https://mcp.router.example/mcp",
+        router: { ...router, company: "acme.eu" },
+      }),
+    ).toThrow(/^better-auth: the agent address's company is "acme\.eu"/);
     // An address on a port, over plain http, is good as written.
     const local = { issuer: "http://127.0.0.1:3000/auth/better-auth", resource: "http://127.0.0.1:3000/mcp" };
     expect(() => loginAt(local)).not.toThrow();

@@ -6,6 +6,7 @@ import {
   checkAgentAddress,
   NO_AGENT_ADDRESS,
   resourceMetadataOf,
+  routedAgentAddress,
 } from "../src/index.ts";
 
 // An instance's one agent address: made from the app's URL or the launcher's environment,
@@ -13,6 +14,13 @@ import {
 
 const APP = "https://acme.example";
 const ADDRESS: AgentAddress = { issuer: `${APP}/auth/better-auth`, resource: `${APP}/mcp` };
+/** A router's host, and the address of the company `acme` behind it. */
+const ROUTER = "https://mcp.router.example";
+const ROUTED: AgentAddress = {
+  issuer: ROUTER,
+  resource: `${ROUTER}/mcp`,
+  router: { company: "acme", secret: "s3cret" },
+};
 
 describe("agentAddressAt", () => {
   it("makes one address from an app's URL, however it is written: no trailing slash, no default port", () => {
@@ -74,6 +82,47 @@ describe("agentAddressFrom", () => {
     expect(agentAddressFrom({ SANOMA_HOSTNAME: "acme.example", SANOMA_HOST_URL: "nothing" })).toEqual(ADDRESS);
   });
 
+  it("reads a router's address first: its /mcp URL, the company's id and the router's secret, all three", () => {
+    const env = { SANOMA_AGENT_URL: ` ${ROUTER}/mcp `, SANOMA_COMPANY: " acme ", SANOMA_ROUTER_SECRET: "s3cret" };
+    expect(agentAddressFrom(env)).toEqual(ROUTED);
+    // The router's wins over the instance's own hostname and URL, which are not read.
+    expect(agentAddressFrom({ ...env, SANOMA_HOSTNAME: "acme.example", SANOMA_HOST_URL: "nothing" })).toEqual(ROUTED);
+    expect(agentAddressFrom({ ...env, SANOMA_AGENT_URL: "http://127.0.0.1:8787/mcp" })).toEqual({
+      ...ROUTED,
+      issuer: "http://127.0.0.1:8787",
+      resource: "http://127.0.0.1:8787/mcp",
+    });
+    // Without the router's URL the company and the secret name no address: the instance's own rule.
+    expect(agentAddressFrom({ SANOMA_COMPANY: "acme", SANOMA_ROUTER_SECRET: "s3cret" })).toBeUndefined();
+    expect(agentAddressFrom({ ...env, SANOMA_AGENT_URL: " ", SANOMA_HOSTNAME: "acme.example" })).toEqual(ADDRESS);
+  });
+
+  it("names the router's variable whose value gives no address", () => {
+    const env = { SANOMA_AGENT_URL: `${ROUTER}/mcp`, SANOMA_COMPANY: "acme", SANOMA_ROUTER_SECRET: "s3cret" };
+    for (const url of [
+      ROUTER,
+      `${ROUTER}/`,
+      `${ROUTER}/mcp/`,
+      `${ROUTER}/agents`,
+      `${ROUTER}/mcp?x=1`,
+      "mcp.router.example/mcp",
+    ]) {
+      expect(() => agentAddressFrom({ ...env, SANOMA_AGENT_URL: url }), url).toThrow(
+        `SANOMA_AGENT_URL is ${JSON.stringify(url)}: write the router's agent surface`,
+      );
+    }
+    for (const company of ["", "acme.eu", "acme corp", "acme/1", "ac:me"]) {
+      expect(() => agentAddressFrom({ ...env, SANOMA_COMPANY: company }), company).toThrow(
+        `SANOMA_COMPANY is ${JSON.stringify(company)}: write this company's id at the router`,
+      );
+    }
+    expect(() => agentAddressFrom({ ...env, SANOMA_ROUTER_SECRET: " " })).toThrow(
+      "SANOMA_ROUTER_SECRET is not set: SANOMA_AGENT_URL names a router",
+    );
+    // The secret is never in what is said.
+    expect(() => agentAddressFrom({ ...env, SANOMA_COMPANY: "a.b" })).not.toThrow(/s3cret/);
+  });
+
   it("is named, with both variables, by what an instance without one says", () => {
     expect(NO_AGENT_ADDRESS).toMatch(/no agent address\. Set SANOMA_HOSTNAME .* or SANOMA_HOST_URL /);
   });
@@ -83,10 +132,36 @@ describe("checkAgentAddress", () => {
   it("takes what agentAddressAt makes, and refuses an address the login could not serve", () => {
     for (const url of [APP, "http://10.0.0.7:3000"]) expect(() => checkAgentAddress(agentAddressAt(url))).not.toThrow();
     expect(() => checkAgentAddress({ ...ADDRESS, issuer: `${ADDRESS.issuer}/` })).toThrow(/as it is compared/);
-    expect(() => checkAgentAddress({ ...ADDRESS, issuer: APP })).toThrow(
-      /its path must be \/auth\/better-auth.*sanoma#777/,
+    expect(() => checkAgentAddress({ ...ADDRESS, issuer: APP })).toThrow(/its path must be \/auth\/better-auth/);
+    expect(() => checkAgentAddress({ ...ADDRESS, resource: APP })).toThrow(/it needs a path/);
+  });
+
+  it("takes a router's address: an issuer with no path, its /mcp, a company's id and a secret; and no third shape", () => {
+    expect(() => checkAgentAddress(ROUTED)).not.toThrow();
+    expect(() => checkAgentAddress(routedAgentAddress(`${ROUTER}/mcp`, ROUTED.router!))).not.toThrow();
+    expect(routedAgentAddress(`${ROUTER}/mcp`, ROUTED.router!)).toEqual(ROUTED);
+    // An own-host issuer with a company, or a root issuer without one, is neither shape.
+    expect(() => checkAgentAddress({ ...ADDRESS, router: ROUTED.router })).toThrow(
+      /a router's issuer is its origin, with no path/,
     );
-    expect(() => checkAgentAddress({ ...ADDRESS, resource: APP })).toThrow(/it needs a path.*sanoma#777/);
+    expect(() => checkAgentAddress({ issuer: ROUTED.issuer, resource: ROUTED.resource })).toThrow(
+      /its path must be \/auth\/better-auth/,
+    );
+    expect(() => checkAgentAddress({ ...ROUTED, issuer: `${ROUTER}/auth` })).toThrow(/with no path/);
+    expect(() => checkAgentAddress({ ...ROUTED, resource: `${ROUTER}/agents` })).toThrow(
+      /a router's resource is its issuer's \/mcp/,
+    );
+    expect(() => checkAgentAddress({ ...ROUTED, resource: "https://other.example/mcp" })).toThrow(
+      /a router's resource is its issuer's \/mcp/,
+    );
+    for (const company of ["", "acme.eu", "a b", "a/b"]) {
+      expect(() => checkAgentAddress({ ...ROUTED, router: { ...ROUTED.router!, company } }), company).toThrow(
+        /the agent address's company is .*: letters, digits, - and _ only/,
+      );
+    }
+    expect(() => checkAgentAddress({ ...ROUTED, router: { company: "acme", secret: "" } })).toThrow(
+      /the agent address's router has no secret/,
+    );
   });
 });
 
@@ -95,6 +170,11 @@ describe("resourceMetadataOf", () => {
     expect(resourceMetadataOf(ADDRESS)).toEqual({
       path: "/.well-known/oauth-protected-resource/mcp",
       url: `${APP}/.well-known/oauth-protected-resource/mcp`,
+    });
+    // A routed address's is on the router's origin: what an instance behind it names in its 401.
+    expect(resourceMetadataOf(ROUTED)).toEqual({
+      path: "/.well-known/oauth-protected-resource/mcp",
+      url: `${ROUTER}/.well-known/oauth-protected-resource/mcp`,
     });
   });
 });
