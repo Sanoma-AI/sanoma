@@ -1,14 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Client, type Pool } from "pg";
-import { CLIENT_IP_HEADER, type LoginHalf } from "sanoma/workflows";
+import { BUILT_IN_CLIENTS, CLIENT_IP_HEADER, type LoginHalf } from "sanoma/workflows";
 import { expect } from "vitest";
 
 // What the staff login's tests share: Claude Code's client as a stand-in serves it, a session's
 // cookie, the staff schema as the worker first finds it, and a client's sign-in step by step
 // (a request to the login, PKCE, authorize, the sign-in by code, consent, the code for tokens).
 
-/** Claude Code's published client id: the URL of its metadata document. */
-export const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
+/** Claude Code's published client id, the URL of its metadata document: the second of the built-in clients. */
+export const CLAUDE_CODE = BUILT_IN_CLIENTS[1]!.client;
 
 /** Claude Code's document, as claude.ai serves it. */
 export const CLAUDE_CODE_DOCUMENT = {

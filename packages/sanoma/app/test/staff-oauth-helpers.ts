@@ -1,11 +1,15 @@
 import { Client } from "pg";
+import { BUILT_IN_CLIENTS } from "sanoma/workflows/shared";
 
 // What the tests of a client's sign-in on a host share (`hosted-mcp.test.ts` on Node,
 // `app-bundle.test.ts` on the Worker): Claude Code's client as a stand-in serves it, a session's
 // cookie, and the staff login's schema afresh.
 
-/** Claude Code's published client id: the URL of its metadata document. */
-export const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
+/**
+ * The built-in clients' published ids, each the URL of its metadata document (`BUILT_IN_CLIENTS`):
+ * `CLAUDE`, the client of Claude's hosted apps, and `CLAUDE_CODE`, Claude Code's.
+ */
+export const [CLAUDE, CLAUDE_CODE] = BUILT_IN_CLIENTS.map((b) => b.client) as [string, string];
 
 /** Claude Code's document, as claude.ai serves it. */
 export const CLAUDE_CODE_DOCUMENT = {

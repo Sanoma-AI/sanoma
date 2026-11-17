@@ -518,6 +518,14 @@ export interface SocialClients {
   github?: { clientId: string; clientSecret: string };
 }
 
+/** Why a login refuses a client that no agent stands for, as its refusal page says it: plain text, never HTML. */
+export interface ClientRefusal {
+  /** The page's heading, a sentence. */
+  title: string;
+  /** What it says under the client's id. */
+  detail: string;
+}
+
 /**
  * What the app gives a connector's login half (`ConnectorSetup.login`) when it makes it: for a
  * public site, once per site; for the staff login, once, with `staff`.
@@ -574,8 +582,15 @@ export interface LoginContext {
      * declared agent that stands for an OAuth client, by the client's id (`agentOfClient`), as
      * the files say when asked. The login is then the surface's authorization server, and refuses
      * a client no agent stands for (`LoginHalf.bearer`). Absent, the login serves no OAuth.
+     * `refusalOf` is why a client has no agent, when the app has more to say than that none is
+     * declared (a built-in client the company turned off, or whose agent's id it took): what the
+     * login's refusal page then says, as plain text. Undefined for any other client.
      */
-    oauth?: { address: AgentAddress; agentOf(client: string): string | undefined | Promise<string | undefined> };
+    oauth?: {
+      address: AgentAddress;
+      agentOf(client: string): string | undefined | Promise<string | undefined>;
+      refusalOf?(client: string): ClientRefusal | undefined | Promise<ClientRefusal | undefined>;
+    };
   };
 }
 

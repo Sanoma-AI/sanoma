@@ -47,7 +47,16 @@ const agent = defineResource({
      * The OAuth client it stands for, one word (a client's id, not necessarily a URL): one agent
      * per client (`readPeople`), which a hosted sign-in maps to its agent (`agentOfClient`).
      */
-    client: z.string().regex(/^\S+$/, 'is one word, such as "claude-code"').optional(),
+    client: z
+      .string()
+      .regex(/^\S+$/, 'is one word, such as "https://claude.ai/oauth/claude-code-client-metadata"')
+      .optional(),
+    /**
+     * Turns off the built-in client whose agent has this `id` (`BUILT_IN_CLIENTS`): the
+     * declaration is then no agent, and that client is refused as an undeclared one is
+     * (`clientAgentOf`). Only with a built-in agent's id and nothing else (`readPeople`).
+     */
+    off: z.literal(true).optional(),
   }),
   fields: { ...NONE, references: { onBehalfOf: { type: "sanoma.person" } } },
   find: ({ id }) => id,
@@ -72,7 +81,9 @@ const group = defineResource({
 /**
  * What a data file declares the company's people with, imported from "sanoma/resources":
  * `export const ada = sanoma.person({ id: "ada", name: "Ada Ortiz", github: "ada-ortiz" })`,
- * `sanoma.agent({ id: "refund-bot", onBehalfOf: bo })`, `sanoma.agent({ id: "claude-code", client: "claude-code" })` and
+ * `sanoma.agent({ id: "refund-bot", onBehalfOf: bo })`,
+ * `sanoma.agent({ id: "our-claude", client: "https://claude.ai/oauth/claude-code-client-metadata" })` (a built-in client's agent replaced),
+ * `sanoma.agent({ id: "claude-ai", off: true })` (a built-in client turned off) and
  * `sanoma.group({ name: "finance", members: [ada, refundBot] })`.
  */
 export const sanoma = { person, agent, group };
