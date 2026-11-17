@@ -21,11 +21,6 @@ import {
 // is). No dynamic client registration: a client is admitted only as the declared agent that
 // stands for it.
 
-/** The scopes there are (`AGENT_SCOPES`, which a router's metadata names too): only a refresh token's. */
-export const SCOPES = AGENT_SCOPES;
-/** The grants there are (`AGENT_GRANT_TYPES`): a code (with PKCE) for tokens, and a refresh. */
-export const GRANT_TYPES = AGENT_GRANT_TYPES;
-
 /**
  * The access token's claim naming the agent its person consented to (`holding`): a token is that
  * agent's alone, whichever agent its client (`azp`) stands for since.
@@ -130,8 +125,8 @@ export function oauthPlugins({ agentOf, fetchClientMetadata, issuer, company }: 
     oauthProvider({
       loginPage: LOGIN_PAGE,
       consentPage: CONSENT_PAGE,
-      scopes: SCOPES,
-      grantTypes: GRANT_TYPES as ("authorization_code" | "refresh_token")[],
+      scopes: AGENT_SCOPES,
+      grantTypes: AGENT_GRANT_TYPES as ("authorization_code" | "refresh_token")[],
       // The one resource is the configured address's, its row made by the login once per
       // process and database (`ensureResource` in staff.ts), never for a request, and not the
       // provider's own `resources` seed, which reads the table at each instance's start: on a
@@ -192,24 +187,39 @@ const holding =
   };
 
 /**
- * The token request with its form's `code` as the provider made it, for an address that is a
- * router's: the company's tag taken off. A code without the tag, or with another company's, is
- * none of this company's: it goes on as one the provider cannot find (`invalid_grant`), so
- * nothing is spent by it. Any other request as it is.
+ * The token request as the provider is to read it, for an address that is a router's, or this
+ * login's own refusal of it. Its form's `code` is as the provider made it, the company's tag
+ * taken off: a code without the tag, or with another company's, is none of this company's, and
+ * goes on as one the provider cannot find (`invalid_grant`), so nothing is spent by it. A
+ * `refresh_token` goes on as it came, tag and all (the provider takes its own prefix off), but
+ * one without this company's tag is refused here, as RFC 6749 §5.2 says a refresh token that is
+ * no one's is (`invalid_grant`): the provider would say `invalid_token`, which is no token
+ * endpoint's error. Any other request as it is.
  */
-export async function withoutCodeTag(request: Request, { router }: AgentAddress): Promise<Request> {
+export async function withoutCodeTag(request: Request, { router }: AgentAddress): Promise<Request | Response> {
   if (!router || request.method !== "POST") return request;
   if (!request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) return request;
   const form = new URLSearchParams(await request.clone().text());
+  const prefix = companyPrefix(router.company);
+  const refresh = form.get("refresh_token");
+  if (form.get("grant_type") === "refresh_token" && refresh !== null && !refresh.startsWith(prefix)) {
+    return Response.json(
+      { error: "invalid_grant", error_description: "The refresh token is not one this company's sign-in issued" },
+      { status: 400, headers: { "cache-control": "no-store", pragma: "no-cache" } },
+    );
+  }
   const code = form.get("code");
   if (code === null) return request;
-  const prefix = companyPrefix(router.company);
   // No code the provider makes has a `:`; an untagged one is found under no name.
   form.set("code", code.startsWith(prefix) ? code.slice(prefix.length) : `untagged:${code}`);
   const headers = new Headers(request.headers);
   headers.delete("content-length");
   return new Request(request.url, { method: "POST", headers, body: form.toString() });
 }
+
+/** An address a client is sent to with a `code`: an absolute URL, or one on this host, that carries one. */
+const codeIn = (to: unknown): boolean =>
+  typeof to === "string" && (URL.parse(to) ?? URL.parse(to, "http://host.invalid"))?.searchParams.has("code") === true;
 
 /**
  * `to` with its `code` tagged, when it is the provider's redirect back to a client with a code
@@ -224,21 +234,38 @@ function taggedCode(to: unknown, issuer: string, company: string): string | unde
   return url.href;
 }
 
+/** Whether it was said already that an answer sent a code this login did not tag (`withCodeTag`): once per process. */
+let saidUntagged = false;
+
+/** Says, once, that an answer of a route that sends codes carried one `taggedCode` did not take for the provider's. */
+function untagged(to: unknown): void {
+  if (saidUntagged || !codeIn(to)) return;
+  saidUntagged = true;
+  console.error(
+    "better-auth: an answer sent a client a code this login did not tag with its company (not the provider's redirect as withCodeTag reads one): the router will refuse that code",
+  );
+}
+
 /**
  * The provider's answer with the code it sends a client tagged with the company, for an address
  * that is a router's, wherever the answer says the client's address: a redirect's `Location`
  * (authorize with a consent remembered, a sign-in a browser navigated to), or the JSON `url`
  * (the consent, a sign-in a page posted: the provider's two shapes of one redirect). Every other
- * answer, and every header of this one (a sign-in's cookies), as it is.
+ * answer, and every header of this one (a sign-in's cookies), as it is. For the routes that can
+ * send a code alone (`staff.ts`'s `SENDS_CODE`): no other answer is read. A code it does not
+ * tag is one the router routes nowhere and this login's token endpoint refuses, so a shape it
+ * does not know fails closed; it is said once (`untagged`).
  */
 export async function withCodeTag(answered: Response, { issuer, router }: AgentAddress): Promise<Response> {
   if (!router) return answered;
-  const location = taggedCode(answered.headers.get("location"), issuer, router.company);
+  const to = answered.headers.get("location");
+  const location = taggedCode(to, issuer, router.company);
   if (location) {
     const headers = new Headers(answered.headers);
     headers.set("location", location);
     return new Response(answered.body, { status: answered.status, statusText: answered.statusText, headers });
   }
+  untagged(to);
   if (!answered.headers.get("content-type")?.includes("application/json") || answered.body === null) return answered;
   const text = await answered.clone().text();
   let said: unknown;
@@ -249,7 +276,10 @@ export async function withCodeTag(answered: Response, { issuer, router }: AgentA
   }
   if (said === null || typeof said !== "object") return answered;
   const url = taggedCode((said as { url?: unknown }).url, issuer, router.company);
-  if (!url) return answered;
+  if (!url) {
+    untagged((said as { url?: unknown }).url);
+    return answered;
+  }
   const headers = new Headers(answered.headers);
   headers.delete("content-length");
   return new Response(JSON.stringify({ ...said, url }), {

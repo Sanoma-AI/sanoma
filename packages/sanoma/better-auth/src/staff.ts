@@ -1,9 +1,12 @@
 import {
   type AgentAddress,
+  agentResourceMetadata,
   agentServerMetadata,
+  bearerJws,
   checkAgentAddress,
   CLIENT_IP_HEADER,
   COMPANY_CLAIM,
+  DISCOVERY_CACHE,
   errorMessage,
   INVITE_SECONDS,
   type LoginContext,
@@ -14,6 +17,7 @@ import {
   ROUTER_CLIENT_IP_HEADER,
   ROUTER_SECRET_HEADER,
   sameOrigin,
+  sameSecret,
   STAFF_AUTH_PATH,
   STAFF_OAUTH_ROUTES,
   type SignInMethod,
@@ -22,7 +26,7 @@ import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import { createAuthMiddleware } from "better-auth/api";
 import { verifyJwsAccessToken } from "better-auth/oauth2";
 import { magicLink } from "better-auth/plugins/magic-link";
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import {
   emailCode,
@@ -104,6 +108,27 @@ const OAUTH_ROUTES = new Map<string, string | undefined>([
 const NO_ORIGIN = new Set<string>([TOKEN, REVOKE]);
 
 /**
+ * The routes a router forwards to this login, and so the only ones where the caller's address
+ * it names is believed (`withRoutedCaller`): the token endpoint and revocation. A browser comes
+ * to every other route itself, from its own address: a sign-in, an email code, the consent.
+ */
+const FORWARDED = NO_ORIGIN;
+
+/**
+ * The routes whose answer may send a client an authorization code, which behind a router gets
+ * the company's tag (`withCodeTag`): authorize, the consent, and each route that makes a session
+ * (`METHOD_OF`), after which the provider goes on with the authorize the sign-in came from. No
+ * other answer is read for one.
+ */
+const SENDS_CODE = new Set<string>([
+  AUTHORIZE,
+  CONSENT,
+  "/sign-in/email-otp",
+  "/callback/github",
+  "/magic-link/verify",
+]);
+
+/**
  * RFC 8414's metadata for the issuer of an agent address of the app's own: a function of the
  * address alone, made from what is served (`OAUTH_ROUTES`, each endpoint on the issuer, whose
  * path is where the routes are) and supported here (`agentServerMetadata`, which a router's
@@ -122,14 +147,6 @@ const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
 
 /** Where RFC 8414's metadata for the issuer is: the well-known path with the issuer's own, `BASE_PATH`, appended. */
 const SERVER_METADATA = `/.well-known/oauth-authorization-server${BASE_PATH}`;
-
-/**
- * How the metadata documents may be kept: five minutes, by the browser or the client alone. Each
- * is the configured address's, the same whatever the request says, and changes only with the
- * instance's configuration, which a client should not go on reading from a cache between it and
- * the instance.
- */
-const DISCOVERY_CACHE = { "cache-control": "private, max-age=300" };
 
 /** The app's OAuth context (`LoginContext.staff.oauth`). */
 type OAuthContext = NonNullable<NonNullable<LoginContext["staff"]>["oauth"]>;
@@ -202,11 +219,7 @@ export function betterAuthStaffLogin(
       throw new Error(`better-auth: ${errorMessage(err)}`, { cause: err });
     }
     const { address } = oauth;
-    const resource = JSON.stringify({
-      resource: address.resource,
-      authorization_servers: [address.issuer],
-      bearer_methods_supported: ["header"],
-    });
+    const resource = JSON.stringify(agentResourceMetadata(address));
     // RFC 9728's at the resource's own path, and at the root for a client that looks there.
     documents.set(resourceMetadataOf(address).path, resource);
     documents.set(RESOURCE_METADATA, resource);
@@ -404,20 +417,22 @@ export function betterAuthStaffLogin(
       if (refused) return refused;
       const asked = route === AUTHORIZE ? withConsentAsked(request) : request;
       if (!oauth) return (await authFor(request)).handler(withSignOutBody(withoutDpop(asked), SIGN_OUT));
-      // With an address that is a router's: the caller's address is the one the router names
-      // (with its secret alone), the code a client sends back loses its company's tag before the
-      // provider reads the form, and every answer that sends a client a code gains it.
+      // With an address that is a router's: at the routes a router forwards, the caller's address
+      // is the one the router names (with this company's secret alone); the code a client sends
+      // back loses its company's tag before the provider reads the form; and the answer of a
+      // route that can send a client a code gains it.
       const { address } = oauth;
       const sent = route === TOKEN ? await withoutCodeTag(asked, address) : asked;
+      if (sent instanceof Response) return sent;
       const answered = await (
         await authFor(request)
-      ).handler(withSignOutBody(withoutDpop(withRoutedCaller(sent, address)), SIGN_OUT));
-      return withCodeTag(answered, address);
+      ).handler(withSignOutBody(withoutDpop(withRoutedCaller(sent, address, FORWARDED.has(route))), SIGN_OUT));
+      return SENDS_CODE.has(route) ? withCodeTag(answered, address) : answered;
     },
     ...(oauth && {
       async bearer(request: Request) {
         // The scheme in any case (RFC 9110 §11.1); the token a JWS in compact form.
-        const token = /^bearer ([\w-]+\.[\w-]+\.[\w-]+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
+        const token = bearerJws(request.headers.get("authorization"));
         if (!token) return null;
         const own = await authFor(request);
         const { issuer, resource } = oauth.address;
@@ -610,20 +625,23 @@ function withoutDpop(request: Request): Request {
 /**
  * The one rule for a caller's address a request names: the request with `CLIENT_IP_HEADER` (what
  * the login's rate limit counts by, set by the app's host from the socket) replaced by what the
- * router names (`ROUTER_CLIENT_IP_HEADER`), only when the address is a router's and the request
- * carries that router's secret (`ROUTER_SECRET_HEADER`, compared in constant time): every
- * request a router forwards comes from the router's own socket, so without this all its callers
- * would share one count. Without the secret, with a wrong one, or for an address of the app's
- * own, what the request names is not read, as before. Neither header goes on to Better Auth.
+ * router names (`ROUTER_CLIENT_IP_HEADER`), only at a route a router forwards (`forwarded`: the
+ * token endpoint, revocation), when the address is a router's and the request carries this
+ * company's secret there (`ROUTER_SECRET_HEADER`, compared in constant time): every request a
+ * router forwards comes from the router's own socket, so without this all its callers would
+ * share one count. At any other route (a sign-in, an email code, the consent, which a browser
+ * reaches itself), without the secret, with a wrong one, or for an address of the app's own,
+ * what the request names is not read. Neither header goes on to Better Auth.
  */
-export function withRoutedCaller(request: Request, { router }: AgentAddress): Request {
+export function withRoutedCaller(request: Request, { router }: AgentAddress, forwarded: boolean): Request {
   const secret = request.headers.get(ROUTER_SECRET_HEADER);
   const caller = request.headers.get(ROUTER_CLIENT_IP_HEADER);
   if (secret === null && caller === null) return request;
   const headers = new Headers(request.headers);
   headers.delete(ROUTER_SECRET_HEADER);
   headers.delete(ROUTER_CLIENT_IP_HEADER);
-  if (router && secret && caller && sameSecret(secret, router.secret)) headers.set(CLIENT_IP_HEADER, caller);
+  if (forwarded && router && secret && caller && sameSecret(secret, router.secret))
+    headers.set(CLIENT_IP_HEADER, caller);
   // Made from its parts: the app's request on Node is not one `new Request(request)` takes.
   const body = request.method === "GET" || request.method === "HEAD" ? null : request.body;
   return new Request(request.url, {
@@ -632,12 +650,6 @@ export function withRoutedCaller(request: Request, { router }: AgentAddress): Re
     ...(body && { body, duplex: "half" }),
   } as RequestInit);
 }
-
-/** A secret's SHA-256: what is compared, so two of any lengths are compared in the same time. */
-const digestOf = (text: string) => createHash("sha256").update(text).digest();
-
-/** Whether two secrets are the same, in time that does not tell where they differ: their digests compared. */
-const sameSecret = (given: string, expected: string) => timingSafeEqual(digestOf(given), digestOf(expected));
 
 /**
  * An authorize with the consent page always shown (`prompt=consent`, as the client itself may
@@ -687,7 +699,7 @@ function discovery(request: Request, document: string | undefined): Response {
   if (document === undefined) return notFound();
   if (request.method !== "GET" && request.method !== "HEAD")
     return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
-  const headers = { "content-type": "application/json", ...DISCOVERY_CACHE };
+  const headers = { "content-type": "application/json", "cache-control": DISCOVERY_CACHE };
   return new Response(request.method === "HEAD" ? null : document, { headers });
 }
 

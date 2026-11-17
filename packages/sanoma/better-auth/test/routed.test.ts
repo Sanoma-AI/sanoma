@@ -1,18 +1,14 @@
-import { hkdfSync } from "node:crypto";
 import {
   type AgentAddress,
   CLIENT_IP_HEADER,
-  type LoginContext,
   type LoginHalf,
   ROUTER_CLIENT_IP_HEADER,
   ROUTER_SECRET_HEADER,
+  routerSecretFor,
 } from "sanoma/workflows";
-import { testDatabaseUrl } from "sanoma/testing";
-import { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { prepareBetterAuthStaff } from "../src/instance.ts";
-import { declaredMetadataFetch } from "../src/oauth.ts";
-import { betterAuthStaffLogin, withRoutedCaller } from "../src/staff.ts";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { withCodeTag } from "../src/oauth.ts";
+import { withRoutedCaller } from "../src/staff.ts";
 import {
   authorizePath,
   CLAUDE_CODE,
@@ -20,11 +16,9 @@ import {
   connect as connectAt,
   consent,
   decode,
-  type Flow,
+  loginFor,
   pkce,
   REDIRECT,
-  requestsTo,
-  resetStaffSchema,
   resourceRows,
   signInFrom,
   token,
@@ -36,27 +30,25 @@ import {
 // the sign-in, the consent) stays on the instance's own host; what the router forwards (the
 // token endpoint, revocation, `/mcp`) reaches the login with the request's URL on that host.
 
-const databaseUrl = testDatabaseUrl("better_auth_routed");
-const key = Buffer.from(hkdfSync("sha256", process.env.SANOMA_SIGNING_KEY!, "", "login staff", 32)).toString("hex");
 /** The instance's own host: where a person signs in, and what the router forwards to. */
 const HOST = "acme.example";
 const ORIGIN = `https://${HOST}`;
 const ROUTER = "https://mcp.router.example";
 const MCP = `${ROUTER}/mcp`;
-const SECRET = "the-router's-secret";
-const routed = (company: string): AgentAddress => ({
+/** The router's master secret, which no instance has, and each company's own, derived from it. */
+const MASTER = "the-router's-master-secret-0123456789";
+const SECRET = await routerSecretFor(MASTER, "acme");
+const routed = async (company: string): Promise<AgentAddress> => ({
   issuer: ROUTER,
   resource: MCP,
-  router: { company, secret: SECRET },
+  router: { company, secret: await routerSecretFor(MASTER, company) },
 });
-const ACME = routed("acme");
+const ACME = await routed("acme");
 const DECLARED = "alice@example.com";
 /** A declared client that is a site: a remembered consent sends its code straight from authorize. */
 const WEB = "https://web.example/oauth/client.json";
 const WEB_REDIRECT = "https://web.example/callback";
 
-const codes = new Map<string, string>();
-const pool = new Pool({ connectionString: databaseUrl });
 const network = async (input: string | URL | Request): Promise<Response> => {
   const url = String(input instanceof Request ? input.url : input);
   if (url === CLAUDE_CODE) return Response.json(CLAUDE_CODE_DOCUMENT);
@@ -67,25 +59,15 @@ const agents = new Map([
   [CLAUDE_CODE, "claude-code"],
   [WEB, "web-bot"],
 ]);
-const loginAt = (address: AgentAddress): LoginHalf => {
-  const context: LoginContext = {
-    database: async () => pool,
-    key,
-    secrets: async () => new Map(),
-    origins: [],
-    sendCode: async (email, code) => void codes.set(email, code),
-    staff: {
-      admits: ({ email }) => email?.toLowerCase() === DECLARED,
-      social: {},
-      record: async () => undefined,
-      oauth: { address, agentOf: (client) => agents.get(client) },
-    },
-  };
-  return betterAuthStaffLogin(context, { fetchClientMetadata: declaredMetadataFetch(network) });
-};
+const { pool, codes, request, flow, loginWith, prepare } = loginFor({
+  database: "better_auth_routed",
+  host: HOST,
+  subnet: "10.7.0",
+  email: DECLARED,
+  network,
+});
+const loginAt = (address: AgentAddress): LoginHalf => loginWith({ address, agentOf: (client) => agents.get(client) });
 
-const request = requestsTo(HOST, "10.7.0");
-const flow: Flow = { origin: ORIGIN, email: DECLARED, codes, request };
 const claimsOf = (jwt: string) => decode(jwt).payload as Record<string, unknown>;
 const connect = (login: LoginHalf, client = CLAUDE_CODE, redirect = REDIRECT) =>
   connectAt(flow, login, { client, resource: MCP, redirect });
@@ -115,8 +97,7 @@ const bearerOf = (login: LoginHalf, bearer: string, host?: string) =>
 
 let acme: LoginHalf;
 beforeAll(async () => {
-  await resetStaffSchema(databaseUrl);
-  await prepareBetterAuthStaff(databaseUrl);
+  await prepare();
   acme = loginAt(ACME);
 });
 afterAll(() => pool.end());
@@ -193,8 +174,18 @@ describe("a login whose agent address is a router's", () => {
     const issued = await connect(acme);
     const first = issued.body.refresh_token!;
     const bare = first.slice("acme.".length);
-    for (const wrong of [bare, `globex.${bare}`]) {
-      expect((await refresh(acme, wrong)).status, wrong).toBe(400);
+    // One without its tag, or with another's, is no grant of this company's: RFC 6749's
+    // `invalid_grant`, answered before the provider, which would say `invalid_token`.
+    for (const wrong of [bare, `globex.${bare}`, `acme${bare}`, `ACME.${bare}`, ""]) {
+      const refused = (await acme.handle(
+        request("/auth/better-auth/oauth2/token", {
+          form: { grant_type: "refresh_token", refresh_token: wrong, client_id: CLAUDE_CODE, resource: MCP },
+          origin: null,
+        }),
+      ))!;
+      expect(refused.status, wrong).toBe(400);
+      expect(refused.headers.get("cache-control"), wrong).toBe("no-store");
+      expect(await refused.json(), wrong).toMatchObject({ error: "invalid_grant" });
     }
     // Neither spent it.
     const rotated = await refresh(acme, first);
@@ -292,7 +283,7 @@ describe("a login whose agent address is a router's", () => {
 
   it("refuses at /mcp a token of another company's, though the same keys signed it for the same router", async () => {
     // Another company's login on the same tables and keys: the tag is all that tells them apart.
-    const globex = loginAt(routed("globex"));
+    const globex = loginAt(await routed("globex"));
     const ours = (await connect(acme)).body.access_token!;
     const theirs = (await connect(globex)).body.access_token!;
     expect(claimsOf(theirs)).toMatchObject({ iss: ROUTER, aud: MCP, sanoma_company: "globex" });
@@ -344,7 +335,7 @@ describe("the caller's address a router names", () => {
 
   it("is taken for the caller's only with the router's secret, and neither header goes further", async () => {
     const named = { [ROUTER_CLIENT_IP_HEADER]: "198.51.100.7" };
-    const believed = withRoutedCaller(forwarded({ ...named, [ROUTER_SECRET_HEADER]: SECRET }), ACME);
+    const believed = withRoutedCaller(forwarded({ ...named, [ROUTER_SECRET_HEADER]: SECRET }), ACME, true);
     expect(believed.headers.get(CLIENT_IP_HEADER)).toBe("198.51.100.7");
     for (const headers of [
       named,
@@ -352,8 +343,11 @@ describe("the caller's address a router names", () => {
       { ...named, [ROUTER_SECRET_HEADER]: `${SECRET}x` },
       { ...named, [ROUTER_SECRET_HEADER]: SECRET.slice(1) },
       { ...named, [ROUTER_SECRET_HEADER]: SECRET.toUpperCase() },
+      // The router's master is no company's secret, nor is another company's.
+      { ...named, [ROUTER_SECRET_HEADER]: MASTER },
+      { ...named, [ROUTER_SECRET_HEADER]: await routerSecretFor(MASTER, "globex") },
     ]) {
-      const ignored = withRoutedCaller(forwarded(headers), ACME);
+      const ignored = withRoutedCaller(forwarded(headers), ACME, true);
       expect(ignored.headers.get(CLIENT_IP_HEADER), JSON.stringify(headers)).toBe(SOCKET);
     }
     // The request goes on whole: its method and its body.
@@ -362,7 +356,7 @@ describe("the caller's address a router names", () => {
       headers: { "content-type": "application/x-www-form-urlencoded", ...named, [ROUTER_SECRET_HEADER]: SECRET },
       body: "grant_type=refresh_token",
     });
-    const sent = withRoutedCaller(posted, ACME);
+    const sent = withRoutedCaller(posted, ACME, true);
     expect([sent.method, sent.url, sent.headers.get("content-type")]).toEqual([
       "POST",
       posted.url,
@@ -370,14 +364,17 @@ describe("the caller's address a router names", () => {
     ]);
     expect(await sent.text()).toBe("grant_type=refresh_token");
     // The secret alone, naming no address, changes nothing.
-    expect(withRoutedCaller(forwarded({ [ROUTER_SECRET_HEADER]: SECRET }), ACME).headers.get(CLIENT_IP_HEADER)).toBe(
-      SOCKET,
-    );
+    expect(
+      withRoutedCaller(forwarded({ [ROUTER_SECRET_HEADER]: SECRET }), ACME, true).headers.get(CLIENT_IP_HEADER),
+    ).toBe(SOCKET);
+    // At a route no router forwards, the secret itself makes nothing believed.
+    const elsewhere = withRoutedCaller(forwarded({ ...named, [ROUTER_SECRET_HEADER]: SECRET }), ACME, false);
+    expect(elsewhere.headers.get(CLIENT_IP_HEADER)).toBe(SOCKET);
     // An address of the app's own believes no router, whatever is sent.
     const own = { issuer: `${ORIGIN}/auth/better-auth`, resource: `${ORIGIN}/mcp` };
-    const unrouted = withRoutedCaller(forwarded({ ...named, [ROUTER_SECRET_HEADER]: SECRET }), own);
+    const unrouted = withRoutedCaller(forwarded({ ...named, [ROUTER_SECRET_HEADER]: SECRET }), own, true);
     expect(unrouted.headers.get(CLIENT_IP_HEADER)).toBe(SOCKET);
-    for (const answered of [believed, unrouted]) {
+    for (const answered of [believed, unrouted, elsewhere]) {
       expect(answered.headers.has(ROUTER_SECRET_HEADER)).toBe(false);
       expect(answered.headers.has(ROUTER_CLIENT_IP_HEADER)).toBe(false);
     }
@@ -391,5 +388,53 @@ describe("the caller's address a router names", () => {
     // Without the secret, or with a wrong one, what a request names is not read: the socket is counted.
     expect((await statuses("203.0.113.63", (i) => `198.51.100.${i + 1}`)).indexOf(429)).toBe(20);
     expect((await statuses("203.0.113.64", (i) => `198.51.100.${i + 1}`, "wrong")).indexOf(429)).toBe(20);
+  });
+
+  it("is not read on a sign-in, an email code or the consent, with the secret or without: the socket is counted", async () => {
+    // A holder of this company's secret posts sign-ins from one socket, each naming another
+    // caller: were the header believed there, none would be held and a code could be guessed
+    // without limit. Better Auth holds a sign-in route at three requests in ten seconds.
+    for (const [route, body] of [
+      ["/auth/better-auth/sign-in/email-otp", { email: DECLARED, otp: "000000" }],
+      ["/auth/better-auth/email-otp/send-verification-otp", { email: "nobody@example.com", type: "sign-in" }],
+    ] as const) {
+      const answered: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        const asking = request(route, { body });
+        asking.headers.set(CLIENT_IP_HEADER, route.includes("sign-in") ? "203.0.113.71" : "203.0.113.72");
+        asking.headers.set(ROUTER_CLIENT_IP_HEADER, `198.51.100.${i + 1}`);
+        asking.headers.set(ROUTER_SECRET_HEADER, SECRET);
+        answered.push((await acme.handle(asking))!.status);
+      }
+      expect(answered, route).toContain(429);
+    }
+  });
+});
+
+/** A redirect with a code and no `iss` of this issuer's: not the provider's as it is read. */
+const odd = () => new Response(null, { status: 302, headers: { location: "https://web.example/callback?code=Zx81" } });
+
+describe("an answer that sends a code", () => {
+  it("is said once when its code is not one this login tagged, and goes on as it is", async () => {
+    const said = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      for (let i = 0; i < 3; i++) {
+        const passed = await withCodeTag(odd(), ACME);
+        expect(passed.headers.get("location")).toBe("https://web.example/callback?code=Zx81");
+      }
+      const json = await withCodeTag(Response.json({ url: "https://web.example/callback?code=Zx81" }), ACME);
+      expect(await json.json()).toEqual({ url: "https://web.example/callback?code=Zx81" });
+      expect(said).toHaveBeenCalledTimes(1);
+      expect(said.mock.calls[0]![0]).toContain("did not tag");
+      // An answer with no code, or an error at the client's redirect, says nothing.
+      await withCodeTag(
+        new Response(null, { status: 302, headers: { location: "/auth/login?code_challenge=x" } }),
+        ACME,
+      );
+      await withCodeTag(Response.json({ url: `https://web.example/callback?error=access_denied&iss=${ROUTER}` }), ACME);
+      expect(said).toHaveBeenCalledTimes(1);
+    } finally {
+      said.mockRestore();
+    }
   });
 });

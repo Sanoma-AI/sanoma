@@ -1,9 +1,7 @@
-import { createHash, createHmac, generateKeyPairSync, hkdfSync, randomBytes, sign } from "node:crypto";
-import type { LoginContext, LoginHalf } from "sanoma/workflows";
-import { testDatabaseUrl } from "sanoma/testing";
+import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import type { LoginHalf } from "sanoma/workflows";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { prepareBetterAuthStaff } from "../src/instance.ts";
 import { declaredMetadataFetch } from "../src/oauth.ts";
 import { betterAuthStaffLogin } from "../src/staff.ts";
 import { tampered } from "../../workflows/test/tampered.ts";
@@ -15,11 +13,9 @@ import {
   consent as allow,
   cookieOf,
   decode,
-  type Flow,
+  loginFor,
   pkce,
   REDIRECT,
-  requestsTo,
-  resetStaffSchema,
   resourceRows as rowsOf,
   signInFrom as signIn,
   token as tokenAt,
@@ -31,8 +27,6 @@ import {
 // fetched, and the bearer checked for its issuer, audience, signature and expiry. Claude Code's
 // client metadata document is served by a stand-in for claude.ai: nothing here leaves the machine.
 
-const databaseUrl = testDatabaseUrl("better_auth_oauth");
-const key = Buffer.from(hkdfSync("sha256", process.env.SANOMA_SIGNING_KEY!, "", "login staff", 32)).toString("hex");
 const HOST = "company.example";
 const ORIGIN = `https://${HOST}`;
 /** The instance's agent address, as the app configures it: the resource and the issuer on its own host. */
@@ -84,31 +78,23 @@ async function withAgent<T>(client: string, agent: string | undefined, run: () =
     else agents.set(client, before);
   }
 }
-const codes = new Map<string, string>();
-const pool = new Pool({ connectionString: databaseUrl });
-const context: LoginContext = {
-  database: async () => pool,
-  key,
-  secrets: async () => new Map(),
-  origins: [],
-  sendCode: async (email, code) => void codes.set(email, code),
-  staff: {
-    admits: ({ email }) => email?.toLowerCase() === DECLARED,
-    social: {},
-    record: async () => undefined,
-    oauth: {
-      address: { issuer: ISSUER, resource: MCP },
-      agentOf: (client) => agents.get(client),
-      refusalOf: (client) => appRefusals.get(client),
-    },
-  },
-};
+/**
+ * The login's database and pool, the codes it sent, requests to it on its host through TLS (from
+ * the page's own origin unless `origin` is null, a client's), and Alice's sign-ins there.
+ */
+const { pool, codes, request, flow, contextWith, prepare } = loginFor({
+  database: "better_auth_oauth",
+  host: HOST,
+  subnet: "10.2.0",
+  email: DECLARED,
+  network,
+});
+const context = contextWith({
+  address: { issuer: ISSUER, resource: MCP },
+  agentOf: (client) => agents.get(client),
+  refusalOf: (client) => appRefusals.get(client),
+});
 let half: LoginHalf;
-
-/** A request to the login on its host, through TLS: from the page's own origin unless `origin` is null (a client's). */
-const request = requestsTo(HOST, "10.2.0");
-/** Alice's sign-ins at this login's host. */
-const flow: Flow = { origin: ORIGIN, email: DECLARED, codes, request };
 
 /** The authorization request a client opens in the browser, for the configured `/mcp` unless `extra` says another. */
 const authorizePath = (client: string, challenge: string, extra: Record<string, string> = {}) =>
@@ -189,8 +175,7 @@ const configured = (address: { issuer: string; resource: string }) =>
   );
 
 beforeAll(async () => {
-  await resetStaffSchema(databaseUrl);
-  await prepareBetterAuthStaff(databaseUrl);
+  await prepare();
   half = betterAuthStaffLogin(context, { fetchClientMetadata: declaredMetadataFetch(network) });
 });
 

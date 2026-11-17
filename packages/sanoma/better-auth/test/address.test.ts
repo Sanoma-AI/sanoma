@@ -1,20 +1,12 @@
-import { hkdfSync } from "node:crypto";
-import type { AgentAddress, LoginContext, LoginHalf } from "sanoma/workflows";
-import { testDatabaseUrl } from "sanoma/testing";
-import { Pool } from "pg";
+import type { AgentAddress, LoginHalf } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { prepareBetterAuthStaff } from "../src/instance.ts";
-import { declaredMetadataFetch } from "../src/oauth.ts";
-import { betterAuthStaffLogin } from "../src/staff.ts";
 import {
   authorizePath,
   CLAUDE_CODE,
   CLAUDE_CODE_DOCUMENT,
   connect as connectAt,
   decode,
-  type Flow,
-  requestsTo,
-  resetStaffSchema,
+  loginFor,
   resourceRows as rowsOf,
 } from "./staff-helpers.ts";
 
@@ -23,8 +15,6 @@ import {
 // the provider's seed, there before any authorize and made by no request; the documents and the
 // tokens name the configured pair alone; and with no address the login serves no OAuth.
 
-const databaseUrl = testDatabaseUrl("better_auth_address");
-const key = Buffer.from(hkdfSync("sha256", process.env.SANOMA_SIGNING_KEY!, "", "login staff", 32)).toString("hex");
 const HOST = "company.example";
 const ORIGIN = `https://${HOST}`;
 const ADDRESS: AgentAddress = { issuer: `${ORIGIN}/auth/better-auth`, resource: `${ORIGIN}/mcp` };
@@ -32,33 +22,21 @@ const ADDRESS: AgentAddress = { issuer: `${ORIGIN}/auth/better-auth`, resource: 
 const MADE_UP = "made-up.example";
 const DECLARED = "alice@example.com";
 
-const codes = new Map<string, string>();
-const pool = new Pool({ connectionString: databaseUrl });
 const network = async (input: string | URL | Request): Promise<Response> =>
   String(input instanceof Request ? input.url : input) === CLAUDE_CODE
     ? Response.json(CLAUDE_CODE_DOCUMENT)
     : new Response("Not found", { status: 404 });
 const agentOf = (client: string) => (client === CLAUDE_CODE ? "claude-code" : undefined);
+const { pool, request, flow, loginWith, prepare } = loginFor({
+  database: "better_auth_address",
+  host: HOST,
+  subnet: "10.4.0",
+  email: DECLARED,
+  network,
+});
 /** The login with `address` as its agent address, or with none. */
-const loginAt = (address: AgentAddress | undefined): LoginHalf => {
-  const context: LoginContext = {
-    database: async () => pool,
-    key,
-    secrets: async () => new Map(),
-    origins: [],
-    sendCode: async (email, code) => void codes.set(email, code),
-    staff: {
-      admits: ({ email }) => email?.toLowerCase() === DECLARED,
-      social: {},
-      record: async () => undefined,
-      ...(address && { oauth: { address, agentOf } }),
-    },
-  };
-  return betterAuthStaffLogin(context, { fetchClientMetadata: declaredMetadataFetch(network) });
-};
+const loginAt = (address: AgentAddress | undefined): LoginHalf => loginWith(address && { address, agentOf });
 
-const request = requestsTo(HOST, "10.4.0");
-const flow: Flow = { origin: ORIGIN, email: DECLARED, codes, request };
 /** A JWT's payload, unverified. */
 const claimsOf = (jwt: string) => decode(jwt).payload as Record<string, unknown>;
 /** The whole flow for Claude Code at `login`, for `address`'s resource, every request on `host`. */
@@ -71,8 +49,7 @@ const accessOf = ({ status, body }: Awaited<ReturnType<typeof connect>>) => {
 };
 
 beforeAll(async () => {
-  await resetStaffSchema(databaseUrl);
-  await prepareBetterAuthStaff(databaseUrl);
+  await prepare();
 });
 
 afterAll(() => pool.end());
@@ -132,7 +109,7 @@ describe("an agent address", () => {
       /^better-auth: the agent address's resource is .*: it needs a path/,
     );
     // A router's address is the other shape, whole (`routed.test.ts`): never the app's own with a company.
-    const router = { company: "acme", secret: "s3cret" };
+    const router = { company: "acme", secret: "s3cret-of-acme-at-the-router-0123456789" };
     expect(() => loginAt({ ...ADDRESS, router })).toThrow(/^better-auth: .*a router's issuer is its origin/);
     expect(() =>
       loginAt({ issuer: "https://mcp.router.example", resource: "https://mcp.router.example/mcp", router }),
