@@ -1,4 +1,3 @@
-import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
@@ -13,16 +12,30 @@ import {
   routedAgentAddress,
   ROUTER_CLIENT_IP_HEADER,
   ROUTER_SECRET_HEADER,
+  routerSecretFor,
   SanomaClient,
   type SanomaConfig,
 } from "sanoma/workflows";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type App, startApp, staffLogin } from "../src/index.ts";
-import { agentRouter, companyOfToken } from "../src/agent-router.ts";
+import { agentRouter, companyBase, companyOfToken } from "../src/agent-router.ts";
 import { freePort } from "../src/steps/agent/local-box.ts";
 import { prepareDatabase } from "../../workflows/src/db.ts";
-import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-oauth-helpers.ts";
+import {
+  allowAt,
+  authorizeQuery,
+  CLAUDE_CODE,
+  CLAUDE_CODE_DOCUMENT,
+  codeForm,
+  navigate,
+  REDIRECT,
+  refreshForm,
+  resetStaffSchema,
+  rpc,
+  rpcAnswer,
+  signInByCode,
+} from "./staff-oauth-helpers.ts";
 
 // Needs Postgres (`pnpm db:up`) and the app built (`pnpm --filter sanoma build`). The agents'
 // router (`config.router`, sanoma#777), in one process: a router app and two companies' apps,
@@ -36,8 +49,8 @@ import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from ".
 
 const ROUTER_HOST = "mcp.router.test";
 const ROUTER = `https://${ROUTER_HOST}`;
-const SECRET = "the-router's-secret";
-const REDIRECT = "http://127.0.0.1:53682/callback";
+/** The router's master secret: what it is configured with, and sends to no one. */
+const MASTER = "the-router's-master-secret-0123456789";
 
 /** A JWT with this payload, signed by nobody: all a router reads of one. */
 const unsigned = (payload: Record<string, unknown>) =>
@@ -60,28 +73,40 @@ describe("the router, over stand-ins", () => {
   };
   const LIST: Record<string, Record<string, unknown>> = {
     acme: { slug: "acme", url: "https://acme.example", status: "live" },
+    local: { slug: "local", url: "http://127.0.0.1:8787", status: "live" },
     paused: { slug: "paused", url: "https://paused.example", status: "stopped" },
     pathed: { slug: "pathed", url: "https://pathed.example/app", status: "live" },
+    plain: { slug: "plain", url: "http://plain.example", status: "live" },
+    usered: { slug: "usered", url: "https://user:pass@usered.example", status: "live" },
+    queried: { slug: "queried", url: "https://queried.example?to=x", status: "live" },
+    unwritten: { slug: "unwritten", status: "live" },
     "bad.id": { slug: "bad.id", url: "https://bad.example", status: "live" },
   };
   /** The keys the router asked the list for, and each request it forwarded. */
   const asked: string[] = [];
   const sent: Request[] = [];
   let answer: (request: Request) => Response | Promise<Response> = fine;
-  const made = (secret: string | null = SECRET) =>
+  /** What each forward was asked to send with, as `fetch` was given it. */
+  const inits: RequestInit[] = [];
+  const made = (secret: string | null = MASTER) =>
     agentRouter({
       router: routing,
       ...(secret && { secret }),
-      record: async (name, key) => {
-        asked.push(`${name}/${key}`);
-        return Object.hasOwn(LIST, key) ? { key, record: LIST[key]! } : null;
+      // As `SanomaClient.routedCompany` answers: where the company is, and whether it is routed to.
+      company: async (id) => {
+        asked.push(`companies/${id}`);
+        const record = Object.hasOwn(LIST, id) ? LIST[id]! : undefined;
+        return record && { ...(typeof record.url === "string" && { url: record.url }), live: record.status === "live" };
       },
       fetch: async (input, init) => {
+        inits.push(init!);
         const request = new Request(input as string, init);
         sent.push(request);
         return answer(request);
       },
     });
+  /** The companies the list has and the router does not send to now: not live, or a URL it refuses. */
+  const UNAVAILABLE = ["paused", "pathed", "plain", "usered", "queried", "unwritten"];
   const router = made();
   const at = (path: string, init: RequestInit = {}) =>
     router.handle(new Request(`https://${ROUTER_HOST}${path}`, init));
@@ -94,6 +119,7 @@ describe("the router, over stand-ins", () => {
   const fresh = () => {
     asked.length = 0;
     sent.length = 0;
+    inits.length = 0;
     answer = fine;
   };
 
@@ -180,8 +206,8 @@ describe("the router, over stand-ins", () => {
     // Wherever the form put `company`, it is the router's own and goes no further.
     const last = await at(`/authorize?${query}&company=%20acme%20`);
     expect(last.headers.get("location")).toBe(`https://acme.example/auth/better-auth/oauth2/authorize?${query}`);
-    // An id not listed, not live, no id at all, or a host: the page again, saying so, never a redirect.
-    for (const id of ["initech", "paused", "pathed", "bad.id", "acme.example", "https://evil.example", "ACME"]) {
+    // An id not listed, no id at all, or a host: the page again, saying so, never a redirect.
+    for (const id of ["initech", "bad.id", "acme.example", "https://evil.example", "ACME"]) {
       const refused = await at(`/authorize?company=${encodeURIComponent(id)}&${query}&redirect_uri=x`);
       expect(refused.status, id).toBe(404);
       expect(refused.headers.has("location"), id).toBe(false);
@@ -190,18 +216,81 @@ describe("the router, over stand-ins", () => {
       expect(html, id).toContain('name="redirect_uri" value="x"');
     }
     // The list is asked by the exact id alone, and nothing was fetched.
-    expect(asked).toEqual([
-      "companies/acme",
-      "companies/acme",
-      "companies/initech",
-      "companies/paused",
-      "companies/pathed",
-      "companies/ACME",
-    ]);
+    expect(asked).toEqual(["companies/acme", "companies/acme", "companies/initech", "companies/ACME"]);
     expect(sent).toEqual([]);
   });
 
-  it("forwards a token request's form unchanged to the company its code names, with the caller's address and the secret", async () => {
+  it("says a listed company it does not route to now is not available, on the page and to a client, never that it is unknown", async () => {
+    fresh();
+    for (const id of UNAVAILABLE) {
+      // The page again, saying the company is there and not available: never a redirect.
+      const page = await at(`/authorize?company=${id}&client_id=x`);
+      expect(page.status, id).toBe(503);
+      expect(page.headers.get("retry-after"), id).toBe("60");
+      expect(page.headers.has("location"), id).toBe(false);
+      const html = await page.text();
+      expect(html, id).toContain("That company is not available right now");
+      expect(html, id).not.toContain("No company with that id");
+      // A client keeps its code, its refresh token and its access token: asked to come back, not told they are no good.
+      for (const refused of [
+        await form("/token", { grant_type: "authorization_code", code: `${id}.Zx81` }),
+        await form("/token", { grant_type: "refresh_token", refresh_token: `${id}.Rt` }),
+        await form("/revoke", { token: `${id}.Rt` }),
+        await at("/mcp", {
+          method: "POST",
+          headers: { authorization: `Bearer ${unsigned({ sanoma_company: id })}` },
+          body: "{}",
+        }),
+      ]) {
+        expect(refused.status, id).toBe(503);
+        expect(refused.headers.get("retry-after"), id).toBe("60");
+        expect(refused.headers.get("cache-control"), id).toBe("no-store");
+        expect(refused.headers.has("www-authenticate"), id).toBe(false);
+        expect(await refused.json(), id).toEqual({
+          error: "temporarily_unavailable",
+          error_description: "The company is not available right now",
+        });
+      }
+    }
+    expect(sent).toEqual([]);
+  });
+
+  it("sends only to an https origin with no path, user or query, and to plain http on this machine alone", async () => {
+    for (const url of [
+      "https://acme.example",
+      "https://acme.example/",
+      "HTTPS://Acme.Example:443",
+      "https://a.example:8443",
+    ]) {
+      expect(companyBase(url), url).toBe(new URL(url).origin);
+    }
+    for (const local of ["http://127.0.0.1:8787", "http://localhost:3000", "http://[::1]:3000"]) {
+      expect(companyBase(local), local).toBe(local);
+    }
+    for (const refused of [
+      "http://acme.example",
+      "http://10.0.0.7:3000",
+      "http://169.254.169.254",
+      "https://acme.example/app",
+      "https://user@acme.example",
+      "https://user:pass@acme.example",
+      "https://acme.example?x=1",
+      "https://acme.example#x",
+      "ftp://acme.example",
+      "acme.example",
+      "",
+      undefined,
+      7,
+    ]) {
+      expect(companyBase(refused), String(refused)).toBeUndefined();
+    }
+    // A listed company on this machine over plain http is routed to: what the tests' instances are.
+    fresh();
+    const local = await at("/authorize?company=local&client_id=x");
+    expect(local.headers.get("location")).toBe("http://127.0.0.1:8787/auth/better-auth/oauth2/authorize?client_id=x");
+  });
+
+  it("forwards a token request's form unchanged to the company its code names, with the caller's address and that company's own secret", async () => {
     fresh();
     answer = () =>
       Response.json(
@@ -238,8 +327,10 @@ describe("the router, over stand-ins", () => {
     expect(Object.fromEntries(forwarded!.headers)).toEqual({
       "content-type": "application/x-www-form-urlencoded",
       [ROUTER_CLIENT_IP_HEADER]: "198.51.100.7",
-      [ROUTER_SECRET_HEADER]: SECRET,
+      // The company's own, derived from the master, which is never sent.
+      [ROUTER_SECRET_HEADER]: await routerSecretFor(MASTER, "acme"),
     });
+    expect(forwarded!.headers.get(ROUTER_SECRET_HEADER)).not.toBe(MASTER);
     // A refresh is routed by the refresh token, a revocation by its token (an access token's claim too).
     await form("/token", { grant_type: "refresh_token", refresh_token: "acme.Rt", code: "globex.no" });
     expect(sent[1]!.url).toBe("https://acme.example/auth/better-auth/oauth2/token");
@@ -248,11 +339,49 @@ describe("the router, over stand-ins", () => {
     expect(sent.slice(2).map((r) => r.url)).toEqual(
       Array(2).fill("https://acme.example/auth/better-auth/oauth2/revoke"),
     );
+    // Each of them with that company's secret; another company gets another, whoever asks.
+    expect(new Set(sent.map((r) => r.headers.get(ROUTER_SECRET_HEADER)))).toEqual(
+      new Set([await routerSecretFor(MASTER, "acme")]),
+    );
+    await form("/token", { grant_type: "authorization_code", code: "local.Zx81" });
+    expect(sent.at(-1)!.url).toBe("http://127.0.0.1:8787/auth/better-auth/oauth2/token");
+    expect(sent.at(-1)!.headers.get(ROUTER_SECRET_HEADER)).toBe(await routerSecretFor(MASTER, "local"));
+  });
+
+  it("reads a form no further than its limit, and never holds one larger", async () => {
+    fresh();
+    // Five megabytes that never end, with no length said: answered once the limit is passed.
+    let pulled = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(new Uint8Array(64 * 1024).fill(97));
+      },
+    });
+    const refused = await at("/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: endless,
+      duplex: "half",
+    } as RequestInit);
+    expect(refused.status).toBe(413);
+    expect(await refused.json()).toMatchObject({ error: "invalid_request" });
+    // Read to just past four megabytes, and no further.
+    expect(pulled).toBeGreaterThan(64);
+    expect(pulled).toBeLessThan(80);
+    // One that says its length is refused unread.
+    const said = await at("/revoke", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(5 * 1024 * 1024) },
+      body: "token=acme.Rt",
+    });
+    expect(said.status).toBe(413);
+    expect(sent).toEqual([]);
   });
 
   it("answers a code or token that names no listed company itself, in OAuth's words, and sends nothing", async () => {
     fresh();
-    for (const code of ["Zx81", "initech.Zx81", "paused.Zx81", "bad.id.Zx81", ".Zx81"]) {
+    for (const code of ["Zx81", "initech.Zx81", "bad.id.Zx81", ".Zx81"]) {
       const refused = await form("/token", { grant_type: "authorization_code", code });
       expect(refused.status, code).toBe(400);
       expect(((await refused.json()) as { error: string }).error, code).toBe("invalid_grant");
@@ -293,7 +422,6 @@ describe("the router, over stand-ins", () => {
       "acme.Zx81",
       unsigned({ sub: "x" }),
       unsigned({ sanoma_company: "initech" }),
-      unsigned({ sanoma_company: "paused" }),
       unsigned({ sanoma_company: ["acme"] }),
       unsigned({ sanoma_company: "acme.example" }),
       `a.${Buffer.from("[]").toString("base64url")}.c`,
@@ -301,14 +429,15 @@ describe("the router, over stand-ins", () => {
     ]) {
       const refused = await at("/mcp", { method: "POST", headers: { authorization: `Bearer ${bearer}` }, body: "{}" });
       expect(refused.status, bearer).toBe(401);
-      expect(refused.headers.get("www-authenticate"), bearer).toMatch(
-        /^Bearer error="invalid_token", .*resource_metadata=/,
+      expect(refused.headers.get("www-authenticate"), bearer).toBe(
+        `Bearer error="invalid_token", error_description="The access token names no company connected here", ${metadata}`,
       );
+      expect(await refused.json(), bearer).toEqual({ error: "Sign in first" });
     }
     expect(sent).toEqual([]);
   });
 
-  it("forwards a /mcp call with its bearer and MCP's headers, and passes the answer on as it streams", async () => {
+  it("forwards a /mcp call with its bearer and MCP's headers and nothing of the router's, and passes the answer on as it streams", async () => {
     fresh();
     const bearer = unsigned({ sanoma_company: "acme" });
     // An answer that never ends: its first event must come through before anything closes.
@@ -333,6 +462,8 @@ describe("the router, over stand-ins", () => {
         "mcp-session-id": "s0",
         cookie: "sanoma.session_token=theirs",
         [CLIENT_IP_HEADER]: "198.51.100.9",
+        [ROUTER_CLIENT_IP_HEADER]: "10.0.0.1",
+        [ROUTER_SECRET_HEADER]: "guess",
       },
       body: '{"jsonrpc":"2.0"}',
     });
@@ -347,14 +478,13 @@ describe("the router, over stand-ins", () => {
     const [forwarded] = sent;
     expect(forwarded!.url).toBe("https://acme.example/mcp");
     expect(await forwarded!.text()).toBe('{"jsonrpc":"2.0"}');
+    // No secret and no caller's address: nothing at a company's /mcp reads either.
     expect(Object.fromEntries(forwarded!.headers)).toEqual({
       accept: "application/json, text/event-stream",
       authorization: `Bearer ${bearer}`,
       "content-type": "application/json",
       "mcp-protocol-version": "2025-06-18",
       "mcp-session-id": "s0",
-      [ROUTER_CLIENT_IP_HEADER]: "198.51.100.9",
-      [ROUTER_SECRET_HEADER]: SECRET,
     });
     // A GET and a DELETE go on too, with no body.
     for (const method of ["GET", "DELETE"]) {
@@ -362,6 +492,100 @@ describe("the router, over stand-ins", () => {
       const other = await at("/mcp", { method, headers: { authorization: `Bearer ${bearer}` } });
       expect(other.status).toBe(405);
       expect(sent.at(-1)!.method).toBe(method);
+      expect(sent.at(-1)!.body).toBeNull();
+    }
+  });
+
+  it("sends a /mcp body on as it comes, never read or held whole", async () => {
+    fresh();
+    const bearer = unsigned({ sanoma_company: "acme" });
+    // A body whose first part is sent and whose end has not come: the company is asked all the same.
+    let more!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        more = controller;
+        controller.enqueue(new TextEncoder().encode('{"jsonrpc":'));
+      },
+    });
+    let read = "";
+    answer = async (request) => {
+      const reader = request.body!.getReader();
+      read = new TextDecoder().decode((await reader.read()).value);
+      // Its end is sent only once the company has read its start.
+      more.enqueue(new TextEncoder().encode('"2.0"}'));
+      more.close();
+      for (let next = await reader.read(); !next.done; next = await reader.read())
+        read += new TextDecoder().decode(next.value);
+      return fine();
+    };
+    const answered = await at("/mcp", {
+      method: "POST",
+      headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      body,
+      duplex: "half",
+    } as RequestInit);
+    expect(answered.status).toBe(200);
+    expect(read).toBe('{"jsonrpc":"2.0"}');
+    expect(inits[0]!.body).toBeInstanceOf(ReadableStream);
+    expect((inits[0] as { duplex?: string }).duplex).toBe("half");
+    // Larger than any form it would read: sent on all the same, its size the company's to refuse.
+    const large = "x".repeat(5 * 1024 * 1024);
+    answer = async (request) => Response.json({ size: (await request.text()).length });
+    const sized = await at("/mcp", { method: "POST", headers: { authorization: `Bearer ${bearer}` }, body: large });
+    expect(await sized.json()).toEqual({ size: large.length });
+  });
+
+  it("gives up on a company once its caller has gone, and waits for its first answer no longer than thirty seconds", async () => {
+    fresh();
+    const bearer = { authorization: `Bearer ${unsigned({ sanoma_company: "acme" })}` };
+    const said = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      // A company that never answers: the request to it ends when the signal it was given does.
+      const signals: AbortSignal[] = [];
+      answer = (request) =>
+        new Promise((_resolve, reject) => {
+          signals.push(request.signal);
+          request.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        });
+      const caller = new AbortController();
+      const asking = at("/mcp", { method: "POST", headers: bearer, body: "{}", signal: caller.signal });
+      await vi.waitFor(() => expect(signals).toHaveLength(1));
+      expect(signals[0]!.aborted).toBe(false);
+      caller.abort();
+      expect((await asking).status).toBe(502);
+      expect(signals[0]!.aborted).toBe(true);
+      // The caller still there, the company silent: given up after thirty seconds, not before.
+      vi.useFakeTimers();
+      const waiting = form("/token", { grant_type: "authorization_code", code: "acme.Zx81" });
+      await vi.waitFor(() => expect(signals).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(signals[1]!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(signals[1]!.aborted).toBe(true);
+      expect((await waiting).status).toBe(502);
+      // An answer that has begun is not cut then: its stream goes on past the wait.
+      let close!: () => void;
+      answer = () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("data: 1\n\n"));
+              close = () => {
+                controller.enqueue(new TextEncoder().encode("data: 2\n\n"));
+                controller.close();
+              };
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      const streamed = await at("/mcp", { method: "POST", headers: bearer, body: "{}" });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(inits.at(-1)!.signal!.aborted).toBe(false);
+      close();
+      expect(await streamed.text()).toBe("data: 1\n\ndata: 2\n\n");
+    } finally {
+      vi.useRealTimers();
+      said.mockRestore();
     }
   });
 
@@ -491,8 +715,9 @@ beforeAll(async () => {
           { fetchClientMetadata: declaredMetadataFetch(claudeAi) },
         ),
       {},
-      // As SANOMA_AGENT_URL, SANOMA_COMPANY and SANOMA_ROUTER_SECRET configure one.
-      routedAgentAddress(`${ROUTER}/mcp`, { company: c.id, secret: SECRET }),
+      // As SANOMA_AGENT_URL, SANOMA_COMPANY and SANOMA_ROUTER_SECRET configure one: the company's
+      // own secret, which whoever lists it derives from the router's master.
+      routedAgentAddress(`${ROUTER}/mcp`, { company: c.id, secret: await routerSecretFor(MASTER, c.id) }),
     );
     c.app = await startApp(c.config, { port: await freePort(), login });
     c.client = await SanomaClient.connect(c.config);
@@ -506,7 +731,7 @@ beforeAll(async () => {
   ]) {
     await routerClient.call("data.companies.save", { record }, { actor: "rita" });
   }
-  routerApp = await startApp(routerConfig, { port: 0, router: { secret: SECRET, fetch: noting } });
+  routerApp = await startApp(routerConfig, { port: 0, router: { secret: MASTER, fetch: noting } });
 }, 120_000);
 
 afterAll(async () => {
@@ -572,32 +797,9 @@ const jsonOf = <T = Record<string, unknown>>(answer: Answer) => JSON.parse(answe
 
 /** A JSON-RPC request to the router's `/mcp`, as an MCP client sends it; its answer as JSON or the last event of a stream. */
 async function mcp(method: string, params: Record<string, unknown>, bearer?: string) {
-  const answered = await router("/mcp", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-      ...(bearer && { authorization: `Bearer ${bearer}` }),
-    },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const data = answered.headers.get("content-type")?.includes("text/event-stream")
-    ? answered.text
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .at(-1)
-        ?.slice("data:".length)
-    : answered.text;
-  return { status: answered.status, headers: answered.headers, body: data ? JSON.parse(data) : undefined };
+  const answered = await router("/mcp", rpc(method, params, bearer ? { authorization: `Bearer ${bearer}` } : {}));
+  return rpcAnswer(answered.status, answered.headers, answered.text);
 }
-
-/** A page's change on a company's own host, from that host's origin, as its sign-in and consent pages post. */
-const fromPage = (c: Company, path: string, body: unknown, cookie?: string) =>
-  fetch(new URL(path, urlOf(c)), {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: urlOf(c), ...(cookie && { cookie }) },
-    body: JSON.stringify(body),
-  });
 
 interface Issued {
   access_token: string;
@@ -616,53 +818,22 @@ async function connect(c: Company) {
   const resource = jsonOf<{ resource: string; authorization_servers: string[] }>(await router(metadataUrl!));
   const [issuer] = resource.authorization_servers;
   const server = jsonOf<Record<string, string>>(await router(`${issuer}/.well-known/oauth-authorization-server`));
-  const verifier = randomBytes(32).toString("base64url");
-  const query = new URLSearchParams({
-    response_type: "code",
-    client_id: CLAUDE_CODE,
-    redirect_uri: REDIRECT,
-    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
-    code_challenge_method: "S256",
-    state: "s 1",
-    resource: resource.resource,
-  });
+  const { verifier, query } = authorizeQuery(CLAUDE_CODE, resource.resource, "s 1");
   // The browser at the router: the page, then the company's id typed into it.
   const page = await router(`${server.authorization_endpoint}?${query}`);
   const chosen = await router(`${server.authorization_endpoint}?${query}&company=${c.id}`);
   expect(chosen.status).toBe(302);
   const authorizeAt = chosen.headers.get("location")!;
   // The browser on the company's own host from here: its authorize, its sign-in, its consent.
-  const navigating = { accept: "text/html", "sec-fetch-mode": "navigate" };
-  const authorized = await ask(authorizeAt, { headers: navigating });
+  const authorized = await navigate(authorizeAt);
   expect(authorized.status).toBe(302);
   const login = new URL(authorized.headers.get("location")!, urlOf(c));
-  await fromPage(c, "/auth/better-auth/email-otp/send-verification-otp", { email: c.email, type: "sign-in" });
-  const signed = await fromPage(c, "/auth/better-auth/sign-in/email-otp", {
-    email: c.email,
-    otp: c.codes.get(c.email),
-    oauth_query: login.search.slice(1),
-  });
+  const signed = await signInByCode(urlOf(c), c.email, c.codes, login.search.slice(1));
   expect(signed.status).toBe(200);
-  const cookie = cookieOf(signed);
-  const consentAt = new URL(((await signed.json()) as { url: string }).url, urlOf(c));
-  const consentPage = await (await fetch(consentAt, { headers: { cookie } })).text();
-  const allowed = await fromPage(
-    c,
-    "/auth/better-auth/oauth2/consent",
-    { accept: true, oauth_query: consentAt.search.slice(1) },
-    cookie,
-  );
-  const back = new URL(((await allowed.json()) as { url: string }).url);
+  const consentAt = signed.next;
+  const { consentPage, back } = await allowAt(urlOf(c), consentAt, signed.cookie);
   const code = back.searchParams.get("code")!;
-  const exchange = (grant: string) =>
-    formTo(server.token_endpoint!, {
-      grant_type: "authorization_code",
-      code: grant,
-      redirect_uri: REDIRECT,
-      client_id: CLAUDE_CODE,
-      code_verifier: verifier,
-      resource: resource.resource,
-    });
+  const exchange = (grant: string) => formTo(server.token_endpoint!, codeForm(grant, verifier, resource.resource));
   return { page, authorizeAt, query, login, consentAt, consentPage, back, code, exchange, server, resource };
 }
 
@@ -679,8 +850,7 @@ async function tokensOf(c: Company) {
   return made;
 }
 const claimsOf = (jwt: string) => JSON.parse(Buffer.from(jwt.split(".")[1]!, "base64url").toString()) as object;
-const refresh = (refresh_token: string) =>
-  formTo("/token", { grant_type: "refresh_token", refresh_token, client_id: CLAUDE_CODE, resource: `${ROUTER}/mcp` });
+const refresh = (refresh_token: string) => formTo("/token", refreshForm(refresh_token, `${ROUTER}/mcp`));
 
 describe("a router in front of two companies", () => {
   it("is where a client finds everything: the 401, the metadata, and which company on a page", async () => {
@@ -793,18 +963,30 @@ describe("a router in front of two companies", () => {
     flow.issued = { ...next, refresh_token: "" };
   });
 
-  it("refuses a company it does not list, or lists as not live, and contacts nobody for it", async () => {
+  it("refuses a company it does not list, says one it lists as not live is not available, and contacts nobody for either", async () => {
     contacted.length = 0;
-    for (const id of ["initech", "hooli"]) {
-      const page = await router(`/authorize?company=${id}&client_id=x`);
-      expect(page.status, id).toBe(404);
-      expect(page.text).toContain("No company with that id is connected here");
-      const refused = await mcp("tools/list", {}, unsigned({ sanoma_company: id }));
-      expect(refused.status, id).toBe(401);
-      expect(refused.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
-      const token = await formTo("/token", { grant_type: "authorization_code", code: `${id}.Zx81` });
-      expect(token.status, id).toBe(400);
-      expect(jsonOf(token)).toMatchObject({ error: "invalid_grant" });
+    const page = await router("/authorize?company=initech&client_id=x");
+    expect(page.status).toBe(404);
+    expect(page.text).toContain("No company with that id is connected here");
+    const refused = await mcp("tools/list", {}, unsigned({ sanoma_company: "initech" }));
+    expect(refused.status).toBe(401);
+    expect(refused.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
+    const token = await formTo("/token", { grant_type: "authorization_code", code: "initech.Zx81" });
+    expect(token.status).toBe(400);
+    expect(jsonOf(token)).toMatchObject({ error: "invalid_grant" });
+    // Listed, and not live: the client is asked to come back, and keeps what it holds.
+    const pending = await router("/authorize?company=hooli&client_id=x");
+    expect(pending.status).toBe(503);
+    expect(pending.text).toContain("That company is not available right now");
+    for (const held of [
+      await router("/mcp", rpc("tools/list", {}, { authorization: `Bearer ${unsigned({ sanoma_company: "hooli" })}` })),
+      await formTo("/token", { grant_type: "authorization_code", code: "hooli.Zx81" }),
+      await formTo("/token", { grant_type: "refresh_token", refresh_token: "hooli.Rt" }),
+      await formTo("/revoke", { token: "hooli.Rt", client_id: CLAUDE_CODE }),
+    ]) {
+      expect(held.status).toBe(503);
+      expect(held.headers.get("retry-after")).toBe("60");
+      expect(jsonOf(held)).toMatchObject({ error: "temporarily_unavailable" });
     }
     expect(contacted).toEqual([]);
   });

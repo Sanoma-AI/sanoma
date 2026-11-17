@@ -1,6 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { betterAuthStaffLogin, declaredMetadataFetch, prepareBetterAuthStaff } from "sanoma/better-auth";
@@ -13,7 +11,24 @@ import { ACTOR_HEADER, AGENT_HEADER } from "../src/api.ts";
 import { type App, startApp, staffLogin } from "../src/index.ts";
 import { freePort } from "../src/steps/agent/local-box.ts";
 import { tampered } from "../../workflows/test/tampered.ts";
-import { CLAUDE, CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-oauth-helpers.ts";
+import {
+  allowAt,
+  authorizeQuery,
+  CLAUDE,
+  CLAUDE_CODE,
+  CLAUDE_CODE_DOCUMENT,
+  codeForm,
+  cookieOf,
+  fromPageAt,
+  navigate,
+  postForm,
+  REDIRECT,
+  refreshForm,
+  resetStaffSchema,
+  rpc,
+  rpcAnswer,
+  signInByCode,
+} from "./staff-oauth-helpers.ts";
 
 // Needs Postgres (`pnpm db:up`) and the app built (`pnpm --filter sanoma build`). `/mcp` on a
 // hosted instance, through the app on Node with the staff login (Better Auth's): a client of its
@@ -27,7 +42,6 @@ import { CLAUDE, CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema }
 // Claude's metadata documents are served by a stand-in for claude.ai: nothing here leaves the machine.
 
 const UNDECLARED = "https://elsewhere.example/oauth/client.json";
-const REDIRECT = "http://127.0.0.1:53682/callback";
 const ADA = "ada@acme.test";
 
 const root = mkdtempSync(join(tmpdir(), "sanoma-hosted-mcp-"));
@@ -106,12 +120,7 @@ afterAll(async () => {
 
 const at = (path: string) => new URL(path, app.url).href;
 /** A page's change, from the app's own origin, as the sign-in and consent pages post. */
-const fromPage = (path: string, body: unknown, cookie?: string) =>
-  fetch(at(path), {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: app.url, ...(cookie && { cookie }) },
-    body: JSON.stringify(body),
-  });
+const fromPage = (path: string, body: unknown, cookie?: string) => fromPageAt(app.url, path, body, cookie);
 
 /** A bearer, as a client sends its access token. */
 const bearerOf = (token: string) => ({ authorization: `Bearer ${token}` });
@@ -123,40 +132,8 @@ async function mcp(
   headers: Record<string, string> = {},
   url = at("/mcp"),
 ) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const text = await res.text();
-  const data = res.headers.get("content-type")?.includes("text/event-stream")
-    ? text
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .at(-1)
-        ?.slice("data:".length)
-    : text;
-  return { status: res.status, headers: res.headers, body: data ? JSON.parse(data) : undefined };
-}
-
-/**
- * The browser the client opens on `url`: a navigation, answered with a redirect, never followed
- * here. Node's `fetch` says `Sec-Fetch-Mode: cors` whatever it is given, which a provider answers
- * with JSON instead: `node:http` says what a browser's navigation says.
- */
-function navigate(url: string, cookie?: string): Promise<Response> {
-  return new Promise((resolve, reject) => {
-    get(url, { headers: { accept: "text/html", "sec-fetch-mode": "navigate", ...(cookie && { cookie }) } }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (chunk: Buffer) => chunks.push(chunk));
-      res.on("end", () => {
-        const headers = new Headers();
-        for (const [name, value] of Object.entries(res.headers))
-          if (typeof value === "string") headers.set(name, value);
-        resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers }));
-      });
-    }).on("error", reject);
-  });
+  const res = await fetch(url, rpc(method, params, headers));
+  return rpcAnswer(res.status, res.headers, await res.text());
 }
 
 /** What a client does from the 401 to a token: discovery, authorize, the person's sign-in and consent, the code for tokens. */
@@ -168,34 +145,14 @@ async function signIn(client = CLAUDE_CODE, cookie?: string) {
   const server = (await (
     await fetch(new URL(`/.well-known/oauth-authorization-server${issuer.pathname}`, issuer))
   ).json()) as { authorization_endpoint: string; token_endpoint: string };
-  const verifier = randomBytes(32).toString("base64url");
-  const query = new URLSearchParams({
-    response_type: "code",
-    client_id: client,
-    redirect_uri: REDIRECT,
-    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
-    code_challenge_method: "S256",
-    state: "s1",
-    resource: resource.resource,
-  });
+  const { verifier, query } = authorizeQuery(client, resource.resource);
   const authorized = await navigate(`${server.authorization_endpoint}?${query}`, cookie);
   return { authorized, verifier, server, resource: resource.resource };
 }
 
 /** The token endpoint's exchange, as Claude Code sends it: a form, no Origin, no cookie; its code and PKCE verifier for tokens. */
 const exchange = (server: { token_endpoint: string }, code: string, verifier: string, resource: string) =>
-  fetch(server.token_endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: REDIRECT,
-      client_id: CLAUDE_CODE,
-      code_verifier: verifier,
-      resource,
-    }),
-  });
+  postForm(server.token_endpoint, codeForm(code, verifier, resource));
 
 /**
  * The whole sign-in for Claude Code, Ada's: from the 401 to its tokens, consenting when asked
@@ -210,24 +167,11 @@ async function connect(signedIn?: string) {
   let next = new URL(authorized.headers.get("location")!, app.url);
   let cookie = signedIn;
   if (cookie === undefined) {
-    await fromPage("/auth/better-auth/email-otp/send-verification-otp", { email: ADA, type: "sign-in" });
-    const signed = await fromPage("/auth/better-auth/sign-in/email-otp", {
-      email: ADA,
-      otp: codes.get(ADA),
-      oauth_query: next.search.slice(1),
-    });
-    cookie = cookieOf(signed);
-    next = new URL(((await signed.json()) as { url: string }).url, app.url);
+    ({ cookie, next } = await signInByCode(app.url, ADA, codes, next.search.slice(1)));
   }
   let consentPage: string | undefined;
   if (next.pathname === "/auth/consent") {
-    consentPage = await (await fetch(next, { headers: { cookie } })).text();
-    const allowed = await fromPage(
-      "/auth/better-auth/oauth2/consent",
-      { accept: true, oauth_query: next.search.slice(1) },
-      cookie,
-    );
-    next = new URL(((await allowed.json()) as { url: string }).url);
+    ({ consentPage, back: next } = await allowAt(app.url, next, cookie));
   }
   const exchanged = await exchange(server, next.searchParams.get("code")!, verifier, resource);
   expect(exchanged.status).toBe(200);
@@ -250,16 +194,7 @@ let built: Issued | undefined;
 
 /** The token endpoint's refresh, as the client sends it. */
 const refresh = (issued: { refresh_token: string; resource: string; server: { token_endpoint: string } }) =>
-  fetch(issued.server.token_endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: issued.refresh_token,
-      client_id: CLAUDE_CODE,
-      resource: issued.resource,
-    }),
-  });
+  postForm(issued.server.token_endpoint, refreshForm(issued.refresh_token, issued.resource));
 
 /** `issued` after a refresh that is granted: its new tokens (a refresh token is used once). */
 async function renewed<T extends Issued>(issued: T) {

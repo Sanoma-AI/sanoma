@@ -90,8 +90,8 @@ export interface AppOptions {
    */
   ingress?: readonly IngressRoute[];
   /**
-   * For a config with a `router`: the secret the agents' router forwards with
-   * (`SANOMA_ROUTER_SECRET`, which `sanoma serve` reads), and what it forwards with instead of
+   * For a config with a `router`: the agents' router's master secret (`SANOMA_ROUTER_SECRET`,
+   * which `sanoma serve` reads with `routerOptionsFrom`), and what it forwards with instead of
    * `fetch` (`AppHandlerOptions.router`).
    */
   router?: { secret?: string; fetch?: typeof fetch };

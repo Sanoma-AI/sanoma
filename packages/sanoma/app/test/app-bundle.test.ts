@@ -17,7 +17,14 @@ import { buildAppBundle, NodeOnlyImport } from "sanoma/app/bundle";
 import { prepareBetterAuth, prepareBetterAuthStaff } from "sanoma/better-auth";
 import { testDatabaseUrl } from "sanoma/testing";
 import { collection } from "sanoma/data";
-import { defineConfig, ROUTER_SECRET_HEADER, SanomaClient, sealInvite } from "sanoma/workflows";
+import {
+  defineConfig,
+  ROUTER_CLIENT_IP_HEADER,
+  ROUTER_SECRET_HEADER,
+  routerSecretFor,
+  SanomaClient,
+  sealInvite,
+} from "sanoma/workflows";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unstable_startWorker } from "wrangler";
@@ -77,9 +84,9 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "${CLAUDE_CO
 export const moved = sanoma.agent({ id: "moved", client: "${MOVED}" });
 `;
 
-/** The agents' router the Worker serves on one more hostname (`config.router`), its secret, and the one company it lists. */
+/** The agents' router the Worker serves on one more hostname (`config.router`), its master secret, and the one company it lists. */
 const ROUTER_HOSTNAME = "mcp.example";
-const ROUTER_SECRET = "the-router's-secret";
+const ROUTER_SECRET = "the-router's-master-secret-0123456789";
 const LISTED = "https://acme-instance.example";
 /** A token that names a company, signed by nobody: all the router reads of one. */
 const tagged = (id: string) => `e30.${Buffer.from(JSON.stringify({ sanoma_company: id })).toString("base64url")}.c2ln`;
@@ -379,7 +386,7 @@ beforeAll(async () => {
     // secrets' key, and the logins' cookies and the invite requests are signed under the signing key.
     SANOMA_SECRETS_KEY: process.env.SANOMA_SECRETS_KEY,
     SANOMA_SIGNING_KEY: process.env.SANOMA_SIGNING_KEY,
-    // What the config's router forwards with.
+    // The master secret of the config's router.
     SANOMA_ROUTER_SECRET: ROUTER_SECRET,
   };
   const { SANOMA_HOSTNAME: _hostname, ...withoutHostname } = vars;
@@ -388,6 +395,8 @@ beforeAll(async () => {
     start("wrangler-appless.json", vars),
     start("wrangler-unnamed.json", {
       ...withoutHostname,
+      // A secret no router could send: this Worker serves no router.
+      SANOMA_ROUTER_SECRET: "too-short",
       SANOMA_HOST_URL: `${WORKERS_DEV}/`,
       DATABASE: { connectionString: databaseUrl },
     }),
@@ -699,15 +708,52 @@ describe("buildAppBundle", () => {
     expect(forwarded[0]).toMatchObject({
       url: `${LISTED}/mcp`,
       method: "POST",
-      headers: { authorization: bearer, "content-type": "application/json", [ROUTER_SECRET_HEADER]: ROUTER_SECRET },
+      headers: { authorization: bearer, "content-type": "application/json" },
     });
-    expect(forwarded[0]!.headers).not.toHaveProperty("cookie");
+    // Nothing of the router's goes with a /mcp call, and never the caller's cookie.
+    for (const never of ["cookie", ROUTER_SECRET_HEADER, ROUTER_CLIENT_IP_HEADER]) {
+      expect(forwarded[0]!.headers, never).not.toHaveProperty(never);
+    }
+    // The body, sent on as a stream, arrives whole: here one larger than a chunk.
     expect(JSON.parse(forwarded[0]!.body)).toMatchObject({ method: "tools/list" });
+    const padded = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: { pad: "x".repeat(300_000) },
+    });
+    const large = await get(`${at}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: bearer },
+      body: padded,
+    });
+    expect(large.status).toBe(200);
+    expect(forwarded[1]!.body).toBe(padded);
+    // A token request goes on with the company's own secret, derived from the master, and the form as it came.
+    const form = "grant_type=refresh_token&refresh_token=acme.Rt&client_id=c";
+    const token = await get(`${at}/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form,
+    });
+    expect(token.status).toBe(200);
+    expect(forwarded[2]).toMatchObject({
+      url: `${LISTED}/auth/better-auth/oauth2/token`,
+      method: "POST",
+      body: form,
+      headers: { [ROUTER_SECRET_HEADER]: await routerSecretFor(ROUTER_SECRET, "acme") },
+    });
+    expect(forwarded[2]!.headers).toHaveProperty(ROUTER_CLIENT_IP_HEADER);
     // A company it does not list is refused here, and nothing is sent.
     const unknown = await listTools(get, at, { authorization: `Bearer ${tagged("initech")}` });
     expect(unknown.status).toBe(401);
     expect(unknown.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
-    expect(forwarded).toHaveLength(1);
+    expect(forwarded).toHaveLength(3);
+    // A Worker whose SANOMA_ROUTER_SECRET is none a router can send serves no router: on the
+    // router's hostname it is the app, with no router's metadata and no page that asks which company.
+    const unrouted = through(() => unnamed);
+    expect((await unrouted(`${at}/.well-known/oauth-authorization-server`)).status).toBe(404);
+    expect(await (await unrouted(`${at}/authorize`)).text()).not.toContain("Which company?");
   });
 
   it("refuses a company file importing what the Worker does not have, by file and symbol", async () => {

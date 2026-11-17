@@ -57,9 +57,10 @@ export interface AppHandlerOptions {
    */
   ingress?: readonly IngressRoute[];
   /**
-   * For a config with a `router` (`ResolvedConfig.router`): the secret it forwards with
-   * (`SANOMA_ROUTER_SECRET`, without which it forwards nothing), and what it forwards with
-   * instead of `fetch` (a test's).
+   * For a config with a `router` (`ResolvedConfig.router`): its master secret
+   * (`SANOMA_ROUTER_SECRET`, as `routerOptionsFrom` reads it; without one it forwards nothing),
+   * and what it forwards with instead of `fetch` (a test's). A launcher that must not serve the
+   * router gives a `resolved` without one.
    */
   router?: { secret?: string; fetch?: typeof fetch };
   /** Start's server entry: the pages and the server functions. */
@@ -84,7 +85,7 @@ export interface AppHandler {
   /** Each public site's domain, by site name, as `hosts` has it. */
   domains: ReadonlyMap<string, string>;
   /** The hostname the agents' router answers on, when the config has one (`ResolvedConfig.router`). */
-  router?: string;
+  routerHostname?: string;
 }
 
 /**
@@ -111,13 +112,10 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
   ]);
   const hosts = publicHosts(first.description, options.domains ?? {});
   // The agents' router, on its hostname alone: its list read through the request's client.
+  const routing = resolved.router;
   const router =
-    resolved.router &&
-    agentRouter({
-      router: resolved.router,
-      ...options.router,
-      record: (collection, key) => client.record(collection, key),
-    });
+    routing && agentRouter({ router: routing, ...options.router, company: (id) => client.routedCompany(routing, id) });
+  // The launchers refuse this at their start (`routerOptionsFrom`); said here for any other caller.
   if (router && hosts.has(router.hostname)) {
     console.warn(`sanoma app: ${router.hostname} is the router's hostname: the public site there is not served`);
   }
@@ -220,7 +218,7 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
     context,
     hosts,
     domains,
-    ...(router && { router: router.hostname }),
+    ...(router && { routerHostname: router.hostname }),
     async fetch(request) {
       try {
         return await answer(request);
