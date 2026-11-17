@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prepareBetterAuthStaff } from "../src/instance.ts";
 import { declaredMetadataFetch } from "../src/oauth.ts";
 import { betterAuthStaffLogin } from "../src/staff.ts";
+import { tampered } from "../../workflows/test/tampered.ts";
 import {
   authorizePath as authorizeFor,
   CLAUDE_CODE,
@@ -898,9 +899,8 @@ describe("a bearer", () => {
       }
     }
     // One character of the signature changed.
-    const [head, payload, signature] = access.split(".");
-    const flipped = `${head}.${payload}.${signature!.slice(0, -2)}${signature!.endsWith("AA") ? "BB" : "AA"}`;
-    expect(await bearerOf(flipped)).toBeNull();
+    const [, payload] = access.split(".");
+    expect(await bearerOf(tampered(access))).toBeNull();
     // Forged: no signature (`alg: none`), and HS256 keyed with the public key (the confusion of
     // an asymmetric key for a shared secret): only the login's own algorithm and keys are taken.
     const { header: realHeader } = decode(access);

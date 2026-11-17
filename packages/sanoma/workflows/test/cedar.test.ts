@@ -33,7 +33,7 @@ import {
   validatePolicies,
   VISITOR_DENIED,
 } from "../src/index.ts";
-import { ANONYMOUS_PRINCIPAL, visitorPrincipal } from "../src/shared.ts";
+import { ANONYMOUS_PRINCIPAL, BUILT_IN_CLIENTS, visitorPrincipal } from "../src/shared.ts";
 import { startWorker } from "../src/worker.ts";
 import { failure, rootWith, waitFor } from "./harness.ts";
 
@@ -961,7 +961,7 @@ forbid (principal == Sanoma::Principal::"sanoma-chat", action == Sanoma::Action:
     const undeclared = acting.filter((r) => r !== claudeCode);
     const decideBuiltIn = cedarPolicy(resolved, policies, undeclared);
     const builtIn = (person: string) =>
-      clientActing("https://claude.ai/oauth/claude-code-client-metadata", person, { people: undeclared, problems: [] });
+      clientActing(BUILT_IN_CLIENTS[1]!.client, person, { people: undeclared, problems: [] });
     expect(builtIn("ada")).toEqual(forOf("ada"));
     const asked = (
       op: { id: string },

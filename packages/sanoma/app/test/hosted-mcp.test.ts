@@ -12,7 +12,8 @@ import { z } from "zod";
 import { ACTOR_HEADER, AGENT_HEADER } from "../src/api.ts";
 import { type App, startApp, staffLogin } from "../src/index.ts";
 import { freePort } from "../src/steps/agent/local-box.ts";
-import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-oauth-helpers.ts";
+import { tampered } from "../../workflows/test/tampered.ts";
+import { CLAUDE, CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-oauth-helpers.ts";
 
 // Needs Postgres (`pnpm db:up`) and the app built (`pnpm --filter sanoma build`). `/mcp` on a
 // hosted instance, through the app on Node with the staff login (Better Auth's): a client of its
@@ -28,8 +29,6 @@ import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from ".
 const UNDECLARED = "https://elsewhere.example/oauth/client.json";
 const REDIRECT = "http://127.0.0.1:53682/callback";
 const ADA = "ada@acme.test";
-/** The client of Claude's hosted apps, built in beside Claude Code's. */
-const CLAUDE = "https://claude.ai/oauth/mcp-oauth-client-metadata";
 
 const root = mkdtempSync(join(tmpdir(), "sanoma-hosted-mcp-"));
 mkdirSync(join(root, "resources"));
@@ -199,22 +198,30 @@ const exchange = (server: { token_endpoint: string }, code: string, verifier: st
   });
 
 /**
- * The whole sign-in for Claude Code, Ada's: from the 401 to its tokens, consenting when asked.
- * Every request is the client's or the login's own: none of them is a page of the app.
+ * The whole sign-in for Claude Code, Ada's: from the 401 to its tokens, consenting when asked
+ * (`consentPage`, the page it was shown). Every request is the client's or the login's own: none
+ * of them is a page of the app. With `signedIn`, Ada's session cookie, she is signed in already,
+ * so no code is mailed (a sign-in by code is rate limited): authorize goes straight to the consent
+ * page, which a client that takes its answer on the person's own computer is shown every time.
  */
-async function connect() {
-  const { authorized, verifier, server, resource } = await signIn();
+async function connect(signedIn?: string) {
+  const { authorized, verifier, server, resource } = await signIn(CLAUDE_CODE, signedIn);
   expect(authorized.status).toBe(302);
-  const login = new URL(authorized.headers.get("location")!, app.url);
-  await fromPage("/auth/better-auth/email-otp/send-verification-otp", { email: ADA, type: "sign-in" });
-  const signed = await fromPage("/auth/better-auth/sign-in/email-otp", {
-    email: ADA,
-    otp: codes.get(ADA),
-    oauth_query: login.search.slice(1),
-  });
-  const cookie = cookieOf(signed);
-  let next = new URL(((await signed.json()) as { url: string }).url, app.url);
+  let next = new URL(authorized.headers.get("location")!, app.url);
+  let cookie = signedIn;
+  if (cookie === undefined) {
+    await fromPage("/auth/better-auth/email-otp/send-verification-otp", { email: ADA, type: "sign-in" });
+    const signed = await fromPage("/auth/better-auth/sign-in/email-otp", {
+      email: ADA,
+      otp: codes.get(ADA),
+      oauth_query: next.search.slice(1),
+    });
+    cookie = cookieOf(signed);
+    next = new URL(((await signed.json()) as { url: string }).url, app.url);
+  }
+  let consentPage: string | undefined;
   if (next.pathname === "/auth/consent") {
+    consentPage = await (await fetch(next, { headers: { cookie } })).text();
     const allowed = await fromPage(
       "/auth/better-auth/oauth2/consent",
       { accept: true, oauth_query: next.search.slice(1) },
@@ -225,8 +232,11 @@ async function connect() {
   const exchanged = await exchange(server, next.searchParams.get("code")!, verifier, resource);
   expect(exchanged.status).toBe(200);
   const issued = (await exchanged.json()) as { access_token: string; refresh_token: string };
-  return { ...issued, server, resource, cookie };
+  return { ...issued, server, resource, cookie, consentPage };
 }
+
+/** A client's tokens and where they are good, as `connect` answers them. */
+type Issued = Omit<Awaited<ReturnType<typeof connect>>, "consentPage">;
 
 /**
  * Claude Code's tokens for Ada, from one sign-in for the tests that need them: a sign-in by code
@@ -235,31 +245,8 @@ async function connect() {
 let connected: ReturnType<typeof connect> | undefined;
 const tokens = () => (connected ??= connect());
 
-/**
- * Another sign-in for Claude Code by Ada, signed in already (`cookie`, so no code is mailed: a
- * sign-in by code is rate limited): authorize goes straight to the consent page, which a client
- * that takes its answer on the person's own computer is shown every time; then its tokens.
- */
-async function connectSignedIn(cookie: string) {
-  const { authorized, verifier, server, resource } = await signIn(CLAUDE_CODE, cookie);
-  expect(authorized.status).toBe(302);
-  const consentAt = new URL(authorized.headers.get("location")!, app.url);
-  expect(consentAt.pathname).toBe("/auth/consent");
-  const consentPage = await (await fetch(consentAt, { headers: { cookie } })).text();
-  const allowed = await fromPage(
-    "/auth/better-auth/oauth2/consent",
-    { accept: true, oauth_query: consentAt.search.slice(1) },
-    cookie,
-  );
-  const back = new URL(((await allowed.json()) as { url: string }).url);
-  const exchanged = await exchange(server, back.searchParams.get("code")!, verifier, resource);
-  expect(exchanged.status).toBe(200);
-  const issued = (await exchanged.json()) as { access_token: string; refresh_token: string };
-  return { ...issued, server, resource, cookie, consentPage };
-}
-
 /** Claude Code's tokens for Ada, issued while no agent was declared for it: the built-in agent's. */
-let built: Awaited<ReturnType<typeof connect>> | undefined;
+let built: Issued | undefined;
 
 /** The token endpoint's refresh, as the client sends it. */
 const refresh = (issued: { refresh_token: string; resource: string; server: { token_endpoint: string } }) =>
@@ -275,7 +262,7 @@ const refresh = (issued: { refresh_token: string; resource: string; server: { to
   });
 
 /** `issued` after a refresh that is granted: its new tokens (a refresh token is used once). */
-async function renewed(issued: Awaited<ReturnType<typeof connect>>) {
+async function renewed<T extends Issued>(issued: T) {
   const answer = await refresh(issued);
   expect(answer.status).toBe(200);
   return { ...issued, ...((await answer.json()) as { access_token: string; refresh_token: string }) };
@@ -369,7 +356,7 @@ describe("the agent surface on a host", () => {
     expect(unsigned.headers.get("www-authenticate")).toBe(
       `Bearer resource_metadata="${app.url}/.well-known/oauth-protected-resource/mcp"`,
     );
-    const forged = await mcp("tools/list", {}, bearerOf(`${access_token.slice(0, -2)}AA`), elsewhere);
+    const forged = await mcp("tools/list", {}, bearerOf(tampered(access_token)), elsewhere);
     expect(forged.status).toBe(401);
     expect(forged.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
     // Nor is there a document for that Host: the one it serves there is the configured address's.
@@ -492,7 +479,7 @@ describe("the agent surface on a host", () => {
   it("signs a person in for Claude Code with no agent declared: built in, it acts as the agent claude-code for them", async () => {
     await withPeople(NO_AGENT, async () => {
       const { cookie } = await tokens();
-      const { consentPage, ...issued } = await connectSignedIn(cookie);
+      const { consentPage, ...issued } = await connect(cookie);
       // The consent names the built-in agent, and says it is Sanoma's, which the company has not turned off.
       expect(consentPage).toContain("Let Claude Code act for you?");
       expect(consentPage).toContain("as the agent <strong>claude-code</strong>, for Ada Ortiz");

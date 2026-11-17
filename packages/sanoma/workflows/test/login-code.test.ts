@@ -18,6 +18,7 @@ import { memoryLedger } from "../src/ledger.ts";
 import { VENDOR } from "../src/op.ts";
 import { isVisitor } from "../src/shared.ts";
 import { ALICE, rootWith, useApp } from "./harness.ts";
+import { tampered } from "./tampered.ts";
 
 // The built-in login-code workflow: a sign-in code mailed through the config's `login.sender` by
 // the runtime's agent `login`, the code sealed in the run's input and the mail's body never in the
@@ -236,7 +237,7 @@ describe("sealed invite requests", () => {
     expect(openInvite(sealed)).toMatchObject({ email: "alice@example.com", nonce: expect.any(String) });
     expect(openInvite(sealed, Date.now() + 10 * 60_000)).toBeUndefined();
     expect(openInvite(sealLoginCode("alice@example.com", "123456"))).toBeUndefined();
-    expect(openInvite(`${sealed.slice(0, -2)}AA`)).toBeUndefined();
+    expect(openInvite(tampered(sealed))).toBeUndefined();
     expect(openInvite("")).toBeUndefined();
   });
 });
