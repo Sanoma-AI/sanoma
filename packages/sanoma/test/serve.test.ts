@@ -4,7 +4,13 @@ import { appOptions, parseDomains, wakeRoute } from "../src/serve.ts";
 
 /** Sets these variables for the test, and unsets the other launcher variables appOptions reads. */
 function environment(values: Record<string, string>) {
-  const names = ["SANOMA_APP_HOST", "SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET", "SANOMA_DOMAINS"];
+  const names = [
+    "SANOMA_APP_HOST",
+    "SANOMA_HOSTNAME",
+    "SANOMA_GITHUB_CLIENT_ID",
+    "SANOMA_GITHUB_CLIENT_SECRET",
+    "SANOMA_DOMAINS",
+  ];
   for (const name of names) vi.stubEnv(name, "");
   for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
 }
@@ -78,6 +84,21 @@ describe("appOptions", () => {
     expect(options.login?.name).toBe("staff");
     // The same client for the public sites' logins, for visitors.
     expect(options.social).toEqual({ github: { clientId: "id", clientSecret: "secret" } });
+  });
+
+  it("takes the app's public hostname from SANOMA_HOSTNAME beyond this machine, and refuses what is not one", async () => {
+    for (const hostname of ["app.sanoma.example", "App.Sanoma.Example", ""]) {
+      environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY, SANOMA_HOSTNAME: hostname });
+      expect((await appOptions()).login?.name, hostname).toBe("staff");
+    }
+    for (const hostname of ["https://app.sanoma.example", "app.sanoma.example:8443", "app.sanoma.example/mcp", "app"]) {
+      environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY, SANOMA_HOSTNAME: hostname });
+      await expect(appOptions(), hostname).rejects.toThrow(UsageError);
+      await expect(appOptions(), hostname).rejects.toThrow(`SANOMA_HOSTNAME is "${hostname}": write the hostname`);
+    }
+    // On this machine nobody signs in, so it is not read.
+    environment({ SANOMA_HOSTNAME: "https://app.sanoma.example" });
+    expect(await appOptions()).toEqual({ host: undefined });
   });
 
   it("names SANOMA_SIGNING_KEY when the staff login has no key to sign with", async () => {

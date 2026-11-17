@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AppOptions, type IngressRoute, staffLogin, startApp } from "sanoma/app";
+import { agentAddressOf, type AppOptions, type IngressRoute, staffLogin, startApp } from "sanoma/app";
 import { appSteps } from "sanoma/app/steps";
 import { betterAuthStaffLogin, prepareBetterAuthStaff } from "sanoma/better-auth";
 import {
@@ -18,7 +18,7 @@ import {
   superviseWorker,
 } from "sanoma/workflows";
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "sanoma/workflows/describe";
-import { domainsOf, UsageError } from "sanoma/workflows/shared";
+import { DOMAIN_NAME, domainsOf, UsageError } from "sanoma/workflows/shared";
 import type { WakeupService } from "sanoma/workflows/wakeup-service";
 import { loadConfig } from "./config.ts";
 import { siteBuild } from "./sites.ts";
@@ -229,8 +229,10 @@ export function parseDomains(value: string | undefined): Record<string, string> 
  * `SANOMA_SIGNING_KEY`, with GitHub as a method when `SANOMA_GITHUB_CLIENT_ID` and
  * `SANOMA_GITHUB_CLIENT_SECRET` are both set, in the environment or in the stored secrets
  * (`readSecrets`), where creating the GitHub App on the app's connect page put them; the same
- * client goes to the public sites' logins (`social`), for visitors. An empty value is the same as
- * unset. A mistake in them is a UsageError.
+ * client goes to the public sites' logins (`social`), for visitors; with `SANOMA_HOSTNAME`, the
+ * hostname the app is reached at over HTTPS, the staff login is the agent surface's authorization
+ * server for that one address (`agentAddressOf`: agents sign in at `https://<hostname>/mcp`), and
+ * without it serves no OAuth. An empty value is the same as unset. A mistake in them is a UsageError.
  */
 export async function appOptions(
   readSecrets?: ReadSecrets,
@@ -240,6 +242,12 @@ export async function appOptions(
   const host = env.SANOMA_APP_HOST || undefined;
   const options = { host, ...(domains && { domains }) };
   if (host === undefined || isLoopback(host)) return options;
+  const hostname = env.SANOMA_HOSTNAME?.toLowerCase() || undefined;
+  if (hostname !== undefined && !DOMAIN_NAME.test(hostname)) {
+    throw new UsageError(
+      `SANOMA_HOSTNAME is "${env.SANOMA_HOSTNAME}": write the hostname the app is reached at over HTTPS, with no scheme, port or path, such as app.sanoma.example`,
+    );
+  }
   try {
     deploymentKey("SANOMA_SIGNING_KEY");
   } catch (err) {
@@ -263,6 +271,7 @@ export async function appOptions(
   const login = staffLogin(
     (context) => betterAuthStaffLogin(context, { fetchClientMetadata: fetchClientMetadataResource }),
     social,
+    hostname === undefined ? undefined : agentAddressOf(hostname),
   );
   return { ...options, login, social };
 }
