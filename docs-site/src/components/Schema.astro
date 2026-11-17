@@ -1,8 +1,9 @@
 ---
 // A JSON Schema's fields as a list: each one's name, type, whether it is required, what it is and
-// the limits it keeps, with an object's own fields folded under it; a schema with no fields is its
-// type alone. No script: `<details>` folds.
-import { descriptionHtml, factsOf, hasFields, type JsonSchema, nestedOf, typeOf } from "../lib/schema.ts";
+// the limits it keeps, with an object's own fields folded under it. A schema that is no object
+// with fields is its type, over the fields of what it holds (a list's items, a record's values)
+// when they have any. No script: `<details>` folds.
+import { descriptionHtml, factsOf, fieldOf, hasFields, type JsonSchema, nestedOf, typeOf } from "../lib/schema.ts";
 
 interface Props {
   schema: JsonSchema;
@@ -10,21 +11,24 @@ interface Props {
 
 const { schema } = Astro.props;
 const required = new Set(schema.required ?? []);
+const held = hasFields(schema) ? [] : nestedOf(schema);
 ---
 
 {
   hasFields(schema) ? (
     <ul class="schema not-content">
-      {Object.entries(schema.properties ?? {}).map(([name, field]) => {
-        const facts = factsOf(field);
+      {Object.entries(schema.properties ?? {}).map(([name, given]) => {
+        const field = fieldOf(given);
+        const facts = factsOf(given);
         return (
           <li>
             <span class="schema-name">{name}</span>
-            <span class="schema-type">{typeOf(field)}</span>
+            <span class="schema-type">{typeOf(given)}</span>
             {required.has(name) && <span class="schema-required">required</span>}
+            {field.deprecated && <span class="schema-deprecated">deprecated</span>}
             {field.description && <p class="schema-description" set:html={descriptionHtml(field.description)} />}
             {facts.length > 0 && <p class="schema-facts">{facts.join(", ")}</p>}
-            {nestedOf(field).map(({ label, schema: inner }) => (
+            {nestedOf(given).map(({ label, schema: inner }) => (
               <details>
                 <summary>{label}</summary>
                 <Astro.self schema={inner} />
@@ -35,8 +39,17 @@ const required = new Set(schema.required ?? []);
       })}
     </ul>
   ) : (
-    <p>
-      <code>{typeOf(schema)}</code>, with no fields.
-    </p>
+    <>
+      <p>
+        <code>{typeOf(schema)}</code>
+        {held.length === 0 && ", with no fields."}
+      </p>
+      {held.map(({ label, schema: inner }) => (
+        <>
+          <p class="schema-held">{label}</p>
+          <Astro.self schema={inner} />
+        </>
+      ))}
+    </>
   )
 }

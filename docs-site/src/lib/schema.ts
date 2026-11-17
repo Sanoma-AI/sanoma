@@ -18,6 +18,10 @@ export interface JsonSchema {
   minimum?: number;
   maximum?: number;
   exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  multipleOf?: number;
+  deprecated?: boolean;
+  contentEncoding?: string;
   minLength?: number;
   maxLength?: number;
   minItems?: number;
@@ -40,21 +44,44 @@ export function typeOf(schema: JsonSchema): string {
   return type ?? "any";
 }
 
+const isNull = (schema: JsonSchema) => schema.type === "null";
+
+/**
+ * A field as a page lists it: a value that may also be null (`anyOf` of one schema and null) is
+ * that schema, which holds its description and limits; its type still says `| null` (`typeOf`).
+ */
+export function fieldOf(schema: JsonSchema): JsonSchema {
+  const options = schema.anyOf?.filter((option) => !isNull(option));
+  if (!options || options.length !== 1 || options.length === schema.anyOf?.length) return schema;
+  return { ...options[0], description: schema.description ?? options[0]!.description };
+}
+
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
-/** The limits a value has to keep, each in words. */
-export function factsOf(schema: JsonSchema): string[] {
+/** zod writes an integer's range as the safe integers': no limit a reader has to keep. */
+const isLimit = (n: number | undefined): n is number => n !== undefined && Math.abs(n) !== Number.MAX_SAFE_INTEGER;
+
+/** The limits a value has to keep, each in words; an array's items' and a record's values' among them. */
+export function factsOf(given: JsonSchema): string[] {
+  const schema = fieldOf(given);
   const facts: string[] = [];
   if (schema.format) facts.push(`format ${schema.format}`);
+  if (schema.contentEncoding) facts.push(`encoded as ${schema.contentEncoding}`);
   if (schema.pattern) facts.push(`matches ${schema.pattern}`);
   if (schema.minLength !== undefined) facts.push(`at least ${count(schema.minLength, "character")}`);
   if (schema.maxLength !== undefined) facts.push(`at most ${count(schema.maxLength, "character")}`);
-  if (schema.minimum !== undefined) facts.push(`at least ${schema.minimum}`);
-  if (schema.exclusiveMinimum !== undefined) facts.push(`more than ${schema.exclusiveMinimum}`);
-  if (schema.maximum !== undefined) facts.push(`at most ${schema.maximum}`);
+  if (isLimit(schema.minimum)) facts.push(`at least ${schema.minimum}`);
+  if (isLimit(schema.exclusiveMinimum)) facts.push(`more than ${schema.exclusiveMinimum}`);
+  if (isLimit(schema.maximum)) facts.push(`at most ${schema.maximum}`);
+  if (isLimit(schema.exclusiveMaximum)) facts.push(`less than ${schema.exclusiveMaximum}`);
+  if (schema.multipleOf !== undefined) facts.push(`a multiple of ${schema.multipleOf}`);
   if (schema.minItems !== undefined) facts.push(`at least ${count(schema.minItems, "item")}`);
   if (schema.maxItems !== undefined) facts.push(`at most ${count(schema.maxItems, "item")}`);
   if (schema.default !== undefined) facts.push(`default ${JSON.stringify(schema.default)}`);
+  if (schema.items) facts.push(...factsOf(schema.items).map((fact) => `each item: ${fact}`));
+  if (typeof schema.additionalProperties === "object") {
+    facts.push(...factsOf(schema.additionalProperties).map((fact) => `each value: ${fact}`));
+  }
   return facts;
 }
 
@@ -71,9 +98,10 @@ export function nestedOf(schema: JsonSchema): { label: string; schema: JsonSchem
   if (typeof schema.additionalProperties === "object") {
     return nestedOf(schema.additionalProperties).map(({ schema: inner }) => ({ label: "Each value", schema: inner }));
   }
+  // An alternative keeps what it is ("Each item" of a list that may be null), numbered when there are several.
   const objects = (schema.anyOf ?? []).flatMap(nestedOf);
-  return objects.map(({ schema: inner }, i) => ({
-    label: objects.length > 1 ? `Fields, alternative ${i + 1}` : "Fields",
+  return objects.map(({ label, schema: inner }, i) => ({
+    label: objects.length > 1 ? `${label}, alternative ${i + 1}` : label,
     schema: inner,
   }));
 }

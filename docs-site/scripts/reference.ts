@@ -45,7 +45,7 @@ export interface ConnectorReference {
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /** The folders under connectors/, each a connector's package, in name order. */
-export const connectorDirs = () =>
+const connectorDirs = () =>
   readdirSync(join(repo, "connectors"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
@@ -66,7 +66,8 @@ export async function readReference(): Promise<ConnectorReference[]> {
       homepage?: string;
     };
     const exported = (await import(pathToFileURL(join(dir, "src", "index.ts")).href)) as Record<string, unknown>;
-    const connectors = Object.values(exported).filter(isConnector);
+    // One connector exported under two names is one.
+    const connectors = [...new Set(Object.values(exported).filter(isConnector))];
     // A page is a folder's: its address and its README's are the folder's name.
     if (connectors.length !== 1) {
       throw new Error(`connectors/${slug}/src/index.ts exports ${connectors.length} connectors: a page takes one`);

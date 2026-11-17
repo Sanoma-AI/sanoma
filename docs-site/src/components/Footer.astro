@@ -1,14 +1,12 @@
 ---
-// Starlight's footer, then which release these pages describe: the `sanoma` package's version as
-// it was when the site was built.
+// Starlight's footer, then which version these pages describe: the `sanoma` package's, as it was
+// in the commit the site was built from.
 import Default from "@astrojs/starlight/components/Footer.astro";
 import manifest from "../../../packages/sanoma/package.json";
 ---
 
 <Default><slot /></Default>
-<p class="sanoma-version">
-  These pages describe <a href={`https://www.npmjs.com/package/sanoma/v/${manifest.version}`}>sanoma {manifest.version}</a>.
-</p>
+<p class="sanoma-version">These pages describe sanoma {manifest.version}.</p>
 
 <style>
   .sanoma-version {

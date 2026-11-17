@@ -102,6 +102,18 @@ h4,
   color: var(--sl-color-accent-high);
 }
 
+.schema-deprecated {
+  margin-inline-start: 0.5rem;
+  font-size: var(--sl-text-xs);
+  color: var(--sl-color-orange-high);
+}
+
+.schema-held {
+  margin-bottom: 0.25rem;
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-2);
+}
+
 .schema-description,
 .schema-facts {
   margin: 0.25rem 0 0;
