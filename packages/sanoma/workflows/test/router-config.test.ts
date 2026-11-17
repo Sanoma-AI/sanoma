@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { collection } from "../src/data.ts";
-import { resolveConfig, type Router, type SanomaConfig } from "../src/index.ts";
+import { resolveConfig, type Router, routerOptionsFrom, type SanomaConfig } from "../src/index.ts";
 
 // The config's `router`: the agents' router the app serves (sanoma#777), checked when the
 // config is resolved, as `login` is, so `sanoma check` refuses one the app could not serve.
@@ -79,6 +79,32 @@ describe("the config's router", () => {
     for (const is of [undefined, "", [], ["live", 1]]) {
       expect(() => resolveConfig(live({ field: "status", is })), JSON.stringify(is)).toThrow(
         /^The config's `router\.companies\.live\.is` is not a value or a list of them/,
+      );
+    }
+  });
+
+  it("is served with its master secret, and refused on the app's own hostname or a public site's domain", () => {
+    const router = resolveConfig(config(good)).router!;
+    const master = "m".repeat(32);
+    expect(routerOptionsFrom(router, {})).toEqual({});
+    expect(routerOptionsFrom(router, { SANOMA_ROUTER_SECRET: " " })).toEqual({});
+    expect(
+      routerOptionsFrom(router, { SANOMA_ROUTER_SECRET: ` ${master} `, SANOMA_HOSTNAME: "app.acme.example" }),
+    ).toEqual({ secret: master });
+    expect(routerOptionsFrom(router, {}, { www: "acme.example" })).toEqual({});
+    for (const hostname of ["mcp.acme.example", " MCP.Acme.Example "]) {
+      expect(
+        () => routerOptionsFrom(router, { SANOMA_HOSTNAME: hostname, SANOMA_ROUTER_SECRET: master }),
+        hostname,
+      ).toThrow("The config's `router.hostname`, mcp.acme.example, is SANOMA_HOSTNAME, the app's own hostname");
+    }
+    expect(() => routerOptionsFrom(router, {}, { www: "acme.example", docs: "MCP.acme.example" })).toThrow(
+      "The config's `router.hostname`, mcp.acme.example, is the domain of the public site docs (SANOMA_DOMAINS)",
+    );
+    // A master that could not be sent, or is short, is refused by its variable's name, never said.
+    for (const bad of ["short", `${master} x`]) {
+      expect(() => routerOptionsFrom(router, { SANOMA_ROUTER_SECRET: bad }), bad).toThrow(
+        /^SANOMA_ROUTER_SECRET is not one a router can send: it must /,
       );
     }
   });

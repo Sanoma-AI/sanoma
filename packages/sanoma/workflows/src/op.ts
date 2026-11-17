@@ -9,7 +9,7 @@ import type { Fake } from "./fake.ts";
 import type { SandboxBackend, SandboxContext } from "./sandbox-contract.ts";
 import type { Secrets } from "./secret.ts";
 import type { RemoteHalf } from "./source.ts";
-import { DOMAIN_NAME, instanceUrl } from "./shared.ts";
+import { DOMAIN_NAME, hostnameUrl, instanceUrl } from "./shared.ts";
 import type { Steps } from "./steps.ts";
 
 /**
@@ -638,8 +638,10 @@ export interface AgentAddress {
   /**
    * Set when the address is a router's: this company's id there (`COMPANY_ID`), which every
    * code, refresh token and access token it issues carries (`companyPrefix`, `COMPANY_CLAIM`),
-   * and the secret the router sends with what it forwards (`ROUTER_SECRET_HEADER`), by which
-   * the instance believes the caller's address the router names, and nothing else.
+   * and this company's own secret at that router (`routerSecretFor`, never the router's master),
+   * which the router sends with a token request or a revocation it forwards
+   * (`ROUTER_SECRET_HEADER`), and by which the instance believes the caller's address the router
+   * names there, and nothing else.
    */
   router?: { company: string; secret: string };
 }
@@ -648,16 +650,75 @@ export interface AgentAddress {
 export const COMPANY_ID = /^[A-Za-z0-9_-]+$/;
 /** What a code and a refresh token of `company`'s start with: the tag a router routes a token request by. */
 export const companyPrefix = (company: string) => `${company}.`;
+/**
+ * `companyPrefix`'s inverse, with nothing checked: what is before the first `.` of a code or a
+ * refresh token, when something is and something follows; undefined for a token with no tag.
+ */
+export function companyOfTag(token: string): string | undefined {
+  const dot = token.indexOf(".");
+  return dot > 0 && dot < token.length - 1 ? token.slice(0, dot) : undefined;
+}
 /** The access token's claim naming the company that issued it: what a router routes a `/mcp` call by, unverified, and the instance checks. */
 export const COMPANY_CLAIM = "sanoma_company";
-/** The header a router sends its secret in with every request it forwards (`AgentAddress.router.secret`). */
+/**
+ * The header a router sends a company's secret in (`AgentAddress.router.secret`), with a token
+ * request or a revocation it forwards, and with nothing else.
+ */
 export const ROUTER_SECRET_HEADER = "x-sanoma-router-secret";
 /**
- * The header a router names its caller's address in. Not `CLIENT_IP_HEADER`, which the app's
- * host sets from the socket: an instance takes this one for it only from a request that carries
- * the router's secret (the staff login's `withRoutedCaller`).
+ * The header a router names its caller's address in, beside the secret. Not `CLIENT_IP_HEADER`,
+ * which the app's host sets from the socket: an instance takes this one for it only from a
+ * request that carries its secret, at the token endpoint and revocation (the staff login's
+ * `withRoutedCaller`).
  */
 export const ROUTER_CLIENT_IP_HEADER = "x-sanoma-router-client-ip";
+
+/** The fewest characters a router's secret has (`routerSecretFrom`); one `routerSecretFor` derives has 64. */
+export const ROUTER_SECRET_MIN = 32;
+
+/** Why `secret` is no router's secret, or undefined: the one rule, which never says the value. */
+function secretProblem(secret: unknown): string | undefined {
+  if (typeof secret !== "string" || !secret) return "it is not set";
+  // A header's value as it is sent: visible ASCII alone, so no space, control or other script.
+  if (!/^[\x21-\x7e]+$/.test(secret)) return "it must be visible ASCII characters alone, with no space";
+  if (secret.length < ROUTER_SECRET_MIN) return `it must have ${ROUTER_SECRET_MIN} characters or more`;
+  return undefined;
+}
+
+/**
+ * `SANOMA_ROUTER_SECRET` as every launcher reads it, trimmed: on a router (a config with
+ * `router`), the master secret each company's own is derived from (`routerSecretFor`); on a
+ * company behind one, that company's derived secret. Undefined when unset or blank. Throws,
+ * naming the variable and never its value, for one that could not be sent in a header or is
+ * shorter than `ROUTER_SECRET_MIN`.
+ */
+export function routerSecretFrom(env: { SANOMA_ROUTER_SECRET?: string }): string | undefined {
+  const secret = env.SANOMA_ROUTER_SECRET?.trim();
+  if (!secret) return undefined;
+  const problem = secretProblem(secret);
+  if (problem) throw new Error(`SANOMA_ROUTER_SECRET is not one a router can send: ${problem}`);
+  return secret;
+}
+
+/**
+ * The secret of `company` at the router whose master secret is `master`: HMAC-SHA256 keyed with
+ * the master over the company's id (both as UTF-8), in lower-case hex. What the router sends
+ * that company and what the company is configured with (its `SANOMA_ROUTER_SECRET`), so one
+ * that leaks names a caller's address at that company alone, and says nothing of the master.
+ * WebCrypto, so the same on Node and on a Worker.
+ */
+export async function routerSecretFor(master: string, company: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", encoder.encode(master), { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(company)));
+  return Array.from(mac, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** An `Authorization` header's token when it is a bearer's JWS in compact form: the scheme in any case (RFC 9110 §11.1). */
+export const bearerJws = (authorization: string | null): string | undefined =>
+  /^bearer ([\w-]+\.[\w-]+\.[\w-]+)$/i.exec(authorization ?? "")?.[1];
 
 /**
  * The agent address of an app served at the root of `url` (`https://app.acme.example`, a Worker's
@@ -677,20 +738,43 @@ export function agentAddressAt(url: string): AgentAddress {
 }
 
 /**
+ * A router's own address, the same for the router and for each company behind it: the issuer is
+ * its origin, with no path, and the resource that origin's `/mcp`.
+ */
+export const routerAddressAt = (origin: string): { issuer: string; resource: string } => ({
+  issuer: origin,
+  resource: `${origin}${AGENT_SURFACE_PATH}`,
+});
+
+/** The address of the router a config's `router` serves at `hostname`, over HTTPS (`hostnameUrl`). */
+export const routerAddressOf = (hostname: string) => routerAddressAt(hostnameUrl(hostname));
+
+/** Each rule of a routed address, once: why a value breaks it (said after what names the value), or undefined. */
+const ROUTED_RULES = {
+  /** A router's agent surface: its URL as it is compared, an http(s) origin and `/mcp`. */
+  url(url: unknown): string | undefined {
+    const checked = instanceUrl(url);
+    if ("url" in checked && checked.url === url && new URL(checked.url).pathname === AGENT_SURFACE_PATH)
+      return undefined;
+    return `write the router's agent surface as it is compared, an http(s) origin and ${AGENT_SURFACE_PATH}, such as https://mcp.sanoma.example${AGENT_SURFACE_PATH}`;
+  },
+  company: (company: unknown): string | undefined =>
+    typeof company === "string" && COMPANY_ID.test(company)
+      ? undefined
+      : "letters, digits, - and _ only, as the router lists it",
+  secret: secretProblem,
+};
+
+/**
  * The agent address of a company behind a router whose agent surface is `url`
  * (`https://mcp.sanoma.example/mcp`): the router's origin as the issuer, `url` as the resource.
  * Throws, saying why, for what is not a router's `/mcp` as it is compared, a company's id that
- * is none, or no secret (`checkAgentAddress`).
+ * is none, or a secret that is none (`checkAgentAddress`).
  */
 export function routedAgentAddress(url: string, router: { company: string; secret: string }): AgentAddress {
-  const checked = instanceUrl(url);
-  const at = "url" in checked && checked.url === url ? new URL(url) : undefined;
-  if (!at || at.pathname !== AGENT_SURFACE_PATH) {
-    throw new Error(
-      `${JSON.stringify(url)} is not a router's agent surface: write its URL as it is compared, an http(s) origin and ${AGENT_SURFACE_PATH}, such as https://mcp.sanoma.example${AGENT_SURFACE_PATH}`,
-    );
-  }
-  const address = { issuer: at.origin, resource: url, router };
+  const problem = ROUTED_RULES.url(url);
+  if (problem) throw new Error(`${JSON.stringify(url)} is not a router's agent surface: ${problem}`);
+  const address = { ...routerAddressAt(new URL(url).origin), router };
   checkAgentAddress(address);
   return address;
 }
@@ -701,9 +785,10 @@ export function routedAgentAddress(url: string, router: { company: string; secre
  * issuer whose path is not `STAFF_AUTH_PATH` (the login's routes are served only there, so its
  * metadata would name endpoints that answer 404) or a resource at its origin's root; for a
  * router's (`router`), an issuer with a path, a resource that is not that issuer's `/mcp`, a
- * company's id that is none (`COMPANY_ID`) or an empty secret. There is no third shape. A staff
- * login checks it when it is made, so a wrong one fails the start rather than every sign-in.
- * The secret is never in what it says.
+ * company's id that is none (`COMPANY_ID`) or a secret that is none (unset, not visible ASCII,
+ * or shorter than `ROUTER_SECRET_MIN`). There is no third shape. A staff login checks it when
+ * it is made, so a wrong one fails the start rather than every sign-in. The secret is never in
+ * what it says.
  */
 export function checkAgentAddress(address: AgentAddress): void {
   for (const part of ["issuer", "resource"] as const) {
@@ -731,24 +816,25 @@ export function checkAgentAddress(address: AgentAddress): void {
     }
     return;
   }
-  if (address.issuer !== issuer.origin) {
+  const own = routerAddressAt(issuer.origin);
+  if (address.issuer !== own.issuer) {
     throw new Error(
       `the agent address's issuer is ${JSON.stringify(address.issuer)}: a router's issuer is its origin, with no path`,
     );
   }
-  if (address.resource !== `${address.issuer}${AGENT_SURFACE_PATH}`) {
+  if (address.resource !== own.resource) {
     throw new Error(
-      `the agent address's resource is ${JSON.stringify(address.resource)}: a router's resource is its issuer's ${AGENT_SURFACE_PATH}, ${address.issuer}${AGENT_SURFACE_PATH}`,
+      `the agent address's resource is ${JSON.stringify(address.resource)}: a router's resource is its issuer's ${AGENT_SURFACE_PATH}, ${own.resource}`,
     );
   }
   const { company, secret } = address.router;
-  if (typeof company !== "string" || !COMPANY_ID.test(company)) {
+  const named = ROUTED_RULES.company(company);
+  if (named) throw new Error(`the agent address's company is ${JSON.stringify(company)}: ${named}`);
+  const kept = ROUTED_RULES.secret(secret);
+  if (kept) {
     throw new Error(
-      `the agent address's company is ${JSON.stringify(company)}: letters, digits, - and _ only, as the router lists it`,
+      `the agent address's router has no secret a router can send (${kept}): give this company's own, which the router derives from its master and the company's id`,
     );
-  }
-  if (typeof secret !== "string" || !secret) {
-    throw new Error("the agent address's router has no secret: give the one the router sends with what it forwards");
   }
 }
 
@@ -765,8 +851,9 @@ export const AGENT_ADDRESS_ENV = [
  * The agent address an instance's environment names, the one rule for every launcher (the
  * `sanoma` bin beyond this machine, the Worker), each value trimmed. A router's first:
  * `SANOMA_AGENT_URL`, the router's agent surface (`https://mcp.sanoma.example/mcp`), with
- * `SANOMA_COMPANY`, this company's id there, and `SANOMA_ROUTER_SECRET`, the secret the router
- * forwards with (`routedAgentAddress`). Else the instance's own: `SANOMA_HOSTNAME`, the hostname
+ * `SANOMA_COMPANY`, this company's id there, and `SANOMA_ROUTER_SECRET`, this company's own
+ * secret there (`routerSecretFrom`; what `routerSecretFor` makes of the router's master and
+ * the id), made by `routedAgentAddress`. Else the instance's own: `SANOMA_HOSTNAME`, the hostname
  * the app is served at over HTTPS (`https://<hostname>`), else `SANOMA_HOST_URL`, the instance's
  * own URL (what its wakeup reaches it by: a Worker's workers.dev URL, or an address with a port
  * or plain http); undefined with none. Throws, naming the variable and never the secret, for a
@@ -779,21 +866,17 @@ export function agentAddressFrom(
   const routed = env.SANOMA_AGENT_URL?.trim();
   if (routed) {
     const company = env.SANOMA_COMPANY?.trim() ?? "";
-    const secret = env.SANOMA_ROUTER_SECRET?.trim() ?? "";
-    const checked = instanceUrl(routed);
-    if (!("url" in checked) || checked.url !== routed || new URL(routed).pathname !== AGENT_SURFACE_PATH) {
-      throw new Error(
-        `SANOMA_AGENT_URL is ${JSON.stringify(routed)}: write the router's agent surface as it is compared, an http(s) origin and ${AGENT_SURFACE_PATH}, such as https://mcp.sanoma.example${AGENT_SURFACE_PATH}`,
-      );
-    }
-    if (!COMPANY_ID.test(company)) {
+    const surface = ROUTED_RULES.url(routed);
+    if (surface) throw new Error(`SANOMA_AGENT_URL is ${JSON.stringify(routed)}: ${surface}`);
+    if (ROUTED_RULES.company(company)) {
       throw new Error(
         `SANOMA_COMPANY is ${JSON.stringify(company)}: write this company's id at the router SANOMA_AGENT_URL names (letters, digits, - and _)`,
       );
     }
-    if (!secret) {
+    const secret = routerSecretFrom(env);
+    if (secret === undefined) {
       throw new Error(
-        "SANOMA_ROUTER_SECRET is not set: SANOMA_AGENT_URL names a router, which sends this secret with what it forwards",
+        "SANOMA_ROUTER_SECRET is not set: SANOMA_AGENT_URL names a router, which sends this company's secret with the token requests it forwards",
       );
     }
     return routedAgentAddress(routed, { company, secret });
@@ -805,7 +888,7 @@ export function agentAddressFrom(
         `SANOMA_HOSTNAME is ${JSON.stringify(hostname)}: write the hostname the app is served at over HTTPS, with no scheme, port or path, such as app.sanoma.example (for any other address, its URL in SANOMA_HOST_URL)`,
       );
     }
-    return agentAddressAt(`https://${hostname}`);
+    return agentAddressAt(hostnameUrl(hostname));
   }
   const url = env.SANOMA_HOST_URL?.trim();
   if (!url) return undefined;
@@ -867,6 +950,25 @@ export function resourceMetadataOf(address: AgentAddress): { path: string; url: 
   const path = `${RESOURCE_METADATA}${resource.pathname}`;
   return { path, url: `${resource.origin}${path}` };
 }
+
+/**
+ * RFC 9728's metadata for an address's resource, the same whoever serves it (the staff login for
+ * its own address or a router's, a router for its own): the resource, its issuer as the one
+ * authorization server, and a bearer in the header alone.
+ */
+export const agentResourceMetadata = ({ issuer, resource }: Pick<AgentAddress, "issuer" | "resource">) => ({
+  resource,
+  authorization_servers: [issuer],
+  bearer_methods_supported: ["header"],
+});
+
+/**
+ * How an agent address's metadata documents may be kept (`Cache-Control`): five minutes, by the
+ * browser or the client alone. Each is the configured address's, the same whatever the request
+ * says, and changes only with the instance's configuration, which a client should not go on
+ * reading from a cache between it and the instance.
+ */
+export const DISCOVERY_CACHE = "private, max-age=300";
 
 /**
  * A request's origin, https when a proxy that ends TLS says so (`x-forwarded-proto: https`), as

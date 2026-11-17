@@ -74,6 +74,7 @@ import {
   makersOf,
   type Op,
   checkConnector,
+  routerSecretFrom,
   setupOf,
   VENDOR,
   withSetup,
@@ -98,6 +99,7 @@ import {
   LOGIN_CODE_WORKFLOW,
   RESHAPE_WORKFLOW,
   errorMessage,
+  siteAtHostname,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
@@ -194,7 +196,8 @@ export interface SanomaConfig {
   /**
    * Serve the agents' router on one more hostname of this instance's app (`Router`): the one
    * address every company it lists is reached at by agents over MCP, each company still its own
-   * sign-in authority. With `SANOMA_ROUTER_SECRET` in the app's environment.
+   * sign-in authority. With `SANOMA_ROUTER_SECRET`, its master secret, in the app's environment
+   * (`routerOptionsFrom`).
    */
   router?: Router;
   /**
@@ -228,7 +231,11 @@ export interface Router {
      * digits, `-` and `_`: a record with any other key is never routed to), looked up exactly.
      */
     collection: string;
-    /** The field holding the company's base URL, an http(s) origin (`https://acme.sanoma.example`). Default `url`. */
+    /**
+     * The field holding the company's base URL, an https origin with no path, user or query
+     * (`https://acme.sanoma.example`); a record with any other is not routed to. Default `url`.
+     * Whoever may write the collection says where each company's agents' traffic goes.
+     */
     url?: string;
     /**
      * Which records are routed to: those whose `field` is `is` (one of them, for a list), such as
@@ -816,6 +823,35 @@ function checkRouter(router: unknown, collections: ReadonlyMap<string, Collectio
     checked.companies.live = { field: field(by, "router.companies.live.field"), is: values as string[] };
   }
   return checked;
+}
+
+/**
+ * What a launcher serves a config's `router` with, from its environment: the one rule for the
+ * `sanoma` bin and the Worker. The master secret (`SANOMA_ROUTER_SECRET`, `routerSecretFrom`),
+ * left out when the variable is unset, and then the router forwards nothing. Throws, saying
+ * why, and then the launcher serves no router (the bin fails its start; the Worker logs it):
+ * for a hostname that is the app's own (`SANOMA_HOSTNAME`) or a public site's domain
+ * (`domains`, `SANOMA_DOMAINS` read), where the router would answer in the app's or the site's
+ * place, and for a secret that is none.
+ */
+export function routerOptionsFrom(
+  { hostname }: Pick<ResolvedRouter, "hostname">,
+  env: { SANOMA_HOSTNAME?: string; SANOMA_ROUTER_SECRET?: string },
+  domains: Readonly<Record<string, string>> = {},
+): { secret?: string } {
+  if (env.SANOMA_HOSTNAME?.trim().toLowerCase() === hostname) {
+    throw new Error(
+      `The config's \`router.hostname\`, ${hostname}, is SANOMA_HOSTNAME, the app's own hostname: give the router a hostname of its own, such as mcp.${hostname}`,
+    );
+  }
+  const site = siteAtHostname(hostname, domains);
+  if (site !== undefined) {
+    throw new Error(
+      `The config's \`router.hostname\`, ${hostname}, is the domain of the public site ${site} (SANOMA_DOMAINS): give the router a hostname of its own`,
+    );
+  }
+  const secret = routerSecretFrom(env);
+  return { ...(secret !== undefined && { secret }) };
 }
 
 /**
