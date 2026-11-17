@@ -1,5 +1,0 @@
-# Astro's build and its generated types
-dist
-.astro
-# Written by scripts/reference.ts before each dev and build
-src/data/reference.json

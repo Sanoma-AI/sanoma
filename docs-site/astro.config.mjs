@@ -1,3 +1,4 @@
+// @ts-check
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -10,10 +11,10 @@ const REPO = "https://github.com/Sanoma-AI/sanoma";
 
 /** What scripts/reference.ts wrote: the connectors, for the sidebar's links to their pages. */
 const referenceFile = fileURLToPath(new URL("./src/data/reference.json", import.meta.url));
-const connectors: { slug: string; title: string }[] = existsSync(referenceFile)
-  ? JSON.parse(readFileSync(referenceFile, "utf8"))
-  : [];
+/** @type {{ slug: string; title: string }[]} */
+const connectors = existsSync(referenceFile) ? JSON.parse(readFileSync(referenceFile, "utf8")) : [];
 
+// https://astro.build/config
 // The pages are packages/sanoma/docs (src/content.config.ts), which the `sanoma` package ships too;
 // the connector reference is drawn from the connectors' own source (scripts/reference.ts).
 export default defineConfig({
@@ -38,7 +39,7 @@ export default defineConfig({
       logo: { src: "./src/assets/mark.svg", alt: "" },
       favicon: "/favicon.svg",
       social: [{ icon: "github", label: "Sanoma on GitHub", href: REPO }],
-      editLink: { baseUrl: `${REPO}/edit/main/apps/docs/` },
+      editLink: { baseUrl: `${REPO}/edit/main/docs-site/` },
       customCss: ["./src/styles/sanoma.css"],
       components: { Footer: "./src/components/Footer.astro" },
       lastUpdated: false,

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { readReference } from "./reference.ts";
 
-const connectors = readdirSync(fileURLToPath(new URL("../../../connectors", import.meta.url)), { withFileTypes: true })
+const connectors = readdirSync(fileURLToPath(new URL("../../connectors", import.meta.url)), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name);
 

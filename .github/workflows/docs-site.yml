@@ -1,18 +1,18 @@
-# The docs site (apps/docs, docs.sanoma.work): built on pull requests that change it, so a broken link
+# The docs site (docs-site, docs.sanoma.work): built on pull requests that change it, so a broken link
 # or a connector the reference cannot read fails there, and deployed to Cloudflare Pages when a
 # release/<version> branch is pushed (README "Release") or when run by hand, so the site describes the
-# release people have installed. See apps/docs/README.md.
+# release people have installed. See docs-site/README.md.
 name: Docs site
 on:
   pull_request:
     paths:
-      - apps/docs/**
+      - docs-site/**
       - packages/sanoma/workflows/src/**
       - packages/sanoma/docs/**
       - packages/sanoma/package.json
       - connectors/*/src/**
       - connectors/*/package.json
-      - apps/docs/pnpm-lock.yaml
+      - docs-site/pnpm-lock.yaml
       - .github/workflows/docs-site.yml
   push:
     branches:
@@ -41,10 +41,10 @@ jobs:
           cache: ${{ github.event_name == 'pull_request' }}
       # The root's packages for the connectors the reference reads, then the site's own (its own lockfile).
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --dir apps/docs install --frozen-lockfile
+      - run: pnpm --dir docs-site install --frozen-lockfile
       # Writes the connector reference, builds the pages and the search index, and fails on a link
       # to a page or heading that is not there.
-      - run: pnpm --dir apps/docs build
+      - run: pnpm --dir docs-site build
       # Wrangler is the docs app's own, from the lockfile. Without the secrets (a fork, or before
       # the Pages project exists) nothing is deployed, and the run says so.
       - name: Deploy to Cloudflare Pages
@@ -54,8 +54,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::warning::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are not set: built, not deployed (apps/docs/README.md)"
+            echo "::warning::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are not set: built, not deployed (docs-site/README.md)"
             exit 0
           fi
-          pnpm --dir apps/docs exec wrangler pages deploy dist --project-name sanoma-docs --branch main --commit-dirty=true
+          pnpm --dir docs-site exec wrangler pages deploy dist --project-name sanoma-docs --branch main --commit-dirty=true
           echo "Deployed \`$GITHUB_SHA\` (\`$GITHUB_REF_NAME\`) to https://docs.sanoma.work." >> "$GITHUB_STEP_SUMMARY"

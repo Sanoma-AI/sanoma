@@ -28,7 +28,7 @@ export default defineConfig({
       "packages/sanoma/*/test/**/*.test.{ts,tsx}",
       "connectors/*/test/**/*.test.ts",
       "scripts/*.test.ts",
-      "apps/*/scripts/*.test.ts",
+      "docs-site/scripts/*.test.ts",
     ],
     testTimeout: 60_000,
     hookTimeout: 60_000,

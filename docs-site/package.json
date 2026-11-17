@@ -8,8 +8,10 @@
   "scripts": {
     "reference": "node --conditions=sanoma-source scripts/reference.ts",
     "dev": "pnpm run reference && astro dev",
+    "start": "pnpm run reference && astro dev",
     "build": "pnpm run reference && astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "astro": "astro"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.43.1",

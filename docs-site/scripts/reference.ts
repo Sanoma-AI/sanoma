@@ -1,4 +1,4 @@
-// `pnpm --filter @sanoma-ai/docs reference`: writes src/data/reference.json, what the reference
+// `pnpm --dir docs-site reference`: writes src/data/reference.json, what the reference
 // pages draw: every connector in connectors/ with its operations, each one's effect, description
 // and its input and output as JSON Schema. Read from the connectors' own source, so a page cannot
 // say what the code does not. Run before `astro dev` and `astro build`.
@@ -6,8 +6,8 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 // By path, not by name: the site is no workspace package (see pnpm-workspace.yaml here), so nothing links `sanoma` into it.
-import { jsonSchemaOf } from "../../../packages/sanoma/workflows/src/define.ts";
-import { type Connector, isOp, type Op, VENDOR } from "../../../packages/sanoma/workflows/src/index.ts";
+import { jsonSchemaOf } from "../../packages/sanoma/workflows/src/define.ts";
+import { type Connector, isOp, type Op, VENDOR } from "../../packages/sanoma/workflows/src/index.ts";
 
 export interface OperationReference {
   /** `<vendor>.<resource>.<name>`, as a workflow's `uses` and the policy name it. */
@@ -35,7 +35,7 @@ export interface ConnectorReference {
   operations: OperationReference[];
 }
 
-const repo = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const repo = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const isConnector = (value: unknown): value is Connector<string, any> =>
   typeof value === "object" && value !== null && VENDOR in value;
@@ -92,7 +92,7 @@ export async function readReference(): Promise<ConnectorReference[]> {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const reference = await readReference();
-  const file = join(repo, "apps", "docs", "src", "data", "reference.json");
+  const file = join(repo, "docs-site", "src", "data", "reference.json");
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(reference, null, 2)}\n`);
   const operations = reference.reduce((sum, connector) => sum + connector.operations.length, 0);
