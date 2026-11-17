@@ -32,6 +32,7 @@ import { apiNameProblem } from "./sdk.ts";
 import {
   apiNameOf,
   BUILT_IN_WORKFLOWS,
+  builtInClientsOf,
   DATA_VENDOR,
   errorMessage,
   LOGIN_AGENT,
@@ -54,6 +55,7 @@ export { companyRootOf, configDirOf } from "./company-file.ts";
 export {
   admit,
   agentActing,
+  builtInActing,
   chatAgentActing,
   clientActing,
   clientClashes,
@@ -327,6 +329,8 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       ...(own && "once" in own.signIn && { once: true as const }),
       ...(onKey && { onKey: { model: onKey.model } }),
     })),
+    // By the people the root declares, as the hosted sign-in reads them (`readPeople`).
+    builtInClients: builtInClientsOf(dataFiles.resources.filter((r) => !inAppPeople(r))),
     resourceTypes,
     collections,
     // An app's people are refused (`readPeople`), so the grid and the People page never show them.

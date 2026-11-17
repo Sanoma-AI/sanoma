@@ -567,6 +567,23 @@ export const ConfigDescriptionSchema = z.strictObject({
   vendors: z.record(z.string(), VendorEntrySchema),
   /** The coding agents the connectors give the chat, in `connectors` order. */
   agents: z.array(AgentEntrySchema),
+  /**
+   * Each OAuth client built in on every company (`BUILT_IN_CLIENTS`) and what the people's files
+   * make of it (`builtInClientsOf`): accepted as its built-in agent, replaced by a declared agent,
+   * turned off, or refused.
+   */
+  builtInClients: z
+    .array(
+      z.strictObject({
+        id: z.string(),
+        name: z.string(),
+        client: z.string(),
+        apps: z.string(),
+        state: z.enum(["accepted", "replaced", "off", "taken", "clash"]),
+        by: z.string().optional(),
+      }),
+    )
+    .optional(),
   /** The resource types the connectors declare, by `id`. */
   resourceTypes: z.array(ResourceTypeEntrySchema),
   /** The config's collections, by name. */

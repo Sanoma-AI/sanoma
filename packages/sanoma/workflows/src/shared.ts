@@ -937,13 +937,59 @@ export const RUNTIME_AGENTS: readonly string[] = [
 /** The ids the runtime keeps for its own agents, each in `agents` and none a data file's to take: `RUNTIME_AGENTS` and the in-app chat's (`CHAT_AGENT`). */
 export const RESERVED_AGENTS: readonly string[] = [...RUNTIME_AGENTS, CHAT_AGENT];
 
+/**
+ * An OAuth client built in on every company, and the agent it acts as: Claude's published
+ * clients, each by the URL of its client ID metadata document. No data file declares one; a
+ * company replaces it or turns it off in its people files (`clientAgentOf`).
+ */
+export interface BuiltInClient {
+  /** The built-in agent's id: the principal the client acts as, in `agents`, for the person who signed it in. */
+  id: string;
+  /** What a page calls the agent. */
+  name: string;
+  /** The client's id: the URL of its metadata document. */
+  client: string;
+  /** Which apps sign in with it, as a sentence's object. */
+  apps: string;
+}
+
+/**
+ * The built-in clients: the one table the hosted sign-in, `sanoma check`, the description and the
+ * docs read. Only clients whose published id is verified; any other client is refused until an
+ * agent declares it.
+ */
+export const BUILT_IN_CLIENTS: readonly BuiltInClient[] = [
+  {
+    id: "claude",
+    name: "Claude",
+    client: "https://claude.ai/oauth/mcp-oauth-client-metadata",
+    apps: "Claude's apps: claude.ai, Claude Desktop and Claude on a phone",
+  },
+  {
+    id: "claude-code",
+    name: "Claude Code",
+    client: "https://claude.ai/oauth/claude-code-client-metadata",
+    apps: "Claude Code",
+  },
+];
+
+/** The built-in client whose agent has the id `id`, whether the company accepts it or not. */
+export const builtInOfId = (id: string): BuiltInClient | undefined => BUILT_IN_CLIENTS.find((b) => b.id === id);
+
 /** The declared resources of one of the runtime's people types, by `desired`. */
 const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>
   resources.flatMap((r) => (r.vendor === "sanoma" && r.type === type ? [r.desired as T] : []));
 
 type PersonFields = { id: string; name?: string; email?: string; github?: string };
-type AgentFields = { id: string; onBehalfOf?: string; client?: string };
+type AgentFields = { id: string; name?: string; onBehalfOf?: string; client?: string; off?: boolean };
 type GroupFields = { name: string; members: string[] };
+
+/**
+ * The declared agents (`sanoma.agent`), in the order declared, without the declarations that only
+ * turn a built-in off (`off: true`), which are no agent: nobody acts as one.
+ */
+const agentsOf = (resources: readonly PeopleResource[]): AgentFields[] =>
+  peopleOfType<AgentFields>(resources, "agent").filter((a) => a.off !== true);
 
 /** The groups a policy may name and a principal may be in: the declared ones, `agents` and `visitors`, sorted. */
 export const groupNamesOf = (resources: readonly PeopleResource[]): string[] =>
@@ -953,27 +999,136 @@ export const groupNamesOf = (resources: readonly PeopleResource[]): string[] =>
 export const personsOf = (resources: readonly PeopleResource[]): PersonFields[] =>
   peopleOfType<PersonFields>(resources, "person");
 
-/** The ids of the declared people and agents (not the runtime's own). */
+/** The ids of the declared people and agents (not the runtime's own, nor a built-in client's). */
 export const principalIdsOf = (resources: readonly PeopleResource[]): string[] =>
-  [...personsOf(resources), ...peopleOfType<AgentFields>(resources, "agent")].map((p) => p.id);
+  [...personsOf(resources), ...agentsOf(resources)].map((p) => p.id);
 
-/** The declared agent (`sanoma.agent`) `id` names, as declared; undefined for anyone else, the runtime's own agents among them. */
+/** The declared agent (`sanoma.agent`) `id` names, as declared; undefined for anyone else, the runtime's own agents and a built-in client's among them. */
 export const declaredAgentOf = (id: string, resources: readonly PeopleResource[]): AgentFields | undefined =>
-  peopleOfType<AgentFields>(resources, "agent").find((a) => a.id === id);
+  agentsOf(resources).find((a) => a.id === id);
 
 /**
- * The id of the declared agent that declares `client` (`sanoma.agent({ client })`), the OAuth
- * client it stands for; undefined when none does, or when two do (`clientClashes`).
+ * Which agent an OAuth client acts as, or why none (`clientAgentOf`):
+ * - `agent`: the agent's id, with its `name` when it has one; `builtIn` when it is the built-in
+ *   agent of a built-in client, absent for an agent the company declared.
+ * - `why`, without an agent: `undeclared` (no agent declares the client, and it is not built in),
+ *   `clash` (two agents declare it, `clientClashes`), `off` (a built-in the company turned off) or
+ *   `taken` (a built-in whose agent's id a person or an agent of the company's has, `by`).
  */
-export function agentOfClient(client: string, resources: readonly PeopleResource[]): string | undefined {
-  const declaring = peopleOfType<AgentFields>(resources, "agent").filter((a) => a.client === client);
-  return declaring.length === 1 ? declaring[0]!.id : undefined;
+export type ClientAgent =
+  | { agent: string; name?: string; builtIn?: BuiltInClient; why?: undefined }
+  | { agent?: undefined; why: "undeclared" | "clash" }
+  | { agent?: undefined; why: "off"; builtIn: BuiltInClient }
+  | { agent?: undefined; why: "taken"; builtIn: BuiltInClient; by: "person" | "agent" };
+
+/**
+ * The agent that stands for the OAuth client `client`, as the people's files say: the one rule
+ * every part of a client's sign-in and each of its requests asks (`agentOfClient`, `clientActing`).
+ * 1. An agent that declares the client (`sanoma.agent({ client })`) stands for it, built in or
+ *    not: a company's own declaration replaces the built-in agent for that client. Two that
+ *    declare it stand for nothing (`clash`).
+ * 2. Else a built-in client (`BUILT_IN_CLIENTS`) acts as its built-in agent, unless the company
+ *    turned it off (`sanoma.agent({ id: <the built-in's id>, off: true })`: `off`), or a person or
+ *    an agent it declares has the built-in agent's id without declaring its client (`taken`: that
+ *    id is the company's, and nobody else acts under it).
+ * 3. Any other client is `undeclared`.
+ */
+export function clientAgentOf(client: string, resources: readonly PeopleResource[]): ClientAgent {
+  const declaring = agentsOf(resources).filter((a) => a.client === client);
+  if (declaring.length > 1) return { why: "clash" };
+  const [declared] = declaring;
+  if (declared) return { agent: declared.id, ...(declared.name !== undefined && { name: declared.name }) };
+  const builtIn = BUILT_IN_CLIENTS.find((b) => b.client === client);
+  if (!builtIn) return { why: "undeclared" };
+  if (peopleOfType<AgentFields>(resources, "agent").some((a) => a.id === builtIn.id && a.off === true)) {
+    return { why: "off", builtIn };
+  }
+  if (agentsOf(resources).some((a) => a.id === builtIn.id)) return { why: "taken", builtIn, by: "agent" };
+  if (personsOf(resources).some((p) => p.id === builtIn.id)) return { why: "taken", builtIn, by: "person" };
+  return { agent: builtIn.id, name: builtIn.name, builtIn };
 }
 
 /**
- * True for a principal the agent rules bind: in `agents`, not a visitor, and either a declared
- * agent or the in-app chat's (`CHAT_AGENT`), the one agent of the runtime's they bind; the others
- * (`RUNTIME_AGENTS`) are exempt. Such an agent starts no built-in workflow but those in
+ * The id of the agent that stands for the OAuth client `client` (`clientAgentOf`): the declared
+ * agent that declares it, else a built-in client's built-in agent while the company accepts it;
+ * undefined for a client refused (undeclared, declared twice, turned off, its id taken).
+ */
+export const agentOfClient = (client: string, resources: readonly PeopleResource[]): string | undefined =>
+  clientAgentOf(client, resources).agent;
+
+/**
+ * The built-in client whose built-in agent `id` is while the company accepts it (`clientAgentOf`
+ * answers it for the client): undefined for any other id, and for a built-in replaced, turned off
+ * or whose id the company took.
+ */
+export function builtInAgentOf(id: string, resources: readonly PeopleResource[]): BuiltInClient | undefined {
+  const builtIn = builtInOfId(id);
+  if (!builtIn) return undefined;
+  const standing = clientAgentOf(builtIn.client, resources);
+  return standing.agent === id && standing.builtIn ? builtIn : undefined;
+}
+
+/** What a company does with a built-in client (`builtInClientsOf`). */
+export interface BuiltInClientState extends BuiltInClient {
+  /**
+   * `accepted`: it acts as its built-in agent. `replaced`: it acts as the declared agent `by`.
+   * `off`: the company turned it off. `taken`: refused, since `by` (a person or an agent the
+   * company declares) has its agent's id. `clash`: refused, since two agents declare it.
+   */
+  state: "accepted" | "replaced" | "off" | "taken" | "clash";
+  /** The declared agent it acts as (`replaced`), or what has its agent's id (`taken`). */
+  by?: string;
+}
+
+/** Each built-in client and what the company's people files make of it: what `sanoma check` and the description list. */
+export const builtInClientsOf = (resources: readonly PeopleResource[]): BuiltInClientState[] =>
+  BUILT_IN_CLIENTS.map((builtIn) => {
+    const standing = clientAgentOf(builtIn.client, resources);
+    if (standing.agent !== undefined) {
+      return standing.builtIn
+        ? { ...builtIn, state: "accepted" }
+        : { ...builtIn, state: "replaced", by: standing.agent };
+    }
+    if (standing.why === "taken") return { ...builtIn, state: "taken", by: `the ${standing.by} ${builtIn.id}` };
+    return { ...builtIn, state: standing.why === "off" ? "off" : "clash" };
+  });
+
+/** One line for a built-in client's state, as `sanoma check` prints it. */
+export function builtInClientLine({ id, name, client, state, by }: BuiltInClientState): string {
+  const what = `${name} (${client})`;
+  switch (state) {
+    case "accepted":
+      return `${what}: accepted, as the built-in agent ${id}`;
+    case "replaced":
+      return `${what}: accepted, as the declared agent ${by}`;
+    case "off":
+      return `${what}: turned off`;
+    case "taken":
+      return `${what}: refused, since ${by} has its built-in agent's id`;
+    case "clash":
+      return `${what}: refused, since two agents declare it`;
+  }
+}
+
+/**
+ * Why the client `client` is refused, as a sentence without its full stop: what `/mcp` answers
+ * its token. A built-in the company turned off is said to be off, never to be declared.
+ */
+export function clientRefusal(client: string, standing: ClientAgent): string {
+  switch (standing.why) {
+    case "off":
+      return `This company turned off ${standing.builtIn.name}, Sanoma's built-in agent ${standing.builtIn.id} for the client ${client} (off: true in resources/people.ts)`;
+    case "taken":
+      return `The client ${client} is built in as the agent ${standing.builtIn.id}, but this company declares a${standing.by === "agent" ? "n agent" : " person"} with that id in resources/people.ts, so the built-in agent does not act here`;
+    default:
+      return `No agent resources/people.ts declares stands for the client ${client}: declare one, sanoma.agent({ id: "<its name>", client: ${JSON.stringify(client)} })`;
+  }
+}
+
+/**
+ * True for a principal the agent rules bind: in `agents`, not a visitor, and a declared agent, a
+ * built-in client's agent (`BUILT_IN_CLIENTS`) or the in-app chat's (`CHAT_AGENT`), the one agent
+ * of the runtime's they bind; the others (`RUNTIME_AGENTS`) are exempt. Such an agent starts no built-in workflow but those in
  * `AGENT_BUILT_INS` and `call`, and those through the start policy; acting for a person, it is
  * asked about as itself and as the person (`cedarPolicy`'s `authorize`).
  */
@@ -991,13 +1146,15 @@ export const declaresPeople = (resources: readonly PeopleResource[]): boolean =>
   resources.some((r) => r.vendor === "sanoma");
 
 /**
- * The principal a declared person or agent (or one of the runtime's own agents) acts as, read
- * from the data files' resources: its id, every group that lists it (and `agents` for an agent),
- * sorted, and an agent's `onBehalfOf`. Undefined for an id nobody declares.
+ * The principal a declared person or agent (or one of the runtime's own agents, or a built-in
+ * client's agent while the company accepts it, `builtInAgentOf`) acts as, read from the data
+ * files' resources: its id, every group that lists it (and `agents` for an agent), sorted, and an
+ * agent's `onBehalfOf`. Undefined for an id nobody declares, a declaration that only turns a
+ * built-in off among them.
  */
 export function principalOf(id: string, resources: readonly PeopleResource[]): Principal | undefined {
-  const agent = peopleOfType<AgentFields>(resources, "agent").find((a) => a.id === id);
-  const isAgent = agent !== undefined || RESERVED_AGENTS.includes(id);
+  const agent = declaredAgentOf(id, resources);
+  const isAgent = agent !== undefined || RESERVED_AGENTS.includes(id) || builtInAgentOf(id, resources) !== undefined;
   if (!isAgent && !peopleOfType<PersonFields>(resources, "person").some((p) => p.id === id)) return undefined;
   const groups = peopleOfType<GroupFields>(resources, "group")
     .filter((g) => g.members.includes(id))
