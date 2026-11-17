@@ -32,6 +32,7 @@ export {
   INVITE_SECONDS,
   type KeyAgent,
   type AgentAddress,
+  type ClientRefusal,
   type LoginContext,
   type LoginHalf,
   type LoginIdentity,

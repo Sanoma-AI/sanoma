@@ -478,8 +478,9 @@ export function betterAuthStaffLogin(
 
 /**
  * What authorize refuses before the provider sees it, on a page a person reads: a method but a
- * browser's GET; a client no declared agent stands for (the provider would only redirect to its
- * error page), saying where one is declared; a resource other than the configured address's,
+ * browser's GET; a client no agent stands for (the provider would only redirect to its error
+ * page), saying where one is declared, or what the app says of it instead (`refusalOf`: a
+ * built-in client the company turned off is said to be off, never to be declared); a resource other than the configured address's,
  * whatever host the request names (the provider would refuse it too, having no row for it, but
  * at the client's redirect). Otherwise undefined.
  */
@@ -489,6 +490,14 @@ async function authorizing(request: Request, surface: OAuthContext): Promise<Res
   const client = query.get("client_id") ?? "";
   const { resource } = surface.address;
   if ((await surface.agentOf(client)) === undefined) {
+    const said = await surface.refusalOf?.(client);
+    if (said) {
+      return refusalPage(
+        403,
+        said.title,
+        `The client is <code>${escape(client || "(none)")}</code>. ${escape(said.detail)}`,
+      );
+    }
     // What is missing and where, never a declaration to paste: the client id is whatever the
     // link that sent the person here says, and a link anyone can send.
     return refusalPage(

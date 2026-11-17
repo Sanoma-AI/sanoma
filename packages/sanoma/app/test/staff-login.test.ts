@@ -760,17 +760,23 @@ export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@
         expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBeUndefined();
         // The other built-in is untouched.
         expect(await context.staff!.oauth!.agentOf(CLAUDE)).toBe("claude-ai");
-        for (const refused of [await authorizeFor(provider, CLAUDE_CODE), await consentFor(provider, CLAUDE_CODE)]) {
-          expect(refused!.status).toBe(403);
-          expect(refused!.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
-          const html = await refused!.text();
-          expect(html).toContain("Claude Code is turned off here");
-          expect(html).toContain(
-            "Acme Plumbing turned off Claude Code, Sanoma's built-in agent <code>claude-code</code>",
-          );
-          expect(html).toContain(CLAUDE_CODE);
-          expect(html).not.toMatch(/declare/i);
-        }
+        // Authorize is the half's to refuse: the app tells it why, which its page says.
+        expect(await context.staff!.oauth!.refusalOf!(CLAUDE_CODE)).toEqual({
+          title: "Claude Code is turned off here.",
+          detail:
+            "Acme Plumbing turned off Claude Code, Sanoma's built-in agent claude-code, so this sign-in cannot go on.",
+        });
+        expect(await context.staff!.oauth!.refusalOf!(CLAUDE)).toBeUndefined();
+        expect(await context.staff!.oauth!.refusalOf!("https://elsewhere.example/client.json")).toBeUndefined();
+        expect(await (await authorizeFor(provider, CLAUDE_CODE))!.text()).toBe("half");
+        const refused = (await consentFor(provider, CLAUDE_CODE))!;
+        expect(refused.status).toBe(403);
+        expect(refused.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+        const html = await refused.text();
+        expect(html).toContain("Claude Code is turned off here.");
+        expect(html).toContain("Acme Plumbing turned off Claude Code, Sanoma&#39;s built-in agent claude-code");
+        expect(html).toContain(CLAUDE_CODE);
+        expect(html).not.toMatch(/declare/i);
         const admitted = admitting(provider, () => people);
         const token = (await admitted.handle!(mcp(`at.ada@acme.test.${CLAUDE_CODE}`)))!;
         expect(token.status).toBe(403);
@@ -802,9 +808,14 @@ export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@
           `export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });\n`,
         );
         expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBeUndefined();
-        const refused = (await authorizeFor(taken.provider, CLAUDE_CODE))!;
+        expect(await context.staff!.oauth!.refusalOf!(CLAUDE_CODE)).toEqual({
+          title: "Claude Code is not accepted here.",
+          detail:
+            "Acme Plumbing has an agent with the id claude-code, the id of Sanoma's built-in agent for Claude Code, so the built-in agent does not act here and this sign-in cannot go on.",
+        });
+        const refused = (await consentFor(taken.provider, CLAUDE_CODE))!;
         expect(refused.status).toBe(403);
-        expect(await refused.text()).toContain("Claude Code is not accepted here");
+        expect(await refused.text()).toContain("Claude Code is not accepted here.");
       });
     });
 
