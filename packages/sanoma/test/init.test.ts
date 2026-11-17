@@ -246,7 +246,8 @@ describe("whoIsStarting", () => {
   it("takes the GitHub login as the id, unless the template's people, the runtime's agents or the visitors have it", async () => {
     signedIn("ada-ortiz");
     expect(await whoIsStarting()).toMatchObject({ id: "ada-ortiz", github: "ada-ortiz" });
-    for (const taken of ["founder", "admin", "agents", "scenarios", "visitors", "anonymous"]) {
+    // A built-in client's agent's id too: a founder named so would keep that client out.
+    for (const taken of ["founder", "admin", "agents", "scenarios", "visitors", "anonymous", "claude", "claude-code"]) {
       signedIn(taken);
       expect(await whoIsStarting()).toMatchObject({ id: "founder", github: taken });
     }
