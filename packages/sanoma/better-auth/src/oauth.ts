@@ -2,7 +2,15 @@ import { createCimdClientDiscovery } from "@better-auth/cimd";
 import { type ClientMetadataResourceFetch, getOAuthProviderState, oauthProvider } from "@better-auth/oauth-provider";
 import { APIError } from "better-auth/api";
 import { jwt } from "better-auth/plugins/jwt";
-import { CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
+import {
+  AGENT_GRANT_TYPES,
+  AGENT_SCOPES,
+  type AgentAddress,
+  COMPANY_CLAIM,
+  companyPrefix,
+  CONSENT_PAGE,
+  LOGIN_PAGE,
+} from "sanoma/workflows";
 
 // The staff login as an OAuth 2.1 authorization server for the agent surface (`/mcp`), whose
 // resource server is the app: Better Auth's oauth-provider, its JWT plugin (the access tokens
@@ -13,10 +21,10 @@ import { CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
 // is). No dynamic client registration: a client is admitted only as the declared agent that
 // stands for it.
 
-/** The scopes there are: none of the policy's, which decides each call, so only a refresh token's. */
-export const SCOPES = ["offline_access"];
-/** The grants there are: a code (with PKCE) for tokens, and a refresh. */
-export const GRANT_TYPES = ["authorization_code", "refresh_token"];
+/** The scopes there are (`AGENT_SCOPES`, which a router's metadata names too): only a refresh token's. */
+export const SCOPES = AGENT_SCOPES;
+/** The grants there are (`AGENT_GRANT_TYPES`): a code (with PKCE) for tokens, and a refresh. */
+export const GRANT_TYPES = AGENT_GRANT_TYPES;
 
 /**
  * The access token's claim naming the agent its person consented to (`holding`): a token is that
@@ -38,6 +46,13 @@ export interface OAuthSetup {
    * routes, and the provider has no resource.
    */
   issuer?: string;
+  /**
+   * This company's id at the router, when the address is a router's (`AgentAddress.router`):
+   * every access token names it (`COMPANY_CLAIM`) and every refresh token starts with it
+   * (`companyPrefix`, the provider's own `prefix.refreshToken`, which takes one back only with
+   * it). The code's tag is `staff.ts`'s, around the provider's answers.
+   */
+  company?: string;
 }
 
 /** The CIMD discovery, as the provider takes one. */
@@ -59,7 +74,7 @@ const LATE = Symbol("late");
  * own extension, not the `cimd()` plugin: that plugin registers it on each instance's start with
  * an object of its own, which the provider's shared options then refuse the second time.
  */
-export function oauthPlugins({ agentOf, fetchClientMetadata, issuer }: OAuthSetup) {
+export function oauthPlugins({ agentOf, fetchClientMetadata, issuer, company }: OAuthSetup) {
   const make = () =>
     createCimdClientDiscovery({
       fetchClientMetadataResource: fetchClientMetadata,
@@ -124,7 +139,11 @@ export function oauthPlugins({ agentOf, fetchClientMetadata, issuer }: OAuthSetu
       // for, and compares none with the request's host. It is the instance's, for every declared
       // client: a client is not linked to it.
       enforcePerClientResources: false,
-      extensions: [{ clientDiscovery: discovery, claims: { accessToken: holding(agentOf) } }],
+      extensions: [{ clientDiscovery: discovery, claims: { accessToken: holding(agentOf, company) } }],
+      // Behind a router, a refresh token carries the company's tag, which the router routes a
+      // refresh and a revocation by: the provider writes it on each one it issues and takes one
+      // back only with it (`decodeRefreshToken`), so another company's, or a bare one, is none.
+      ...(company !== undefined && { prefix: { refreshToken: companyPrefix(company) } }),
       // A consent is to let a client act as the agent the consent page named: kept by that agent
       // (the consent's reference), so a client the files map to another agent since is asked
       // again, and one mapped back finds its consent. Only for that: no page after the sign-in.
@@ -160,7 +179,7 @@ async function consentReference(agentOf: OAuthSetup["agentOf"], state: { query?:
  * back refreshes as before.
  */
 const holding =
-  (agentOf: OAuthSetup["agentOf"]) =>
+  (agentOf: OAuthSetup["agentOf"], company?: string) =>
   async ({ client, referenceId }: { client: { clientId: string }; referenceId?: string }) => {
     const agent = await agentOf(client.clientId);
     if (agent === undefined || referenceId !== referenceOf(agent)) {
@@ -169,8 +188,76 @@ const holding =
         error_description: "The person consented to another agent than the one this client stands for now",
       });
     }
-    return { [AGENT_CLAIM]: agent };
+    return { [AGENT_CLAIM]: agent, ...(company !== undefined && { [COMPANY_CLAIM]: company }) };
   };
+
+/**
+ * The token request with its form's `code` as the provider made it, for an address that is a
+ * router's: the company's tag taken off. A code without the tag, or with another company's, is
+ * none of this company's: it goes on as one the provider cannot find (`invalid_grant`), so
+ * nothing is spent by it. Any other request as it is.
+ */
+export async function withoutCodeTag(request: Request, { router }: AgentAddress): Promise<Request> {
+  if (!router || request.method !== "POST") return request;
+  if (!request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) return request;
+  const form = new URLSearchParams(await request.clone().text());
+  const code = form.get("code");
+  if (code === null) return request;
+  const prefix = companyPrefix(router.company);
+  // No code the provider makes has a `:`; an untagged one is found under no name.
+  form.set("code", code.startsWith(prefix) ? code.slice(prefix.length) : `untagged:${code}`);
+  const headers = new Headers(request.headers);
+  headers.delete("content-length");
+  return new Request(request.url, { method: "POST", headers, body: form.toString() });
+}
+
+/**
+ * `to` with its `code` tagged, when it is the provider's redirect back to a client with a code
+ * (an absolute URL with `code` and this issuer's `iss`, RFC 9207, and no `error`); undefined for
+ * any other address.
+ */
+function taggedCode(to: unknown, issuer: string, company: string): string | undefined {
+  const url = typeof to === "string" ? URL.parse(to) : null;
+  const code = url?.searchParams.get("code");
+  if (!url || !code || url.searchParams.get("iss") !== issuer || url.searchParams.has("error")) return undefined;
+  url.searchParams.set("code", companyPrefix(company) + code);
+  return url.href;
+}
+
+/**
+ * The provider's answer with the code it sends a client tagged with the company, for an address
+ * that is a router's, wherever the answer says the client's address: a redirect's `Location`
+ * (authorize with a consent remembered, a sign-in a browser navigated to), or the JSON `url`
+ * (the consent, a sign-in a page posted: the provider's two shapes of one redirect). Every other
+ * answer, and every header of this one (a sign-in's cookies), as it is.
+ */
+export async function withCodeTag(answered: Response, { issuer, router }: AgentAddress): Promise<Response> {
+  if (!router) return answered;
+  const location = taggedCode(answered.headers.get("location"), issuer, router.company);
+  if (location) {
+    const headers = new Headers(answered.headers);
+    headers.set("location", location);
+    return new Response(answered.body, { status: answered.status, statusText: answered.statusText, headers });
+  }
+  if (!answered.headers.get("content-type")?.includes("application/json") || answered.body === null) return answered;
+  const text = await answered.clone().text();
+  let said: unknown;
+  try {
+    said = JSON.parse(text);
+  } catch {
+    return answered;
+  }
+  if (said === null || typeof said !== "object") return answered;
+  const url = taggedCode((said as { url?: unknown }).url, issuer, router.company);
+  if (!url) return answered;
+  const headers = new Headers(answered.headers);
+  headers.delete("content-length");
+  return new Response(JSON.stringify({ ...said, url }), {
+    status: answered.status,
+    statusText: answered.statusText,
+    headers,
+  });
+}
 
 /**
  * The fetch for a client's metadata document wherever the app runs (the Worker's, whose `fetch`

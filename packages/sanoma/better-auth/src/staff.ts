@@ -1,6 +1,9 @@
 import {
   type AgentAddress,
+  agentServerMetadata,
   checkAgentAddress,
+  CLIENT_IP_HEADER,
+  COMPANY_CLAIM,
   errorMessage,
   INVITE_SECONDS,
   type LoginContext,
@@ -8,15 +11,18 @@ import {
   type LoginMethod,
   RESOURCE_METADATA,
   resourceMetadataOf,
+  ROUTER_CLIENT_IP_HEADER,
+  ROUTER_SECRET_HEADER,
   sameOrigin,
   STAFF_AUTH_PATH,
+  STAFF_OAUTH_ROUTES,
   type SignInMethod,
 } from "sanoma/workflows";
 import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import { createAuthMiddleware } from "better-auth/api";
 import { verifyJwsAccessToken } from "better-auth/oauth2";
 import { magicLink } from "better-auth/plugins/magic-link";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Pool } from "pg";
 import {
   emailCode,
@@ -31,7 +37,7 @@ import {
 } from "./instance.ts";
 import { databaseOn } from "sanoma/workflows/db";
 import { oauthResource } from "./db/staff.ts";
-import { AGENT_CLAIM, declaredMetadataFetch, GRANT_TYPES, oauthPlugins, SCOPES } from "./oauth.ts";
+import { AGENT_CLAIM, declaredMetadataFetch, oauthPlugins, withCodeTag, withoutCodeTag } from "./oauth.ts";
 
 /** Says nothing: a listener for a checked-out client's `error`, whose query fails on its own. */
 const quiet = () => undefined;
@@ -65,9 +71,7 @@ const ROUTES = new Set([
   "/get-session",
 ]);
 
-const AUTHORIZE = "/oauth2/authorize";
-const TOKEN = "/oauth2/token";
-const REVOKE = "/oauth2/revoke";
+const { authorize: AUTHORIZE, token: TOKEN, revoke: REVOKE } = STAFF_OAUTH_ROUTES;
 const CONSENT = "/oauth2/consent";
 /**
  * Where the provider sends a person whose authorize it cannot answer at the client's redirect
@@ -97,33 +101,20 @@ const OAUTH_ROUTES = new Map<string, string | undefined>([
  * revocation (RFC 7009 §2.1), its form a token to end; never a cookie. Every other change keeps
  * the same-origin rule.
  */
-const NO_ORIGIN = new Set([TOKEN, REVOKE]);
+const NO_ORIGIN = new Set<string>([TOKEN, REVOKE]);
 
 /**
- * RFC 8414's metadata for an agent address's issuer: a function of the address alone, made from
- * what is served (`OAUTH_ROUTES`, each endpoint on the issuer, whose path is where the routes
- * are) and supported here (`SCOPES`, `GRANT_TYPES`). Client ID Metadata Documents, public clients
- * alone (`none`, at the token endpoint and revocation), so no client secret or assertion; PKCE
- * `S256`; `iss` on every answer; no registration, introspection, DPoP or back-channel logout,
- * which nothing here serves. A route is added to `OAUTH_ROUTES` with its field, a method here.
+ * RFC 8414's metadata for the issuer of an agent address of the app's own: a function of the
+ * address alone, made from what is served (`OAUTH_ROUTES`, each endpoint on the issuer, whose
+ * path is where the routes are) and supported here (`agentServerMetadata`, which a router's
+ * document shares). A route is added to `OAUTH_ROUTES` with its field, a method there. An
+ * address that is a router's has no document here: the router serves its issuer's.
  */
 export function serverMetadataOf({ issuer }: AgentAddress): Record<string, unknown> {
   const endpoints = [...OAUTH_ROUTES].flatMap(([route, field]) =>
     field === undefined ? [] : [[field, `${issuer}${route}`] as const],
   );
-  return {
-    issuer,
-    ...Object.fromEntries(endpoints),
-    scopes_supported: SCOPES,
-    response_types_supported: ["code"],
-    response_modes_supported: ["query"],
-    grant_types_supported: GRANT_TYPES,
-    token_endpoint_auth_methods_supported: ["none"],
-    revocation_endpoint_auth_methods_supported: ["none"],
-    code_challenge_methods_supported: ["S256"],
-    authorization_response_iss_parameter_supported: true,
-    client_id_metadata_document_supported: true,
-  };
+  return agentServerMetadata(issuer, Object.fromEntries(endpoints));
 }
 
 /** The routes of the email code, which answer only when the app can send one. */
@@ -219,7 +210,9 @@ export function betterAuthStaffLogin(
     // RFC 9728's at the resource's own path, and at the root for a client that looks there.
     documents.set(resourceMetadataOf(address).path, resource);
     documents.set(RESOURCE_METADATA, resource);
-    documents.set(SERVER_METADATA, JSON.stringify(serverMetadataOf(address)));
+    // RFC 8414's for the app's own issuer alone: a router serves its issuer's, with endpoints of
+    // its own, and this login none for it (a 404, as any other well-known path).
+    if (!address.router) documents.set(SERVER_METADATA, JSON.stringify(serverMetadataOf(address)));
   }
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
   const minted = new Map<string, string>();
@@ -297,6 +290,7 @@ export function betterAuthStaffLogin(
           agentOf: oauth?.agentOf ?? (() => undefined),
           fetchClientMetadata,
           issuer: oauth?.address.issuer,
+          company: oauth?.address.router?.company,
         }),
         magicLink({
           expiresIn: INVITE_SECONDS,
@@ -409,7 +403,16 @@ export function betterAuthStaffLogin(
       const refused = oauth && (await GUARDS.get(route)?.(request, oauth));
       if (refused) return refused;
       const asked = route === AUTHORIZE ? withConsentAsked(request) : request;
-      return (await authFor(request)).handler(withSignOutBody(withoutDpop(asked), SIGN_OUT));
+      if (!oauth) return (await authFor(request)).handler(withSignOutBody(withoutDpop(asked), SIGN_OUT));
+      // With an address that is a router's: the caller's address is the one the router names
+      // (with its secret alone), the code a client sends back loses its company's tag before the
+      // provider reads the form, and every answer that sends a client a code gains it.
+      const { address } = oauth;
+      const sent = route === TOKEN ? await withoutCodeTag(asked, address) : asked;
+      const answered = await (
+        await authFor(request)
+      ).handler(withSignOutBody(withoutDpop(withRoutedCaller(sent, address)), SIGN_OUT));
+      return withCodeTag(answered, address);
     },
     ...(oauth && {
       async bearer(request: Request) {
@@ -452,6 +455,11 @@ export function betterAuthStaffLogin(
         // It is the agent's its person consented to (`AGENT_CLAIM`), and no other's: once the
         // files move its client to another agent it is refused, as is one that names none. A
         // client no agent stands for any more is the app's admission to refuse, by its name.
+        // Behind a router it is this company's, by the tag the router sent it here by: another
+        // company's on the same router has the same issuer and audience, and other keys; one
+        // these keys signed for another company (a database moved, a tag changed) is refused too.
+        const company = oauth.address.router?.company;
+        if (company !== undefined && payload[COMPANY_CLAIM] !== company) return null;
         const consented = payload[AGENT_CLAIM];
         const agent = await oauth.agentOf(payload.azp);
         if (typeof consented !== "string" || (agent !== undefined && agent !== consented)) return null;
@@ -598,6 +606,38 @@ function withoutDpop(request: Request): Request {
   headers.delete("dpop");
   return new Request(url, new Request(request, { headers }));
 }
+
+/**
+ * The one rule for a caller's address a request names: the request with `CLIENT_IP_HEADER` (what
+ * the login's rate limit counts by, set by the app's host from the socket) replaced by what the
+ * router names (`ROUTER_CLIENT_IP_HEADER`), only when the address is a router's and the request
+ * carries that router's secret (`ROUTER_SECRET_HEADER`, compared in constant time): every
+ * request a router forwards comes from the router's own socket, so without this all its callers
+ * would share one count. Without the secret, with a wrong one, or for an address of the app's
+ * own, what the request names is not read, as before. Neither header goes on to Better Auth.
+ */
+export function withRoutedCaller(request: Request, { router }: AgentAddress): Request {
+  const secret = request.headers.get(ROUTER_SECRET_HEADER);
+  const caller = request.headers.get(ROUTER_CLIENT_IP_HEADER);
+  if (secret === null && caller === null) return request;
+  const headers = new Headers(request.headers);
+  headers.delete(ROUTER_SECRET_HEADER);
+  headers.delete(ROUTER_CLIENT_IP_HEADER);
+  if (router && secret && caller && sameSecret(secret, router.secret)) headers.set(CLIENT_IP_HEADER, caller);
+  // Made from its parts: the app's request on Node is not one `new Request(request)` takes.
+  const body = request.method === "GET" || request.method === "HEAD" ? null : request.body;
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    ...(body && { body, duplex: "half" }),
+  } as RequestInit);
+}
+
+/** A secret's SHA-256: what is compared, so two of any lengths are compared in the same time. */
+const digestOf = (text: string) => createHash("sha256").update(text).digest();
+
+/** Whether two secrets are the same, in time that does not tell where they differ: their digests compared. */
+const sameSecret = (given: string, expected: string) => timingSafeEqual(digestOf(given), digestOf(expected));
 
 /**
  * An authorize with the consent page always shown (`prompt=consent`, as the client itself may
