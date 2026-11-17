@@ -7,10 +7,13 @@ import { type AppOptions, type IngressRoute, staffLogin, startApp } from "sanoma
 import { appSteps } from "sanoma/app/steps";
 import { betterAuthStaffLogin, prepareBetterAuthStaff } from "sanoma/better-auth";
 import {
+  type AgentAddress,
+  agentAddressFrom,
   deploymentKey,
   errorMessage,
   GITHUB_APP,
   isLoopback,
+  NO_AGENT_ADDRESS,
   type ResolvedConfig,
   resolveConfig,
   SanomaClient,
@@ -229,8 +232,11 @@ export function parseDomains(value: string | undefined): Record<string, string> 
  * `SANOMA_SIGNING_KEY`, with GitHub as a method when `SANOMA_GITHUB_CLIENT_ID` and
  * `SANOMA_GITHUB_CLIENT_SECRET` are both set, in the environment or in the stored secrets
  * (`readSecrets`), where creating the GitHub App on the app's connect page put them; the same
- * client goes to the public sites' logins (`social`), for visitors. An empty value is the same as
- * unset. A mistake in them is a UsageError.
+ * client goes to the public sites' logins (`social`), for visitors; with an agent address in the
+ * environment (`agentAddressFrom`: `SANOMA_HOSTNAME`, else `SANOMA_HOST_URL`), the staff login is
+ * the agent surface's authorization server for that one address, and without one serves no
+ * OAuth, which is said once on stderr. An empty value is the same as unset. A mistake in them
+ * is a UsageError.
  */
 export async function appOptions(
   readSecrets?: ReadSecrets,
@@ -240,6 +246,17 @@ export async function appOptions(
   const host = env.SANOMA_APP_HOST || undefined;
   const options = { host, ...(domains && { domains }) };
   if (host === undefined || isLoopback(host)) return options;
+  let address: AgentAddress | undefined;
+  try {
+    address = agentAddressFrom(env);
+  } catch (err) {
+    throw new UsageError(errorMessage(err));
+  }
+  // Once for the process: a reload reads the variables again.
+  if (!address && !saidNoAddress) {
+    saidNoAddress = true;
+    console.error(`${NO_AGENT_ADDRESS}. People sign in as before.`);
+  }
   try {
     deploymentKey("SANOMA_SIGNING_KEY");
   } catch (err) {
@@ -263,9 +280,15 @@ export async function appOptions(
   const login = staffLogin(
     (context) => betterAuthStaffLogin(context, { fetchClientMetadata: fetchClientMetadataResource }),
     social,
+    address,
   );
   return { ...options, login, social };
 }
+
+/** Whether this process said already that it has no agent address (`appOptions`). */
+let saidNoAddress = false;
+/** Lets it be said again: for a test, which runs in one process. */
+export const resetNotices = () => void (saidNoAddress = false);
 
 /** How long a reload waits after it is asked (`WorkerOptions.reload`): the save that asked it ends first. */
 const RELOAD_MS = 1_000;

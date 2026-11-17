@@ -6,7 +6,9 @@ import { wakeupAccounts, wakeupInstances } from "./db/wakeup.ts";
 import { info, warn } from "./log.ts";
 import { generateSecret } from "./secret.ts";
 import { tokenHash } from "./tokens.ts";
-import { bodyText, errorMessage } from "./shared.ts";
+import { bodyText, errorMessage, instanceUrl } from "./shared.ts";
+
+export { instanceUrl };
 
 /*
  * `sanoma/workflows/wakeup-service`: the service that wakes stopped instances, server-side
@@ -116,18 +118,6 @@ async function jsonBody(request: Request): Promise<Record<string, unknown> | und
   } catch {
     return undefined;
   }
-}
-
-/**
- * An instance's URL as it is stored, without a trailing slash, or why it is refused: `http(s)`, no
- * user or password, no query, no fragment (`/wake` is added to it).
- */
-export function instanceUrl(value: unknown): { url: string } | { error: string } {
-  const refused = { error: "url must be an http(s) URL with no user, password, query or fragment" };
-  if (typeof value !== "string" || /[?#]/.test(value) || !URL.canParse(value)) return refused;
-  const url = new URL(value);
-  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return refused;
-  return { url: url.href.replace(/\/+$/, "") };
 }
 
 type InstanceRow = typeof wakeupInstances.$inferSelect;

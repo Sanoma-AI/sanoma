@@ -172,7 +172,7 @@ export function oauthTables(
       (t) => [index().on(t.userId)],
     )
     .enableRLS();
-  /** A resource tokens are for, by its URL: this instance's `/mcp`, one row per host it was asked on. */
+  /** A resource tokens are for, by its URL: this instance's `/mcp` at its configured agent address, the one row the staff login makes (and any a former address left). */
   const oauthResource = schema
     .table("oauth_resource", {
       id: text().primaryKey(),

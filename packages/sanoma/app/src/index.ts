@@ -39,6 +39,7 @@ import { liveSnapshot } from "./snapshot-build.ts";
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
 export type { IngressRoute } from "./handler.ts";
+export { agentAddressAt, agentAddressFrom } from "sanoma/workflows";
 export { type MakeStaffLogin, type StaffSocial, staffLogin } from "./login/staff.ts";
 export { loopbackLogin } from "./loopback.ts";
 export type { AppBundle, AppBundleContext, AppBundleEnv, AppBundleModule, AppHost } from "./app-bundle.ts";
@@ -76,7 +77,7 @@ export interface AppOptions {
   /**
    * The company's own OAuth clients (its GitHub App's), given to each public site's login
    * (`LoginContext.social`), which then offers them to visitors. The staff login takes its own
-   * (`staffLogin(make, social)`).
+   * (`staffLogin(make, social, address)`).
    */
   social?: SocialClients;
   /**
