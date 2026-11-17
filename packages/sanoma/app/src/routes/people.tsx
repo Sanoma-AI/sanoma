@@ -5,7 +5,7 @@ import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useServerFn } from "@tanstack/react-start";
-import { ADMIN, AGENTS } from "sanoma/workflows/shared";
+import { ADMIN, AGENTS, type BuiltInClientState } from "sanoma/workflows/shared";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Badge } from "#/components/ui/badge.tsx";
@@ -82,6 +82,7 @@ function directory(config: ConfigDescription) {
       (p) => (p.file !== undefined && files.has(p.file)) || PEOPLE_PROBLEM.test(p.message),
     ),
     types: config.resourceTypes.filter((t) => t.vendor === "sanoma"),
+    builtIn: config.builtInClients ?? [],
   };
 }
 type Directory = ReturnType<typeof directory>;
@@ -123,6 +124,7 @@ function PeoplePage() {
           Declared in data files under <code>resources/</code>. Signing in admits these people and nobody else; a change
           to them waits for someone in <code>admin</code>.
         </p>
+        {show === "agents" && <BuiltInClients clients={data.builtIn} />}
         {rows.length === 0 && (show !== "groups" || data.views.agents.length === 0) ? (
           <Nothing className="border-0" title={`No ${show} declared`}>
             {EMPTY[show]}
@@ -325,19 +327,27 @@ function AgentsTable({
             <TableCell>
               {typeof row.desired.onBehalfOf === "string" ? (
                 row.desired.onBehalfOf
+              ) : row.desired.off === true ? (
+                <span className="text-muted-foreground">nobody</span>
               ) : (
                 <span className="text-muted-foreground">whoever names it</span>
               )}
             </TableCell>
             <TableCell>
-              {typeof row.desired.client === "string" ? (
+              {row.desired.off === true ? (
+                <span className="text-muted-foreground">turns the built-in off</span>
+              ) : typeof row.desired.client === "string" ? (
                 <code>{row.desired.client}</code>
               ) : (
                 <span className="text-muted-foreground">none</span>
               )}
             </TableCell>
             <TableCell>
-              <Names names={groupsOf.get(row.name) ?? []} builtIn={builtInGroups(row.type)} none="none" />
+              <Names
+                names={groupsOf.get(row.name) ?? []}
+                builtIn={row.desired.off === true ? [] : builtInGroups(row.type)}
+                none="none"
+              />
             </TableCell>
             <TableCell>
               <DeclaredIn resource={row} />
@@ -346,6 +356,44 @@ function AgentsTable({
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+/** What the company's files make of a built-in client, as its line says it. */
+const BUILT_IN_STATE: Record<BuiltInClientState["state"], (client: BuiltInClientState) => string> = {
+  accepted: ({ id }) => `Accepted, as the built-in agent ${id}`,
+  replaced: ({ by }) => `Accepted, as the declared agent ${by}`,
+  off: () => "Turned off",
+  taken: ({ by }) => `Refused: ${by} has its built-in agent's id`,
+  clash: () => "Refused: two agents declare it",
+};
+
+/**
+ * The OAuth clients built in on every company (the description's `builtInClients`), over the
+ * declared agents: which the company accepts on a host as its built-in agent, which a declared
+ * agent replaces, and which it turned off.
+ */
+function BuiltInClients({ clients }: { clients: BuiltInClientState[] }) {
+  if (clients.length === 0) return null;
+  return (
+    <div className="border-b p-3 text-sm">
+      <p className="text-muted-foreground">
+        Built in to Sanoma: on a host, these clients sign a person in without a declaration and act for them as an agent
+        in <code>agents</code>. Declare an agent with a client's URL to replace its agent, or{" "}
+        <code>sanoma.agent({"{ id, off: true }"})</code> with its agent's id to turn it off.
+      </p>
+      <ul className="mt-2 flex flex-col gap-1">
+        {clients.map((client) => (
+          <li key={client.id} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-medium">{client.name}</span>
+            <code className="text-xs text-muted-foreground">{client.client}</code>
+            <Badge variant={client.state === "accepted" || client.state === "replaced" ? "secondary" : "outline"}>
+              {BUILT_IN_STATE[client.state](client)}
+            </Badge>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

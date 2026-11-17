@@ -24,7 +24,7 @@ import {
   type SocialClients,
 } from "sanoma/workflows";
 import { admit } from "sanoma/workflows/describe";
-import { agentOfClient, personsOf } from "sanoma/workflows/shared";
+import { agentOfClient, type ClientAgent, clientAgentOf, personsOf } from "sanoma/workflows/shared";
 import { z } from "zod";
 import type { AppContext, LoginProvider } from "../context.ts";
 import type { AppSnapshot } from "../snapshot.ts";
@@ -44,8 +44,9 @@ import { escapeHtml, type PageFrame, smallPage, wantsJson } from "./page.ts";
 // or `agentAddressAt` the app's URL):
 // the half is the authorization server for `/mcp` (`LoginContext.staff.oauth`), whose sign-in and
 // consent pages are these, and a request to `/mcp` with a bearer is the client's, checked by the
-// half and admitted as the declared agent that stands for that client, for the person who signed
-// it in; without one, `/mcp` answers the 401 that starts a client's sign-in, which names the
+// half and admitted as the agent that stands for that client (`clientAgentOf`: the one the files declare
+// for it, else a built-in client's built-in agent while the company accepts it), for the person
+// who signed it in; without one, `/mcp` answers the 401 that starts a client's sign-in, which names the
 // configured address's metadata whatever host the request came in on. With no address there is
 // no OAuth: `/mcp` is a signed-in person's alone, and its 401 says what to set.
 
@@ -58,6 +59,9 @@ export type StaffSocial = SocialClients;
 const INVITE = "/auth/invite";
 /** The agent surface (`routes/mcp.ts`): the one path a bearer is taken at, and the path of the resource the half issues tokens for. */
 const MCP = AGENT_SURFACE_PATH;
+/** The half's authorize endpoint (the provider's, under the login's own routes), where a client's sign-in starts in a browser. */
+const atAuthorize = (pathname: string) => pathname.startsWith("/auth/") && pathname.endsWith("/oauth2/authorize");
+
 /** A bearer, `Authorization: Bearer …` (the scheme in any case, RFC 9110 §11.1): what a client sends `/mcp` once signed in. */
 const hasBearer = (request: Request) => /^bearer \S/i.test(request.headers.get("authorization") ?? "");
 
@@ -178,8 +182,8 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
             admits: async (identity) => (await admitted(identity)) !== undefined,
             social,
             // The agent surface's authorization server, for the one configured address: tokens
-            // for its resource, and a client only as the agent the files declare for it, as they
-            // read now. With no address the half serves no OAuth.
+            // for its resource, and a client only as the agent that stands for it (declared, or a
+            // built-in the company accepts), as the files read now. With no address the half serves no OAuth.
             ...(address && {
               oauth: { address, agentOf: async (id) => agentOfClient(id, (await people()).people) },
             }),
@@ -206,10 +210,18 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
           ? smallPage(503, "Sign-in", "<p>Sign-in is not available on this host. The app's log says why.</p>")
           : smallPage(503, "Starting", "<p>The app is starting. Try again in a moment.</p>");
       }
-      const own = await half.handle(request);
-      if (own) return own;
       const url = new URL(request.url);
       const { pathname } = url;
+      // A built-in client the company turned off (or whose agent's id it took) is no client to
+      // the half, which would say to declare it: refused here with the same status, saying that.
+      if (request.method === "GET" && atAuthorize(pathname)) {
+        const client = url.searchParams.get("client_id") ?? "";
+        // While the files cannot be read the half refuses every client, as it does undeclared ones.
+        const standing = clientAgentOf(client, (await peopleIfRead())?.people ?? []);
+        if (standing.why === "off" || standing.why === "taken") return builtInRefused(client, standing, frame());
+      }
+      const own = await half.handle(request);
+      if (own) return own;
       if (pathname === INVITE && request.method === "POST") return mint(request);
       if (pathname.startsWith(`${INVITE}/`) && request.method === "GET")
         return landing(pathname.slice(INVITE.length + 1));
@@ -257,17 +269,20 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
 
   /**
    * The consent page for a client's sign-in (`url`, the half's signed request): which client asks,
-   * as which declared agent, for `person` and the company, with Allow and Deny, which post the
-   * signed request back to the half (`/oauth2/consent`). A client no agent stands for any more is
-   * refused here too.
+   * as which agent, for `person` and the company, with Allow and Deny, which post the signed
+   * request back to the half (`/oauth2/consent`). It says whose the agent is: one the company
+   * declared, or one built in to Sanoma that the company has not turned off. A client no agent
+   * stands for any more is refused here too.
    */
   async function consentPage(url: URL, person: { id: string }): Promise<Response> {
     const client = url.searchParams.get("client_id") ?? "";
     const { people: declared } = await people();
-    const agent = agentOfClient(client, declared);
+    const standing = clientAgentOf(client, declared);
+    const { agent } = standing;
     const look = frame();
     const company = look.company?.name ?? "this company";
     if (agent === undefined) {
+      if (standing.why === "off" || standing.why === "taken") return builtInRefused(client, standing, look);
       return smallPage(
         403,
         "Not declared",
@@ -279,9 +294,14 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
     return smallPage(
       200,
       "Allow access",
-      `<div class="lede"><h1>Let ${escapeHtml(agent)} act for you?</h1>` +
+      `<div class="lede"><h1>Let ${escapeHtml(standing.name ?? agent)} act for you?</h1>` +
         `<p>${escapeHtml(client)} asks to work in ${escapeHtml(company)} as the agent <strong>${escapeHtml(agent)}</strong>, ` +
-        `for ${escapeHtml(nameOf(who))}. It may do only what both you and that agent may do, and the company's policy decides each call.</p></div>` +
+        `for ${escapeHtml(nameOf(who))}. It may do only what both you and that agent may do, and the company's policy decides each call.</p>` +
+        `<p class="small muted">${
+          standing.builtIn
+            ? `${escapeHtml(standing.builtIn.name)} is built in to Sanoma: ${escapeHtml(company)} did not declare it, and has not turned it off.`
+            : `${escapeHtml(company)} declared this agent in <code>resources/people.ts</code>.`
+        }</p></div>` +
         `<div class="links"><button id="allow" type="button" class="button">Allow</button>` +
         `<button id="deny" type="button" class="link">Deny</button></div>` +
         `<p id="message" class="message" role="status"></p><script>${CONSENT_SCRIPT}</script>`,
@@ -369,6 +389,32 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
     resolveActor: (request) => during(request, () => provider.resolveActor(request)),
     handle: (request) => during(request, () => provider.handle!(request)),
   };
+}
+
+/**
+ * The 403 for a built-in client the company does not accept, at authorize and on the consent
+ * page: that it is turned off (or that its agent's id is the company's own), never where to
+ * declare it.
+ */
+function builtInRefused(
+  client: string,
+  standing: Extract<ClientAgent, { why: "off" | "taken" }>,
+  look: PageFrame,
+): Response {
+  const company = look.company?.name ?? "this company";
+  const { name, id } = standing.builtIn;
+  return smallPage(
+    403,
+    standing.why === "off" ? "Turned off" : "Not accepted",
+    `<div class="lede"><h1>${escapeHtml(name)} is ${standing.why === "off" ? "turned off" : "not accepted"} here</h1>` +
+      `<p>${
+        standing.why === "off"
+          ? `${escapeHtml(company)} turned off ${escapeHtml(name)}, Sanoma's built-in agent <code>${escapeHtml(id)}</code>, so this sign-in cannot go on.`
+          : `${escapeHtml(company)} declares a${standing.by === "agent" ? "n agent" : " person"} with the id <code>${escapeHtml(id)}</code>, the id of Sanoma's built-in agent for ${escapeHtml(name)}, so the built-in agent does not act here and this sign-in cannot go on.`
+      }</p>` +
+      `<p class="small muted">The client is <code>${escapeHtml(client)}</code>.</p></div>`,
+    look,
+  );
 }
 
 /** The people a snapshot read now declares. */

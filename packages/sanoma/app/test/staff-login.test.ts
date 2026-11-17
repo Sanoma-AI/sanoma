@@ -90,6 +90,15 @@ const request = (
 const mcp = (bearer?: string, host?: string) =>
   request("/mcp", { method: "POST", ...(bearer && { bearer }), ...(host && { host }) });
 
+/** The consent page for `clientId`'s sign-in, asked by Ada, signed in. */
+const consentFor = (provider: LoginProvider, clientId: string) =>
+  provider.handle!(
+    request(`/auth/consent?${new URLSearchParams({ client_id: clientId, sig: "x" })}`, { cookie: "who=ada@acme.test" }),
+  );
+/** The half's authorize for `clientId`, as a browser asks it. */
+const authorizeFor = (provider: LoginProvider, clientId: string) =>
+  provider.handle!(request(`/auth/better-auth/oauth2/authorize?${new URLSearchParams({ client_id: clientId })}`));
+
 describe("staffLogin", () => {
   /** The runtime's table of spent invite-request nonces, as the client keeps it. */
   const nonces = new Set<string>();
@@ -692,6 +701,111 @@ describe("staffLogin", () => {
       expect((await login.handle!(request(`/auth/consent?${stranger}`, { cookie: "who=ada@acme.test" })))?.status).toBe(
         403,
       );
+    });
+
+    describe("a built-in client, which no agent declares", () => {
+      const CLAUDE = "https://claude.ai/oauth/mcp-oauth-client-metadata";
+      const PERSONS = `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@acme.test" });
+`;
+      /** The login over a company whose `resources/people.ts` is `PERSONS` and `rest`, with those people. */
+      async function over(rest = "") {
+        const other = mkdtempSync(join(tmpdir(), "sanoma-staff-built-in-"));
+        mkdirSync(join(other, "resources"));
+        writeFileSync(join(other, "resources", "people.ts"), PERSONS + rest);
+        const people = readPeople(other);
+        rmSync(other, { recursive: true, force: true });
+        expect(people.problems).toEqual([]);
+        return { people, provider: await opened({ current: (s) => ({ ...s, people }) }) };
+      }
+      it("is accepted as its built-in agent for the person, and the consent page says it is Sanoma's, not turned off", async () => {
+        const { people, provider } = await over();
+        expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("claude-code");
+        expect(await context.staff!.oauth!.agentOf(CLAUDE)).toBe("claude");
+        expect(await context.staff!.oauth!.agentOf("https://elsewhere.example/client.json")).toBeUndefined();
+        // Authorize is the half's, as for a declared client.
+        expect(await (await authorizeFor(provider, CLAUDE_CODE))!.text()).toBe("half");
+        const page = (await consentFor(provider, CLAUDE_CODE))!;
+        expect(page.status).toBe(200);
+        const html = await page.text();
+        expect(html).toContain("Let Claude Code act for you?");
+        expect(html).toContain(
+          `${CLAUDE_CODE} asks to work in Acme Plumbing as the agent <strong>claude-code</strong>, for Ada Lovelace.`,
+        );
+        expect(html).toContain(
+          "Claude Code is built in to Sanoma: Acme Plumbing did not declare it, and has not turned it off.",
+        );
+        expect(html).not.toContain("declared this agent");
+        expect(await (await consentFor(provider, CLAUDE))!.text()).toContain("Let Claude act for you?");
+        // Its bearer at /mcp: the built-in agent, in agents, for the person it was issued for.
+        const admitted = admitting(provider, () => people);
+        const asked = mcp(`at.ada@acme.test.${CLAUDE_CODE}`);
+        expect(await admitted.handle!(asked)).toBeUndefined();
+        expect(await admitted.resolveActor(asked)).toEqual({
+          id: "claude-code",
+          groups: ["agents"],
+          onBehalfOf: "ada",
+        });
+        // The consent page of an agent the company declared says so instead.
+        const declared = await (await consentFor(login, CLAUDE_CODE))!.text();
+        expect(declared).toContain("Acme Plumbing declared this agent in <code>resources/people.ts</code>.");
+        expect(declared).not.toContain("built in to Sanoma");
+      });
+
+      it("is refused once the company turns it off, at authorize, consent and /mcp, saying it is off and never to declare it", async () => {
+        const { people, provider } = await over(
+          `export const noClaudeCode = sanoma.agent({ id: "claude-code", off: true });\n`,
+        );
+        expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBeUndefined();
+        // The other built-in is untouched.
+        expect(await context.staff!.oauth!.agentOf(CLAUDE)).toBe("claude");
+        for (const refused of [await authorizeFor(provider, CLAUDE_CODE), await consentFor(provider, CLAUDE_CODE)]) {
+          expect(refused!.status).toBe(403);
+          expect(refused!.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+          const html = await refused!.text();
+          expect(html).toContain("Claude Code is turned off here");
+          expect(html).toContain(
+            "Acme Plumbing turned off Claude Code, Sanoma's built-in agent <code>claude-code</code>",
+          );
+          expect(html).toContain(CLAUDE_CODE);
+          expect(html).not.toMatch(/declare/i);
+        }
+        const admitted = admitting(provider, () => people);
+        const token = (await admitted.handle!(mcp(`at.ada@acme.test.${CLAUDE_CODE}`)))!;
+        expect(token.status).toBe(403);
+        const said = (await token.json()) as { code: string; error: string };
+        expect(said.code).toBe("not_admitted");
+        expect(said.error).toContain("This company turned off Claude Code, Sanoma's built-in agent claude-code");
+        expect(said.error).not.toContain("declare one");
+        // A client that is not built in is still the half's to refuse, as before.
+        expect(await (await authorizeFor(provider, "https://elsewhere.example/client.json"))!.text()).toBe("half");
+      });
+
+      it("is replaced by the company's own declaration of the client, and refused while its agent's id is another's", async () => {
+        const ours = await over(
+          `export const ours = sanoma.agent({ id: "our-claude", name: "Our Claude", client: "${CLAUDE_CODE}" });\n`,
+        );
+        expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("our-claude");
+        const html = await (await consentFor(ours.provider, CLAUDE_CODE))!.text();
+        expect(html).toContain("Let Our Claude act for you?");
+        expect(html).toContain("as the agent <strong>our-claude</strong>");
+        expect(html).toContain("Acme Plumbing declared this agent");
+        const admitted = admitting(ours.provider, () => ours.people);
+        expect(await admitted.resolveActor(mcp(`at.ada@acme.test.${CLAUDE_CODE}`))).toEqual({
+          id: "our-claude",
+          groups: ["agents"],
+          onBehalfOf: "ada",
+        });
+        // An agent of the company's with the built-in's id, for another client: the built-in does not act.
+        const taken = await over(
+          `export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });\n`,
+        );
+        expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBeUndefined();
+        const refused = (await authorizeFor(taken.provider, CLAUDE_CODE))!;
+        expect(refused.status).toBe(403);
+        expect(await refused.text()).toContain("Claude Code is not accepted here");
+      });
     });
 
     it("shows the sign-in page a client's sign-in sends someone to, signed in or not, which posts its signed request along", async () => {

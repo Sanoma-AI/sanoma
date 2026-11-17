@@ -20,12 +20,16 @@ import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from ".
 // server's metadata from the 401, signs a declared person in by email code, is asked their
 // consent, gets a JWT for the instance's configured `/mcp` from a form POST with no Origin, and
 // calls the tools as the declared agent on that person's behalf. The agent address is configured,
-// as `SANOMA_HOSTNAME` configures one: here the address the test's app listens on. Claude Code's metadata document is served
-// by a stand-in for claude.ai: nothing here leaves the machine.
+// as `SANOMA_HOSTNAME` configures one: here the address the test's app listens on. Claude Code's client is built in: with no
+// agent declared for it, it signs a person in the same way and acts as the built-in agent
+// `claude-code`, until the company turns it off; any other client is refused until declared.
+// Claude's metadata documents are served by a stand-in for claude.ai: nothing here leaves the machine.
 
 const UNDECLARED = "https://elsewhere.example/oauth/client.json";
 const REDIRECT = "http://127.0.0.1:53682/callback";
 const ADA = "ada@acme.test";
+/** The client of Claude's hosted apps, built in beside Claude Code's. */
+const CLAUDE = "https://claude.ai/oauth/mcp-oauth-client-metadata";
 
 const root = mkdtempSync(join(tmpdir(), "sanoma-hosted-mcp-"));
 mkdirSync(join(root, "resources"));
@@ -46,8 +50,10 @@ async function withPeople<T>(people: string, run: () => Promise<T>): Promise<T> 
     writeFileSync(join(root, "resources/people.ts"), PEOPLE);
   }
 }
-/** The people with no agent for Claude Code. */
-const UNDECLARED_CLIENT = PEOPLE.replace(/^export const claudeCode.*$/m, "");
+/** The people with no agent declared: Claude's clients are the built-in ones. */
+const NO_AGENT = PEOPLE.replace(/^export const claudeCode.*\n/m, "");
+/** The people with no agent declared, and the built-in Claude Code turned off. */
+const TURNED_OFF = `${NO_AGENT}export const noClaudeCode = sanoma.agent({ id: "claude-code", off: true });\n`;
 
 const hello = defineWorkflow({
   name: "say-hello",
@@ -69,7 +75,9 @@ const fetched: string[] = [];
 const claudeAi = async (input: string | URL | Request): Promise<Response> => {
   const url = String(input instanceof Request ? input.url : input);
   fetched.push(url);
-  return url === CLAUDE_CODE ? Response.json(CLAUDE_CODE_DOCUMENT) : new Response("Not found", { status: 404 });
+  if (url === CLAUDE_CODE) return Response.json(CLAUDE_CODE_DOCUMENT);
+  if (url === CLAUDE) return Response.json({ ...CLAUDE_CODE_DOCUMENT, client_id: CLAUDE, client_name: "Claude" });
+  return new Response("Not found", { status: 404 });
 };
 
 /** The staff login as `sanoma serve` composes it, its codes kept here and claude.ai a stand-in; `origin` is its agent address's, none without. */
@@ -137,9 +145,9 @@ async function mcp(
  * here. Node's `fetch` says `Sec-Fetch-Mode: cors` whatever it is given, which a provider answers
  * with JSON instead: `node:http` says what a browser's navigation says.
  */
-function navigate(url: string): Promise<Response> {
+function navigate(url: string, cookie?: string): Promise<Response> {
   return new Promise((resolve, reject) => {
-    get(url, { headers: { accept: "text/html", "sec-fetch-mode": "navigate" } }, (res) => {
+    get(url, { headers: { accept: "text/html", "sec-fetch-mode": "navigate", ...(cookie && { cookie }) } }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (chunk: Buffer) => chunks.push(chunk));
       res.on("end", () => {
@@ -153,7 +161,7 @@ function navigate(url: string): Promise<Response> {
 }
 
 /** What a client does from the 401 to a token: discovery, authorize, the person's sign-in and consent, the code for tokens. */
-async function signIn(client = CLAUDE_CODE) {
+async function signIn(client = CLAUDE_CODE, cookie?: string) {
   const challenged = await mcp("tools/list", {});
   const metadataUrl = /resource_metadata="([^"]+)"/.exec(challenged.headers.get("www-authenticate") ?? "")?.[1];
   const resource = (await (await fetch(metadataUrl!)).json()) as { resource: string; authorization_servers: string[] };
@@ -171,7 +179,7 @@ async function signIn(client = CLAUDE_CODE) {
     state: "s1",
     resource: resource.resource,
   });
-  const authorized = await navigate(`${server.authorization_endpoint}?${query}`);
+  const authorized = await navigate(`${server.authorization_endpoint}?${query}`, cookie);
   return { authorized, verifier, server, resource: resource.resource };
 }
 
@@ -227,6 +235,32 @@ async function connect() {
 let connected: ReturnType<typeof connect> | undefined;
 const tokens = () => (connected ??= connect());
 
+/**
+ * Another sign-in for Claude Code by Ada, signed in already (`cookie`, so no code is mailed: a
+ * sign-in by code is rate limited): authorize goes straight to the consent page, which a client
+ * that takes its answer on the person's own computer is shown every time; then its tokens.
+ */
+async function connectSignedIn(cookie: string) {
+  const { authorized, verifier, server, resource } = await signIn(CLAUDE_CODE, cookie);
+  expect(authorized.status).toBe(302);
+  const consentAt = new URL(authorized.headers.get("location")!, app.url);
+  expect(consentAt.pathname).toBe("/auth/consent");
+  const consentPage = await (await fetch(consentAt, { headers: { cookie } })).text();
+  const allowed = await fromPage(
+    "/auth/better-auth/oauth2/consent",
+    { accept: true, oauth_query: consentAt.search.slice(1) },
+    cookie,
+  );
+  const back = new URL(((await allowed.json()) as { url: string }).url);
+  const exchanged = await exchange(server, back.searchParams.get("code")!, verifier, resource);
+  expect(exchanged.status).toBe(200);
+  const issued = (await exchanged.json()) as { access_token: string; refresh_token: string };
+  return { ...issued, server, resource, cookie, consentPage };
+}
+
+/** Claude Code's tokens for Ada, issued while no agent was declared for it: the built-in agent's. */
+let built: Awaited<ReturnType<typeof connect>> | undefined;
+
 /** The token endpoint's refresh, as the client sends it. */
 const refresh = (issued: { refresh_token: string; resource: string; server: { token_endpoint: string } }) =>
   fetch(issued.server.token_endpoint, {
@@ -239,6 +273,13 @@ const refresh = (issued: { refresh_token: string; resource: string; server: { to
       resource: issued.resource,
     }),
   });
+
+/** `issued` after a refresh that is granted: its new tokens (a refresh token is used once). */
+async function renewed(issued: Awaited<ReturnType<typeof connect>>) {
+  const answer = await refresh(issued);
+  expect(answer.status).toBe(200);
+  return { ...issued, ...((await answer.json()) as { access_token: string; refresh_token: string }) };
+}
 
 describe("the agent surface on a host", () => {
   it("answers /mcp without a token 401, pointing at its metadata: CIMD, public clients and S256", async () => {
@@ -346,8 +387,9 @@ describe("the agent surface on a host", () => {
     expect((await mcp("tools/list", {}, { ...bearer, [AGENT_HEADER]: "claude-code" })).status).toBe(400);
     expect((await mcp("tools/list", {}, { [ACTOR_HEADER]: "ada" })).status).toBe(401);
 
-    // Once no agent declares the client, its token is refused, however recent.
-    await withPeople(UNDECLARED_CLIENT, async () => {
+    // Claude Code's client is built in: once no agent declares it and the company turns the
+    // built-in off, its token is refused, however recent.
+    await withPeople(TURNED_OFF, async () => {
       const refused = await mcp("tools/list", {}, bearer);
       expect(refused.status).toBe(403);
       expect(refused.body).toMatchObject({ code: "not_admitted", error: expect.stringContaining(CLAUDE_CODE) });
@@ -356,8 +398,9 @@ describe("the agent surface on a host", () => {
 
   it("reads the people as the files say now at the login's own routes, with no page asked in between", async () => {
     const signedIn = await tokens();
-    // Undeclared: the token endpoint and authorize are all that is asked, and both refuse.
-    writeFileSync(join(root, "resources/people.ts"), PEOPLE.replace(/^export const claudeCode.*$/m, ""));
+    // Undeclared and turned off (Claude Code's client is built in, so undeclared alone is still
+    // accepted): the token endpoint and authorize are all that is asked, and both refuse.
+    writeFileSync(join(root, "resources/people.ts"), TURNED_OFF);
     try {
       const refreshed = await refresh(signedIn);
       expect(refreshed.status).toBe(400);
@@ -444,6 +487,113 @@ describe("the agent surface on a host", () => {
     // No declaration ready to paste: the client's id is whatever the link that sent here said.
     expect(page).not.toContain("sanoma.agent(");
     expect(fetched).toEqual([]);
+  });
+
+  it("signs a person in for Claude Code with no agent declared: built in, it acts as the agent claude-code for them", async () => {
+    await withPeople(NO_AGENT, async () => {
+      const { cookie } = await tokens();
+      const { consentPage, ...issued } = await connectSignedIn(cookie);
+      // The consent names the built-in agent, and says it is Sanoma's, which the company has not turned off.
+      expect(consentPage).toContain("Let Claude Code act for you?");
+      expect(consentPage).toContain("as the agent <strong>claude-code</strong>, for Ada Ortiz");
+      expect(consentPage).toContain("Claude Code is built in to Sanoma");
+      expect(consentPage).toContain("has not turned it off");
+      const claims = JSON.parse(Buffer.from(issued.access_token.split(".")[1]!, "base64url").toString());
+      expect(claims).toMatchObject({ aud: `${app.url}/mcp`, azp: CLAUDE_CODE, sanoma_agent: "claude-code" });
+      const bearer = bearerOf(issued.access_token);
+      const started = await mcp(
+        "tools/call",
+        { name: "start_run", arguments: { workflow: "say-hello", input: { to: "Bo" } } },
+        bearer,
+      );
+      expect(started.body.result.isError, JSON.stringify(started.body)).toBeFalsy();
+      const { runId } = started.body.result.structuredContent as { runId: string };
+      // The run and its ledger say the built-in agent and the person it acts for.
+      const builtIn = { id: "claude-code", groups: ["agents"], onBehalfOf: "ada" };
+      expect((await testApp.client.run(runId))?.startedBy).toEqual(builtIn);
+      expect(await testApp.client.result(runId)).toBe("Hello, Bo");
+      const ledger = await testApp.client.ledger(runId);
+      expect(ledger.length).toBeGreaterThan(0);
+      expect(ledger.map((r) => r.actor)).toEqual(ledger.map(() => builtIn));
+      built = await renewed(issued);
+    });
+  });
+
+  it("refuses the built-in client once the company turns it off: at authorize, the token endpoint and /mcp, saying it is off", async () => {
+    const issued = built!;
+    await withPeople(TURNED_OFF, async () => {
+      fetched.length = 0;
+      const { authorized } = await signIn();
+      expect(authorized.status).toBe(403);
+      expect(authorized.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+      const page = await authorized.text();
+      expect(page).toContain("Claude Code is turned off here");
+      expect(page).toContain(CLAUDE_CODE);
+      // Turned off on purpose: nothing says to declare it.
+      expect(page).not.toMatch(/declare/i);
+      expect(fetched).toEqual([]);
+      const refreshed = await refresh(issued);
+      expect(refreshed.status).toBe(400);
+      expect(await refreshed.json()).toMatchObject({ error: "invalid_client" });
+      const refused = await mcp("tools/list", {}, bearerOf(issued.access_token));
+      expect(refused.status).toBe(403);
+      expect(refused.body).toMatchObject({
+        code: "not_admitted",
+        error: expect.stringContaining("This company turned off Claude Code, Sanoma's built-in agent claude-code"),
+      });
+      expect(refused.body.error).not.toContain("declare one");
+      // The other built-in, Claude's apps' client, is still accepted: authorize goes on to the sign-in.
+      const other = await signIn(CLAUDE);
+      expect(other.authorized.status).toBe(302);
+      expect(new URL(other.authorized.headers.get("location")!, app.url).pathname).toBe("/auth/login");
+    });
+    // On again, with nothing else asked: the same tokens are the built-in agent's again.
+    await withPeople(NO_AGENT, async () => {
+      expect((await mcp("tools/list", {}, bearerOf(issued.access_token))).status).toBe(200);
+      built = await renewed(issued);
+    });
+  });
+
+  it("acts as the company's own agent, not the built-in, once the company declares the client", async () => {
+    const issued = built!;
+    // Declared under another id: the token was consented for the built-in agent, so the client signs in again.
+    const ours = `${NO_AGENT}export const ours = sanoma.agent({ id: "our-claude", client: "${CLAUDE_CODE}" });\n`;
+    await withPeople(ours, async () => {
+      const refused = await mcp("tools/list", {}, bearerOf(issued.access_token));
+      expect(refused.status).toBe(401);
+      expect(refused.headers.get("www-authenticate")).toMatch(/^Bearer error="invalid_token"/);
+      const refreshed = await refresh(issued);
+      expect(refreshed.status).toBe(400);
+      expect(await refreshed.json()).toMatchObject({ error: "invalid_grant" });
+    });
+    // Declared under the built-in's own id: the company's agent as declared, here in a group of the company's.
+    const same = `${PEOPLE}export const tools = sanoma.group({ name: "tools", members: [claudeCode] });\n`;
+    await withPeople(same, async () => {
+      const started = await mcp(
+        "tools/call",
+        { name: "start_run", arguments: { workflow: "say-hello", input: { to: "Cy" } } },
+        bearerOf(issued.access_token),
+      );
+      expect(started.body.result.isError, JSON.stringify(started.body)).toBeFalsy();
+      const { runId } = started.body.result.structuredContent as { runId: string };
+      expect((await testApp.client.run(runId))?.startedBy).toEqual({
+        id: "claude-code",
+        groups: ["agents", "tools"],
+        onBehalfOf: "ada",
+      });
+    });
+  });
+
+  it("still refuses a client that is neither declared nor built in, with no agent declared at all", async () => {
+    await withPeople(NO_AGENT, async () => {
+      fetched.length = 0;
+      const { authorized } = await signIn(UNDECLARED);
+      expect(authorized.status).toBe(403);
+      const page = await authorized.text();
+      expect(page).toContain("resources/people.ts");
+      expect(page).toContain(UNDECLARED);
+      expect(fetched).toEqual([]);
+    });
   });
 
   it("answers a well-known path it does not serve 404, signed in or not: never the sign-in page", async () => {

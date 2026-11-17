@@ -7,7 +7,8 @@ import { escapeHtml, smallPage, wantsJson } from "./page.ts";
 // Admission is declaration: whoever a login says is asking is let in only as a person the data
 // files declare (`sanoma.person`), matched by what the login vouches for, and acts as declared
 // (`admit`). An agent never signs in: an OAuth client a person signed in (`LoginIdentity.client`,
-// the staff login's bearer at `/mcp`) acts as the declared agent that stands for it, for that
+// the staff login's bearer at `/mcp`) acts as the agent that stands for it (the one the files
+// declare for it, else a built-in client's built-in agent while the company accepts it), for that
 // person (`clientActing`), checked against the files on every request. One wrapper for every
 // login, so no provider can forget it.
 
