@@ -33,7 +33,8 @@
     "packages/desktop/*.mts",
     "connectors/*/src",
     "connectors/*/test",
-    "scripts/*.ts"
+    "scripts/*.ts",
+    "apps/*/scripts"
   ],
   // The app's routes and components (JSX, DOM), and the test that draws them in a DOM, are checked
   // by packages/sanoma/app/tsconfig.json (`typecheck:ui`). Its Node entry, src/index.ts, is still

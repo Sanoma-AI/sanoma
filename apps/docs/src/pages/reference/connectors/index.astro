@@ -1,0 +1,40 @@
+---
+// Every connector in the repository, with a link to its page of operations.
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import type { ConnectorReference } from "../../../../scripts/reference.ts";
+import reference from "../../../data/reference.json";
+
+const connectors = reference as ConnectorReference[];
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Connectors",
+    description: "The vendors Sanoma's connectors reach, and the operations each one offers a workflow.",
+  }}
+>
+  <p>
+    A connector is an npm package that gives workflows a vendor's operations. Each page here lists a connector's
+    operations with what a call sends and what it answers, read from the connector's own code.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Connector</th><th>Package</th><th>Operations</th></tr>
+    </thead>
+    <tbody>
+      {
+        connectors.map((connector) => (
+          <tr>
+            <td>
+              <a href={`/reference/connectors/${connector.slug}/`}>{connector.title}</a>
+            </td>
+            <td>
+              <code>{connector.package}</code>
+            </td>
+            <td>{connector.operations.length}</td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+</StarlightPage>

@@ -1,0 +1,102 @@
+---
+// One connector's operations, by resource: each one's id, effect and description, and its input
+// and output as lists of fields. Drawn from src/data/reference.json (scripts/reference.ts).
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import type { ConnectorReference } from "../../../../scripts/reference.ts";
+import Schema from "../../../components/Schema.astro";
+import reference from "../../../data/reference.json";
+import { descriptionHtml, type JsonSchema, typeOf } from "../../../lib/schema.ts";
+
+export function getStaticPaths() {
+  return (reference as ConnectorReference[]).map((connector) => ({
+    params: { connector: connector.slug },
+    props: { connector },
+  }));
+}
+
+interface Props {
+  connector: ConnectorReference;
+}
+
+const { connector } = Astro.props;
+const resources = [...new Set(connector.operations.map((operation) => operation.resource))];
+const of = (resource: string) => connector.operations.filter((operation) => operation.resource === resource);
+/** A heading's id: an operation's own id, which is letters, digits, dots, dashes and underscores. */
+const anchor = (id: string) => id.replaceAll(".", "-");
+const hasFields = (schema: JsonSchema) => Object.keys(schema.properties ?? {}).length > 0;
+
+const headings = resources.flatMap((resource) => [
+  { depth: 2, slug: anchor(`${connector.vendor}.${resource}`), text: resource },
+  ...of(resource).map((operation) => ({ depth: 3, slug: anchor(operation.id), text: operation.name })),
+]);
+---
+
+<StarlightPage
+  frontmatter={{
+    title: connector.title,
+    description: connector.description ?? `The operations of ${connector.package}.`,
+  }}
+  headings={headings}
+>
+  {connector.description && <p>{connector.description}.</p>}
+  <p>
+    Package <code>{connector.package}</code>, version {connector.version}. Its README, with how to install and
+    connect it, is{" "}
+    <a href={`https://github.com/Sanoma-AI/sanoma/tree/main/connectors/${connector.slug}#readme`}>on GitHub</a>.
+  </p>
+  {
+    connector.resources.length > 0 && (
+      <p>
+        Resource types, which a data file under <code>resources/</code> declares:{" "}
+        {connector.resources.map((type, i) => (
+          <>
+            {i > 0 && ", "}
+            <code>{type}</code>
+          </>
+        ))}
+        .
+      </p>
+    )
+  }
+  {
+    connector.operations.length === 0 && (
+      <p>This connector has no operations for a workflow to call: it gives the chat a model or a coding agent.</p>
+    )
+  }
+  {
+    resources.map((resource) => (
+      <>
+        <h2 id={anchor(`${connector.vendor}.${resource}`)}>{resource}</h2>
+        {of(resource).map((operation) => (
+          <>
+            <h3 id={anchor(operation.id)}>{operation.name}</h3>
+            <p class="operation-meta not-content">
+              <code class="operation-id">{operation.id}</code>
+              <span class="effect" data-effect={operation.effect}>
+                {operation.effect}
+              </span>
+              {operation.idempotent && <span class="effect">safe to retry</span>}
+            </p>
+            {operation.description && <p set:html={descriptionHtml(operation.description)} />}
+            <h4>Input</h4>
+            {hasFields(operation.input) ? (
+              <Schema schema={operation.input} />
+            ) : (
+              <p>
+                <code>{typeOf(operation.input, operation.input)}</code>, with no fields.
+              </p>
+            )}
+            <h4>Output</h4>
+            {hasFields(operation.output) ? (
+              <Schema schema={operation.output} />
+            ) : (
+              <p>
+                <code>{typeOf(operation.output, operation.output)}</code>
+              </p>
+            )}
+          </>
+        ))}
+      </>
+    ))
+  }
+</StarlightPage>

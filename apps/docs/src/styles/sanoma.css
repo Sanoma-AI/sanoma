@@ -1,0 +1,142 @@
+/*
+ * Sanoma's look on Starlight: the website's colours (pine on paper) and type (Fraunces over IBM
+ * Plex), mapped onto Starlight's own variables, so no component is replaced.
+ */
+@import "@fontsource-variable/fraunces";
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+:root {
+  --sl-font: "IBM Plex Sans Variable", system-ui, sans-serif;
+  --sl-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --sanoma-font-display: "Fraunces Variable", Georgia, serif;
+}
+
+/* Dark, Starlight's default. */
+:root {
+  --sl-color-accent-low: #1c322d;
+  --sl-color-accent: #4fb39b;
+  --sl-color-accent-high: #c5e6dc;
+  --sl-color-white: #f4f6f3;
+  --sl-color-gray-1: #e7eae6;
+  --sl-color-gray-2: #c3c9c6;
+  --sl-color-gray-3: #9aa3a8;
+  --sl-color-gray-4: #5b646b;
+  --sl-color-gray-5: #2d353a;
+  --sl-color-gray-6: #1b2125;
+  --sl-color-black: #151a1d;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #e3f0ec;
+  --sl-color-accent: #1f6f5f;
+  --sl-color-accent-high: #144a40;
+  --sl-color-white: #1c2126;
+  --sl-color-gray-1: #262c31;
+  --sl-color-gray-2: #3d454b;
+  --sl-color-gray-3: #5b646b;
+  --sl-color-gray-4: #848d92;
+  --sl-color-gray-5: #c5cbc8;
+  --sl-color-gray-6: #e9ece9;
+  --sl-color-gray-7: #f5f6f4;
+  --sl-color-black: #ffffff;
+  /* Paper under the page, white on the bars beside it. */
+  --sl-color-bg: #f5f6f4;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #ffffff;
+}
+
+h1,
+h2,
+h3,
+h4,
+.site-title {
+  font-family: var(--sanoma-font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* The connector reference (src/components/Schema.astro, src/pages/reference/connectors). */
+.operation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: var(--sl-text-sm);
+}
+
+.operation-id {
+  font-family: var(--sl-font-mono);
+}
+
+.effect {
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 999px;
+  color: var(--sl-color-gray-2);
+  font-size: var(--sl-text-xs);
+}
+
+.effect[data-effect="read"] {
+  border-color: var(--sl-color-accent);
+  color: var(--sl-color-accent-high);
+}
+
+.schema {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--sl-color-gray-5);
+}
+
+.schema > li {
+  margin: 0;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--sl-color-gray-5);
+}
+
+.schema .schema {
+  margin-top: 0.5rem;
+  margin-inline-start: 1rem;
+}
+
+.schema-name {
+  font-family: var(--sl-font-mono);
+  font-weight: 600;
+  color: var(--sl-color-white);
+}
+
+.schema-type {
+  margin-inline-start: 0.5rem;
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-3);
+}
+
+.schema-required {
+  margin-inline-start: 0.5rem;
+  font-size: var(--sl-text-xs);
+  color: var(--sl-color-accent-high);
+}
+
+.schema-description,
+.schema-facts {
+  margin: 0.25rem 0 0;
+  font-size: var(--sl-text-sm);
+}
+
+.schema-facts {
+  color: var(--sl-color-gray-3);
+}
+
+.schema details {
+  margin-top: 0.4rem;
+}
+
+.schema summary {
+  cursor: pointer;
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-2);
+}
