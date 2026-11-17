@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prepareBetterAuthStaff } from "../src/instance.ts";
 import { declaredMetadataFetch } from "../src/oauth.ts";
 import { betterAuthStaffLogin } from "../src/staff.ts";
+import { tampered } from "../../workflows/test/tampered.ts";
 import {
   authorizePath as authorizeFor,
   CLAUDE_CODE,
@@ -69,6 +70,8 @@ const agents = new Map([
   [WEB, "web-bot"],
   ["https://claude.ai/oauth/moved", "moved"],
 ]);
+/** Why the app says a client no agent stands for is refused (`refusalOf`): none, unless a test gives one. */
+const appRefusals = new Map<string, { title: string; detail: string }>();
 /** Runs `run` while `agent` stands for `client` (no agent, undefined), then puts the declaration back as it was. */
 async function withAgent<T>(client: string, agent: string | undefined, run: () => Promise<T>): Promise<T> {
   const before = agents.get(client);
@@ -93,7 +96,11 @@ const context: LoginContext = {
     admits: ({ email }) => email?.toLowerCase() === DECLARED,
     social: {},
     record: async () => undefined,
-    oauth: { address: { issuer: ISSUER, resource: MCP }, agentOf: (client) => agents.get(client) },
+    oauth: {
+      address: { issuer: ISSUER, resource: MCP },
+      agentOf: (client) => agents.get(client),
+      refusalOf: (client) => appRefusals.get(client),
+    },
   },
 };
 let half: LoginHalf;
@@ -767,6 +774,36 @@ describe("an undeclared client", () => {
     expect(fetched).toEqual([]);
   });
 
+  it("is refused at authorize on the app's own words when it gives some, as text, and never told to declare it", async () => {
+    fetched.length = 0;
+    const { challenge } = pkce();
+    appRefusals.set(CLAUDE_CODE, {
+      title: "Claude Code is turned off here.",
+      detail: "Acme turned off <b>Claude Code</b>, Sanoma's built-in agent claude-code.",
+    });
+    try {
+      await withAgent(CLAUDE_CODE, undefined, async () => {
+        const asked = (await half.handle(request(authorizePath(CLAUDE_CODE, challenge))))!;
+        expect(asked.status).toBe(403);
+        expect(asked.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+        expect(asked.headers.get("x-frame-options")).toBe("DENY");
+        expect(asked.headers.get("cache-control")).toBe("no-store");
+        const page = await asked.text();
+        expect(page).toContain("<h1>Claude Code is turned off here.</h1>");
+        expect(page).toContain(`The client is <code>${CLAUDE_CODE}</code>.`);
+        // The app's words are text: nothing of theirs is markup on the page.
+        expect(page).toContain("Acme turned off &lt;b&gt;Claude Code&lt;/b&gt;");
+        expect(page).not.toMatch(/declare/i);
+        expect(fetched).toEqual([]);
+      });
+      // Only for a client no agent stands for: one an agent does goes on, whatever the app would say.
+      const on = (await half.handle(request(authorizePath(CLAUDE_CODE, challenge))))!;
+      expect(on.status).not.toBe(403);
+    } finally {
+      appRefusals.delete(CLAUDE_CODE);
+    }
+  });
+
   it("whose declared document redirects is refused, the redirect not followed", async () => {
     fetched.length = 0;
     const { challenge } = pkce();
@@ -862,9 +899,8 @@ describe("a bearer", () => {
       }
     }
     // One character of the signature changed.
-    const [head, payload, signature] = access.split(".");
-    const flipped = `${head}.${payload}.${signature!.slice(0, -2)}${signature!.endsWith("AA") ? "BB" : "AA"}`;
-    expect(await bearerOf(flipped)).toBeNull();
+    const [, payload] = access.split(".");
+    expect(await bearerOf(tampered(access))).toBeNull();
     // Forged: no signature (`alg: none`), and HS256 keyed with the public key (the confusion of
     // an asymmetric key for a shared secret): only the login's own algorithm and keys are taken.
     const { header: realHeader } = decode(access);

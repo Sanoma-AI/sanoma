@@ -13,7 +13,7 @@ import { userInfo } from "node:os";
 import { basename, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { AGENTS, RESERVED_AGENTS, VISITORS } from "sanoma/workflows";
+import { AGENTS, BUILT_IN_CLIENTS, RESERVED_AGENTS, VISITORS } from "sanoma/workflows";
 import { isVisitor, slugged } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { stage } from "./events.ts";
@@ -186,10 +186,11 @@ export function templatePeopleIds(): string[] {
 
 /**
  * `id`, unless it is empty or taken, by a person, agent or group the template declares, by one
- * of the runtime's own agents or by the visitors (`isVisitor`): then "founder".
+ * of the runtime's own agents, by a built-in client's agent or by the visitors (`isVisitor`): then "founder".
  */
 function free(id: string): string {
-  const taken = [...templatePeopleIds(), AGENTS, VISITORS, ...RESERVED_AGENTS];
+  // A built-in client's agent's id is not reserved, but a person who took it would keep that client out (`clientAgentOf`).
+  const taken = [...templatePeopleIds(), AGENTS, VISITORS, ...RESERVED_AGENTS, ...BUILT_IN_CLIENTS.map((b) => b.id)];
   return id && !taken.includes(id) && !isVisitor({ id }) ? id : "founder";
 }
 
