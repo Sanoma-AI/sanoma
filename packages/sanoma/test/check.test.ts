@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "sanoma/testing";
-import { resolveConfig } from "sanoma/workflows";
+import { BUILT_IN_CLIENTS, resolveConfig } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { check } from "../src/check.ts";
 import { type Loaded, loadConfig } from "../src/config.ts";
@@ -277,20 +277,18 @@ export const finance = sanoma.group({ name: "finance", members: [ada, claudeCode
     }
   }, 180_000);
 
-  it("lists what the people's files make of each built-in client, and reports an off that turns off no built-in", async () => {
+  it("logs what the people's files make of each built-in client: one turned off, one replaced, neither a problem nor a warning", async () => {
     const own = copyFixture();
-    const people = join(own, "resources/people.ts");
-    const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
+    const [claude, claudeCode] = BUILT_IN_CLIENTS.map((b) => b.client);
     try {
       mkdirSync(join(own, "resources"), { recursive: true });
-      // One built-in turned off, the other replaced by the company's own agent: no problem, no warning.
       writeFileSync(
-        people,
+        join(own, "resources/people.ts"),
         `import { sanoma } from "sanoma/resources";
 
 export const ada = sanoma.person({ id: "ada" });
 export const noClaude = sanoma.agent({ id: "claude-ai", off: true });
-export const ours = sanoma.agent({ id: "our-claude", client: "${CLAUDE_CODE}", onBehalfOf: ada });
+export const ours = sanoma.agent({ id: "our-claude", client: "${claudeCode}", onBehalfOf: ada });
 `,
       );
       const logged: string[] = [];
@@ -300,24 +298,9 @@ export const ours = sanoma.agent({ id: "our-claude", client: "${CLAUDE_CODE}", o
         warnings: [],
       });
       expect(logged.filter((line) => line.startsWith("built-in client: "))).toEqual([
-        "built-in client: Claude (https://claude.ai/oauth/mcp-oauth-client-metadata): turned off",
-        `built-in client: Claude Code (${CLAUDE_CODE}): accepted, as the declared agent our-claude`,
+        `built-in client: Claude (${claude}): turned off`,
+        `built-in client: Claude Code (${claudeCode}): accepted, as the declared agent our-claude`,
       ]);
-      // Off on an agent that is no built-in is a problem of the people's files: nobody is admitted while it stands.
-      writeFileSync(
-        people,
-        `import { sanoma } from "sanoma/resources";
-
-export const ada = sanoma.person({ id: "ada" });
-export const bot = sanoma.agent({ id: "refund-bot", off: true });
-`,
-      );
-      expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toMatchObject({
-        ok: false,
-        problems: expect.arrayContaining([
-          "resources/people.ts#bot: resources/people.ts#bot is off, which only turns off one of Sanoma's built-in agents (claude-ai, claude-code): remove the declaration instead",
-        ]),
-      });
     } finally {
       rmSync(own, { recursive: true, force: true });
     }

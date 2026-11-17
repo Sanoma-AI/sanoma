@@ -82,7 +82,7 @@ function directory(config: ConfigDescription) {
       (p) => (p.file !== undefined && files.has(p.file)) || PEOPLE_PROBLEM.test(p.message),
     ),
     types: config.resourceTypes.filter((t) => t.vendor === "sanoma"),
-    builtIn: config.builtInClients ?? [],
+    builtIn: config.builtInClients,
   };
 }
 type Directory = ReturnType<typeof directory>;

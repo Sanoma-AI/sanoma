@@ -572,17 +572,15 @@ export const ConfigDescriptionSchema = z.strictObject({
    * make of it (`builtInClientsOf`): accepted as its built-in agent, replaced by a declared agent,
    * turned off, or refused.
    */
-  builtInClients: z
-    .array(
-      z.strictObject({
-        id: z.string(),
-        name: z.string(),
-        client: z.string(),
-        state: z.enum(BUILT_IN_CLIENT_STATES),
-        by: z.strictObject({ kind: z.enum(["person", "agent"]), id: z.string() }).optional(),
-      }),
-    )
-    .optional(),
+  builtInClients: z.array(
+    z.strictObject({
+      id: z.string(),
+      name: z.string(),
+      client: z.string(),
+      state: z.enum(BUILT_IN_CLIENT_STATES),
+      by: z.strictObject({ kind: z.enum(["person", "agent"]), id: z.string() }).optional(),
+    }),
+  ),
   /** The resource types the connectors declare, by `id`. */
   resourceTypes: z.array(ResourceTypeEntrySchema),
   /** The config's collections, by name. */

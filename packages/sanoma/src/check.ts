@@ -15,7 +15,7 @@ import {
   schemaOf,
   writeGenerated,
 } from "sanoma/workflows/describe";
-import { builtInClientLine, builtInClientsOf, problemLine, warningLine } from "sanoma/workflows/shared";
+import { builtInClientLine, problemLine, warningLine } from "sanoma/workflows/shared";
 import { runScenarios } from "sanoma/workflows/scenarios";
 import type { Loaded } from "./config.ts";
 import { siteBuild } from "./sites.ts";
@@ -49,7 +49,7 @@ const LINTED = ["workflows", "resources", "sites", "apps"];
  * With them, the repo's Permissions grid (`permissionsGrid`, as the app's Permissions page has
  * it), from the same config and description, which a change is reviewed by: none when the
  * policies do not hold, since every cell would be the refusing policy's deny. What the people's
- * files make of each built-in client (`builtInClientsOf`: accepted, replaced by a declared agent,
+ * files make of each built-in client (the description's `builtInClients`: accepted, replaced by a declared agent,
  * turned off, or refused, which a warning says why) is logged, one `built-in client: …` line each.
  */
 export async function check(
@@ -109,7 +109,7 @@ export async function check(
     ...peopleWarnings(readPeople(root).people),
   ].map(warningLine);
   const grid = policies.length ? undefined : permissionsGrid(resolved, description);
-  for (const client of builtInClientsOf(readPeople(root).people)) log(`built-in client: ${builtInClientLine(client)}`);
+  for (const client of description.builtInClients) log(`built-in client: ${builtInClientLine(client)}`);
   return { ok: problems.length === 0, problems, warnings, ...(grid && { grid }) };
 }
 
