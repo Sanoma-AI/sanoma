@@ -4,7 +4,7 @@ The site at [docs.sanoma.work](https://docs.sanoma.work), on [Astro Starlight](h
 
 ## Where the pages are
 
-- **The guides** are [`packages/sanoma/docs`](../packages/sanoma/docs), which the `sanoma` package ships: `src/content/docs` is a link to that folder, so there is one copy. A page is Markdown with a `title`, a `description` and its `sidebar.order` in its folder; a page that uses a component (`Tabs`, `Steps`, `LinkCard`) is `.mdx`. A link to another page is its address on the site (`/sites/content/#slugs`), and a link to a file of the repository is its GitHub URL.
+- **The guides** are [`src/content/docs`](src/content/docs), where Starlight looks for them. A page is Markdown with a `title`, a `description` and its `sidebar.order` in its folder; a page that uses a component (`Tabs`, `Steps`, `LinkCard`) is `.mdx`. A link to another page is its address on the site (`/sites/content/#slugs`), and a link to a file of the repository is its GitHub URL.
 - **The connector reference** (`/reference/connectors/`) is drawn from the connectors' own source: [`scripts/reference.ts`](scripts/reference.ts) imports every connector under `connectors/` and writes each operation's effect, description and its input and output as JSON Schema to `src/data/reference.json` (ignored by git), which `src/pages/reference/connectors` and [`src/components/Schema.astro`](src/components/Schema.astro) draw. Nothing there is written by hand.
 - **The look** is [`src/styles/sanoma.css`](src/styles/sanoma.css): the website's colours and type on Starlight's variables.
 

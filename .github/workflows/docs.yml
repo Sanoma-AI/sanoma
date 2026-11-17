@@ -6,7 +6,7 @@ on:
     paths:
       - "**/README.md"
       - "**/AGENTS.md"
-      - "packages/sanoma/docs/**"
+      - "docs-site/src/content/docs/**"
 
 jobs:
   format:

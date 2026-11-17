@@ -28,7 +28,6 @@
     "tsconfig.base.json",
     "oxlint.json",
     "README.md",
-    "docs",
     "LICENSE",
     "workflows/dist",
     "workflows/src",

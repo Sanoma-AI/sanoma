@@ -32,7 +32,7 @@ Source and test directory maps live below each package. Open them when navigatin
 ## Documentation boundaries
 
 - For README prose and other product copy, use [copywriting](.agents/skills/copywriting/SKILL.md).
-- The guides for people who write a company repo are the pages of [`packages/sanoma/docs`](packages/sanoma/docs), which the `sanoma` package ships and [the docs site](docs-site/README.md) serves: how to use a thing goes there, as Markdown (`.mdx` only for a page that uses a component), each page with its `title`, `description` and `sidebar.order`. A README heading that says "Moved to the docs" stays, so links to it land; write the prose on the page it names.
+- The guides for people who write a company repo are the pages of [`docs-site/src/content/docs`](docs-site/src/content/docs), which [the docs site](docs-site/README.md) serves: how to use a thing goes there, as Markdown (`.mdx` only for a page that uses a component), each page with its `title`, `description` and `sidebar.order`. A README heading that says "Moved to the docs" stays, so links to it land; write the prose on the page it names.
 - `README.md` explains purpose, installation, usage, and public behavior. `AGENTS.md` contains a short map, maintenance constraints, and relevant checks. Link to details rather than repeat them.
 - Put shared rules at the nearest common ancestor and package-specific rules in that package. Add deeper guidance only for a distinct boundary or a useful local map.
 - Keep separate files at the root and package level. For a small directory index where the audiences need exactly the same content, use `AGENTS.md` as the source and a relative `README.md -> AGENTS.md` symlink. Do not symlink a long user manual into automatically loaded guidance.

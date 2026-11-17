@@ -2,7 +2,7 @@
   "name": "@sanoma-ai/docs",
   "version": "0.0.0",
   "private": true,
-  "description": "Sanoma's documentation site (docs.sanoma.work): packages/sanoma/docs and the connectors' operations, on Astro Starlight",
+  "description": "Sanoma's documentation site (docs.sanoma.work): the guides and the connectors' operations, on Astro Starlight",
   "license": "FSL-1.1-ALv2",
   "type": "module",
   "scripts": {

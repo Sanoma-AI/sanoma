@@ -4,96 +4,96 @@ One command over a company repo: `sanoma` runs its workflows and the app, `sanom
 
 ## Start a company
 
-Moved to the docs: [Start a company](docs/start/start-a-company.md).
+Moved to the docs: [Start a company](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/start/start-a-company.md).
 
 ## Install
 
-Moved to the docs: [Install in a repository](docs/start/install.md).
+Moved to the docs: [Install in a repository](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/start/install.md).
 
 ## Apps
 
-Moved to the docs: [Apps](docs/start/apps.md).
+Moved to the docs: [Apps](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/start/apps.md).
 
 ## People and policies
 
-Moved to the docs: [People and policies](docs/policies/people-and-policies.md).
+Moved to the docs: [People and policies](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/policies/people-and-policies.md).
 
 ## Commands
 
-Moved to the docs: [Commands](docs/reference/commands.md).
+Moved to the docs: [Commands](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/reference/commands.md).
 
 ### From a terminal or an agent
 
-Moved to the docs: [Commands](docs/reference/commands.md#from-a-terminal-or-an-agent).
+Moved to the docs: [Commands](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/reference/commands.md#from-a-terminal-or-an-agent).
 
 ### For a parent process
 
-Moved to the docs: [Commands](docs/reference/commands.md#for-a-parent-process).
+Moved to the docs: [Commands](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/reference/commands.md#for-a-parent-process).
 
 ## Postgres
 
-Moved to the docs: [Postgres](docs/hosting/postgres.md).
+Moved to the docs: [Postgres](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/hosting/postgres.md).
 
 ## `.env.example`
 
-Moved to the docs: [Files sanoma writes](docs/reference/files.md).
+Moved to the docs: [Files sanoma writes](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/reference/files.md).
 
 ## Secret storage and bootstrap
 
-Moved to the docs: [Secrets](docs/hosting/secrets.md).
+Moved to the docs: [Secrets](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/hosting/secrets.md).
 
 ## The lint
 
-Moved to the docs: [Files sanoma writes](docs/reference/files.md#the-lint).
+Moved to the docs: [Files sanoma writes](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/reference/files.md#the-lint).
 
 ## Sites
 
-Moved to the docs: [Sites](docs/sites/overview.md).
+Moved to the docs: [Sites](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/overview.md).
 
 ### Demos
 
-Moved to the docs: [Demos](docs/sites/demos.md).
+Moved to the docs: [Demos](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/demos.md).
 
 ### Developing a site
 
-Moved to the docs: [Developing a site](docs/sites/developing.md).
+Moved to the docs: [Developing a site](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/developing.md).
 
 ## Template files
 
-Moved to the docs: [Files sanoma writes](docs/reference/files.md#template-files).
+Moved to the docs: [Files sanoma writes](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/reference/files.md#template-files).
 
 ## Invoices
 
-Moved to the docs: [Invoices](docs/reference/invoices.md).
+Moved to the docs: [Invoices](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/reference/invoices.md).
 
 ## Generated files
 
-Moved to the docs: [Files sanoma writes](docs/reference/files.md#generated-files).
+Moved to the docs: [Files sanoma writes](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/reference/files.md#generated-files).
 
 ## Dev mode
 
-Moved to the docs: [Dev mode](docs/reference/dev-mode.md).
+Moved to the docs: [Dev mode](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/reference/dev-mode.md).
 
 ## The wakeup service
 
-Moved to the docs: [The wakeup service](docs/hosting/wakeup.md).
+Moved to the docs: [The wakeup service](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/hosting/wakeup.md).
 
 ## Hosting it yourself
 
-Moved to the docs: [Hosting it yourself](docs/hosting/self-hosting.md).
+Moved to the docs: [Hosting it yourself](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/hosting/self-hosting.md).
 
 ### The worker's port
 
-Moved to the docs: [Hosting it yourself](docs/hosting/self-hosting.md#the-workers-port).
+Moved to the docs: [Hosting it yourself](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/hosting/self-hosting.md#the-workers-port).
 
 ### Cloning a private repository
 
-Moved to the docs: [Hosting it yourself](docs/hosting/self-hosting.md#cloning-a-private-repository).
+Moved to the docs: [Hosting it yourself](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/hosting/self-hosting.md#cloning-a-private-repository).
 
 ### Standalone identity service
 
-Moved to the docs: [Hosting it yourself](docs/hosting/self-hosting.md#standalone-identity-service).
+Moved to the docs: [Hosting it yourself](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/hosting/self-hosting.md#standalone-identity-service).
 
 ### The box image
 
-Moved to the docs: [Hosting it yourself](docs/hosting/self-hosting.md#the-box-image).
+Moved to the docs: [Hosting it yourself](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/hosting/self-hosting.md#the-box-image).

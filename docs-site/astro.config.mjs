@@ -1,6 +1,5 @@
 // @ts-check
 import { existsSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
@@ -15,23 +14,10 @@ const referenceFile = fileURLToPath(new URL("./src/data/reference.json", import.
 const connectors = existsSync(referenceFile) ? JSON.parse(readFileSync(referenceFile, "utf8")) : [];
 
 // https://astro.build/config
-// The pages are packages/sanoma/docs (src/content.config.ts), which the `sanoma` package ships too;
-// the connector reference is drawn from the connectors' own source (scripts/reference.ts).
+// The guides are src/content/docs; the connector reference is drawn from the connectors' own
+// source (scripts/reference.ts).
 export default defineConfig({
   site: "https://docs.sanoma.work",
-  // A page is read at its real path, in packages/sanoma, where the site's packages are not installed:
-  // what an `.mdx` page imports is resolved from here.
-  vite: {
-    resolve: {
-      // The whole name alone: `@astrojs/starlight/components/<file>` is another entry.
-      alias: [
-        {
-          find: /^@astrojs\/starlight\/components$/,
-          replacement: createRequire(import.meta.url).resolve("@astrojs/starlight/components"),
-        },
-      ],
-    },
-  },
   integrations: [
     starlight({
       title: "Sanoma",

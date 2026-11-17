@@ -24,79 +24,79 @@ console.log(app.url); // http://127.0.0.1:3000
 
 ## Sites
 
-Moved to the docs: [Sites](../docs/sites/overview.md#sites).
+Moved to the docs: [Sites](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/overview.md#sites).
 
 ### A site's imports
 
-Moved to the docs: [A site's imports](../docs/sites/imports.md).
+Moved to the docs: [A site's imports](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/imports.md).
 
 ### The kit and RunForm
 
-Moved to the docs: [The kit and RunForm](../docs/sites/kit.md).
+Moved to the docs: [The kit and RunForm](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/kit.md).
 
 ### A site's own stylesheet
 
-Moved to the docs: [A site's own stylesheet](../docs/sites/stylesheet.md).
+Moved to the docs: [A site's own stylesheet](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/stylesheet.md).
 
 #### The kit on a site
 
-Moved to the docs: [A site's own stylesheet](../docs/sites/stylesheet.md#the-kit-on-a-site).
+Moved to the docs: [A site's own stylesheet](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/stylesheet.md#the-kit-on-a-site).
 
 ### Calling operations and workflows
 
-Moved to the docs: [Calling operations and workflows](../docs/sites/calling.md).
+Moved to the docs: [Calling operations and workflows](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/calling.md).
 
 ### Agents over MCP
 
-Moved to the docs: [Agents over MCP](../docs/start/agents-over-mcp.md).
+Moved to the docs: [Agents over MCP](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/start/agents-over-mcp.md).
 
 ### Content
 
-Moved to the docs: [Content](../docs/sites/content.md).
+Moved to the docs: [Content](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/content.md).
 
 ### Public sites
 
-Moved to the docs: [Public sites](../docs/sites/public-sites.md).
+Moved to the docs: [Public sites](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/public-sites.md).
 
 ### Languages
 
-Moved to the docs: [Languages](../docs/sites/languages.md).
+Moved to the docs: [Languages](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/languages.md).
 
 ## The app bundle
 
-Moved to the docs: [The app bundle](../docs/hosting/app-bundle.md).
+Moved to the docs: [The app bundle](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/hosting/app-bundle.md).
 
 ## Screens
 
-Moved to the docs: [The app's screens](../docs/start/the-app.md).
+Moved to the docs: [The app's screens](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/start/the-app.md).
 
 ### Connection management
 
-Moved to the docs: [The app's screens](../docs/start/the-app.md#connection-management).
+Moved to the docs: [The app's screens](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/start/the-app.md#connection-management).
 
 ### Run graph
 
-Moved to the docs: [The app's screens](../docs/start/the-app.md#run-graph).
+Moved to the docs: [The app's screens](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/start/the-app.md#run-graph).
 
 ### Outline
 
-Moved to the docs: [The app's screens](../docs/start/the-app.md#outline).
+Moved to the docs: [The app's screens](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/start/the-app.md#outline).
 
 ## Login
 
-Moved to the docs: [Login](../docs/sites/login.md).
+Moved to the docs: [Login](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/login.md).
 
 ### No login, on this machine
 
-Moved to the docs: [Login](../docs/sites/login.md#no-login-on-this-machine).
+Moved to the docs: [Login](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/login.md#no-login-on-this-machine).
 
 ### Staff sign-in on a host
 
-Moved to the docs: [Login](../docs/sites/login.md#staff-sign-in-on-a-host).
+Moved to the docs: [Login](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/login.md#staff-sign-in-on-a-host).
 
 ### Your own
 
-Moved to the docs: [Login](../docs/sites/login.md#your-own).
+Moved to the docs: [Login](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/sites/login.md#your-own).
 
 ## Developing
 

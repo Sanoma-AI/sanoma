@@ -8,7 +8,6 @@ on:
     paths:
       - docs-site/**
       - packages/sanoma/workflows/src/**
-      - packages/sanoma/docs/**
       - packages/sanoma/package.json
       - connectors/*/src/**
       - connectors/*/package.json
