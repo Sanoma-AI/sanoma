@@ -1,0 +1,17 @@
+---
+// Starlight's footer, then which version these pages describe: the `sanoma` package's, as it was
+// in the commit the site was built from.
+import Default from "@astrojs/starlight/components/Footer.astro";
+import manifest from "../../../packages/sanoma/package.json";
+---
+
+<Default><slot /></Default>
+<p class="sanoma-version">These pages describe sanoma {manifest.version}.</p>
+
+<style>
+  .sanoma-version {
+    margin-top: 1.5rem;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+  }
+</style>

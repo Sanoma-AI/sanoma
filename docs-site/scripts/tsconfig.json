@@ -1,0 +1,6 @@
+{
+  // The scripts run on Node with the repository's own packages, before the site's are installed
+  // (the root's tests run reference.test.ts): the repository's options, not Astro's.
+  "extends": "../../tsconfig.json",
+  "include": ["."]
+}

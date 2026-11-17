@@ -1,0 +1,87 @@
+---
+// One connector's operations, by resource: each one's id, effect and description, and its input
+// and output as lists of fields. Drawn from src/data/reference.json (scripts/reference.ts).
+import { Badge } from "@astrojs/starlight/components";
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import Schema from "../../../components/Schema.astro";
+import { type ConnectorReference, connectors } from "../../../lib/reference.ts";
+import { descriptionHtml } from "../../../lib/schema.ts";
+
+export function getStaticPaths() {
+  return connectors.map((connector) => ({ params: { connector: connector.slug }, props: { connector } }));
+}
+
+interface Props {
+  connector: ConnectorReference;
+}
+
+const { connector } = Astro.props;
+const resources = Object.entries(Object.groupBy(connector.operations, (operation) => operation.resource));
+
+const headings = resources.flatMap(([resource, operations = []]) => [
+  { depth: 2, slug: resource, text: resource },
+  ...operations.map((operation) => ({ depth: 3, slug: `${resource}-${operation.name}`, text: operation.name })),
+]);
+---
+
+<StarlightPage
+  frontmatter={{
+    title: connector.title,
+    description: connector.description ?? `The operations of ${connector.package}.`,
+  }}
+  headings={headings}
+>
+  {connector.description && <p>{connector.description}.</p>}
+  <p>
+    Package <code>{connector.package}</code>, version {connector.version}.
+    {
+      connector.homepage && (
+        <>
+          {" "}
+          Its README, with how to install and connect it, is <a href={connector.homepage}>on GitHub</a>.
+        </>
+      )
+    }
+  </p>
+  {
+    connector.resources.length > 0 && (
+      <p>
+        Resource types, which a data file under <code>resources/</code> declares:{" "}
+        {connector.resources.map((type, i) => (
+          <>
+            {i > 0 && ", "}
+            <code>{type}</code>
+          </>
+        ))}
+        .
+      </p>
+    )
+  }
+  {
+    connector.operations.length === 0 && (
+      <p>This connector has no operations for a workflow to call: it gives the chat a model or a coding agent.</p>
+    )
+  }
+  {
+    resources.map(([resource, operations = []]) => (
+      <>
+        <h2 id={resource}>{resource}</h2>
+        {operations.map((operation) => (
+          <>
+            <h3 id={`${resource}-${operation.name}`}>{operation.name}</h3>
+            <p class="operation-meta not-content">
+              <code>{operation.id}</code>
+              <Badge text={operation.effect} variant={operation.effect === "read" ? "note" : "caution"} size="small" />
+              {operation.idempotent && <Badge text="safe to retry" variant="default" size="small" />}
+            </p>
+            {operation.description && <p set:html={descriptionHtml(operation.description)} />}
+            <h4>Input</h4>
+            <Schema schema={operation.input} />
+            <h4>Output</h4>
+            <Schema schema={operation.output} />
+          </>
+        ))}
+      </>
+    ))
+  }
+</StarlightPage>

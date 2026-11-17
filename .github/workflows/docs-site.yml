@@ -1,0 +1,82 @@
+# The docs site (docs-site, docs.sanoma.work): built on pull requests that change it, so a broken
+# link or a connector the reference cannot read fails there, and deployed to Cloudflare Pages once a
+# release has published (the Release workflow, on its release/<version> branch), so the site
+# describes a release that is on npm. It can also be deployed by hand, from main or a release
+# branch. See docs-site/README.md.
+name: Docs site
+on:
+  pull_request:
+    paths:
+      - docs-site/**
+      - packages/sanoma/workflows/src/**
+      - packages/sanoma/package.json
+      - connectors/*/src/**
+      - connectors/*/package.json
+      - pnpm-lock.yaml
+      - .github/workflows/docs-site.yml
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, never cancelled half way; a pull request's newer push replaces its build.
+concurrency:
+  group: docs-site-${{ github.event.pull_request.number || 'deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  site:
+    # After a release, only one that succeeded.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    # Actions pinned to commits: a deploy holds the Cloudflare token.
+    steps:
+      # By hand, only what is released or about to be: main or a release branch.
+      - name: Ref is main or a release branch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/main | refs/heads/release/*) ;;
+            *) echo "::error::Deploy from main or release/<version>, not $GITHUB_REF"; exit 1 ;;
+          esac
+      # After a release, the commit it published, not main's head.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      # Node and pnpm from .mise.toml, the one pin; pnpm then switches to `packageManager`.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: ${{ github.event_name == 'pull_request' }}
+      # A pull request's packages from the cache, as ci.yml's; a deploy restores none.
+      - id: pnpm
+        if: github.event_name == 'pull_request'
+        run: echo "store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name == 'pull_request'
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-docs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'docs-site/pnpm-lock.yaml') }}
+      # The root's packages for the connectors the reference reads, then the site's own (its own lockfile).
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir docs-site install --frozen-lockfile
+      # Writes the connector reference, builds the pages and the search index, and fails on a link
+      # to a page or heading that is not there.
+      - run: pnpm --dir docs-site build
+      # Wrangler is the docs site's own, from its lockfile. Without the secrets (before the Pages
+      # project exists) nothing is deployed, and the run says so.
+      - name: Deploy to Cloudflare Pages
+        if: github.event_name != 'pull_request'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are not set: built, not deployed (docs-site/README.md)"
+            exit 0
+          fi
+          pnpm --dir docs-site exec wrangler pages deploy dist --project-name sanoma-docs --branch main --commit-dirty=true
+          echo "Deployed \`$(git rev-parse HEAD)\` to https://docs.sanoma.work." >> "$GITHUB_STEP_SUMMARY"

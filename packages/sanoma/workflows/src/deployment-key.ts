@@ -1,4 +1,4 @@
-import { hkdfSync } from "node:crypto";
+import { createHash, hkdfSync, timingSafeEqual } from "node:crypto";
 
 /** The deployment's own keys: bound only to the environment or bootstrap, never written by the runtime. */
 export const DEPLOYMENT_KEYS: readonly string[] = ["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY"];
@@ -55,3 +55,11 @@ export const deriveSigningKey = (signingKey: Buffer, purpose: string): Buffer =>
  */
 export const signingKeyFor = (purpose: string): Buffer =>
   deriveSigningKey(deploymentKey("SANOMA_SIGNING_KEY"), purpose);
+
+/**
+ * Whether two secrets are the same, in a time that tells neither where they differ nor how long
+ * either is: their SHA-256 digests compared (`timingSafeEqual`). The one compare for a secret a
+ * request brings against the one configured.
+ */
+export const sameSecret = (given: string, expected: string): boolean =>
+  timingSafeEqual(createHash("sha256").update(given).digest(), createHash("sha256").update(expected).digest());

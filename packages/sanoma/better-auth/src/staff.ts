@@ -1,6 +1,12 @@
 import {
   type AgentAddress,
+  agentResourceMetadata,
+  agentServerMetadata,
+  bearerJws,
   checkAgentAddress,
+  CLIENT_IP_HEADER,
+  COMPANY_CLAIM,
+  DISCOVERY_CACHE,
   errorMessage,
   INVITE_SECONDS,
   type LoginContext,
@@ -8,8 +14,12 @@ import {
   type LoginMethod,
   RESOURCE_METADATA,
   resourceMetadataOf,
+  ROUTER_CLIENT_IP_HEADER,
+  ROUTER_SECRET_HEADER,
   sameOrigin,
+  sameSecret,
   STAFF_AUTH_PATH,
+  STAFF_OAUTH_ROUTES,
   type SignInMethod,
 } from "sanoma/workflows";
 import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
@@ -31,7 +41,7 @@ import {
 } from "./instance.ts";
 import { databaseOn } from "sanoma/workflows/db";
 import { oauthResource } from "./db/staff.ts";
-import { AGENT_CLAIM, declaredMetadataFetch, GRANT_TYPES, oauthPlugins, SCOPES } from "./oauth.ts";
+import { AGENT_CLAIM, declaredMetadataFetch, oauthPlugins, withCodeTag, withoutCodeTag } from "./oauth.ts";
 
 /** Says nothing: a listener for a checked-out client's `error`, whose query fails on its own. */
 const quiet = () => undefined;
@@ -65,9 +75,7 @@ const ROUTES = new Set([
   "/get-session",
 ]);
 
-const AUTHORIZE = "/oauth2/authorize";
-const TOKEN = "/oauth2/token";
-const REVOKE = "/oauth2/revoke";
+const { authorize: AUTHORIZE, token: TOKEN, revoke: REVOKE } = STAFF_OAUTH_ROUTES;
 const CONSENT = "/oauth2/consent";
 /**
  * Where the provider sends a person whose authorize it cannot answer at the client's redirect
@@ -97,33 +105,41 @@ const OAUTH_ROUTES = new Map<string, string | undefined>([
  * revocation (RFC 7009 §2.1), its form a token to end; never a cookie. Every other change keeps
  * the same-origin rule.
  */
-const NO_ORIGIN = new Set([TOKEN, REVOKE]);
+const NO_ORIGIN = new Set<string>([TOKEN, REVOKE]);
 
 /**
- * RFC 8414's metadata for an agent address's issuer: a function of the address alone, made from
- * what is served (`OAUTH_ROUTES`, each endpoint on the issuer, whose path is where the routes
- * are) and supported here (`SCOPES`, `GRANT_TYPES`). Client ID Metadata Documents, public clients
- * alone (`none`, at the token endpoint and revocation), so no client secret or assertion; PKCE
- * `S256`; `iss` on every answer; no registration, introspection, DPoP or back-channel logout,
- * which nothing here serves. A route is added to `OAUTH_ROUTES` with its field, a method here.
+ * The routes a router forwards to this login, and so the only ones where the caller's address
+ * it names is believed (`withRoutedCaller`): the token endpoint and revocation. A browser comes
+ * to every other route itself, from its own address: a sign-in, an email code, the consent.
+ */
+const FORWARDED = NO_ORIGIN;
+
+/**
+ * The routes whose answer may send a client an authorization code, which behind a router gets
+ * the company's tag (`withCodeTag`): authorize, the consent, and each route that makes a session
+ * (`METHOD_OF`), after which the provider goes on with the authorize the sign-in came from. No
+ * other answer is read for one.
+ */
+const SENDS_CODE = new Set<string>([
+  AUTHORIZE,
+  CONSENT,
+  "/sign-in/email-otp",
+  "/callback/github",
+  "/magic-link/verify",
+]);
+
+/**
+ * RFC 8414's metadata for the issuer of an agent address of the app's own: a function of the
+ * address alone, made from what is served (`OAUTH_ROUTES`, each endpoint on the issuer, whose
+ * path is where the routes are) and supported here (`agentServerMetadata`, which a router's
+ * document shares). A route is added to `OAUTH_ROUTES` with its field, a method there. An
+ * address that is a router's has no document here: the router serves its issuer's.
  */
 export function serverMetadataOf({ issuer }: AgentAddress): Record<string, unknown> {
   const endpoints = [...OAUTH_ROUTES].flatMap(([route, field]) =>
     field === undefined ? [] : [[field, `${issuer}${route}`] as const],
   );
-  return {
-    issuer,
-    ...Object.fromEntries(endpoints),
-    scopes_supported: SCOPES,
-    response_types_supported: ["code"],
-    response_modes_supported: ["query"],
-    grant_types_supported: GRANT_TYPES,
-    token_endpoint_auth_methods_supported: ["none"],
-    revocation_endpoint_auth_methods_supported: ["none"],
-    code_challenge_methods_supported: ["S256"],
-    authorization_response_iss_parameter_supported: true,
-    client_id_metadata_document_supported: true,
-  };
+  return agentServerMetadata(issuer, Object.fromEntries(endpoints));
 }
 
 /** The routes of the email code, which answer only when the app can send one. */
@@ -131,14 +147,6 @@ const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
 
 /** Where RFC 8414's metadata for the issuer is: the well-known path with the issuer's own, `BASE_PATH`, appended. */
 const SERVER_METADATA = `/.well-known/oauth-authorization-server${BASE_PATH}`;
-
-/**
- * How the metadata documents may be kept: five minutes, by the browser or the client alone. Each
- * is the configured address's, the same whatever the request says, and changes only with the
- * instance's configuration, which a client should not go on reading from a cache between it and
- * the instance.
- */
-const DISCOVERY_CACHE = { "cache-control": "private, max-age=300" };
 
 /** The app's OAuth context (`LoginContext.staff.oauth`). */
 type OAuthContext = NonNullable<NonNullable<LoginContext["staff"]>["oauth"]>;
@@ -211,15 +219,13 @@ export function betterAuthStaffLogin(
       throw new Error(`better-auth: ${errorMessage(err)}`, { cause: err });
     }
     const { address } = oauth;
-    const resource = JSON.stringify({
-      resource: address.resource,
-      authorization_servers: [address.issuer],
-      bearer_methods_supported: ["header"],
-    });
+    const resource = JSON.stringify(agentResourceMetadata(address));
     // RFC 9728's at the resource's own path, and at the root for a client that looks there.
     documents.set(resourceMetadataOf(address).path, resource);
     documents.set(RESOURCE_METADATA, resource);
-    documents.set(SERVER_METADATA, JSON.stringify(serverMetadataOf(address)));
+    // RFC 8414's for the app's own issuer alone: a router serves its issuer's, with endpoints of
+    // its own, and this login none for it (a 404, as any other well-known path).
+    if (!address.router) documents.set(SERVER_METADATA, JSON.stringify(serverMetadataOf(address)));
   }
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
   const minted = new Map<string, string>();
@@ -297,6 +303,7 @@ export function betterAuthStaffLogin(
           agentOf: oauth?.agentOf ?? (() => undefined),
           fetchClientMetadata,
           issuer: oauth?.address.issuer,
+          company: oauth?.address.router?.company,
         }),
         magicLink({
           expiresIn: INVITE_SECONDS,
@@ -409,12 +416,23 @@ export function betterAuthStaffLogin(
       const refused = oauth && (await GUARDS.get(route)?.(request, oauth));
       if (refused) return refused;
       const asked = route === AUTHORIZE ? withConsentAsked(request) : request;
-      return (await authFor(request)).handler(withSignOutBody(withoutDpop(asked), SIGN_OUT));
+      if (!oauth) return (await authFor(request)).handler(withSignOutBody(withoutDpop(asked), SIGN_OUT));
+      // With an address that is a router's: at the routes a router forwards, the caller's address
+      // is the one the router names (with this company's secret alone); the code a client sends
+      // back loses its company's tag before the provider reads the form; and the answer of a
+      // route that can send a client a code gains it.
+      const { address } = oauth;
+      const sent = route === TOKEN ? await withoutCodeTag(asked, address) : asked;
+      if (sent instanceof Response) return sent;
+      const answered = await (
+        await authFor(request)
+      ).handler(withSignOutBody(withoutDpop(withRoutedCaller(sent, address, FORWARDED.has(route))), SIGN_OUT));
+      return SENDS_CODE.has(route) ? withCodeTag(answered, address) : answered;
     },
     ...(oauth && {
       async bearer(request: Request) {
         // The scheme in any case (RFC 9110 §11.1); the token a JWS in compact form.
-        const token = /^bearer ([\w-]+\.[\w-]+\.[\w-]+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
+        const token = bearerJws(request.headers.get("authorization"));
         if (!token) return null;
         const own = await authFor(request);
         const { issuer, resource } = oauth.address;
@@ -452,6 +470,11 @@ export function betterAuthStaffLogin(
         // It is the agent's its person consented to (`AGENT_CLAIM`), and no other's: once the
         // files move its client to another agent it is refused, as is one that names none. A
         // client no agent stands for any more is the app's admission to refuse, by its name.
+        // Behind a router it is this company's, by the tag the router sent it here by: another
+        // company's on the same router has the same issuer and audience, and other keys; one
+        // these keys signed for another company (a database moved, a tag changed) is refused too.
+        const company = oauth.address.router?.company;
+        if (company !== undefined && payload[COMPANY_CLAIM] !== company) return null;
         const consented = payload[AGENT_CLAIM];
         const agent = await oauth.agentOf(payload.azp);
         if (typeof consented !== "string" || (agent !== undefined && agent !== consented)) return null;
@@ -600,6 +623,35 @@ function withoutDpop(request: Request): Request {
 }
 
 /**
+ * The one rule for a caller's address a request names: the request with `CLIENT_IP_HEADER` (what
+ * the login's rate limit counts by, set by the app's host from the socket) replaced by what the
+ * router names (`ROUTER_CLIENT_IP_HEADER`), only at a route a router forwards (`forwarded`: the
+ * token endpoint, revocation), when the address is a router's and the request carries this
+ * company's secret there (`ROUTER_SECRET_HEADER`, compared in constant time): every request a
+ * router forwards comes from the router's own socket, so without this all its callers would
+ * share one count. At any other route (a sign-in, an email code, the consent, which a browser
+ * reaches itself), without the secret, with a wrong one, or for an address of the app's own,
+ * what the request names is not read. Neither header goes on to Better Auth.
+ */
+export function withRoutedCaller(request: Request, { router }: AgentAddress, forwarded: boolean): Request {
+  const secret = request.headers.get(ROUTER_SECRET_HEADER);
+  const caller = request.headers.get(ROUTER_CLIENT_IP_HEADER);
+  if (secret === null && caller === null) return request;
+  const headers = new Headers(request.headers);
+  headers.delete(ROUTER_SECRET_HEADER);
+  headers.delete(ROUTER_CLIENT_IP_HEADER);
+  if (forwarded && router && secret && caller && sameSecret(secret, router.secret))
+    headers.set(CLIENT_IP_HEADER, caller);
+  // Made from its parts: the app's request on Node is not one `new Request(request)` takes.
+  const body = request.method === "GET" || request.method === "HEAD" ? null : request.body;
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    ...(body && { body, duplex: "half" }),
+  } as RequestInit);
+}
+
+/**
  * An authorize with the consent page always shown (`prompt=consent`, as the client itself may
  * ask), unless its redirect is the client's alone (`ownAddress`). The provider remembers a
  * consent and, finding one, sends the code on with nothing shown: right for a site, whose
@@ -647,7 +699,7 @@ function discovery(request: Request, document: string | undefined): Response {
   if (document === undefined) return notFound();
   if (request.method !== "GET" && request.method !== "HEAD")
     return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
-  const headers = { "content-type": "application/json", ...DISCOVERY_CACHE };
+  const headers = { "content-type": "application/json", "cache-control": DISCOVERY_CACHE };
   return new Response(request.method === "HEAD" ? null : document, { headers });
 }
 

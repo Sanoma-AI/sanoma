@@ -60,6 +60,14 @@ const expected = `# Copy to .env (ignored by git; \`sanoma\` loads it before rea
 # own URL instead, such as http://10.0.0.7:3000. With neither, no agent can sign in.
 # SANOMA_HOSTNAME=
 # SANOMA_HOST_URL=
+# Optional. Behind a router, the one address many companies' agents connect to: the router's
+# agent surface, such as https://mcp.sanoma.example/mcp, this company's id there, and this
+# company's own secret there, which the router's operator derives. All three; they are read
+# before the two above. On an instance whose config has a router of its own,
+# SANOMA_ROUTER_SECRET is that router's master secret instead: 32 characters or more.
+# SANOMA_AGENT_URL=
+# SANOMA_COMPANY=
+# SANOMA_ROUTER_SECRET=
 # Optional. GitHub sign-in: the OAuth client of the company's GitHub App. Who may sign in is
 # resources/people.ts. Both or neither.
 # SANOMA_GITHUB_CLIENT_ID=

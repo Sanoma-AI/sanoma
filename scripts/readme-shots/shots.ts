@@ -323,7 +323,7 @@ async function seed(acme: string): Promise<void> {
   }
 }
 
-/** A company repo named acme: the README's workflow, the config above, the packages/sanoma/app README's site page, the outbound collection, and `node_modules` reaching this checkout. */
+/** A company repo named acme: the README's workflow, the config above, the docs' site page (docs-site/src/content/docs/sites/kit.md), the outbound collection, and `node_modules` reaching this checkout. */
 function writeRepo(dir: string): void {
   const readme = readFileSync(join(repo, "README.md"), "utf8").replaceAll("\r\n", "\n");
   const block = /^```ts\n\/\/ workflows\/announce\.ts\n([\s\S]*?)^```$/m.exec(readme);
@@ -331,10 +331,12 @@ function writeRepo(dir: string): void {
   mkdirSync(join(dir, "workflows"), { recursive: true });
   writeFileSync(join(dir, "workflows/announce.ts"), block[1]);
   writeFileSync(join(dir, "sanoma.config.ts"), CONFIG);
-  const appReadme = readFileSync(join(repo, "packages/sanoma/app/README.md"), "utf8").replaceAll("\r\n", "\n");
-  const page = /^```tsx\n\/\/ sites\/launches\/routes\/index\.tsx\n([\s\S]*?)^```$/m.exec(appReadme);
+  const kit = readFileSync(join(repo, "docs-site/src/content/docs/sites/kit.md"), "utf8").replaceAll("\r\n", "\n");
+  const page = /^```tsx\n\/\/ sites\/launches\/routes\/index\.tsx\n([\s\S]*?)^```$/m.exec(kit);
   if (!page?.[1])
-    fail("packages/sanoma/app/README.md has no ```tsx block that starts with `// sites/launches/routes/index.tsx`");
+    fail(
+      "docs-site/src/content/docs/sites/kit.md has no ```tsx block that starts with `// sites/launches/routes/index.tsx`",
+    );
   mkdirSync(join(dir, "sites/launches/routes"), { recursive: true });
   writeFileSync(join(dir, "sites/launches/site.ts"), SITE_TS);
   writeFileSync(join(dir, "sites/launches/routes/index.tsx"), page[1]);

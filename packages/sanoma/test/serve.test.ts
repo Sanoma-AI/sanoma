@@ -8,6 +8,9 @@ function environment(values: Record<string, string>) {
     "SANOMA_APP_HOST",
     "SANOMA_HOSTNAME",
     "SANOMA_HOST_URL",
+    "SANOMA_AGENT_URL",
+    "SANOMA_COMPANY",
+    "SANOMA_ROUTER_SECRET",
     "SANOMA_GITHUB_CLIENT_ID",
     "SANOMA_GITHUB_CLIENT_SECRET",
     "SANOMA_DOMAINS",
@@ -17,6 +20,8 @@ function environment(values: Record<string, string>) {
 }
 
 const KEY = Buffer.alloc(32, 1).toString("base64");
+/** A router's secret as one is: visible ASCII, 32 characters or more. */
+const SECRET = "a-router's-secret-0123456789abcdefgh";
 
 const GITHUB = {
   SANOMA_GITHUB_CLIENT_ID: "id",
@@ -111,6 +116,78 @@ describe("appOptions", () => {
     // On this machine nobody signs in, so neither is read.
     environment({ SANOMA_HOSTNAME: "https://app.sanoma.example", SANOMA_HOST_URL: "nothing" });
     expect(await appOptions()).toEqual({ host: undefined });
+  });
+
+  it("takes a router's address first, all three of its variables, the secret one a router can send", async () => {
+    const beyond = { SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY };
+    const routed = {
+      SANOMA_AGENT_URL: "https://mcp.sanoma.example/mcp",
+      SANOMA_COMPANY: "acme",
+      SANOMA_ROUTER_SECRET: SECRET,
+    };
+    const said = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      resetNotices();
+      // An address, though no hostname or URL of its own is set: nothing is said.
+      environment({ ...beyond, ...routed });
+      const options = await appOptions();
+      expect(options.login?.name).toBe("staff");
+      // A config with no router of its own serves none, and reads the secret for nothing else.
+      expect(options.router).toBeUndefined();
+      expect(said).not.toHaveBeenCalled();
+    } finally {
+      said.mockRestore();
+    }
+    for (const [missing, named] of [
+      [{ SANOMA_COMPANY: "" }, 'SANOMA_COMPANY is ""'],
+      [{ SANOMA_COMPANY: "acme.eu" }, 'SANOMA_COMPANY is "acme.eu"'],
+      [{ SANOMA_ROUTER_SECRET: "" }, "SANOMA_ROUTER_SECRET is not set"],
+      [{ SANOMA_ROUTER_SECRET: "s3cret" }, "SANOMA_ROUTER_SECRET is not one a router can send: it must have 32"],
+      [
+        { SANOMA_ROUTER_SECRET: `${SECRET} x` },
+        "SANOMA_ROUTER_SECRET is not one a router can send: it must be visible",
+      ],
+      [{ SANOMA_AGENT_URL: "https://mcp.sanoma.example" }, 'SANOMA_AGENT_URL is "https://mcp.sanoma.example"'],
+    ] as const) {
+      environment({ ...beyond, ...routed, ...missing });
+      await expect(appOptions(), named).rejects.toThrow(UsageError);
+      await expect(appOptions(), named).rejects.toThrow(named);
+    }
+  });
+
+  it("serves a config's router with its master secret on any host, and refuses its hostname where the app or a site answers", async () => {
+    const router = { hostname: "mcp.sanoma.example", companies: { collection: "companies", url: "url" } };
+    // Wherever the app listens; trimmed, and a blank one is none: the router then forwards nothing.
+    environment({ SANOMA_ROUTER_SECRET: ` ${SECRET} ` });
+    expect(await appOptions(undefined, router)).toEqual({ host: undefined, router: { secret: SECRET } });
+    environment({ SANOMA_ROUTER_SECRET: " " });
+    expect(await appOptions(undefined, router)).toEqual({ host: undefined, router: {} });
+    // A config without one reads nothing of it, whatever the variable holds.
+    environment({ SANOMA_ROUTER_SECRET: "short" });
+    expect(await appOptions()).toEqual({ host: undefined });
+    for (const [set, named] of [
+      [{ SANOMA_ROUTER_SECRET: "short" }, "SANOMA_ROUTER_SECRET is not one a router can send: it must have 32"],
+      [{ SANOMA_ROUTER_SECRET: `${SECRET}\u00e9` }, "SANOMA_ROUTER_SECRET is not one a router can send: it must be"],
+      [
+        { SANOMA_HOSTNAME: "MCP.sanoma.example" },
+        "The config's `router.hostname`, mcp.sanoma.example, is SANOMA_HOSTNAME, the app's own hostname",
+      ],
+      [
+        { SANOMA_DOMAINS: "www=sanoma.example,docs=mcp.sanoma.example" },
+        "The config's `router.hostname`, mcp.sanoma.example, is the domain of the public site docs",
+      ],
+    ] as const) {
+      environment({ SANOMA_ROUTER_SECRET: SECRET, ...set });
+      await expect(appOptions(undefined, router), named).rejects.toThrow(UsageError);
+      await expect(appOptions(undefined, router), named).rejects.toThrow(named);
+    }
+    // Another hostname and other domains beside it are fine.
+    environment({
+      SANOMA_ROUTER_SECRET: SECRET,
+      SANOMA_HOSTNAME: "app.sanoma.example",
+      SANOMA_DOMAINS: "www=sanoma.example",
+    });
+    expect((await appOptions(undefined, router)).router).toEqual({ secret: SECRET });
   });
 
   it("says once, beyond this machine with no agent address, that no agent can sign in, and what to set", async () => {

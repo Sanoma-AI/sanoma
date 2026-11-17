@@ -1,7 +1,11 @@
-import { createHash, randomBytes } from "node:crypto";
-import { Client, type Pool } from "pg";
-import { BUILT_IN_CLIENTS, CLIENT_IP_HEADER, type LoginHalf } from "sanoma/workflows";
+import { createHash, hkdfSync, randomBytes } from "node:crypto";
+import { Client, Pool } from "pg";
+import { testDatabaseUrl } from "sanoma/testing";
+import { BUILT_IN_CLIENTS, CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "sanoma/workflows";
 import { expect } from "vitest";
+import { prepareBetterAuthStaff } from "../src/instance.ts";
+import { declaredMetadataFetch } from "../src/oauth.ts";
+import { betterAuthStaffLogin } from "../src/staff.ts";
 
 // What the staff login's tests share: Claude Code's client as a stand-in serves it, a session's
 // cookie, the staff schema as the worker first finds it, and a client's sign-in step by step
@@ -186,6 +190,59 @@ export async function token(
   for (const [name, value] of Object.entries(headers)) asking.headers.set(name, value);
   const answered = (await login.handle(asking))!;
   return { status: answered.status, body: (await answered.json()) as Record<string, string> };
+}
+
+/** The app's OAuth context (`LoginContext.staff.oauth`): the agent address, and which agent stands for a client. */
+export type OAuthContext = NonNullable<NonNullable<LoginContext["staff"]>["oauth"]>;
+
+/**
+ * What each file of the staff login's OAuth tests starts with: a test database of its own
+ * (`database`) and its pool, the login's key, the codes its sender kept, requests to the login
+ * on `host` (each from an address of its own under `subnet`), the declared person's sign-ins
+ * there (`flow`), and the login itself, its clients' documents fetched from `network`.
+ * `contextWith(oauth)` is the app's context for a login with that OAuth context (with none, it
+ * serves no OAuth), `loginWith(oauth)` the login made from it, and `prepare` the staff schema made
+ * afresh, as the worker makes it.
+ */
+export function loginFor({
+  database,
+  host,
+  subnet,
+  email = "alice@example.com",
+  network,
+}: {
+  database: string;
+  host: string;
+  subnet: string;
+  email?: string;
+  network: (input: string | URL | Request, init?: globalThis.RequestInit) => Promise<Response>;
+}) {
+  const databaseUrl = testDatabaseUrl(database);
+  const key = Buffer.from(hkdfSync("sha256", process.env.SANOMA_SIGNING_KEY!, "", "login staff", 32)).toString("hex");
+  const codes = new Map<string, string>();
+  const pool = new Pool({ connectionString: databaseUrl });
+  const request = requestsTo(host, subnet);
+  const flow: Flow = { origin: `https://${host}`, email, codes, request };
+  const contextWith = (oauth?: OAuthContext): LoginContext => ({
+    database: async () => pool,
+    key,
+    secrets: async () => new Map(),
+    origins: [],
+    sendCode: async (to, code) => void codes.set(to, code),
+    staff: {
+      admits: (identity) => identity.email?.toLowerCase() === email,
+      social: {},
+      record: async () => undefined,
+      ...(oauth && { oauth }),
+    },
+  });
+  const loginWith = (oauth?: OAuthContext): LoginHalf =>
+    betterAuthStaffLogin(contextWith(oauth), { fetchClientMetadata: declaredMetadataFetch(network) });
+  const prepare = async () => {
+    await resetStaffSchema(databaseUrl);
+    await prepareBetterAuthStaff(databaseUrl);
+  };
+  return { databaseUrl, pool, codes, request, flow, contextWith, loginWith, prepare };
 }
 
 /**

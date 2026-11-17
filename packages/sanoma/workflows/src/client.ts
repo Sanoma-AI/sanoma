@@ -32,7 +32,7 @@ import { type Call, callsOf, inputOf, opCalled, outputsOf, recorded } from "./ct
 import { type Chats, chatStore } from "./chats.ts";
 import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection-driver.ts";
-import { queueFor, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import { queueFor, type ResolvedConfig, type ResolvedRouter, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import { readStoreMoves, type StoreMove } from "./store-move.ts";
 import {
@@ -118,6 +118,7 @@ import {
   type RunStatus,
   RESHAPE_WORKFLOW,
   SAVE_DRAFT_WORKFLOW,
+  type Saved,
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
@@ -552,17 +553,7 @@ export class SanomaClient {
     const decisions: RecordedDecision[] = [];
     for (const [i, c] of calls.entries()) {
       const before = await beforeOf(policy, c.op, c.input, this.config.collections, (get, key) =>
-        drivers.get(get)?.(
-          { key },
-          {
-            idempotencyKey: `${runId}:before${i ? `:${i}` : ""}`,
-            runId,
-            opId: get,
-            attempt: 1,
-            secrets: this.storedSecrets,
-            by: actor.id,
-          },
-        ),
+        drivers.get(get)?.({ key }, this.readContext(get, runId, actor.id, `${runId}:before${i ? `:${i}` : ""}`)),
       );
       decisions.push(decideCall(policy, c.op, c.input, actor, run, { ...before, ...(connection && { connection }) }));
     }
@@ -1757,6 +1748,44 @@ export class SanomaClient {
         });
     }
     return found;
+  }
+
+  /**
+   * What a collection's `get` is called with outside a call of its own: a record read for a
+   * call's policy (`beforeOf`), or the runtime reading its own configured list (`routedCompany`).
+   */
+  private readContext(get: string, runId: string, by: string, idempotencyKey = runId): CallContext {
+    return { idempotencyKey, runId, opId: get, attempt: 1, secrets: this.storedSecrets, by };
+  }
+
+  /**
+   * The company `id` in the list a config's `router` names (`ResolvedConfig.router.companies`),
+   * for the agents' router alone: the runtime reading its own configured list to find where a
+   * request goes, so nobody's call, with no policy asked and nothing recorded. It answers only
+   * where that company is (`url`, when its field holds text) and whether the list routes to it
+   * (`live`: its `live.field` one of `live.is`, or true with no `live`), never the record;
+   * undefined when no record has exactly that key. Read anew each time: nothing is kept.
+   */
+  async routedCompany(
+    { companies }: Pick<ResolvedRouter, "companies">,
+    id: string,
+  ): Promise<{ url?: string; live: boolean } | undefined> {
+    const get = this.config.collections.get(companies.collection)?.get.id;
+    const fn = get === undefined ? undefined : this.config.drivers.get(get);
+    if (get === undefined || !fn) {
+      throw new SanomaError("invalid_input", `${companies.collection} is no collection of this company`);
+    }
+    const found = (await fn(
+      { key: id },
+      this.readContext(get, `runtime:router:${companies.collection}`, "sanoma"),
+    )) as Saved | null;
+    if (!found || found.key !== id) return undefined;
+    const url = found.record[companies.url];
+    const state = companies.live && found.record[companies.live.field];
+    return {
+      ...(typeof url === "string" && { url }),
+      live: !companies.live || (typeof state === "string" && companies.live.is.includes(state)),
+    };
   }
 
   /** Non-secret statuses for the selected store and declared bindings. */

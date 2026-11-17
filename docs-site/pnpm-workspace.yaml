@@ -1,0 +1,8 @@
+# The docs site installs on its own, with its own lockfile: it is no package of the repository's
+# workspace. Astro wants a newer Vite than the app is locked to, and a second Vite in the one
+# lockfile gives the connectors' tests a second msw. Run `pnpm install` here after the root's.
+packages: []
+allowBuilds:
+  esbuild: false
+  sharp: false
+  workerd: false
