@@ -15,7 +15,7 @@ import {
   schemaOf,
   writeGenerated,
 } from "sanoma/workflows/describe";
-import { problemLine, warningLine } from "sanoma/workflows/shared";
+import { builtInClientLine, problemLine, warningLine } from "sanoma/workflows/shared";
 import { runScenarios } from "sanoma/workflows/scenarios";
 import type { Loaded } from "./config.ts";
 import { siteBuild } from "./sites.ts";
@@ -48,7 +48,9 @@ const LINTED = ["workflows", "resources", "sites", "apps"];
  * `peopleWarnings`) never make it not.
  * With them, the repo's Permissions grid (`permissionsGrid`, as the app's Permissions page has
  * it), from the same config and description, which a change is reviewed by: none when the
- * policies do not hold, since every cell would be the refusing policy's deny.
+ * policies do not hold, since every cell would be the refusing policy's deny. What the people's
+ * files make of each built-in client (the description's `builtInClients`: accepted, replaced by a declared agent,
+ * turned off, or refused, which a warning says why) is logged, one `built-in client: …` line each.
  */
 export async function check(
   { config, root, resolved }: Loaded,
@@ -102,10 +104,12 @@ export async function check(
   const warnings = [
     ...description.sites.flatMap((site) => site.warnings),
     ...crossAppImports(root, description.apps),
-    // An agent that acts for whoever names it, in a declared group: its groups reach them.
+    // An agent that acts for whoever names it, in a declared group: its groups reach them. And a
+    // built-in client refused because its agent's id is taken, or turned off to no effect.
     ...peopleWarnings(readPeople(root).people),
   ].map(warningLine);
   const grid = policies.length ? undefined : permissionsGrid(resolved, description);
+  for (const client of description.builtInClients) log(`built-in client: ${builtInClientLine(client)}`);
   return { ok: problems.length === 0, problems, warnings, ...(grid && { grid }) };
 }
 
@@ -197,7 +201,7 @@ function configProblems({ problems, workflows, sites }: ConfigDescription, root:
     ...problems.map(problemLine),
     ...workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: relative(root, wf.file), ...p }))),
     ...sites.flatMap((site) => site.problems.map(problemLine)),
-    // The people's own (an id two share, a reserved one), which admit nobody while they stand.
+    // The people's own (an id two share, a reserved one, an `off` that turns off no built-in), which admit nobody while they stand.
     ...people.problems.map(problemLine),
     // A client two agents declare, which admits everyone still: no agent is that client's.
     ...clientClashes(people.people).map(problemLine),

@@ -456,6 +456,7 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
     ops: description.ops.filter((op) => vendors.has(op.vendor)),
     vendors: Object.fromEntries(Object.entries(description.vendors).filter(([vendor]) => vendors.has(vendor))),
     agents: [],
+    builtInClients: [],
     resourceTypes: [],
     collections: description.collections,
     resources: [],
