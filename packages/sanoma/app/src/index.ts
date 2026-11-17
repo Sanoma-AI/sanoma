@@ -90,6 +90,12 @@ export interface AppOptions {
    */
   ingress?: readonly IngressRoute[];
   /**
+   * For a config with a `router`: the secret the agents' router forwards with
+   * (`SANOMA_ROUTER_SECRET`, which `sanoma serve` reads), and what it forwards with instead of
+   * `fetch` (`AppHandlerOptions.router`).
+   */
+  router?: { secret?: string; fetch?: typeof fetch };
+  /**
    * Called right after each change a worker must run that the app makes commits: a run's start
    * (drift, apply and a held call are starts) and an approval's decision; never for a read
    * (`ClientOptions.onWrite`). `sanoma serve` wakes its worker with it (`Supervisor.wake`). Must
@@ -191,6 +197,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       sites,
       ...(options.domains && { domains: options.domains }),
       ...(options.ingress && { ingress: options.ingress }),
+      ...(options.router && { router: options.router }),
       entry: responder.entry,
       files: responder.files,
       ...(responder.stylesheet && { stylesheet: responder.stylesheet }),

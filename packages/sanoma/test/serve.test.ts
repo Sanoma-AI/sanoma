@@ -8,6 +8,9 @@ function environment(values: Record<string, string>) {
     "SANOMA_APP_HOST",
     "SANOMA_HOSTNAME",
     "SANOMA_HOST_URL",
+    "SANOMA_AGENT_URL",
+    "SANOMA_COMPANY",
+    "SANOMA_ROUTER_SECRET",
     "SANOMA_GITHUB_CLIENT_ID",
     "SANOMA_GITHUB_CLIENT_SECRET",
     "SANOMA_DOMAINS",
@@ -110,6 +113,42 @@ describe("appOptions", () => {
     }
     // On this machine nobody signs in, so neither is read.
     environment({ SANOMA_HOSTNAME: "https://app.sanoma.example", SANOMA_HOST_URL: "nothing" });
+    expect(await appOptions()).toEqual({ host: undefined });
+  });
+
+  it("takes a router's address first, all three of its variables, and hands a config's router its secret on any host", async () => {
+    const beyond = { SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY };
+    const routed = {
+      SANOMA_AGENT_URL: "https://mcp.sanoma.example/mcp",
+      SANOMA_COMPANY: "acme",
+      SANOMA_ROUTER_SECRET: "s3cret",
+    };
+    const said = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      resetNotices();
+      // An address, though no hostname or URL of its own is set: nothing is said.
+      environment({ ...beyond, ...routed });
+      const options = await appOptions();
+      expect(options.login?.name).toBe("staff");
+      expect(options.router).toEqual({ secret: "s3cret" });
+      expect(said).not.toHaveBeenCalled();
+    } finally {
+      said.mockRestore();
+    }
+    for (const [missing, named] of [
+      [{ SANOMA_COMPANY: "" }, 'SANOMA_COMPANY is ""'],
+      [{ SANOMA_COMPANY: "acme.eu" }, 'SANOMA_COMPANY is "acme.eu"'],
+      [{ SANOMA_ROUTER_SECRET: "" }, "SANOMA_ROUTER_SECRET is not set"],
+      [{ SANOMA_AGENT_URL: "https://mcp.sanoma.example" }, 'SANOMA_AGENT_URL is "https://mcp.sanoma.example"'],
+    ] as const) {
+      environment({ ...beyond, ...routed, ...missing });
+      await expect(appOptions(), named).rejects.toThrow(UsageError);
+      await expect(appOptions(), named).rejects.toThrow(named);
+    }
+    // The secret is the config's router's too, wherever the app listens; a blank one is none.
+    environment({ SANOMA_ROUTER_SECRET: " s3cret " });
+    expect(await appOptions()).toEqual({ host: undefined, router: { secret: "s3cret" } });
+    environment({ SANOMA_ROUTER_SECRET: " " });
     expect(await appOptions()).toEqual({ host: undefined });
   });
 

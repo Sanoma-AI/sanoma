@@ -66,8 +66,9 @@ function socialOf(env: AppBundleEnv): SocialClients | undefined {
 }
 
 /**
- * The Worker's agent address, by the launchers' one rule (`agentAddressFrom`): its own
- * hostname's (`SANOMA_HOSTNAME`), the one host besides the sites' it then answers on; with none
+ * The Worker's agent address, by the launchers' one rule (`agentAddressFrom`): a router's when
+ * the three variables name one (`SANOMA_AGENT_URL`, `SANOMA_COMPANY`, `SANOMA_ROUTER_SECRET`),
+ * else its own hostname's (`SANOMA_HOSTNAME`), the one host besides the sites' it then answers on; with none
  * declared, its own URL's (`SANOMA_HOST_URL`, the workers.dev URL the Cloudflare host binds on
  * every upload, where such a Worker is reached). With neither (a bundle run by a host that binds
  * none), or a value that names no address (logged, once: the handler is made once), none: the
@@ -124,6 +125,7 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
       login: admitting(staff, () => snapshot.people),
       sites,
       domains,
+      router: { ...(env.SANOMA_ROUTER_SECRET && { secret: env.SANOMA_ROUTER_SECRET }) },
       entry: start,
       files: (request, site) => fileFor(request, env, site),
     },
@@ -179,7 +181,14 @@ export async function serve(
     throw err;
   }));
   const { hostname } = new URL(request.url);
-  if (env.SANOMA_HOSTNAME && hostname !== env.SANOMA_HOSTNAME.toLowerCase() && !app.hosts.has(hostname)) {
+  // With its own hostname the app answers there, on its sites' domains and on its router's
+  // hostname (`config.router`), and nowhere else.
+  if (
+    env.SANOMA_HOSTNAME &&
+    hostname !== env.SANOMA_HOSTNAME.toLowerCase() &&
+    !app.hosts.has(hostname) &&
+    hostname !== app.router
+  ) {
     return plain(404, "Not found\n");
   }
   let client: Promise<SanomaClient> | undefined;

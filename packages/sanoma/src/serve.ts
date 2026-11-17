@@ -233,18 +233,22 @@ export function parseDomains(value: string | undefined): Record<string, string> 
  * `SANOMA_GITHUB_CLIENT_SECRET` are both set, in the environment or in the stored secrets
  * (`readSecrets`), where creating the GitHub App on the app's connect page put them; the same
  * client goes to the public sites' logins (`social`), for visitors; with an agent address in the
- * environment (`agentAddressFrom`: `SANOMA_HOSTNAME`, else `SANOMA_HOST_URL`), the staff login is
+ * environment (`agentAddressFrom`: a router's, `SANOMA_AGENT_URL` with `SANOMA_COMPANY` and
+ * `SANOMA_ROUTER_SECRET`, else `SANOMA_HOSTNAME`, else `SANOMA_HOST_URL`), the staff login is
  * the agent surface's authorization server for that one address, and without one serves no
- * OAuth, which is said once on stderr. An empty value is the same as unset. A mistake in them
+ * OAuth, which is said once on stderr. On any host, `SANOMA_ROUTER_SECRET` is also what a
+ * config's `router` forwards with (`AppOptions.router`). An empty value is the same as unset. A mistake in them
  * is a UsageError.
  */
 export async function appOptions(
   readSecrets?: ReadSecrets,
-): Promise<Pick<AppOptions, "host" | "login" | "domains" | "social">> {
+): Promise<Pick<AppOptions, "host" | "login" | "domains" | "social" | "router">> {
   const env = process.env;
   const domains = parseDomains(env.SANOMA_DOMAINS);
   const host = env.SANOMA_APP_HOST || undefined;
-  const options = { host, ...(domains && { domains }) };
+  // What a config's `router` forwards with; a config without one reads nothing of it.
+  const secret = env.SANOMA_ROUTER_SECRET?.trim();
+  const options = { host, ...(domains && { domains }), ...(secret && { router: { secret } }) };
   if (host === undefined || isLoopback(host)) return options;
   let address: AgentAddress | undefined;
   try {
