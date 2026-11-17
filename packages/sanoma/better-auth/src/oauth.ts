@@ -2,7 +2,7 @@ import { createCimdClientDiscovery } from "@better-auth/cimd";
 import { type ClientMetadataResourceFetch, getOAuthProviderState, oauthProvider } from "@better-auth/oauth-provider";
 import { APIError } from "better-auth/api";
 import { jwt } from "better-auth/plugins/jwt";
-import { type AgentAddress, CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
+import { CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
 
 // The staff login as an OAuth 2.1 authorization server for the agent surface (`/mcp`), whose
 // resource server is the app: Better Auth's oauth-provider, its JWT plugin (the access tokens
@@ -14,7 +14,9 @@ import { type AgentAddress, CONSENT_PAGE, LOGIN_PAGE } from "sanoma/workflows";
 // stands for it.
 
 /** The scopes there are: none of the policy's, which decides each call, so only a refresh token's. */
-const SCOPES = ["offline_access"];
+export const SCOPES = ["offline_access"];
+/** The grants there are: a code (with PKCE) for tokens, and a refresh. */
+export const GRANT_TYPES = ["authorization_code", "refresh_token"];
 
 /**
  * The access token's claim naming the agent its person consented to (`holding`): a token is that
@@ -31,11 +33,11 @@ export interface OAuthSetup {
   /** How a client's metadata document is fetched (`fetchClientMetadataResource`); only a declared client's ever is. */
   fetchClientMetadata: ClientMetadataResourceFetch;
   /**
-   * The instance's agent address (`LoginContext.staff.oauth.address`): the issuer every token and
-   * the metadata name, and the one resource a token is issued for. Without one nothing is issued:
-   * the provider has no resource, and the login serves none of its routes.
+   * The issuer of the instance's agent address (`LoginContext.staff.oauth.address`), which every
+   * token names. Without an address nothing is issued: the login serves none of the provider's
+   * routes, and the provider has no resource.
    */
-  address?: AgentAddress;
+  issuer?: string;
 }
 
 /** The CIMD discovery, as the provider takes one. */
@@ -57,7 +59,7 @@ const LATE = Symbol("late");
  * own extension, not the `cimd()` plugin: that plugin registers it on each instance's start with
  * an object of its own, which the provider's shared options then refuse the second time.
  */
-export function oauthPlugins({ agentOf, fetchClientMetadata, address }: OAuthSetup) {
+export function oauthPlugins({ agentOf, fetchClientMetadata, issuer }: OAuthSetup) {
   const make = () =>
     createCimdClientDiscovery({
       fetchClientMetadataResource: fetchClientMetadata,
@@ -106,21 +108,21 @@ export function oauthPlugins({ agentOf, fetchClientMetadata, address }: OAuthSet
   };
   return [
     // The access tokens' keys, in the `jwks` table; no JWT on a session's responses. Its issuer
-    // is the one setting the provider reads for an access token's `iss`, the `iss` of authorize's
-    // redirect back (RFC 9207) and its metadata's `issuer`: the configured one, so none of them
-    // is a request's host (unset, each would be the base URL, which is the request's).
-    jwt({ disableSettingJwtHeader: true, ...(address && { jwt: { issuer: address.issuer } }) }),
+    // is the one setting the provider reads for an access token's `iss` and the `iss` of
+    // authorize's redirect back (RFC 9207): the configured one, so neither is a request's host
+    // (unset, each would be the base URL, which is the request's).
+    jwt({ disableSettingJwtHeader: true, ...(issuer !== undefined && { jwt: { issuer } }) }),
     oauthProvider({
       loginPage: LOGIN_PAGE,
       consentPage: CONSENT_PAGE,
       scopes: SCOPES,
-      grantTypes: ["authorization_code", "refresh_token"],
-      // The one resource is the configured address's, its row the provider's own seed
-      // (`seedResourcesOnce`, at each instance's start: a read, an insert only when the row is
-      // missing), never made for a request: the provider issues a token only for a resource it
-      // has a row for, and compares none with the request's host. It is the instance's, for
-      // every declared client: a client is not linked to it.
-      ...(address && { resources: [{ identifier: address.resource, name: "Agent surface" }] }),
+      grantTypes: GRANT_TYPES as ("authorization_code" | "refresh_token")[],
+      // The one resource is the configured address's, its row made by the login once per
+      // process and database (`ensureResource` in staff.ts), never for a request, and not the
+      // provider's own `resources` seed, which reads the table at each instance's start: on a
+      // Worker, every request. The provider issues a token only for a resource it has a row
+      // for, and compares none with the request's host. It is the instance's, for every declared
+      // client: a client is not linked to it.
       enforcePerClientResources: false,
       extensions: [{ clientDiscovery: discovery, claims: { accessToken: holding(agentOf) } }],
       // A consent is to let a client act as the agent the consent page named: kept by that agent

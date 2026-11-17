@@ -1,12 +1,28 @@
 import { createHash, createHmac, generateKeyPairSync, hkdfSync, randomBytes, sign } from "node:crypto";
-import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "sanoma/workflows";
+import type { LoginContext, LoginHalf } from "sanoma/workflows";
 import { testDatabaseUrl } from "sanoma/testing";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prepareBetterAuthStaff } from "../src/instance.ts";
 import { declaredMetadataFetch } from "../src/oauth.ts";
 import { betterAuthStaffLogin } from "../src/staff.ts";
-import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-helpers.ts";
+import {
+  authorizePath as authorizeFor,
+  CLAUDE_CODE,
+  CLAUDE_CODE_DOCUMENT,
+  connect as connectAt,
+  consent as allow,
+  cookieOf,
+  decode,
+  type Flow,
+  pkce,
+  REDIRECT,
+  requestsTo,
+  resetStaffSchema,
+  resourceRows as rowsOf,
+  signInFrom as signIn,
+  token as tokenAt,
+} from "./staff-helpers.ts";
 
 // The staff login as the agent surface's authorization server: its metadata, a declared client's
 // sign-in by email code with PKCE, consent and a JWT for the configured address's `/mcp`, the token
@@ -26,7 +42,6 @@ const DECLARED = "alice@example.com";
 const UNDECLARED = "https://elsewhere.example/oauth/client.json";
 /** A declared client whose own document asks for DPoP-bound tokens (RFC 9449 §5.2). */
 const BOUND = "https://bound.example/oauth/client.json";
-const REDIRECT = "http://localhost:53682/callback";
 /** A declared client that is a site: its redirect an HTTPS address of its own, which no other program answers at. */
 const WEB = "https://web.example/oauth/client.json";
 const WEB_REDIRECT = "https://web.example/callback";
@@ -83,108 +98,27 @@ const context: LoginContext = {
 };
 let half: LoginHalf;
 
-let nextIp = 1;
 /** A request to the login on its host, through TLS: from the page's own origin unless `origin` is null (a client's). */
-function request(
-  path: string,
-  init: {
-    body?: unknown;
-    form?: Record<string, string>;
-    cookie?: string;
-    origin?: string | null;
-    bearer?: string;
-    host?: string;
-  } = {},
-): Request {
-  const host = init.host ?? HOST;
-  const headers = new Headers({ host, "x-forwarded-proto": "https", [CLIENT_IP_HEADER]: `10.2.0.${nextIp++}` });
-  if (init.origin !== null) headers.set("origin", init.origin ?? `https://${host}`);
-  if (init.cookie) headers.set("cookie", init.cookie);
-  if (init.bearer) headers.set("authorization", `Bearer ${init.bearer}`);
-  let body: string | undefined;
-  if (init.body !== undefined) {
-    headers.set("content-type", "application/json");
-    body = JSON.stringify(init.body);
-  } else if (init.form) {
-    headers.set("content-type", "application/x-www-form-urlencoded");
-    body = new URLSearchParams(init.form).toString();
-  }
-  return new Request(`http://${host}${path}`, { method: body === undefined ? "GET" : "POST", headers, body });
-}
+const request = requestsTo(HOST, "10.2.0");
+/** Alice's sign-ins at this login's host. */
+const flow: Flow = { origin: ORIGIN, email: DECLARED, codes, request };
 
-/** A PKCE pair: the verifier, and its S256 challenge. */
-function pkce() {
-  const verifier = randomBytes(32).toString("base64url");
-  return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
-}
-
-/** The authorization request a client opens in the browser. */
-function authorizePath(client: string, challenge: string, extra: Record<string, string> = {}) {
-  const query = new URLSearchParams({
-    response_type: "code",
-    client_id: client,
-    redirect_uri: REDIRECT,
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-    state: "state-1",
-    scope: "offline_access",
-    resource: MCP,
-    ...extra,
-  });
-  return `/auth/better-auth/oauth2/authorize?${query}`;
-}
+/** The authorization request a client opens in the browser, for the configured `/mcp` unless `extra` says another. */
+const authorizePath = (client: string, challenge: string, extra: Record<string, string> = {}) =>
+  authorizeFor(client, challenge, MCP, extra);
 
 /** A JWT's header or payload, as it is written: JSON, base64url. */
 const jsonPart = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 
-/** A JWT's payload and header, unverified. */
-function decode(jwt: string) {
-  const [header, payload] = jwt
-    .split(".")
-    .slice(0, 2)
-    .map((part) => JSON.parse(Buffer.from(part!, "base64url").toString()));
-  return { header, payload };
-}
-
 /** Signs Alice in on the page the provider sent her to, and answers where it sends her next. */
-async function signInFrom(login: string): Promise<{ cookie: string; next: string }> {
-  const { search } = new URL(login, ORIGIN);
-  await half.handle(
-    request("/auth/better-auth/email-otp/send-verification-otp", { body: { email: DECLARED, type: "sign-in" } }),
-  );
-  const signed = (await half.handle(
-    request("/auth/better-auth/sign-in/email-otp", {
-      body: { email: DECLARED, otp: codes.get(DECLARED)!, oauth_query: search.slice(1) },
-    }),
-  ))!;
-  expect(signed.status).toBe(200);
-  const { url } = (await signed.json()) as { url?: string };
-  return { cookie: cookieOf(signed), next: url! };
-}
+const signInFrom = (login: string) => signIn(flow, half, login);
 
 /** Allows the client on the consent page, and answers the client's redirect with its code. */
-async function consent(page: string, cookie: string): Promise<URL> {
-  const { search } = new URL(page, ORIGIN);
-  const allowed = (await half.handle(
-    request("/auth/better-auth/oauth2/consent", { body: { accept: true, oauth_query: search.slice(1) }, cookie }),
-  ))!;
-  expect(allowed.status).toBe(200);
-  return new URL(((await allowed.json()) as { url: string }).url);
-}
-
-/** The identifiers of the provider's resource rows, sorted. */
-const resourceRows = async () =>
-  (await pool.query<{ identifier: string }>("SELECT identifier FROM better_auth_staff.oauth_resource")).rows
-    .map((row) => row.identifier)
-    .toSorted();
+const consent = (page: string, cookie: string) => allow(flow, half, page, cookie);
 
 /** The token endpoint, as a client calls it: a form, no Origin, no cookie; `headers` besides, when it sends any. */
-async function token(form: Record<string, string>, headers: Record<string, string> = {}) {
-  const asking = request("/auth/better-auth/oauth2/token", { form, origin: null });
-  for (const [name, value] of Object.entries(headers)) asking.headers.set(name, value);
-  const answered = (await half.handle(asking))!;
-  return { status: answered.status, body: (await answered.json()) as Record<string, string> };
-}
+const token = (form: Record<string, string>, headers: Record<string, string> = {}) =>
+  tokenAt(flow, half, form, { headers });
 
 /** A code for tokens at the token endpoint, with its PKCE verifier, as `client` (Claude Code unless said) sends it. */
 const exchange = (
@@ -217,15 +151,8 @@ const bearerOf = (bearer?: string, at: { host?: string; login?: LoginHalf; path?
   );
 
 /** The whole flow for a client, Claude Code unless said: authorize, sign in by code, consent, the code for tokens. */
-async function connect(client = CLAUDE_CODE, redirect = REDIRECT) {
-  const { verifier, challenge } = pkce();
-  const asked = (await half.handle(request(authorizePath(client, challenge, { redirect_uri: redirect }))))!;
-  expect(asked.status).toBe(302);
-  const login = asked.headers.get("location")!;
-  const { cookie, next } = await signInFrom(login);
-  const back = next.startsWith(redirect) ? new URL(next) : await consent(next, cookie);
-  return { cookie, back, ...(await exchange(back.searchParams.get("code")!, verifier, client, {}, redirect)) };
-}
+const connect = (client = CLAUDE_CODE, redirect = REDIRECT) =>
+  connectAt(flow, half, { client, resource: MCP, redirect });
 
 /** Where an authorize of `client`'s sends the person signed in with `cookie`: a page of the login's by its path, or the client's redirect. */
 async function sentTo(client: string, redirect: string, cookie: string, extra: Record<string, string> = {}) {
@@ -627,7 +554,7 @@ describe("a declared client", () => {
 
   it("has the one resource row the login was configured with, whatever host and resource a request names", async () => {
     // The provider's seed, there since the login's first request: never made by an authorize.
-    expect(await resourceRows()).toEqual([MCP]);
+    expect(await rowsOf(pool)).toEqual([MCP]);
     const { body } = await connect();
     // The token endpoint, on hosts nobody configured: junk grants, and a real refresh token
     // asked for such a host's own /mcp, which the provider has no row for.
@@ -682,7 +609,7 @@ describe("a declared client", () => {
       iss: ISSUER,
       aud: MCP,
     });
-    expect(await resourceRows()).toEqual([MCP]);
+    expect(await rowsOf(pool)).toEqual([MCP]);
   });
 
   it("is refused once no agent declares it any more: at authorize, the token endpoint and revocation", async () => {

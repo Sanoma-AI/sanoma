@@ -1,12 +1,22 @@
-import { createHash, hkdfSync, randomBytes } from "node:crypto";
-import { type AgentAddress, CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "sanoma/workflows";
+import { hkdfSync } from "node:crypto";
+import type { AgentAddress, LoginContext, LoginHalf } from "sanoma/workflows";
 import { testDatabaseUrl } from "sanoma/testing";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prepareBetterAuthStaff } from "../src/instance.ts";
 import { declaredMetadataFetch } from "../src/oauth.ts";
 import { betterAuthStaffLogin } from "../src/staff.ts";
-import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-helpers.ts";
+import {
+  authorizePath,
+  CLAUDE_CODE,
+  CLAUDE_CODE_DOCUMENT,
+  connect as connectAt,
+  decode,
+  type Flow,
+  requestsTo,
+  resetStaffSchema,
+  resourceRows as rowsOf,
+} from "./staff-helpers.ts";
 
 // The instance's one configured agent address (`LoginContext.staff.oauth.address`): the issuer and
 // the resource are what the app configured, whatever Host a request names. The resource's row is
@@ -21,7 +31,6 @@ const ADDRESS: AgentAddress = { issuer: `${ORIGIN}/auth/better-auth`, resource: 
 /** A host nobody configured: what a request may say all the same. */
 const MADE_UP = "made-up.example";
 const DECLARED = "alice@example.com";
-const REDIRECT = "http://localhost:53682/callback";
 
 const codes = new Map<string, string>();
 const pool = new Pool({ connectionString: databaseUrl });
@@ -48,108 +57,18 @@ const loginAt = (address: AgentAddress | undefined): LoginHalf => {
   return betterAuthStaffLogin(context, { fetchClientMetadata: declaredMetadataFetch(network) });
 };
 
-let nextIp = 1;
-/** A request to the login through TLS, on its host unless `host` says another: a page's own unless `origin` is null (a client's). */
-function request(
-  path: string,
-  init: {
-    body?: unknown;
-    form?: Record<string, string>;
-    cookie?: string;
-    origin?: string | null;
-    bearer?: string;
-    host?: string;
-  } = {},
-): Request {
-  const host = init.host ?? HOST;
-  const headers = new Headers({ host, "x-forwarded-proto": "https", [CLIENT_IP_HEADER]: `10.4.0.${nextIp++}` });
-  if (init.origin !== null) headers.set("origin", init.origin ?? `https://${host}`);
-  if (init.cookie) headers.set("cookie", init.cookie);
-  if (init.bearer) headers.set("authorization", `Bearer ${init.bearer}`);
-  let body: string | undefined;
-  if (init.body !== undefined) {
-    headers.set("content-type", "application/json");
-    body = JSON.stringify(init.body);
-  } else if (init.form) {
-    headers.set("content-type", "application/x-www-form-urlencoded");
-    body = new URLSearchParams(init.form).toString();
-  }
-  return new Request(`http://${host}${path}`, { method: body === undefined ? "GET" : "POST", headers, body });
-}
-
-/** The authorization request a client opens in the browser, for `resource`. */
-function authorizePath(challenge: string, resource: string) {
-  const query = new URLSearchParams({
-    response_type: "code",
-    client_id: CLAUDE_CODE,
-    redirect_uri: REDIRECT,
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-    state: "state-1",
-    scope: "offline_access",
-    resource,
-  });
-  return `/auth/better-auth/oauth2/authorize?${query}`;
-}
-
+const request = requestsTo(HOST, "10.4.0");
+const flow: Flow = { origin: ORIGIN, email: DECLARED, codes, request };
 /** A JWT's payload, unverified. */
-const claimsOf = (jwt: string) =>
-  JSON.parse(Buffer.from(jwt.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
-
-/** The identifiers of the provider's resource rows, sorted. */
-const resourceRows = async () =>
-  (await pool.query<{ identifier: string }>("SELECT identifier FROM better_auth_staff.oauth_resource")).rows
-    .map((row) => row.identifier)
-    .toSorted();
-
-/** The whole flow for Claude Code at `login`, every request on `host`: authorize, sign in by code, consent, the code for tokens. */
-async function connect(login: LoginHalf, address: AgentAddress, host = HOST) {
-  const verifier = randomBytes(32).toString("base64url");
-  const challenge = createHash("sha256").update(verifier).digest("base64url");
-  const asked = (await login.handle(request(authorizePath(challenge, address.resource), { host })))!;
-  expect(asked.status).toBe(302);
-  const { search } = new URL(asked.headers.get("location")!, ORIGIN);
-  await login.handle(
-    request("/auth/better-auth/email-otp/send-verification-otp", {
-      body: { email: DECLARED, type: "sign-in" },
-      host,
-    }),
-  );
-  const signed = (await login.handle(
-    request("/auth/better-auth/sign-in/email-otp", {
-      body: { email: DECLARED, otp: codes.get(DECLARED)!, oauth_query: search.slice(1) },
-      host,
-    }),
-  ))!;
-  expect(signed.status).toBe(200);
-  const cookie = cookieOf(signed);
-  const consentAt = new URL(((await signed.json()) as { url: string }).url, ORIGIN);
-  const allowed = (await login.handle(
-    request("/auth/better-auth/oauth2/consent", {
-      body: { accept: true, oauth_query: consentAt.search.slice(1) },
-      cookie,
-      host,
-    }),
-  ))!;
-  expect(allowed.status).toBe(200);
-  const back = new URL(((await allowed.json()) as { url: string }).url);
-  const exchanged = (await login.handle(
-    request("/auth/better-auth/oauth2/token", {
-      form: {
-        grant_type: "authorization_code",
-        code: back.searchParams.get("code")!,
-        redirect_uri: REDIRECT,
-        client_id: CLAUDE_CODE,
-        code_verifier: verifier,
-        resource: address.resource,
-      },
-      origin: null,
-      host,
-    }),
-  ))!;
-  expect(exchanged.status).toBe(200);
-  return { back, ...((await exchanged.json()) as { access_token: string; refresh_token: string }) };
-}
+const claimsOf = (jwt: string) => decode(jwt).payload as Record<string, unknown>;
+/** The whole flow for Claude Code at `login`, for `address`'s resource, every request on `host`. */
+const connect = (login: LoginHalf, address: AgentAddress, host?: string) =>
+  connectAt(flow, login, { client: CLAUDE_CODE, resource: address.resource, host });
+/** A token as `connect` answers it. */
+const accessOf = ({ status, body }: Awaited<ReturnType<typeof connect>>) => {
+  expect(status).toBe(200);
+  return body.access_token!;
+};
 
 beforeAll(async () => {
   await resetStaffSchema(databaseUrl);
@@ -165,7 +84,7 @@ describe("a login with no agent address", () => {
     expect((await plain.handle(request("/auth/better-auth/get-session", { origin: null })))?.status).toBe(200);
     const challenge = "c".repeat(43);
     for (const asking of [
-      request(authorizePath(challenge, ADDRESS.resource)),
+      request(authorizePath(CLAUDE_CODE, challenge, ADDRESS.resource)),
       request("/auth/better-auth/oauth2/token", { form: { grant_type: "refresh_token" }, origin: null }),
       request("/auth/better-auth/oauth2/revoke", { form: { token: "nothing" }, origin: null }),
       request("/auth/better-auth/oauth2/consent", { body: { accept: true } }),
@@ -179,7 +98,7 @@ describe("a login with no agent address", () => {
       expect((await plain.handle(asking))?.status, asking.url).toBe(404);
     }
     expect(plain.bearer).toBeUndefined();
-    expect(await resourceRows()).toEqual([]);
+    expect(await rowsOf(pool)).toEqual([]);
   });
 });
 
@@ -187,9 +106,9 @@ describe("an agent address", () => {
   it("is refused when a token could never match it: a trailing slash, a query, a host not as it is compared", () => {
     for (const [part, written] of [
       ["issuer", `${ADDRESS.issuer}/`],
-      ["issuer", "https://mcp.router.example/"],
       ["issuer", "https://Company.Example/auth/better-auth"],
       ["issuer", "https://company.example:443/auth/better-auth"],
+      ["issuer", "https://ada@company.example/auth/better-auth"],
       ["issuer", "company.example/auth/better-auth"],
       ["resource", `${ADDRESS.resource}/`],
       ["resource", `${ADDRESS.resource}?x=1`],
@@ -197,13 +116,24 @@ describe("an agent address", () => {
       ["resource", "/mcp"],
     ] as const) {
       expect(() => loginAt({ ...ADDRESS, [part]: written }), written).toThrow(
-        `better-auth: the agent address's ${part} is ${JSON.stringify(written)}`,
+        `better-auth: the agent address's ${part} is ${JSON.stringify(written)}: write an http(s) URL as it is compared`,
       );
     }
-    // An issuer at its origin's root, and one on a port, are good as written.
-    for (const issuer of ["https://mcp.router.example", "http://127.0.0.1:3000/auth/better-auth"]) {
-      expect(() => loginAt({ ...ADDRESS, issuer }), issuer).not.toThrow();
+  });
+
+  it("is refused when the login could not serve it: an issuer elsewhere than its own routes, a resource at a root", () => {
+    // The login's routes are at /auth/better-auth alone: an issuer at a root, or another path, would name endpoints that 404.
+    for (const issuer of ["https://mcp.router.example", `${ORIGIN}/auth`, `${ORIGIN}/auth/better-auth/v2`]) {
+      expect(() => loginAt({ ...ADDRESS, issuer }), issuer).toThrow(
+        /^better-auth: the agent address's issuer is .*: its path must be \/auth\/better-auth.*sanoma#777/,
+      );
     }
+    expect(() => loginAt({ ...ADDRESS, resource: ORIGIN })).toThrow(
+      /^better-auth: the agent address's resource is .*: it needs a path.*sanoma#777/,
+    );
+    // An address on a port, over plain http, is good as written.
+    const local = { issuer: "http://127.0.0.1:3000/auth/better-auth", resource: "http://127.0.0.1:3000/mcp" };
+    expect(() => loginAt(local)).not.toThrow();
   });
 });
 
@@ -213,16 +143,16 @@ describe("a login with an agent address", () => {
     half = loginAt(ADDRESS);
   });
 
-  it("has its resource's row before any authorize: the provider's seed, at the login's first request", async () => {
-    expect(await resourceRows()).toEqual([]);
+  it("has its resource's row before any authorize: made at the login's first request, whatever it asks", async () => {
+    expect(await rowsOf(pool)).toEqual([]);
     expect((await half.handle(request("/auth/better-auth/get-session", { origin: null })))?.status).toBe(200);
-    expect(await resourceRows()).toEqual([ADDRESS.resource]);
+    expect(await rowsOf(pool)).toEqual([ADDRESS.resource]);
   });
 
   it("makes no row and no document for a made-up Host", async () => {
     const madeUp = `https://${MADE_UP}/mcp`;
     // A declared client asking for the made-up host's own /mcp, on that host: refused, on a page.
-    const asked = (await half.handle(request(authorizePath("c".repeat(43), madeUp), { host: MADE_UP })))!;
+    const asked = (await half.handle(request(authorizePath(CLAUDE_CODE, "c".repeat(43), madeUp), { host: MADE_UP })))!;
     expect(asked.status).toBe(400);
     expect(await asked.text()).toContain(ADDRESS.resource);
     // The token endpoint, which needs no sign-in, has no row for it either.
@@ -234,7 +164,7 @@ describe("a login with an agent address", () => {
       }),
     ))!;
     expect(junk.status).toBe(400);
-    expect(await resourceRows()).toEqual([ADDRESS.resource]);
+    expect(await rowsOf(pool)).toEqual([ADDRESS.resource]);
     // The documents are the configured address's on any Host: none names the host asked.
     for (const path of [
       "/.well-known/oauth-protected-resource/mcp",
@@ -258,38 +188,42 @@ describe("a login with an agent address", () => {
   });
 
   it("issues for the configured issuer and resource on any Host, and takes the token at /mcp on any Host", async () => {
-    const { access_token, back } = await connect(half, ADDRESS, MADE_UP);
-    expect(back.searchParams.get("iss")).toBe(ADDRESS.issuer);
-    expect(claimsOf(access_token)).toMatchObject({ iss: ADDRESS.issuer, aud: ADDRESS.resource, azp: CLAUDE_CODE });
+    const issued = await connect(half, ADDRESS, MADE_UP);
+    const access = accessOf(issued);
+    expect(issued.back.searchParams.get("iss")).toBe(ADDRESS.issuer);
+    expect(claimsOf(access)).toMatchObject({ iss: ADDRESS.issuer, aud: ADDRESS.resource, azp: CLAUDE_CODE });
     for (const host of [HOST, MADE_UP, "10.0.0.7:3000"]) {
-      expect(await half.bearer!(request("/mcp", { origin: null, bearer: access_token, host })), host).toMatchObject({
+      expect(await half.bearer!(request("/mcp", { origin: null, bearer: access, host })), host).toMatchObject({
         email: DECLARED,
         client: CLAUDE_CODE,
       });
     }
-    expect(await resourceRows()).toEqual([ADDRESS.resource]);
+    expect(await rowsOf(pool)).toEqual([ADDRESS.resource]);
   });
 
   it("refuses a token issued for another address, though the same keys signed it", async () => {
-    // Another login on the same tables and keys, its address a router's: its tokens are that address's.
-    const router: AgentAddress = { issuer: "https://mcp.router.example", resource: "https://mcp.router.example/mcp" };
-    const routed = loginAt(router);
-    const theirs = await connect(routed, router);
-    expect(claimsOf(theirs.access_token)).toMatchObject({ iss: router.issuer, aud: router.resource });
-    expect(await routed.bearer!(request("/mcp", { origin: null, bearer: theirs.access_token }))).toMatchObject({
+    // Another login on the same tables and keys, configured with another origin's address: its tokens are that address's.
+    const OTHER = "https://other.example";
+    const other: AgentAddress = { issuer: `${OTHER}/auth/better-auth`, resource: `${OTHER}/mcp` };
+    const elsewhere = loginAt(other);
+    const theirs = accessOf(await connect(elsewhere, other));
+    expect(claimsOf(theirs)).toMatchObject({ iss: other.issuer, aud: other.resource });
+    expect(await elsewhere.bearer!(request("/mcp", { origin: null, bearer: theirs }))).toMatchObject({
       client: CLAUDE_CODE,
     });
-    const ours = await connect(half, ADDRESS);
-    // Each refuses the other's, on its own host, the other's, and the host the token names.
-    for (const host of [HOST, "mcp.router.example"]) {
-      expect(await half.bearer!(request("/mcp", { origin: null, bearer: theirs.access_token, host })), host).toBeNull();
-      expect(await routed.bearer!(request("/mcp", { origin: null, bearer: ours.access_token, host })), host).toBeNull();
+    const ours = accessOf(await connect(half, ADDRESS));
+    // Each refuses the other's, on its own host and on the host the token names.
+    for (const host of [HOST, "other.example"]) {
+      expect(await half.bearer!(request("/mcp", { origin: null, bearer: theirs, host })), host).toBeNull();
+      expect(await elsewhere.bearer!(request("/mcp", { origin: null, bearer: ours, host })), host).toBeNull();
     }
     // A token of one's issuer for the other's resource is none either: both must be the configured pair.
-    const mixed = loginAt({ issuer: ADDRESS.issuer, resource: router.resource });
-    const split = await connect(mixed, { issuer: ADDRESS.issuer, resource: router.resource });
-    expect(claimsOf(split.access_token)).toMatchObject({ iss: ADDRESS.issuer, aud: router.resource });
-    expect(await half.bearer!(request("/mcp", { origin: null, bearer: split.access_token }))).toBeNull();
-    expect(await routed.bearer!(request("/mcp", { origin: null, bearer: split.access_token }))).toBeNull();
+    const mixed = { issuer: ADDRESS.issuer, resource: other.resource };
+    const split = accessOf(await connect(loginAt(mixed), mixed));
+    expect(claimsOf(split)).toMatchObject({ iss: ADDRESS.issuer, aud: other.resource });
+    expect(await half.bearer!(request("/mcp", { origin: null, bearer: split }))).toBeNull();
+    expect(await elsewhere.bearer!(request("/mcp", { origin: null, bearer: split }))).toBeNull();
+    // Each login made the row of its own resource, and no other.
+    expect(await rowsOf(pool)).toEqual([ADDRESS.resource, other.resource].toSorted());
   });
 });

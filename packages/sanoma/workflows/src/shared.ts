@@ -196,6 +196,19 @@ export const slugged = (name: string): string =>
     .replaceAll(/[^a-z0-9]+/g, "-")
     .replaceAll(/^-+|-+$/g, "");
 
+/**
+ * An instance's URL as it is stored and compared, without a trailing slash, or why it is refused:
+ * `http(s)`, no user or password, no query, no fragment. What the wakeup service keeps (`/wake`
+ * is added to it), and what an agent address is written as.
+ */
+export function instanceUrl(value: unknown): { url: string } | { error: string } {
+  const refused = { error: "url must be an http(s) URL with no user, password, query or fragment" };
+  if (typeof value !== "string" || /[?#]/.test(value) || !URL.canParse(value)) return refused;
+  const url = new URL(value);
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return refused;
+  return { url: url.href.replace(/\/+$/, "") };
+}
+
 /** Where a host with a `hostname` serves the app (`HostSpec`'s `hostname`): `https://<hostname>`. */
 export const hostnameUrl = (hostname: string): string => `https://${hostname}`;
 

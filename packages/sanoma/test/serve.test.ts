@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "sanoma/workflows/shared";
-import { appOptions, parseDomains, wakeRoute } from "../src/serve.ts";
+import { appOptions, parseDomains, resetNotices, wakeRoute } from "../src/serve.ts";
 
 /** Sets these variables for the test, and unsets the other launcher variables appOptions reads. */
 function environment(values: Record<string, string>) {
   const names = [
     "SANOMA_APP_HOST",
     "SANOMA_HOSTNAME",
+    "SANOMA_HOST_URL",
     "SANOMA_GITHUB_CLIENT_ID",
     "SANOMA_GITHUB_CLIENT_SECRET",
     "SANOMA_DOMAINS",
@@ -86,19 +87,52 @@ describe("appOptions", () => {
     expect(options.social).toEqual({ github: { clientId: "id", clientSecret: "secret" } });
   });
 
-  it("takes the app's public hostname from SANOMA_HOSTNAME beyond this machine, and refuses what is not one", async () => {
-    for (const hostname of ["app.sanoma.example", "App.Sanoma.Example", ""]) {
-      environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY, SANOMA_HOSTNAME: hostname });
-      expect((await appOptions()).login?.name, hostname).toBe("staff");
+  it("takes the agent address from SANOMA_HOSTNAME or SANOMA_HOST_URL beyond this machine, and refuses what names none", async () => {
+    const beyond = { SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY };
+    for (const address of [
+      { SANOMA_HOSTNAME: "app.sanoma.example" },
+      { SANOMA_HOSTNAME: "App.Sanoma.Example" },
+      { SANOMA_HOST_URL: "http://10.0.0.7:3000" },
+      { SANOMA_HOST_URL: " https://intranet/ " },
+    ] as Record<string, string>[]) {
+      environment({ ...beyond, ...address });
+      expect((await appOptions()).login?.name, JSON.stringify(address)).toBe("staff");
     }
     for (const hostname of ["https://app.sanoma.example", "app.sanoma.example:8443", "app.sanoma.example/mcp", "app"]) {
-      environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY, SANOMA_HOSTNAME: hostname });
+      environment({ ...beyond, SANOMA_HOSTNAME: hostname });
       await expect(appOptions(), hostname).rejects.toThrow(UsageError);
       await expect(appOptions(), hostname).rejects.toThrow(`SANOMA_HOSTNAME is "${hostname}": write the hostname`);
     }
-    // On this machine nobody signs in, so it is not read.
-    environment({ SANOMA_HOSTNAME: "https://app.sanoma.example" });
+    for (const url of ["app.sanoma.example", "https://app.sanoma.example/app", "ftp://app.sanoma.example"]) {
+      environment({ ...beyond, SANOMA_HOST_URL: url });
+      await expect(appOptions(), url).rejects.toThrow(UsageError);
+      await expect(appOptions(), url).rejects.toThrow(`SANOMA_HOST_URL: "${url}" is not where an app is served`);
+    }
+    // On this machine nobody signs in, so neither is read.
+    environment({ SANOMA_HOSTNAME: "https://app.sanoma.example", SANOMA_HOST_URL: "nothing" });
     expect(await appOptions()).toEqual({ host: undefined });
+  });
+
+  it("says once, beyond this machine with no agent address, that no agent can sign in, and what to set", async () => {
+    const said = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const notices = () => said.mock.calls.filter(([line]) => String(line).includes("no agent address"));
+      // With an address, and on this machine: nothing is said.
+      environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY, SANOMA_HOSTNAME: "app.sanoma.example" });
+      await appOptions();
+      environment({});
+      await appOptions();
+      expect(notices()).toEqual([]);
+      environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY });
+      resetNotices();
+      await appOptions();
+      // A reload reads the options again: it is not said twice.
+      await appOptions();
+      expect(notices()).toHaveLength(1);
+      expect(notices()[0]![0]).toMatch(/^No agent can sign in at \/mcp: .*Set SANOMA_HOSTNAME .* or SANOMA_HOST_URL /);
+    } finally {
+      said.mockRestore();
+    }
   });
 
   it("names SANOMA_SIGNING_KEY when the staff login has no key to sign with", async () => {

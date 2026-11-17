@@ -39,7 +39,8 @@ import { liveSnapshot } from "./snapshot-build.ts";
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
 export type { IngressRoute } from "./handler.ts";
-export { agentAddressAt, agentAddressOf, type MakeStaffLogin, type StaffSocial, staffLogin } from "./login/staff.ts";
+export { agentAddressAt, agentAddressFrom } from "sanoma/workflows";
+export { type MakeStaffLogin, type StaffSocial, staffLogin } from "./login/staff.ts";
 export { loopbackLogin } from "./loopback.ts";
 export type { AppBundle, AppBundleContext, AppBundleEnv, AppBundleModule, AppHost } from "./app-bundle.ts";
 

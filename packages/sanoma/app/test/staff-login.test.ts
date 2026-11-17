@@ -1,12 +1,20 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LoginContext, type LoginHalf, type LoginMethod, sealInvite } from "sanoma/workflows";
+import {
+  type AgentAddress,
+  agentAddressAt,
+  type LoginContext,
+  NO_AGENT_ADDRESS,
+  type LoginHalf,
+  type LoginMethod,
+  sealInvite,
+} from "sanoma/workflows";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppContext, LoginProvider } from "../src/context.ts";
 import type { AppSnapshot } from "../src/snapshot.ts";
 import { admitting } from "../src/login/admission.ts";
-import { agentAddressAt, agentAddressOf, staffLogin } from "../src/login/staff.ts";
+import { staffLogin } from "../src/login/staff.ts";
 import { readPeople } from "sanoma/workflows/describe";
 import { CLAUDE_CODE } from "./staff-oauth-helpers.ts";
 
@@ -15,8 +23,8 @@ import { CLAUDE_CODE } from "./staff-oauth-helpers.ts";
 // `POST /auth/invite`. Better Auth itself is `packages/sanoma/better-auth/test/staff.test.ts`'s.
 
 const APP = "https://acme.example";
-/** The instance's agent address: the app's own hostname's. */
-const ADDRESS = agentAddressOf("acme.example");
+/** The instance's agent address: the app's own origin's. */
+const ADDRESS = agentAddressAt(APP);
 const root = mkdtempSync(join(tmpdir(), "sanoma-staff-"));
 mkdirSync(join(root, "resources"));
 writeFileSync(
@@ -104,21 +112,26 @@ describe("staffLogin", () => {
   let login: LoginProvider;
 
   async function opened(
-    methods: LoginMethod[] = ["code", "invite"],
-    sender = true,
-    stylesheet?: string,
-    /** The company as its files say at a request (`open`'s `current`): the one snapshot unless given. */
-    current?: (snapshot: AppSnapshot) => AppSnapshot | Promise<AppSnapshot>,
-    /** The instance's agent address; null for an instance with none. */
-    address: typeof ADDRESS | null = ADDRESS,
+    options: {
+      methods?: LoginMethod[];
+      /** Whether the config names a sender for the email code. */
+      sender?: boolean;
+      stylesheet?: string;
+      /** The company as its files say at a request (`open`'s `current`): the one snapshot unless given. */
+      current?: (snapshot: AppSnapshot) => AppSnapshot | Promise<AppSnapshot>;
+      /** The instance's agent address: `ADDRESS` unless given, and none when given as undefined. */
+      address?: AgentAddress | undefined;
+    } = {},
   ): Promise<LoginProvider> {
+    const { methods = ["code", "invite"], sender = true, stylesheet, current } = options;
+    const address = "address" in options ? options.address : ADDRESS;
     const provider = staffLogin(
       async (given) => {
         context = given;
         return fakeHalf(methods);
       },
       { github: { clientId: "id", clientSecret: "secret" } },
-      address ?? undefined,
+      address,
     );
     const snapshot = { people: readPeople(root) } as AppSnapshot;
     await provider.open!(
@@ -169,7 +182,7 @@ describe("staffLogin", () => {
   });
 
   it("gives no sender when the config names none", async () => {
-    await opened(["invite"], false);
+    await opened({ methods: ["invite"], sender: false });
     expect(context.sendCode).toBeUndefined();
   });
 
@@ -204,7 +217,7 @@ describe("staffLogin", () => {
     const fn = (await login.handle!(request("/_serverFn/abc", { method: "POST" })))!;
     expect(await fn.json()).toEqual({ error: "Sign in first" });
 
-    const github = await opened(["code", "github", "invite"]);
+    const github = await opened({ methods: ["code", "github", "invite"] });
     const both = await (await github.handle!(request("/")))!.text();
     expect(both).toContain("Continue with GitHub");
     expect(both).toContain('errorCallbackURL:"/auth/login"');
@@ -245,7 +258,7 @@ describe("staffLogin", () => {
   });
 
   it("links the kit's stylesheet, which loads signed out with its fonts, and nothing else does", async () => {
-    const styled = await opened(["code", "invite"], true, "/assets/style-abc.css");
+    const styled = await opened({ stylesheet: "/assets/style-abc.css" });
     const html = await (await styled.handle!(request("/auth/login")))!.text();
     expect(html).toContain('<link rel="stylesheet" href="/assets/style-abc.css">');
     expect(await styled.handle!(request("/assets/style-abc.css"))).toBeUndefined();
@@ -255,7 +268,7 @@ describe("staffLogin", () => {
   });
 
   it("says to ask for an invite when email sign-in is not set up, naming no file", async () => {
-    const invites = await opened(["invite"], false);
+    const invites = await opened({ methods: ["invite"], sender: false });
     const html = await (await invites.handle!(request("/")))!.text();
     expect(html).toContain("Email sign-in not set up");
     expect(html).toContain("Ask for an invite link");
@@ -265,7 +278,7 @@ describe("staffLogin", () => {
     expect(html).not.toContain("Continue with GitHub");
     expect(html).not.toMatch(/resources\/|sanoma\.config|Resend|SANOMA_/);
 
-    const github = await opened(["github", "invite"], false);
+    const github = await opened({ methods: ["github", "invite"], sender: false });
     const both = await (await github.handle!(request("/")))!.text();
     expect(both).toContain("Ask for an invite link");
     expect(both).toContain("Continue with GitHub");
@@ -378,8 +391,10 @@ describe("staffLogin", () => {
   it("admits nobody, and fails no sign-in, while the people cannot be read", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const unread = await opened(["code", "invite"], true, undefined, async () => {
-        throw new Error("resources/people.ts: Unexpected token");
+      const unread = await opened({
+        current: async () => {
+          throw new Error("resources/people.ts: Unexpected token");
+        },
       });
       const { staff } = context;
       // What the half is told: nobody is declared, and a sign-in it made is not the app's to fail.
@@ -489,7 +504,7 @@ describe("staffLogin", () => {
     answers: Record<string, () => { status: number; body: unknown }>,
     cookie?: string,
   ) {
-    login = await opened(["code", "github", "invite"]);
+    login = await opened({ methods: ["code", "github", "invite"] });
     const page = (await login.handle!(request(`/auth/login?${search}`, { ...(cookie && { cookie }) })))!;
     expect(page.status).toBe(200);
     const html = await page.text();
@@ -552,30 +567,6 @@ describe("staffLogin", () => {
 
     it("gives the half its OAuth: the configured address, and the agent each client stands for, as the files say", async () => {
       expect(ADDRESS).toEqual({ issuer: `${APP}/auth/better-auth`, resource: `${APP}/mcp` });
-      // An app is at one address, however its hostname or its URL is written: no trailing slash, no default port.
-      for (const made of [
-        agentAddressOf("ACME.Example"),
-        agentAddressAt(APP),
-        agentAddressAt(`${APP}/`),
-        agentAddressAt("HTTPS://Acme.Example:443/"),
-      ]) {
-        expect(made).toEqual(ADDRESS);
-      }
-      expect(agentAddressAt("http://127.0.0.1:3000/")).toEqual({
-        issuer: "http://127.0.0.1:3000/auth/better-auth",
-        resource: "http://127.0.0.1:3000/mcp",
-      });
-      // What is no origin gives none: a path, a query, a user, no scheme.
-      for (const url of [
-        `${APP}/app`,
-        `${APP}/?x=1`,
-        "https://ada@acme.example",
-        "acme.example",
-        "ftp://acme.example",
-        "",
-      ]) {
-        expect(() => agentAddressAt(url), url).toThrow(/agent address/);
-      }
       expect(context.staff!.oauth!.address).toEqual(ADDRESS);
       expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("claude-code");
       expect(await context.staff!.oauth!.agentOf("https://elsewhere.example/client.json")).toBeUndefined();
@@ -609,14 +600,14 @@ describe("staffLogin", () => {
     });
 
     it("gives the half no OAuth without an agent address, and /mcp's 401 says what to set", async () => {
-      const plain = await opened(["code", "invite"], true, undefined, undefined, null);
+      const plain = await opened({ address: undefined });
       expect(context.staff!.oauth).toBeUndefined();
       // No client can sign in: no challenge to follow, with or without a token, and the setting named.
       for (const asked of [mcp(), mcp("at.nothing"), request("/mcp/", { method: "POST" })]) {
         const refused = (await plain.handle!(asked))!;
         expect([refused.status, refused.headers.get("www-authenticate")]).toEqual([401, null]);
         expect(refused.headers.get("cache-control")).toBe("no-store");
-        expect(((await refused.json()) as { error: string }).error).toMatch(/no agent address\. Set SANOMA_HOSTNAME /);
+        expect(((await refused.json()) as { error: string }).error).toBe(NO_AGENT_ADDRESS);
       }
       // A half with no OAuth has no `bearer`: a token is nobody, whatever it says.
       const { bearer: _bearer, ...halfWithout } = fakeHalf(["code", "invite"]);

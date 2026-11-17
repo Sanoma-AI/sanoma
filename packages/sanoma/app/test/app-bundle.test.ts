@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
@@ -151,17 +151,105 @@ let appless: Awaited<ReturnType<typeof unstable_startWorker>>;
 /** The same upload declared without a hostname: no `SANOMA_HOSTNAME`, its own URL in `SANOMA_HOST_URL`. */
 let unnamed: Awaited<ReturnType<typeof unstable_startWorker>>;
 
-const get = (url: string, init?: RequestInit) => worker.fetch(url, init as never) as unknown as Promise<Response>;
-/** A request as TLS in front of a Worker hands it on (the dev server is plain http): an invite's URL and a cookie are then https's. */
-const secure = (url: string, init: RequestInit = {}) =>
-  get(url, { ...init, headers: { ...(init.headers as Record<string, string>), "x-forwarded-proto": "https" } });
+type Worker = Awaited<ReturnType<typeof unstable_startWorker>>;
+type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
-/** The same, to the Worker declared without a hostname. */
-const at = (url: string, init: RequestInit = {}) =>
-  unnamed.fetch(url, {
-    ...init,
-    headers: { ...(init.headers as Record<string, string>), "x-forwarded-proto": "https" },
-  } as never) as unknown as Promise<Response>;
+const get: Fetch = (url, init) => worker.fetch(url, init as never) as unknown as Promise<Response>;
+/** Requests to a Worker as TLS in front of it hands them on (the dev server is plain http): an invite's URL and a cookie are then https's. */
+const through =
+  (to: () => Worker): Fetch =>
+  (url, init = {}) =>
+    to().fetch(url, {
+      ...init,
+      headers: { ...(init.headers as Record<string, string>), "x-forwarded-proto": "https" },
+    } as never) as unknown as Promise<Response>;
+const secure = through(() => worker);
+
+/** `tools/list` at `app`'s `/mcp`, as an MCP client posts it, with `headers`. */
+const listTools = (fetch: Fetch, app: string, headers: Record<string, string>) =>
+  fetch(`${app}/mcp`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+  });
+
+/** What going live does at `app`: an invite for Ada from a request sealed under the signing key, landed, then the link that signs her in. Her session's cookie. */
+async function signInByInvite(fetch: Fetch, app: string): Promise<string> {
+  const minted = await fetch(`${app}/auth/invite`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ request: sealInvite({ email: "ada@acme.test" }) }),
+  });
+  expect(minted.status).toBe(200);
+  const { url } = (await minted.json()) as { url: string };
+  expect(url).toMatch(new RegExp(`^${app}/auth/invite/`));
+  const landing = await fetch(url);
+  expect(landing.status).toBe(200);
+  const html = await landing.text();
+  expect(html).toContain("Continue as ada@acme.test");
+  const verify = /href="([^"]*magic-link\/verify[^"]*)"/.exec(html)?.[1]?.replaceAll(/&(?:amp|#38);/g, "&");
+  expect(verify).toBeDefined();
+  const landed = await fetch(`${app}${verify}`, { redirect: "manual" });
+  expect(landed.status).toBe(302);
+  expect(landed.headers.get("location")).toBe(`${app}/`);
+  const cookie = landed.headers.get("set-cookie")?.split(";")[0];
+  expect(cookie).toMatch(/session_token=/);
+  return cookie!;
+}
+
+const CLIENT_REDIRECT = "http://127.0.0.1:53682/callback";
+
+/** `client`'s authorize at `app` for its `/mcp`, opened in the browser of the person signed in with `cookie`. */
+const authorize = (fetch: Fetch, app: string, cookie: string, client: string, verifier: string) =>
+  fetch(
+    `${app}/auth/better-auth/oauth2/authorize?${new URLSearchParams({
+      response_type: "code",
+      client_id: client,
+      redirect_uri: CLIENT_REDIRECT,
+      code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+      code_challenge_method: "S256",
+      state: "s1",
+      resource: `${app}/mcp`,
+    })}`,
+    { headers: { cookie, accept: "text/html" }, redirect: "manual" },
+  );
+
+/**
+ * Claude Code's sign-in at `app` for the person signed in with `cookie`: authorize, her consent,
+ * the token endpoint's form with no Origin. Its access token's claims, and the redirect back.
+ */
+async function connectClient(fetch: Fetch, app: string, cookie: string) {
+  const verifier = randomBytes(32).toString("base64url");
+  const asked = await authorize(fetch, app, cookie, CLAUDE_CODE, verifier);
+  const consentAt = new URL(await nextOf(asked), app);
+  expect(consentAt.pathname).toBe("/auth/consent");
+  expect(await (await fetch(consentAt.href, { headers: { cookie } })).text()).toContain("Let claude-code act for you?");
+  const allowed = await fetch(`${app}/auth/better-auth/oauth2/consent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: app, cookie },
+    body: JSON.stringify({ accept: true, oauth_query: consentAt.search.slice(1) }),
+  });
+  const back = new URL(((await allowed.json()) as { url: string }).url);
+  const exchanged = await fetch(`${app}/auth/better-auth/oauth2/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: back.searchParams.get("code")!,
+      redirect_uri: CLIENT_REDIRECT,
+      client_id: CLAUDE_CODE,
+      code_verifier: verifier,
+      resource: `${app}/mcp`,
+    }).toString(),
+  });
+  expect(exchanged.status).toBe(200);
+  const { access_token } = (await exchanged.json()) as { access_token: string };
+  const claims = JSON.parse(Buffer.from(access_token.split(".")[1]!, "base64url").toString()) as Record<
+    string,
+    unknown
+  >;
+  return { access_token, claims, back };
+}
 
 beforeAll(async () => {
   const { repo, config } = company();
@@ -413,46 +501,22 @@ describe("buildAppBundle", () => {
     expect(await signedOut.text()).toContain("invite link");
     expect((await secure(`${app}/auth/better-auth/get-session`)).status).toBe(200);
     expect((await secure(`${app}/auth/invite/nothing`)).status).toBe(410);
-    // What going live does: an invite for the person, from a request sealed under the signing key.
-    const minted = await secure(`${app}/auth/invite`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ request: sealInvite({ email: "ada@acme.test" }) }),
-    });
-    expect(minted.status).toBe(200);
-    const { url } = (await minted.json()) as { url: string };
-    expect(url).toMatch(new RegExp(`^${app}/auth/invite/`));
-    const landing = await secure(url);
-    expect(landing.status).toBe(200);
-    const html = await landing.text();
-    expect(html).toContain("Continue as ada@acme.test");
-    const verify = /href="([^"]*magic-link\/verify[^"]*)"/.exec(html)?.[1]?.replaceAll(/&(?:amp|#38);/g, "&");
-    expect(verify).toBeDefined();
-    const landed = await secure(`${app}${verify}`, { redirect: "manual" });
-    expect(landed.status).toBe(302);
-    expect(landed.headers.get("location")).toBe(`${app}/`);
-    const cookie = landed.headers.get("set-cookie")?.split(";")[0];
-    expect(cookie).toMatch(/session_token=/);
-    const home = await secure(`${app}/`, { headers: { cookie: cookie! } });
+    const cookie = await signInByInvite(secure, app);
+    const home = await secure(`${app}/`, { headers: { cookie } });
     expect(home.status).toBe(200);
     // The agent surface (`/mcp`) on the Worker: behind the staff sign-in, then the MCP server, as the person.
-    const listTools = (headers: Record<string, string>) =>
-      secure(`${app}/mcp`, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
-      });
-    expect((await listTools({})).status).toBe(401);
+    const list = (headers: Record<string, string>) => listTools(secure, app, headers);
+    expect((await list({})).status).toBe(401);
     // The loopback login's header is no sign-in on a host.
-    expect((await listTools({ "x-sanoma-actor": "ada" })).status).toBe(401);
-    const listed = await listTools({ cookie: cookie! });
+    expect((await list({ "x-sanoma-actor": "ada" })).status).toBe(401);
+    const listed = await list({ cookie });
     expect(listed.status).toBe(200);
     expect(await listed.text()).toContain('"name":"start_run"');
 
     // A client of her own (Claude Code) on the Worker: the 401 that starts its sign-in, the
     // metadata, authorize for her (signed in already), her consent, the token endpoint's form
     // with no Origin, and its token at /mcp as the declared agent for her.
-    const challenged = await listTools({});
+    const challenged = await list({});
     const metadataUrl = `${app}/.well-known/oauth-protected-resource/mcp`;
     expect(challenged.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${metadataUrl}"`);
     expect(await (await secure(metadataUrl)).json()).toMatchObject({
@@ -470,76 +534,35 @@ describe("buildAppBundle", () => {
       code_challenge_methods_supported: ["S256"],
     });
     expect(server.token_endpoint_auth_methods_supported).toContain("none");
-    const verifier = "v".repeat(43);
-    const authorize = (client: string) =>
-      secure(
-        `${app}/auth/better-auth/oauth2/authorize?${new URLSearchParams({
-          response_type: "code",
-          client_id: client,
-          redirect_uri: "http://127.0.0.1:53682/callback",
-          code_challenge: createHash("sha256").update(verifier).digest("base64url"),
-          code_challenge_method: "S256",
-          state: "s1",
-          resource: `${app}/mcp`,
-        })}`,
-        { headers: { cookie: cookie!, accept: "text/html" }, redirect: "manual" },
-      );
-    const asked = await authorize(CLAUDE_CODE);
-    const consentAt = new URL(await nextOf(asked), app);
-    expect(consentAt.pathname).toBe("/auth/consent");
-    expect(await (await secure(consentAt.href, { headers: { cookie: cookie! } })).text()).toContain(
-      "Let claude-code act for you?",
-    );
-    const allowed = await secure(`${app}/auth/better-auth/oauth2/consent`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: app, cookie: cookie! },
-      body: JSON.stringify({ accept: true, oauth_query: consentAt.search.slice(1) }),
-    });
-    const code = new URL(((await allowed.json()) as { url: string }).url).searchParams.get("code")!;
-    const exchanged = await secure(`${app}/auth/better-auth/oauth2/token`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: "http://127.0.0.1:53682/callback",
-        client_id: CLAUDE_CODE,
-        code_verifier: verifier,
-        resource: `${app}/mcp`,
-      }).toString(),
-    });
-    expect(exchanged.status).toBe(200);
-    const { access_token } = (await exchanged.json()) as { access_token: string };
-    expect(JSON.parse(Buffer.from(access_token.split(".")[1]!, "base64url").toString())).toMatchObject({
-      aud: `${app}/mcp`,
-      azp: CLAUDE_CODE,
-    });
-    const asClient = await listTools({ authorization: `Bearer ${access_token}` });
+    const { access_token, claims } = await connectClient(secure, app, cookie);
+    expect(claims).toMatchObject({ aud: `${app}/mcp`, azp: CLAUDE_CODE });
+    const asClient = await list({ authorization: `Bearer ${access_token}` });
     expect(asClient.status).toBe(200);
     expect(await asClient.text()).toContain('"name":"start_run"');
     expect(outbound).toEqual([CLAUDE_CODE]);
     // A client no agent declares: refused at authorize, its document never fetched.
-    const undeclared = await authorize("https://elsewhere.example/oauth/client.json");
+    const undeclared = await authorize(
+      secure,
+      app,
+      cookie,
+      "https://elsewhere.example/oauth/client.json",
+      "v".repeat(43),
+    );
     expect(undeclared.status).toBe(403);
     expect(await undeclared.text()).toContain("resources/people.ts");
     expect(outbound).toEqual([CLAUDE_CODE]);
     // A declared client whose document redirects: refused, the redirect never followed.
-    const redirected = await authorize(MOVED);
+    const redirected = await authorize(secure, app, cookie, MOVED, "v".repeat(43));
     expect([302, 200]).not.toContain(redirected.status);
     expect(outbound).toEqual([CLAUDE_CODE, MOVED]);
   });
 
   it("takes its agent address from its own URL when it has no hostname: discovery names it, and a client signs in", async () => {
     const app = WORKERS_DEV;
-    const listTools = (headers: Record<string, string>) =>
-      at(`${app}/mcp`, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
-      });
+    const at = through(() => unnamed);
     // The 401 and both documents name the Worker's own URL, its trailing slash gone.
     const metadataUrl = `${app}/.well-known/oauth-protected-resource/mcp`;
-    const challenged = await listTools({});
+    const challenged = await listTools(at, app, {});
     expect(challenged.status).toBe(401);
     expect(challenged.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${metadataUrl}"`);
     expect(await (await at(metadataUrl)).json()).toMatchObject({
@@ -551,68 +574,16 @@ describe("buildAppBundle", () => {
       authorization_endpoint: `${app}/auth/better-auth/oauth2/authorize`,
       token_endpoint: `${app}/auth/better-auth/oauth2/token`,
     });
-    // The person signs in by an invite, then the client's sign-in for her: authorize, consent, the code for a token.
-    const minted = await at(`${app}/auth/invite`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ request: sealInvite({ email: "ada@acme.test" }) }),
-    });
-    expect(minted.status).toBe(200);
-    const html = await (await at(((await minted.json()) as { url: string }).url)).text();
-    const verify = /href="([^"]*magic-link\/verify[^"]*)"/.exec(html)?.[1]?.replaceAll(/&(?:amp|#38);/g, "&");
-    const landed = await at(`${app}${verify}`, { redirect: "manual" });
-    const cookie = landed.headers.get("set-cookie")?.split(";")[0];
-    expect(cookie).toMatch(/session_token=/);
-    const verifier = "w".repeat(43);
-    const asked = await at(
-      `${app}/auth/better-auth/oauth2/authorize?${new URLSearchParams({
-        response_type: "code",
-        client_id: CLAUDE_CODE,
-        redirect_uri: "http://127.0.0.1:53682/callback",
-        code_challenge: createHash("sha256").update(verifier).digest("base64url"),
-        code_challenge_method: "S256",
-        state: "s2",
-        resource: `${app}/mcp`,
-      })}`,
-      { headers: { cookie: cookie!, accept: "text/html" }, redirect: "manual" },
-    );
-    const consentAt = new URL(await nextOf(asked), app);
-    expect(consentAt.pathname).toBe("/auth/consent");
-    const allowed = await at(`${app}/auth/better-auth/oauth2/consent`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: app, cookie: cookie! },
-      body: JSON.stringify({ accept: true, oauth_query: consentAt.search.slice(1) }),
-    });
-    const back = new URL(((await allowed.json()) as { url: string }).url);
+    // The person signs in by an invite, then the client's sign-in for her, as on the Worker with a hostname.
+    const cookie = await signInByInvite(at, app);
+    const { access_token, claims, back } = await connectClient(at, app, cookie);
     expect(back.searchParams.get("iss")).toBe(`${app}/auth/better-auth`);
-    const exchanged = await at(`${app}/auth/better-auth/oauth2/token`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code: back.searchParams.get("code")!,
-        redirect_uri: "http://127.0.0.1:53682/callback",
-        client_id: CLAUDE_CODE,
-        code_verifier: verifier,
-        resource: `${app}/mcp`,
-      }).toString(),
-    });
-    expect(exchanged.status).toBe(200);
-    const { access_token } = (await exchanged.json()) as { access_token: string };
-    expect(JSON.parse(Buffer.from(access_token.split(".")[1]!, "base64url").toString())).toMatchObject({
-      iss: `${app}/auth/better-auth`,
-      aud: `${app}/mcp`,
-      azp: CLAUDE_CODE,
-    });
-    const asClient = await listTools({ authorization: `Bearer ${access_token}` });
+    expect(claims).toMatchObject({ iss: `${app}/auth/better-auth`, aud: `${app}/mcp`, azp: CLAUDE_CODE });
+    const asClient = await listTools(at, app, { authorization: `Bearer ${access_token}` });
     expect(asClient.status).toBe(200);
     expect(await asClient.text()).toContain('"name":"start_run"');
     // The token is that address's: the Worker with a hostname, on the same tables and keys, refuses it.
-    const elsewhere = await secure(`https://${HOSTNAME}/mcp`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${access_token}` },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
-    });
+    const elsewhere = await listTools(secure, `https://${HOSTNAME}`, { authorization: `Bearer ${access_token}` });
     expect(elsewhere.status).toBe(401);
   });
 

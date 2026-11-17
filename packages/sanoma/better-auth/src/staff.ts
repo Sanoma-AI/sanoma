@@ -1,18 +1,23 @@
 import {
   type AgentAddress,
+  checkAgentAddress,
+  errorMessage,
   INVITE_SECONDS,
   type LoginContext,
   type LoginHalf,
   type LoginMethod,
   RESOURCE_METADATA,
+  resourceMetadataOf,
   sameOrigin,
+  STAFF_AUTH_PATH,
   type SignInMethod,
 } from "sanoma/workflows";
 import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import { createAuthMiddleware } from "better-auth/api";
 import { verifyJwsAccessToken } from "better-auth/oauth2";
 import { magicLink } from "better-auth/plugins/magic-link";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import type { Pool } from "pg";
 import {
   emailCode,
   identityOf,
@@ -24,7 +29,9 @@ import {
   type User,
   withSignOutBody,
 } from "./instance.ts";
-import { AGENT_CLAIM, declaredMetadataFetch, oauthPlugins } from "./oauth.ts";
+import { databaseOn } from "sanoma/workflows/db";
+import { oauthResource } from "./db/staff.ts";
+import { AGENT_CLAIM, declaredMetadataFetch, GRANT_TYPES, oauthPlugins, SCOPES } from "./oauth.ts";
 
 /** Says nothing: a listener for a checked-out client's `error`, whose query fails on its own. */
 const quiet = () => undefined;
@@ -37,7 +44,7 @@ const quiet = () => undefined;
 
 /** The schema the staff login's tables are in, beside the visitors' `better_auth`. */
 const SCHEMA = SCHEMAS.staff;
-const BASE_PATH = "/auth/better-auth";
+const BASE_PATH = STAFF_AUTH_PATH;
 const SIGN_OUT = `${BASE_PATH}/sign-out`;
 const SEND_CODE = "/email-otp/send-verification-otp";
 /** How long a staff session lasts: seven days. Who may sign in is read on every request, so removing someone takes effect at once. */
@@ -93,28 +100,37 @@ const OAUTH_ROUTES = new Map<string, string | undefined>([
 const NO_ORIGIN = new Set([TOKEN, REVOKE]);
 
 /**
- * What RFC 8414's metadata says, of what the provider would: only what is served (`OAUTH_ROUTES`)
- * and supported here. Public clients alone (`none`, at the token endpoint and revocation), so no
- * client secret or assertion; no introspection, DPoP or back-channel logout, which nothing here
- * serves.
+ * RFC 8414's metadata for an agent address's issuer: a function of the address alone, made from
+ * what is served (`OAUTH_ROUTES`, each endpoint on the issuer, whose path is where the routes
+ * are) and supported here (`SCOPES`, `GRANT_TYPES`). Client ID Metadata Documents, public clients
+ * alone (`none`, at the token endpoint and revocation), so no client secret or assertion; PKCE
+ * `S256`; `iss` on every answer; no registration, introspection, DPoP or back-channel logout,
+ * which nothing here serves. A route is added to `OAUTH_ROUTES` with its field, a method here.
  */
-const SERVER_METADATA_FIELDS = [
-  "issuer",
-  ...[...OAUTH_ROUTES.values()].filter((field) => field !== undefined),
-  "scopes_supported",
-  "response_types_supported",
-  "response_modes_supported",
-  "grant_types_supported",
-  "code_challenge_methods_supported",
-  "authorization_response_iss_parameter_supported",
-  "client_id_metadata_document_supported",
-];
+export function serverMetadataOf({ issuer }: AgentAddress): Record<string, unknown> {
+  const endpoints = [...OAUTH_ROUTES].flatMap(([route, field]) =>
+    field === undefined ? [] : [[field, `${issuer}${route}`] as const],
+  );
+  return {
+    issuer,
+    ...Object.fromEntries(endpoints),
+    scopes_supported: SCOPES,
+    response_types_supported: ["code"],
+    response_modes_supported: ["query"],
+    grant_types_supported: GRANT_TYPES,
+    token_endpoint_auth_methods_supported: ["none"],
+    revocation_endpoint_auth_methods_supported: ["none"],
+    code_challenge_methods_supported: ["S256"],
+    authorization_response_iss_parameter_supported: true,
+    client_id_metadata_document_supported: true,
+  };
+}
 
 /** The routes of the email code, which answer only when the app can send one. */
 const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
 
-/** RFC 8414's well-known path, which an issuer's own path is appended to. */
-const SERVER_METADATA = "/.well-known/oauth-authorization-server";
+/** Where RFC 8414's metadata for the issuer is: the well-known path with the issuer's own, `BASE_PATH`, appended. */
+const SERVER_METADATA = `/.well-known/oauth-authorization-server${BASE_PATH}`;
 
 /**
  * How the metadata documents may be kept: five minutes, by the browser or the client alone. Each
@@ -123,9 +139,6 @@ const SERVER_METADATA = "/.well-known/oauth-authorization-server";
  * the instance.
  */
 const DISCOVERY_CACHE = { "cache-control": "private, max-age=300" };
-
-/** A path's own part of a URL, without a trailing slash: an issuer's or a resource's, as its well-known path takes it. */
-const pathOf = (url: string) => new URL(url).pathname.replace(/\/+$/, "");
 
 /** The app's OAuth context (`LoginContext.staff.oauth`). */
 type OAuthContext = NonNullable<NonNullable<LoginContext["staff"]>["oauth"]>;
@@ -189,7 +202,25 @@ export function betterAuthStaffLogin(
   if (!staff) throw new Error("better-auth: the staff login needs the app's staff context");
   const github = staff.social.github;
   const oauth = staff.oauth;
-  if (oauth) checkAddress(oauth.address);
+  /** Both metadata documents, by the path each is served at: made once, from the address alone. */
+  const documents = new Map<string, string>();
+  if (oauth) {
+    try {
+      checkAgentAddress(oauth.address);
+    } catch (err) {
+      throw new Error(`better-auth: ${errorMessage(err)}`, { cause: err });
+    }
+    const { address } = oauth;
+    const resource = JSON.stringify({
+      resource: address.resource,
+      authorization_servers: [address.issuer],
+      bearer_methods_supported: ["header"],
+    });
+    // RFC 9728's at the resource's own path, and at the root for a client that looks there.
+    documents.set(resourceMetadataOf(address).path, resource);
+    documents.set(RESOURCE_METADATA, resource);
+    documents.set(SERVER_METADATA, JSON.stringify(serverMetadataOf(address)));
+  }
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
   const minted = new Map<string, string>();
   /**
@@ -209,6 +240,9 @@ export function betterAuthStaffLogin(
     database,
     key,
     schema: SCHEMA,
+    ...(oauth && {
+      seed: { key: oauth.address.resource, run: (pool: Pool) => ensureResource(pool, oauth.address.resource) },
+    }),
     basePath: BASE_PATH,
     // Any host the app answers on: what keeps a change to the page's own origin is `handle`'s check.
     hosts: new Map<Protocol, string[]>([
@@ -262,7 +296,7 @@ export function betterAuthStaffLogin(
         ...oauthPlugins({
           agentOf: oauth?.agentOf ?? (() => undefined),
           fetchClientMetadata,
-          address: oauth?.address,
+          issuer: oauth?.address.issuer,
         }),
         magicLink({
           expiresIn: INVITE_SECONDS,
@@ -305,30 +339,6 @@ export function betterAuthStaffLogin(
     ...(github ? (["github"] as const) : []),
     "invite",
   ];
-
-  /**
-   * A well-known path's answer, with the app's OAuth context: RFC 9728's metadata for the
-   * resource (`RESOURCE_METADATA`, at the configured resource's path, and at the root for a
-   * client that looks there), naming the configured issuer as its one authorization server; and
-   * RFC 8414's for that issuer, at the path the issuer implies, which the provider answers
-   * itself (it finds the path by its `jwt.issuer` too). Both say the configured address alone,
-   * whatever `Host` the request names: no host a request makes up gets a document of its own.
-   * Any other well-known path is a 404, never the sign-in page a client would take for a
-   * document: RFC 8414's at another path is not this issuer's, and there is no OpenID provider.
-   */
-  async function discovery(request: Request, pathname: string, { address }: OAuthContext): Promise<Response> {
-    if (pathname === `${RESOURCE_METADATA}${pathOf(address.resource)}` || pathname === RESOURCE_METADATA) {
-      if (request.method !== "GET" && request.method !== "HEAD")
-        return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
-      return Response.json(
-        { resource: address.resource, authorization_servers: [address.issuer], bearer_methods_supported: ["header"] },
-        { headers: DISCOVERY_CACHE },
-      );
-    }
-    if (pathname === `${SERVER_METADATA}${pathOf(address.issuer)}`)
-      return serverMetadata(await (await authFor(request)).handler(request), address);
-    return notFound();
-  }
 
   /** The mints of this process, one after another. */
   let mints: Promise<unknown> = Promise.resolve();
@@ -386,7 +396,7 @@ export function betterAuthStaffLogin(
     async handle(request) {
       const { pathname } = new URL(request.url);
       // With no agent address no well-known path is a document of this login's: a 404 too.
-      if (pathname.startsWith("/.well-known/")) return oauth ? discovery(request, pathname, oauth) : notFound();
+      if (pathname.startsWith("/.well-known/")) return discovery(request, documents.get(pathname));
       if (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`)) return undefined;
       const route = pathname.slice(BASE_PATH.length);
       if (oauth && route === ERROR) return sentBack(request);
@@ -565,27 +575,6 @@ const GUARDS = new Map([
 ]);
 
 /**
- * The provider's RFC 8414 answer, narrowed to `SERVER_METADATA_FIELDS`, public clients alone,
- * each endpoint the configured issuer's own (the provider writes them on its base URL, which is
- * the request's host: the issuer and its routes are one address); any other answer as it is.
- */
-async function serverMetadata(answered: Response, { issuer }: AgentAddress): Promise<Response> {
-  if (answered.status !== 200) return answered;
-  const headers = new Headers(answered.headers);
-  headers.delete("content-length");
-  for (const [name, value] of Object.entries(DISCOVERY_CACHE)) headers.set(name, value);
-  // A HEAD's answer has no body to narrow: its headers are the GET's.
-  if (answered.body === null) return new Response(null, { status: 200, headers });
-  const full = (await answered.json()) as Record<string, unknown>;
-  const metadata: Record<string, unknown> = {};
-  for (const field of SERVER_METADATA_FIELDS) if (full[field] !== undefined) metadata[field] = full[field];
-  for (const [route, field] of OAUTH_ROUTES) if (field !== undefined) metadata[field] = `${issuer}${route}`;
-  metadata.token_endpoint_auth_methods_supported = ["none"];
-  metadata.revocation_endpoint_auth_methods_supported = ["none"];
-  return new Response(JSON.stringify(metadata), { status: 200, headers });
-}
-
-/**
  * The request with DPoP (RFC 9449) left out, whatever the route: authorize's `dpop_jkt` and the
  * token endpoint's `DPoP` proof. The provider cannot be told not to bind a token to a key, and `/mcp` takes Bearer
  * tokens alone, so a DPoP-capable client would be issued a token it cannot use, and sign in again
@@ -638,24 +627,34 @@ function ownAddress(redirect: string | null): boolean {
 }
 
 /**
- * Refuses an agent address a token could never match: each of its two URLs must be written as
- * the provider writes an issuer (`validateIssuerUrl`: the URL's own serialisation, its host in
- * lower case, a default port left out, with no trailing slash, query or fragment), since `bearer`
- * and a client compare them as strings. At the login's making, so a wrong one fails the start
- * rather than every sign-in.
+ * A well-known path's answer: `document` when the login serves one there (RFC 9728's metadata
+ * for the configured resource, naming the configured issuer as its one authorization server, and
+ * RFC 8414's for that issuer), to a GET or a HEAD, the same whatever `Host` the request names,
+ * with no instance of Better Auth and nothing read. Any other well-known path is a 404, never
+ * the sign-in page a client would take for a document: RFC 8414's at another path is not this
+ * issuer's, there is no OpenID provider, and with no agent address there is no document at all.
  */
-function checkAddress(address: AgentAddress): void {
-  for (const part of ["issuer", "resource"] as const) {
-    const written = address[part];
-    const url = URL.parse(written);
-    const canonical = url && !url.search && !url.hash ? url.href.replace(/\/$/, "") : undefined;
-    if (!url || !/^https?:$/.test(url.protocol) || written !== canonical) {
-      throw new Error(
-        `better-auth: the agent address's ${part} is ${JSON.stringify(written)}: write an http(s) URL as it is compared, ` +
-          `with no trailing slash, query or fragment${canonical ? ` (${canonical})` : ""}`,
-      );
-    }
-  }
+function discovery(request: Request, document: string | undefined): Response {
+  if (document === undefined) return notFound();
+  if (request.method !== "GET" && request.method !== "HEAD")
+    return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+  const headers = { "content-type": "application/json", ...DISCOVERY_CACHE };
+  return new Response(request.method === "HEAD" ? null : document, { headers });
+}
+
+/**
+ * The provider's row for the configured resource, made when missing: once per process and
+ * database (`openBetterAuth`'s `seed`), before the login's first instance there, so before any
+ * authorize, and by no request's query. The provider issues a token only for a resource it has
+ * a row for. Two processes at once make one (the identifier is unique). A row a former address
+ * left stays: `bearer` refuses a token for it.
+ */
+async function ensureResource(pool: Pool, identifier: string): Promise<void> {
+  const now = new Date();
+  await databaseOn(pool)
+    .insert(oauthResource)
+    .values({ id: randomUUID(), identifier, name: "Agent surface", createdAt: now, updatedAt: now })
+    .onConflictDoNothing({ target: oauthResource.identifier });
 }
 
 /** No document, or no route, of this login's: never kept. */

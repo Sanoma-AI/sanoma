@@ -1,17 +1,17 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { get } from "node:http";
-import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { betterAuthStaffLogin, declaredMetadataFetch, prepareBetterAuthStaff } from "sanoma/better-auth";
 import { testDatabaseUrl } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
-import { defineWorkflow, type SanomaConfig } from "sanoma/workflows";
+import { agentAddressAt, defineWorkflow, type SanomaConfig } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ACTOR_HEADER, AGENT_HEADER } from "../src/api.ts";
 import { type App, startApp, staffLogin } from "../src/index.ts";
+import { freePort } from "../src/steps/agent/local-box.ts";
 import { CLAUDE_CODE, CLAUDE_CODE_DOCUMENT, cookieOf, resetStaffSchema } from "./staff-oauth-helpers.ts";
 
 // Needs Postgres (`pnpm db:up`) and the app built (`pnpm --filter sanoma build`). `/mcp` on a
@@ -72,16 +72,6 @@ const claudeAi = async (input: string | URL | Request): Promise<Response> => {
   return url === CLAUDE_CODE ? Response.json(CLAUDE_CODE_DOCUMENT) : new Response("Not found", { status: 404 });
 };
 
-/** A port nothing listens on now: the address is configured before the app listens. */
-const freePort = () =>
-  new Promise<number>((resolve, reject) => {
-    const probe = createServer().once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const { port } = probe.address() as AddressInfo;
-      probe.close(() => resolve(port));
-    });
-  });
-
 /** The staff login as `sanoma serve` composes it, its codes kept here and claude.ai a stand-in; `origin` is its agent address's, none without. */
 const loginAt = (origin?: string) =>
   staffLogin(
@@ -91,13 +81,14 @@ const loginAt = (origin?: string) =>
         { fetchClientMetadata: declaredMetadataFetch(claudeAi) },
       ),
     {},
-    origin === undefined ? undefined : { issuer: `${origin}/auth/better-auth`, resource: `${origin}/mcp` },
+    origin === undefined ? undefined : agentAddressAt(origin),
   );
 
 let app: App;
 beforeAll(async () => {
   await resetStaffSchema(databaseUrl);
   await prepareBetterAuthStaff(databaseUrl);
+  // A port nothing listens on now: the address is configured before the app listens.
   const port = await freePort();
   app = await startApp(testApp.config, { port, login: loginAt(`http://127.0.0.1:${port}`) });
   if (app.url !== `http://127.0.0.1:${port}`) throw new Error(`the app listens at ${app.url}, not at its address`);
@@ -484,7 +475,7 @@ describe("a host with no agent address", () => {
     for (const headers of [{}, bearerOf("a.b.c")]) {
       const refused = await mcp("tools/list", {}, headers, on("/mcp"));
       expect([refused.status, refused.headers.get("www-authenticate")]).toEqual([401, null]);
-      expect(refused.body.error).toContain("Set SANOMA_HOSTNAME");
+      expect(refused.body.error).toMatch(/Set SANOMA_HOSTNAME .* or SANOMA_HOST_URL /);
     }
     // A token the addressed app on the same database issued is nobody here.
     const { access_token } = await tokens();
