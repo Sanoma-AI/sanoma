@@ -1151,8 +1151,8 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
   });
 
   it("binds a built-in client's agent, which no file declares, to the agents' rules: forbidden and held by policy alone", async () => {
-    // Claude's hosted apps' client is built in: its agent `claude` acts for Ada, as her sign-in makes it.
-    const claudeForAda = { id: "claude", onBehalfOf: "ada" };
+    // Claude's hosted apps' client is built in: its agent `claude-ai` acts for Ada, as her sign-in makes it.
+    const claudeForAda = { id: "claude-ai", onBehalfOf: "ada" };
     expect(await failure(app.client.drift({ startedBy: claudeForAda }))).toMatchObject({
       code: "policy_denied",
       message: "workflow:drift was denied by policy: Agents do not check drift here",
@@ -1170,7 +1170,7 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
       message: "workflow:bonus was denied by policy: Contractors get no bonus",
     });
     const held = await app.client.start(payout, { amount: 9 }, { startedBy: claudeForAda });
-    expect((await app.client.run(held))?.startedBy).toEqual({ id: "claude", groups: ["agents"], onBehalfOf: "ada" });
+    expect((await app.client.run(held))?.startedBy).toEqual({ id: "claude-ai", groups: ["agents"], onBehalfOf: "ada" });
     await waitFor(async () => (await app.client.approvals(held)).some((a) => a.status === "pending"));
     expect(await app.client.approvals(held)).toEqual([
       expect.objectContaining({ approver: "ada", status: "pending", reasons: ["agent-payouts"] }),
@@ -1178,8 +1178,8 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
     await app.client.decide(held, { decision: "approve", by: { id: "ada" } });
     expect(await app.client.result(held)).toEqual({ paid: 9 });
     // Acting for no one, or for someone not declared, it is nobody.
-    expect(await failure(app.client.drift({ startedBy: "claude" }))).toMatchObject({ code: "not_admitted" });
-    expect(await failure(app.client.drift({ startedBy: { id: "claude", onBehalfOf: "zed" } }))).toMatchObject({
+    expect(await failure(app.client.drift({ startedBy: "claude-ai" }))).toMatchObject({ code: "not_admitted" });
+    expect(await failure(app.client.drift({ startedBy: { id: "claude-ai", onBehalfOf: "zed" } }))).toMatchObject({
       code: "not_admitted",
     });
   });

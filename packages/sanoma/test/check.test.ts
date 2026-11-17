@@ -256,7 +256,7 @@ export const finance = sanoma.group({ name: "finance", members: [ada, claudeCode
         warnings: [warning, taken],
       });
       expect(logged.filter((line) => line.startsWith("built-in client: "))).toEqual([
-        "built-in client: Claude (https://claude.ai/oauth/mcp-oauth-client-metadata): accepted, as the built-in agent claude",
+        "built-in client: Claude (https://claude.ai/oauth/mcp-oauth-client-metadata): accepted, as the built-in agent claude-ai",
         "built-in client: Claude Code (https://claude.ai/oauth/claude-code-client-metadata): refused, since the agent claude-code has its built-in agent's id",
       ]);
       // One client each: a warning alone, which does not fail the check.
@@ -289,7 +289,7 @@ export const finance = sanoma.group({ name: "finance", members: [ada, claudeCode
         `import { sanoma } from "sanoma/resources";
 
 export const ada = sanoma.person({ id: "ada" });
-export const noClaude = sanoma.agent({ id: "claude", off: true });
+export const noClaude = sanoma.agent({ id: "claude-ai", off: true });
 export const ours = sanoma.agent({ id: "our-claude", client: "${CLAUDE_CODE}", onBehalfOf: ada });
 `,
       );
@@ -315,7 +315,7 @@ export const bot = sanoma.agent({ id: "refund-bot", off: true });
       expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toMatchObject({
         ok: false,
         problems: expect.arrayContaining([
-          "resources/people.ts#bot: resources/people.ts#bot is off, which only turns off one of Sanoma's built-in agents (claude, claude-code): remove the declaration instead",
+          "resources/people.ts#bot: resources/people.ts#bot is off, which only turns off one of Sanoma's built-in agents (claude-ai, claude-code): remove the declaration instead",
         ]),
       });
     } finally {

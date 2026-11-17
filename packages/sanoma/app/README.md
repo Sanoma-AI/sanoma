@@ -279,7 +279,7 @@ Claude's clients are built in on every company, so they need no declaration. Eac
 
 | Client                                                     | Client id                                             | Built-in agent |
 | ---------------------------------------------------------- | ----------------------------------------------------- | -------------- |
-| Claude's apps: claude.ai, Claude Desktop and Claude mobile | `https://claude.ai/oauth/mcp-oauth-client-metadata`   | `claude`       |
+| Claude's apps: claude.ai, Claude Desktop and Claude mobile | `https://claude.ai/oauth/mcp-oauth-client-metadata`   | `claude-ai`    |
 | Claude Code                                                | `https://claude.ai/oauth/claude-code-client-metadata` | `claude-code`  |
 
 The consent page names the built-in agent and says it is built in to Sanoma and that the company has not turned it off. A policy written for `agents` reaches a built-in agent as it reaches any agent, and one may name it (`principal == Sanoma::Principal::"claude-code"`), so a company can forbid or hold its calls by policy alone. `sanoma check` and the People page's Agents tab list each built-in client and whether the company accepts it.
@@ -295,7 +295,7 @@ export const claudeCode = sanoma.agent({
 });
 
 // Claude's apps are turned off: refused as an undeclared client is.
-export const noClaude = sanoma.agent({ id: "claude", off: true });
+export const noClaude = sanoma.agent({ id: "claude-ai", off: true });
 ```
 
 - **Replace it.** An agent that declares a built-in client stands for that client, under any id, with its own groups and `onBehalfOf`. The built-in agent then does not act.

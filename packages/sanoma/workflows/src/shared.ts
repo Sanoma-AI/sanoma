@@ -960,7 +960,7 @@ export interface BuiltInClient {
  */
 export const BUILT_IN_CLIENTS: readonly BuiltInClient[] = [
   {
-    id: "claude",
+    id: "claude-ai",
     name: "Claude",
     client: "https://claude.ai/oauth/mcp-oauth-client-metadata",
     apps: "Claude's apps: claude.ai, Claude Desktop and Claude on a phone",

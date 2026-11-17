@@ -247,7 +247,16 @@ describe("whoIsStarting", () => {
     signedIn("ada-ortiz");
     expect(await whoIsStarting()).toMatchObject({ id: "ada-ortiz", github: "ada-ortiz" });
     // A built-in client's agent's id too: a founder named so would keep that client out.
-    for (const taken of ["founder", "admin", "agents", "scenarios", "visitors", "anonymous", "claude", "claude-code"]) {
+    for (const taken of [
+      "founder",
+      "admin",
+      "agents",
+      "scenarios",
+      "visitors",
+      "anonymous",
+      "claude-ai",
+      "claude-code",
+    ]) {
       signedIn(taken);
       expect(await whoIsStarting()).toMatchObject({ id: "founder", github: taken });
     }

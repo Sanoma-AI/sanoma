@@ -79,7 +79,7 @@ const group = defineResource({
  * What a data file declares the company's people with, imported from "sanoma/resources":
  * `export const ada = sanoma.person({ id: "ada", name: "Ada Ortiz", github: "ada-ortiz" })`,
  * `sanoma.agent({ id: "refund-bot", onBehalfOf: bo })`, `sanoma.agent({ id: "claude-code", client: "claude-code" })`,
- * `sanoma.agent({ id: "claude", off: true })` (a built-in client turned off) and
+ * `sanoma.agent({ id: "claude-ai", off: true })` (a built-in client turned off) and
  * `sanoma.group({ name: "finance", members: [ada, refundBot] })`.
  */
 export const sanoma = { person, agent, group };

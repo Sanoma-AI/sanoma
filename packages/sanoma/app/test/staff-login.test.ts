@@ -722,7 +722,7 @@ export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@
       it("is accepted as its built-in agent for the person, and the consent page says it is Sanoma's, not turned off", async () => {
         const { people, provider } = await over();
         expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("claude-code");
-        expect(await context.staff!.oauth!.agentOf(CLAUDE)).toBe("claude");
+        expect(await context.staff!.oauth!.agentOf(CLAUDE)).toBe("claude-ai");
         expect(await context.staff!.oauth!.agentOf("https://elsewhere.example/client.json")).toBeUndefined();
         // Authorize is the half's, as for a declared client.
         expect(await (await authorizeFor(provider, CLAUDE_CODE))!.text()).toBe("half");
@@ -759,7 +759,7 @@ export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@
         );
         expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBeUndefined();
         // The other built-in is untouched.
-        expect(await context.staff!.oauth!.agentOf(CLAUDE)).toBe("claude");
+        expect(await context.staff!.oauth!.agentOf(CLAUDE)).toBe("claude-ai");
         for (const refused of [await authorizeFor(provider, CLAUDE_CODE), await consentFor(provider, CLAUDE_CODE)]) {
           expect(refused!.status).toBe(403);
           expect(refused!.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
