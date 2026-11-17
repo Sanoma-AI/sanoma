@@ -22,4 +22,4 @@ pnpm --dir docs-site preview    # serves that build, with search
 
 ## Deploy
 
-[`docs-site.yml`](../.github/workflows/docs-site.yml) builds the site on pull requests that change it, and deploys it to Cloudflare Pages when a `release/<version>` branch is pushed or when run by hand, so the site describes the release people have installed. It needs the repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets and the Pages project `sanoma-docs` with `docs.sanoma.work` as its domain; without the secrets it builds and deploys nothing.
+[`docs-site.yml`](../.github/workflows/docs-site.yml) builds the site on pull requests that change it, and deploys it to Cloudflare Pages once the Release workflow has published, from the commit it published, so the site describes a release that is on npm. It can also be run by hand, from `main` or a release branch. It needs the repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets and the Pages project `sanoma-docs` with `docs.sanoma.work` as its domain; without the secrets it builds and deploys nothing.

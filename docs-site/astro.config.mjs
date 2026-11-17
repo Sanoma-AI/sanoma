@@ -1,6 +1,5 @@
 // @ts-check
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import starlightLinksValidator from "starlight-links-validator";
@@ -8,10 +7,12 @@ import starlightLlmsTxt from "starlight-llms-txt";
 
 const REPO = "https://github.com/Sanoma-AI/sanoma";
 
-/** What scripts/reference.ts wrote: the connectors, for the sidebar's links to their pages. */
-const referenceFile = fileURLToPath(new URL("./src/data/reference.json", import.meta.url));
-/** @type {{ slug: string; title: string }[]} */
-const connectors = existsSync(referenceFile) ? JSON.parse(readFileSync(referenceFile, "utf8")) : [];
+/**
+ * What scripts/reference.ts wrote: the connectors, for the sidebar's links to their pages. The
+ * `dev`, `start` and `build` scripts write it first; `astro` run by itself needs it written.
+ * @type {{ slug: string; title: string }[]}
+ */
+const connectors = JSON.parse(readFileSync(new URL("./src/data/reference.json", import.meta.url), "utf8"));
 
 // https://astro.build/config
 // The guides are src/content/docs; the connector reference is drawn from the connectors' own
@@ -23,12 +24,10 @@ export default defineConfig({
       title: "Sanoma",
       description: "Run a company's operations as code: workflows, policies, sites and the connectors they call.",
       logo: { src: "./src/assets/mark.svg", alt: "" },
-      favicon: "/favicon.svg",
       social: [{ icon: "github", label: "Sanoma on GitHub", href: REPO }],
       editLink: { baseUrl: `${REPO}/edit/main/docs-site/` },
       customCss: ["./src/styles/sanoma.css"],
       components: { Footer: "./src/components/Footer.astro" },
-      lastUpdated: false,
       // Cedar has no grammar in Shiki: a policy is shown as plain text.
       expressiveCode: { shiki: { langAlias: { cedar: "txt" } } },
       sidebar: [

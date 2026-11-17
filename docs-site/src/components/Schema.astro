@@ -1,42 +1,42 @@
 ---
 // A JSON Schema's fields as a list: each one's name, type, whether it is required, what it is and
-// the limits it keeps, with an object's own fields folded under it. No script: `<details>` folds.
-import { descriptionHtml, factsOf, type JsonSchema, nestedOf, resolve, typeOf } from "../lib/schema.ts";
+// the limits it keeps, with an object's own fields folded under it; a schema with no fields is its
+// type alone. No script: `<details>` folds.
+import { descriptionHtml, factsOf, hasFields, type JsonSchema, nestedOf, typeOf } from "../lib/schema.ts";
 
 interface Props {
   schema: JsonSchema;
-  /** The schema `$ref`s are read from: the operation's whole input or output. */
-  root?: JsonSchema;
 }
 
-const root = Astro.props.root ?? Astro.props.schema;
-const schema = resolve(Astro.props.schema, root);
+const { schema } = Astro.props;
 const required = new Set(schema.required ?? []);
-const fields = Object.entries(schema.properties ?? {});
 ---
 
 {
-  fields.length > 0 && (
+  hasFields(schema) ? (
     <ul class="schema not-content">
-      {fields.map(([name, given]) => {
-        const field = resolve(given, root);
-        const facts = factsOf(field, root);
+      {Object.entries(schema.properties ?? {}).map(([name, field]) => {
+        const facts = factsOf(field);
         return (
           <li>
             <span class="schema-name">{name}</span>
-            <span class="schema-type">{typeOf(field, root)}</span>
+            <span class="schema-type">{typeOf(field)}</span>
             {required.has(name) && <span class="schema-required">required</span>}
             {field.description && <p class="schema-description" set:html={descriptionHtml(field.description)} />}
             {facts.length > 0 && <p class="schema-facts">{facts.join(", ")}</p>}
-            {nestedOf(field, root).map(({ label, schema: inner }) => (
+            {nestedOf(field).map(({ label, schema: inner }) => (
               <details>
                 <summary>{label}</summary>
-                <Astro.self schema={inner} root={root} />
+                <Astro.self schema={inner} />
               </details>
             ))}
           </li>
         );
       })}
     </ul>
+  ) : (
+    <p>
+      <code>{typeOf(schema)}</code>, with no fields.
+    </p>
   )
 }

@@ -1,10 +1,7 @@
 ---
 // Every connector in the repository, with a link to its page of operations.
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
-import type { ConnectorReference } from "../../../../scripts/reference.ts";
-import reference from "../../../data/reference.json";
-
-const connectors = reference as ConnectorReference[];
+import { connectors } from "../../../lib/reference.ts";
 ---
 
 <StarlightPage

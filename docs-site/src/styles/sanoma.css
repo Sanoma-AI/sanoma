@@ -11,10 +11,8 @@
   --sl-font: "IBM Plex Sans Variable", system-ui, sans-serif;
   --sl-font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --sanoma-font-display: "Fraunces Variable", Georgia, serif;
-}
 
-/* Dark, Starlight's default. */
-:root {
+  /* Dark, Starlight's default. */
   --sl-color-accent-low: #1c322d;
   --sl-color-accent: #4fb39b;
   --sl-color-accent-high: #c5e6dc;
@@ -65,23 +63,6 @@ h4,
   align-items: center;
   margin-top: 0.5rem;
   font-size: var(--sl-text-sm);
-}
-
-.operation-id {
-  font-family: var(--sl-font-mono);
-}
-
-.effect {
-  padding: 0.05rem 0.5rem;
-  border: 1px solid var(--sl-color-gray-5);
-  border-radius: 999px;
-  color: var(--sl-color-gray-2);
-  font-size: var(--sl-text-xs);
-}
-
-.effect[data-effect="read"] {
-  border-color: var(--sl-color-accent);
-  color: var(--sl-color-accent-high);
 }
 
 .schema {
