@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppContext, LoginProvider } from "../src/context.ts";
 import type { AppSnapshot } from "../src/snapshot.ts";
 import { admitting } from "../src/login/admission.ts";
-import { agentAddressOf, staffLogin } from "../src/login/staff.ts";
+import { agentAddressAt, agentAddressOf, staffLogin } from "../src/login/staff.ts";
 import { readPeople } from "sanoma/workflows/describe";
 import { CLAUDE_CODE } from "./staff-oauth-helpers.ts";
 
@@ -552,8 +552,30 @@ describe("staffLogin", () => {
 
     it("gives the half its OAuth: the configured address, and the agent each client stands for, as the files say", async () => {
       expect(ADDRESS).toEqual({ issuer: `${APP}/auth/better-auth`, resource: `${APP}/mcp` });
-      // A hostname is one address, however it is written.
-      expect(agentAddressOf("ACME.Example")).toEqual(ADDRESS);
+      // An app is at one address, however its hostname or its URL is written: no trailing slash, no default port.
+      for (const made of [
+        agentAddressOf("ACME.Example"),
+        agentAddressAt(APP),
+        agentAddressAt(`${APP}/`),
+        agentAddressAt("HTTPS://Acme.Example:443/"),
+      ]) {
+        expect(made).toEqual(ADDRESS);
+      }
+      expect(agentAddressAt("http://127.0.0.1:3000/")).toEqual({
+        issuer: "http://127.0.0.1:3000/auth/better-auth",
+        resource: "http://127.0.0.1:3000/mcp",
+      });
+      // What is no origin gives none: a path, a query, a user, no scheme.
+      for (const url of [
+        `${APP}/app`,
+        `${APP}/?x=1`,
+        "https://ada@acme.example",
+        "acme.example",
+        "ftp://acme.example",
+        "",
+      ]) {
+        expect(() => agentAddressAt(url), url).toThrow(/agent address/);
+      }
       expect(context.staff!.oauth!.address).toEqual(ADDRESS);
       expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("claude-code");
       expect(await context.staff!.oauth!.agentOf("https://elsewhere.example/client.json")).toBeUndefined();

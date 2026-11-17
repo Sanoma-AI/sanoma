@@ -189,6 +189,7 @@ export function betterAuthStaffLogin(
   if (!staff) throw new Error("better-auth: the staff login needs the app's staff context");
   const github = staff.social.github;
   const oauth = staff.oauth;
+  if (oauth) checkAddress(oauth.address);
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
   const minted = new Map<string, string>();
   /**
@@ -634,6 +635,27 @@ function ownAddress(redirect: string | null): boolean {
   const loopback =
     host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || /^127(\.\d+){3}$/.test(host);
   return url.protocol === "https:" && !loopback;
+}
+
+/**
+ * Refuses an agent address a token could never match: each of its two URLs must be written as
+ * the provider writes an issuer (`validateIssuerUrl`: the URL's own serialisation, its host in
+ * lower case, a default port left out, with no trailing slash, query or fragment), since `bearer`
+ * and a client compare them as strings. At the login's making, so a wrong one fails the start
+ * rather than every sign-in.
+ */
+function checkAddress(address: AgentAddress): void {
+  for (const part of ["issuer", "resource"] as const) {
+    const written = address[part];
+    const url = URL.parse(written);
+    const canonical = url && !url.search && !url.hash ? url.href.replace(/\/$/, "") : undefined;
+    if (!url || !/^https?:$/.test(url.protocol) || written !== canonical) {
+      throw new Error(
+        `better-auth: the agent address's ${part} is ${JSON.stringify(written)}: write an http(s) URL as it is compared, ` +
+          `with no trailing slash, query or fragment${canonical ? ` (${canonical})` : ""}`,
+      );
+    }
+  }
 }
 
 /** No document, or no route, of this login's: never kept. */

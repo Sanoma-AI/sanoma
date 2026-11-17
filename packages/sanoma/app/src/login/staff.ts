@@ -37,7 +37,8 @@ import { escapeHtml, type PageFrame, smallPage, wantsJson } from "./page.ts";
 // request's client, and keeps nothing between requests.
 // Here too: the sign-in page (`/auth/login`, and any page asked for signed out), an invite's
 // landing page and `POST /auth/invite`. And the agent surface's own sign-in, when the instance has
-// an agent address (`AgentAddress`, one, configured: `agentAddressOf` the app's public hostname):
+// an agent address (`AgentAddress`, one, configured: `agentAddressOf` the app's public hostname,
+// or `agentAddressAt` its URL):
 // the half is the authorization server for `/mcp` (`LoginContext.staff.oauth`), whose sign-in and
 // consent pages are these, and a request to `/mcp` with a bearer is the client's, checked by the
 // half and admitted as the declared agent that stands for that client, for the person who signed
@@ -58,14 +59,26 @@ const MCP = "/mcp";
 const HALF = "/auth/better-auth";
 
 /**
- * The agent address of an app reached at `hostname` over HTTPS (`SANOMA_HOSTNAME`): the staff
- * login there as the issuer, `https://<hostname>/auth/better-auth`, and the agent surface as the
- * resource, `https://<hostname>/mcp`.
+ * The agent address of an app served at the root of `url` (`https://app.acme.example`, a Worker's
+ * own workers.dev URL): the staff login there as the issuer, `<origin>/auth/better-auth`, and the
+ * agent surface as the resource, `<origin>/mcp`. The origin is the URL's own, as a client writes
+ * it: its host in lower case, a default port left out, no trailing slash. Throws for what is no
+ * http(s) URL, or one with a path, a query or a fragment: the app is not served below a path.
  */
-export function agentAddressOf(hostname: string): AgentAddress {
-  const origin = `https://${hostname.toLowerCase()}`;
-  return { issuer: `${origin}${HALF}`, resource: `${origin}${MCP}` };
+export function agentAddressAt(url: string): AgentAddress {
+  const parsed = URL.parse(url);
+  if (!parsed || !/^https?:$/.test(parsed.protocol) || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error(
+      `The app's address is ${JSON.stringify(url)}: an agent address needs an http(s) origin, such as https://app.sanoma.example`,
+    );
+  }
+  if (parsed.username || parsed.password)
+    throw new Error("The app's address names a user: an agent address is an origin alone");
+  return { issuer: `${parsed.origin}${HALF}`, resource: `${parsed.origin}${MCP}` };
 }
+
+/** The agent address of an app reached at `hostname` over HTTPS (`SANOMA_HOSTNAME`): `agentAddressAt("https://<hostname>")`. */
+export const agentAddressOf = (hostname: string): AgentAddress => agentAddressAt(`https://${hostname}`);
 
 /** A bearer, `Authorization: Bearer …` (the scheme in any case, RFC 9110 §11.1): what a client sends `/mcp` once signed in. */
 const hasBearer = (request: Request) => /^bearer \S/i.test(request.headers.get("authorization") ?? "");
@@ -416,7 +429,7 @@ function challenge(address: AgentAddress | undefined, error?: "invalid_token"): 
 /** What `/mcp` says to a client on an instance with no agent address: why no agent signs in, and the setting that gives it one. */
 const NO_ADDRESS =
   "No agent can sign in here: this instance has no agent address. Set SANOMA_HOSTNAME to the hostname the app is " +
-  "reached at over HTTPS (on the Cloudflare host, the container's hostname), and an agent signs in at https://<hostname>/mcp";
+  "reached at over HTTPS, and an agent signs in at https://<hostname>/mcp";
 
 /** A refusal as JSON saying why (`POST /auth/invite`'s, a server function's, `/mcp`'s), never kept, with `headers` besides. */
 const refuse = (status: number, error: string, headers: Record<string, string> = {}) =>

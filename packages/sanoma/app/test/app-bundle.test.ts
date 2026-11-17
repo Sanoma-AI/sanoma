@@ -24,6 +24,8 @@ const fixtureDir = fileURLToPath(new URL("./fixtures/company-sites/", import.met
 const databaseUrl = testDatabaseUrl("app_bundle");
 const DOMAINS: Record<string, string> = { hello: "hello.example", intl: "intl.example", members: "members.example" };
 const HOSTNAME = "app.example";
+/** A Worker's own URL, as the Cloudflare host binds it (`SANOMA_HOST_URL`): where one declared without a hostname answers. */
+const WORKERS_DEV = "https://sanoma-app-test.acme.workers.dev";
 delete process.env.NODE_PATH;
 
 /** The connector's part, in the test: the bundle's fetch with a host that counts the worker's starts. */
@@ -146,11 +148,20 @@ let bundle: AppBundle;
 let worker: Awaited<ReturnType<typeof unstable_startWorker>>;
 /** The same upload with no DATABASE binding, so the app cannot be made: what answers there needs no app. */
 let appless: Awaited<ReturnType<typeof unstable_startWorker>>;
+/** The same upload declared without a hostname: no `SANOMA_HOSTNAME`, its own URL in `SANOMA_HOST_URL`. */
+let unnamed: Awaited<ReturnType<typeof unstable_startWorker>>;
 
 const get = (url: string, init?: RequestInit) => worker.fetch(url, init as never) as unknown as Promise<Response>;
 /** A request as TLS in front of a Worker hands it on (the dev server is plain http): an invite's URL and a cookie are then https's. */
 const secure = (url: string, init: RequestInit = {}) =>
   get(url, { ...init, headers: { ...(init.headers as Record<string, string>), "x-forwarded-proto": "https" } });
+
+/** The same, to the Worker declared without a hostname. */
+const at = (url: string, init: RequestInit = {}) =>
+  unnamed.fetch(url, {
+    ...init,
+    headers: { ...(init.headers as Record<string, string>), "x-forwarded-proto": "https" },
+  } as never) as unknown as Promise<Response>;
 
 beforeAll(async () => {
   const { repo, config } = company();
@@ -218,15 +229,21 @@ beforeAll(async () => {
     SANOMA_SECRETS_KEY: process.env.SANOMA_SECRETS_KEY,
     SANOMA_SIGNING_KEY: process.env.SANOMA_SIGNING_KEY,
   };
-  [worker, appless] = await Promise.all([
+  const { SANOMA_HOSTNAME: _hostname, ...withoutHostname } = vars;
+  [worker, appless, unnamed] = await Promise.all([
     start("wrangler.json", { ...vars, DATABASE: { connectionString: databaseUrl } }),
     start("wrangler-appless.json", vars),
+    start("wrangler-unnamed.json", {
+      ...withoutHostname,
+      SANOMA_HOST_URL: `${WORKERS_DEV}/`,
+      DATABASE: { connectionString: databaseUrl },
+    }),
   ]);
-  await Promise.all([worker.ready, appless.ready]);
+  await Promise.all([worker.ready, appless.ready, unnamed.ready]);
 }, 300_000);
 
 afterAll(async () => {
-  await Promise.all([worker?.dispose(), appless?.dispose()]);
+  await Promise.all([worker?.dispose(), appless?.dispose(), unnamed?.dispose()]);
   for (const dir of temporary) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -510,6 +527,93 @@ describe("buildAppBundle", () => {
     const redirected = await authorize(MOVED);
     expect([302, 200]).not.toContain(redirected.status);
     expect(outbound).toEqual([CLAUDE_CODE, MOVED]);
+  });
+
+  it("takes its agent address from its own URL when it has no hostname: discovery names it, and a client signs in", async () => {
+    const app = WORKERS_DEV;
+    const listTools = (headers: Record<string, string>) =>
+      at(`${app}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      });
+    // The 401 and both documents name the Worker's own URL, its trailing slash gone.
+    const metadataUrl = `${app}/.well-known/oauth-protected-resource/mcp`;
+    const challenged = await listTools({});
+    expect(challenged.status).toBe(401);
+    expect(challenged.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${metadataUrl}"`);
+    expect(await (await at(metadataUrl)).json()).toMatchObject({
+      resource: `${app}/mcp`,
+      authorization_servers: [`${app}/auth/better-auth`],
+    });
+    expect(await (await at(`${app}/.well-known/oauth-authorization-server/auth/better-auth`)).json()).toMatchObject({
+      issuer: `${app}/auth/better-auth`,
+      authorization_endpoint: `${app}/auth/better-auth/oauth2/authorize`,
+      token_endpoint: `${app}/auth/better-auth/oauth2/token`,
+    });
+    // The person signs in by an invite, then the client's sign-in for her: authorize, consent, the code for a token.
+    const minted = await at(`${app}/auth/invite`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request: sealInvite({ email: "ada@acme.test" }) }),
+    });
+    expect(minted.status).toBe(200);
+    const html = await (await at(((await minted.json()) as { url: string }).url)).text();
+    const verify = /href="([^"]*magic-link\/verify[^"]*)"/.exec(html)?.[1]?.replaceAll(/&(?:amp|#38);/g, "&");
+    const landed = await at(`${app}${verify}`, { redirect: "manual" });
+    const cookie = landed.headers.get("set-cookie")?.split(";")[0];
+    expect(cookie).toMatch(/session_token=/);
+    const verifier = "w".repeat(43);
+    const asked = await at(
+      `${app}/auth/better-auth/oauth2/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: CLAUDE_CODE,
+        redirect_uri: "http://127.0.0.1:53682/callback",
+        code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+        code_challenge_method: "S256",
+        state: "s2",
+        resource: `${app}/mcp`,
+      })}`,
+      { headers: { cookie: cookie!, accept: "text/html" }, redirect: "manual" },
+    );
+    const consentAt = new URL(await nextOf(asked), app);
+    expect(consentAt.pathname).toBe("/auth/consent");
+    const allowed = await at(`${app}/auth/better-auth/oauth2/consent`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app, cookie: cookie! },
+      body: JSON.stringify({ accept: true, oauth_query: consentAt.search.slice(1) }),
+    });
+    const back = new URL(((await allowed.json()) as { url: string }).url);
+    expect(back.searchParams.get("iss")).toBe(`${app}/auth/better-auth`);
+    const exchanged = await at(`${app}/auth/better-auth/oauth2/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: back.searchParams.get("code")!,
+        redirect_uri: "http://127.0.0.1:53682/callback",
+        client_id: CLAUDE_CODE,
+        code_verifier: verifier,
+        resource: `${app}/mcp`,
+      }).toString(),
+    });
+    expect(exchanged.status).toBe(200);
+    const { access_token } = (await exchanged.json()) as { access_token: string };
+    expect(JSON.parse(Buffer.from(access_token.split(".")[1]!, "base64url").toString())).toMatchObject({
+      iss: `${app}/auth/better-auth`,
+      aud: `${app}/mcp`,
+      azp: CLAUDE_CODE,
+    });
+    const asClient = await listTools({ authorization: `Bearer ${access_token}` });
+    expect(asClient.status).toBe(200);
+    expect(await asClient.text()).toContain('"name":"start_run"');
+    // The token is that address's: the Worker with a hostname, on the same tables and keys, refuses it.
+    const elsewhere = await secure(`https://${HOSTNAME}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${access_token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    expect(elsewhere.status).toBe(401);
   });
 
   it("answers a page of a site with a login from the assets, whoever asks, and renders one that imports a call on each request", async () => {

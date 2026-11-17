@@ -521,8 +521,8 @@ export interface SocialClients {
  * An instance's one agent address, as it is configured, never read from a request: the issuer its
  * staff login signs access tokens as (an OAuth authorization server's identifier, RFC 8414) and
  * the resource they are for (the agent surface's URL, RFC 9728's resource identifier). Both are
- * absolute URLs as a client compares them, with no trailing slash, on the app's own host or on
- * another that reaches it.
+ * absolute URLs as a client compares them, with no trailing slash (a staff login refuses one
+ * written otherwise), on the app's own host or on another that reaches it.
  */
 export interface AgentAddress {
   issuer: string;

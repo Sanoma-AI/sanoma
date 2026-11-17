@@ -9,6 +9,7 @@
 import { root, snapshot } from "virtual:sanoma/app-runtime";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  type AgentAddress,
   checkPreparedOnly,
   errorMessage,
   GITHUB_APP,
@@ -25,7 +26,7 @@ import type { AdmittingLogin } from "../context.ts";
 import { type AppHandler, appHandler } from "../handler.ts";
 import { admitting } from "../login/admission.ts";
 import { publicFront, servedOnceMade, siteLogin } from "../login/public.ts";
-import { agentAddressOf, staffLogin } from "../login/staff.ts";
+import { agentAddressAt, agentAddressOf, staffLogin } from "../login/staff.ts";
 import { plain } from "../server/webhooks.ts";
 import { filePath, hasExtension, publicPath } from "../site-path.ts";
 import { servedOnWorker } from "../snapshot.ts";
@@ -63,6 +64,24 @@ function socialOf(env: AppBundleEnv): SocialClients | undefined {
   return undefined;
 }
 
+/**
+ * The Worker's agent address: its own hostname's (`SANOMA_HOSTNAME`), the one host besides the
+ * sites' it then answers on; with none declared, its own URL's (`SANOMA_HOST_URL`, the
+ * workers.dev URL the Cloudflare host binds on every upload, where such a Worker is reached).
+ * With neither (a bundle run by a host that binds none), or a URL that is no origin (logged), no
+ * address: the staff login serves no OAuth.
+ */
+function addressOf(env: AppBundleEnv): AgentAddress | undefined {
+  if (env.SANOMA_HOSTNAME) return agentAddressOf(env.SANOMA_HOSTNAME);
+  if (!env.SANOMA_HOST_URL) return undefined;
+  try {
+    return agentAddressAt(env.SANOMA_HOST_URL);
+  } catch (err) {
+    console.error(`sanoma: no agent can sign in: SANOMA_HOST_URL gives no agent address: ${errorMessage(err)}`);
+    return undefined;
+  }
+}
+
 /** The handler, made on the first request from the Worker's bindings, which do not change in an isolate. */
 let made: Promise<AppHandler> | undefined;
 
@@ -79,11 +98,7 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
   // Each call made on the request's own client (`requests`), `tokens.resolve` and the logins' pool too.
   const client = member([]) as SanomaClient;
   const social = socialOf(env);
-  // The agent address is the app's own hostname's (`SANOMA_HOSTNAME`), the one host besides the
-  // sites' the Worker answers on; a Worker with none (reached at its workers.dev name alone) has
-  // no address, and its staff login serves no OAuth.
-  const address = env.SANOMA_HOSTNAME ? agentAddressOf(env.SANOMA_HOSTNAME) : undefined;
-  const staff = staffLogin(betterAuthStaffLogin, social, address);
+  const staff = staffLogin(betterAuthStaffLogin, social, addressOf(env));
   const domains = env.SANOMA_DOMAINS ? domainsOf(env.SANOMA_DOMAINS) : {};
   // Each site the Worker serves, with its login half when it has one; another public site answers 503 on its hosts here.
   const sites = new Map<string, AdmittingLogin>();

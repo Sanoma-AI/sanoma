@@ -183,6 +183,30 @@ describe("a login with no agent address", () => {
   });
 });
 
+describe("an agent address", () => {
+  it("is refused when a token could never match it: a trailing slash, a query, a host not as it is compared", () => {
+    for (const [part, written] of [
+      ["issuer", `${ADDRESS.issuer}/`],
+      ["issuer", "https://mcp.router.example/"],
+      ["issuer", "https://Company.Example/auth/better-auth"],
+      ["issuer", "https://company.example:443/auth/better-auth"],
+      ["issuer", "company.example/auth/better-auth"],
+      ["resource", `${ADDRESS.resource}/`],
+      ["resource", `${ADDRESS.resource}?x=1`],
+      ["resource", `${ADDRESS.resource}#x`],
+      ["resource", "/mcp"],
+    ] as const) {
+      expect(() => loginAt({ ...ADDRESS, [part]: written }), written).toThrow(
+        `better-auth: the agent address's ${part} is ${JSON.stringify(written)}`,
+      );
+    }
+    // An issuer at its origin's root, and one on a port, are good as written.
+    for (const issuer of ["https://mcp.router.example", "http://127.0.0.1:3000/auth/better-auth"]) {
+      expect(() => loginAt({ ...ADDRESS, issuer }), issuer).not.toThrow();
+    }
+  });
+});
+
 describe("a login with an agent address", () => {
   let half: LoginHalf;
   beforeAll(() => {

@@ -32,9 +32,15 @@ export interface AppBundleEnv {
    * The app's own hostname: the staff's pages are served there, and a public site's on its domain
    * (`SANOMA_DOMAINS`); a request for any other host answers 404. It is the instance's agent
    * address too (`agentAddressOf`): agents sign in at `https://<hostname>/mcp`. Unset, every
-   * host that is no site's domain is the app's, and its staff login serves no OAuth for `/mcp`.
+   * host that is no site's domain is the app's, and its agent address is `SANOMA_HOST_URL`'s.
    */
   SANOMA_HOSTNAME?: string;
+  /**
+   * The Worker's own URL (its workers.dev URL, which the Cloudflare host binds on every upload,
+   * for the wakeup): the instance's agent address when it has no `SANOMA_HOSTNAME`
+   * (`agentAddressAt`). With neither, the staff login serves no OAuth for `/mcp`.
+   */
+  SANOMA_HOST_URL?: string;
   /** `<site>=<hostname>,…`: the public sites' domains (`domainsText`). */
   SANOMA_DOMAINS?: string;
   /** The deployment's signing key, each login's key derived from it (`deploymentKey`). */
