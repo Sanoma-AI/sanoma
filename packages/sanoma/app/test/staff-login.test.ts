@@ -1,7 +1,15 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LoginContext, type LoginHalf, type LoginMethod, sealInvite } from "sanoma/workflows";
+import {
+  type AgentAddress,
+  agentAddressAt,
+  type LoginContext,
+  NO_AGENT_ADDRESS,
+  type LoginHalf,
+  type LoginMethod,
+  sealInvite,
+} from "sanoma/workflows";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppContext, LoginProvider } from "../src/context.ts";
 import type { AppSnapshot } from "../src/snapshot.ts";
@@ -15,6 +23,8 @@ import { CLAUDE_CODE } from "./staff-oauth-helpers.ts";
 // `POST /auth/invite`. Better Auth itself is `packages/sanoma/better-auth/test/staff.test.ts`'s.
 
 const APP = "https://acme.example";
+/** The instance's agent address: the app's own origin's. */
+const ADDRESS = agentAddressAt(APP);
 const root = mkdtempSync(join(tmpdir(), "sanoma-staff-"));
 mkdirSync(join(root, "resources"));
 writeFileSync(
@@ -62,12 +72,12 @@ function fakeHalf(methods: LoginMethod[]): LoginHalf {
 
 const request = (
   path: string,
-  init: { cookie?: string; method?: string; body?: unknown; origin?: string; bearer?: string } = {},
+  init: { cookie?: string; method?: string; body?: unknown; origin?: string; bearer?: string; host?: string } = {},
 ) =>
-  new Request(new URL(path, APP), {
+  new Request(new URL(path, init.host ? `https://${init.host}` : APP), {
     method: init.method ?? (init.body === undefined ? "GET" : "POST"),
     headers: {
-      host: "acme.example",
+      host: init.host ?? "acme.example",
       "x-forwarded-proto": "https",
       ...(init.cookie && { cookie: init.cookie }),
       ...(init.bearer && { authorization: `Bearer ${init.bearer}` }),
@@ -76,8 +86,9 @@ const request = (
     ...(init.body !== undefined && { body: JSON.stringify(init.body) }),
   });
 
-/** A JSON-RPC request to `/mcp`, as a client posts one: no Origin, maybe a bearer. */
-const mcp = (bearer?: string) => request("/mcp", { method: "POST", ...(bearer && { bearer }) });
+/** A JSON-RPC request to `/mcp`, as a client posts one: no Origin, maybe a bearer, on the app's host unless `host` says another. */
+const mcp = (bearer?: string, host?: string) =>
+  request("/mcp", { method: "POST", ...(bearer && { bearer }), ...(host && { host }) });
 
 describe("staffLogin", () => {
   /** The runtime's table of spent invite-request nonces, as the client keeps it. */
@@ -101,18 +112,26 @@ describe("staffLogin", () => {
   let login: LoginProvider;
 
   async function opened(
-    methods: LoginMethod[] = ["code", "invite"],
-    sender = true,
-    stylesheet?: string,
-    /** The company as its files say at a request (`open`'s `current`): the one snapshot unless given. */
-    current?: (snapshot: AppSnapshot) => AppSnapshot | Promise<AppSnapshot>,
+    options: {
+      methods?: LoginMethod[];
+      /** Whether the config names a sender for the email code. */
+      sender?: boolean;
+      stylesheet?: string;
+      /** The company as its files say at a request (`open`'s `current`): the one snapshot unless given. */
+      current?: (snapshot: AppSnapshot) => AppSnapshot | Promise<AppSnapshot>;
+      /** The instance's agent address: `ADDRESS` unless given, and none when given as undefined. */
+      address?: AgentAddress | undefined;
+    } = {},
   ): Promise<LoginProvider> {
+    const { methods = ["code", "invite"], sender = true, stylesheet, current } = options;
+    const address = "address" in options ? options.address : ADDRESS;
     const provider = staffLogin(
       async (given) => {
         context = given;
         return fakeHalf(methods);
       },
       { github: { clientId: "id", clientSecret: "secret" } },
+      address,
     );
     const snapshot = { people: readPeople(root) } as AppSnapshot;
     await provider.open!(
@@ -163,7 +182,7 @@ describe("staffLogin", () => {
   });
 
   it("gives no sender when the config names none", async () => {
-    await opened(["invite"], false);
+    await opened({ methods: ["invite"], sender: false });
     expect(context.sendCode).toBeUndefined();
   });
 
@@ -198,7 +217,7 @@ describe("staffLogin", () => {
     const fn = (await login.handle!(request("/_serverFn/abc", { method: "POST" })))!;
     expect(await fn.json()).toEqual({ error: "Sign in first" });
 
-    const github = await opened(["code", "github", "invite"]);
+    const github = await opened({ methods: ["code", "github", "invite"] });
     const both = await (await github.handle!(request("/")))!.text();
     expect(both).toContain("Continue with GitHub");
     expect(both).toContain('errorCallbackURL:"/auth/login"');
@@ -239,7 +258,7 @@ describe("staffLogin", () => {
   });
 
   it("links the kit's stylesheet, which loads signed out with its fonts, and nothing else does", async () => {
-    const styled = await opened(["code", "invite"], true, "/assets/style-abc.css");
+    const styled = await opened({ stylesheet: "/assets/style-abc.css" });
     const html = await (await styled.handle!(request("/auth/login")))!.text();
     expect(html).toContain('<link rel="stylesheet" href="/assets/style-abc.css">');
     expect(await styled.handle!(request("/assets/style-abc.css"))).toBeUndefined();
@@ -249,7 +268,7 @@ describe("staffLogin", () => {
   });
 
   it("says to ask for an invite when email sign-in is not set up, naming no file", async () => {
-    const invites = await opened(["invite"], false);
+    const invites = await opened({ methods: ["invite"], sender: false });
     const html = await (await invites.handle!(request("/")))!.text();
     expect(html).toContain("Email sign-in not set up");
     expect(html).toContain("Ask for an invite link");
@@ -259,7 +278,7 @@ describe("staffLogin", () => {
     expect(html).not.toContain("Continue with GitHub");
     expect(html).not.toMatch(/resources\/|sanoma\.config|Resend|SANOMA_/);
 
-    const github = await opened(["github", "invite"], false);
+    const github = await opened({ methods: ["github", "invite"], sender: false });
     const both = await (await github.handle!(request("/")))!.text();
     expect(both).toContain("Ask for an invite link");
     expect(both).toContain("Continue with GitHub");
@@ -372,8 +391,10 @@ describe("staffLogin", () => {
   it("admits nobody, and fails no sign-in, while the people cannot be read", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const unread = await opened(["code", "invite"], true, undefined, async () => {
-        throw new Error("resources/people.ts: Unexpected token");
+      const unread = await opened({
+        current: async () => {
+          throw new Error("resources/people.ts: Unexpected token");
+        },
       });
       const { staff } = context;
       // What the half is told: nobody is declared, and a sign-in it made is not the app's to fail.
@@ -420,10 +441,14 @@ describe("staffLogin", () => {
           : null;
       },
     };
-    const provider = staffLogin(async (given) => {
-      context = given;
-      return asking;
-    });
+    const provider = staffLogin(
+      async (given) => {
+        context = given;
+        return asking;
+      },
+      {},
+      ADDRESS,
+    );
     const snapshot = { people: readPeople(root) } as AppSnapshot;
     const app = { resolved: { appName: "acme-plumbing", name: "Acme Plumbing", root }, client, snapshot };
     await provider.open!(app as unknown as AppContext, () => {
@@ -479,7 +504,7 @@ describe("staffLogin", () => {
     answers: Record<string, () => { status: number; body: unknown }>,
     cookie?: string,
   ) {
-    login = await opened(["code", "github", "invite"]);
+    login = await opened({ methods: ["code", "github", "invite"] });
     const page = (await login.handle!(request(`/auth/login?${search}`, { ...(cookie && { cookie }) })))!;
     expect(page.status).toBe(200);
     const html = await page.text();
@@ -540,8 +565,9 @@ describe("staffLogin", () => {
   describe("the agent surface's sign-in", () => {
     const METADATA = `${APP}/.well-known/oauth-protected-resource/mcp`;
 
-    it("gives the half its OAuth: tokens for /mcp, and the agent each client stands for, as the files say", async () => {
-      expect(context.staff!.oauth!.resource).toBe("/mcp");
+    it("gives the half its OAuth: the configured address, and the agent each client stands for, as the files say", async () => {
+      expect(ADDRESS).toEqual({ issuer: `${APP}/auth/better-auth`, resource: `${APP}/mcp` });
+      expect(context.staff!.oauth!.address).toEqual(ADDRESS);
       expect(await context.staff!.oauth!.agentOf(CLAUDE_CODE)).toBe("claude-code");
       expect(await context.staff!.oauth!.agentOf("https://elsewhere.example/client.json")).toBeUndefined();
     });
@@ -553,6 +579,52 @@ describe("staffLogin", () => {
       // Anywhere else, the sign-in page's answer as before, with no challenge.
       const fn = (await login.handle!(request("/_serverFn/abc", { method: "POST" })))!;
       expect([fn.status, fn.headers.get("www-authenticate")]).toEqual([401, null]);
+    });
+
+    it("names the configured address's metadata in the 401, whatever host the request came in on", async () => {
+      // The app reached by another name (an address, a proxy's own): the one address tokens are for.
+      for (const host of ["10.0.0.7:3000", "made-up.example"]) {
+        const refused = (await login.handle!(mcp(undefined, host)))!;
+        expect([refused.status, refused.headers.get("www-authenticate")], host).toEqual([
+          401,
+          `Bearer resource_metadata="${METADATA}"`,
+        ]);
+        const bad = (await login.handle!(mcp("at.nothing", host)))!;
+        expect(bad.headers.get("www-authenticate"), host).toMatch(
+          new RegExp(`^Bearer error="invalid_token", error_description="[^"]+", resource_metadata="${METADATA}"$`),
+        );
+        expect(bad.headers.get("www-authenticate"), host).not.toContain(host);
+        // A bearer the half takes is taken there too: the half checks it against the address, not the Host.
+        expect(await login.handle!(mcp(`at.ada@acme.test.${CLAUDE_CODE}`, host)), host).toBeUndefined();
+      }
+    });
+
+    it("gives the half no OAuth without an agent address, and /mcp's 401 says what to set", async () => {
+      const plain = await opened({ address: undefined });
+      expect(context.staff!.oauth).toBeUndefined();
+      // No client can sign in: no challenge to follow, with or without a token, and the setting named.
+      for (const asked of [mcp(), mcp("at.nothing"), request("/mcp/", { method: "POST" })]) {
+        const refused = (await plain.handle!(asked))!;
+        expect([refused.status, refused.headers.get("www-authenticate")]).toEqual([401, null]);
+        expect(refused.headers.get("cache-control")).toBe("no-store");
+        expect(((await refused.json()) as { error: string }).error).toBe(NO_AGENT_ADDRESS);
+      }
+      // A half with no OAuth has no `bearer`: a token is nobody, whatever it says.
+      const { bearer: _bearer, ...halfWithout } = fakeHalf(["code", "invite"]);
+      const without = staffLogin(async () => halfWithout);
+      await without.open!(
+        { resolved: { appName: "acme-plumbing", name: "Acme Plumbing", root }, client } as unknown as AppContext,
+        () => ({ people: readPeople(root) }) as AppSnapshot,
+      );
+      const token = mcp(`at.ada@acme.test.${CLAUDE_CODE}`);
+      expect((await without.handle!(token))?.status).toBe(401);
+      expect(await without.resolveActor(token)).toBeUndefined();
+      // Someone signed in still reaches /mcp as themselves, as before, and every page signs in as it did.
+      const signedIn = request("/mcp", { method: "POST", cookie: "who=ada@acme.test" });
+      expect(await plain.handle!(signedIn)).toBeUndefined();
+      expect(await plain.resolveActor(signedIn)).toEqual({ email: "ada@acme.test" });
+      expect((await plain.handle!(request("/workflows")))?.status).toBe(401);
+      expect((await plain.handle!(request("/.well-known/oauth-protected-resource/mcp")))?.status).toBe(404);
     });
 
     it("answers a well-known path the half does not 404, never the sign-in page", async () => {

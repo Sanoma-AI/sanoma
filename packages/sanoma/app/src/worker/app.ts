@@ -9,6 +9,8 @@
 import { root, snapshot } from "virtual:sanoma/app-runtime";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  type AgentAddress,
+  agentAddressFrom,
   checkPreparedOnly,
   errorMessage,
   GITHUB_APP,
@@ -63,6 +65,23 @@ function socialOf(env: AppBundleEnv): SocialClients | undefined {
   return undefined;
 }
 
+/**
+ * The Worker's agent address, by the launchers' one rule (`agentAddressFrom`): its own
+ * hostname's (`SANOMA_HOSTNAME`), the one host besides the sites' it then answers on; with none
+ * declared, its own URL's (`SANOMA_HOST_URL`, the workers.dev URL the Cloudflare host binds on
+ * every upload, where such a Worker is reached). With neither (a bundle run by a host that binds
+ * none), or a value that names no address (logged, once: the handler is made once), none: the
+ * staff login serves no OAuth, and everything else is served as it is.
+ */
+function addressOf(env: AppBundleEnv): AgentAddress | undefined {
+  try {
+    return agentAddressFrom(env);
+  } catch (err) {
+    console.error(`sanoma: no agent can sign in at /mcp: ${errorMessage(err)}`);
+    return undefined;
+  }
+}
+
 /** The handler, made on the first request from the Worker's bindings, which do not change in an isolate. */
 let made: Promise<AppHandler> | undefined;
 
@@ -79,7 +98,7 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
   // Each call made on the request's own client (`requests`), `tokens.resolve` and the logins' pool too.
   const client = member([]) as SanomaClient;
   const social = socialOf(env);
-  const staff = staffLogin(betterAuthStaffLogin, social);
+  const staff = staffLogin(betterAuthStaffLogin, social, addressOf(env));
   const domains = env.SANOMA_DOMAINS ? domainsOf(env.SANOMA_DOMAINS) : {};
   // Each site the Worker serves, with its login half when it has one; another public site answers 503 on its hosts here.
   const sites = new Map<string, AdmittingLogin>();

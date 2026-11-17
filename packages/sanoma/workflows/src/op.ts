@@ -9,6 +9,7 @@ import type { Fake } from "./fake.ts";
 import type { SandboxBackend, SandboxContext } from "./sandbox-contract.ts";
 import type { Secrets } from "./secret.ts";
 import type { RemoteHalf } from "./source.ts";
+import { DOMAIN_NAME, instanceUrl } from "./shared.ts";
 import type { Steps } from "./steps.ts";
 
 /**
@@ -569,13 +570,12 @@ export interface LoginContext {
     /** Tells the app of a sign-in by `method` of the person `identity` names, which the ledger records. Must not throw. */
     record(method: SignInMethod, identity: LoginIdentity): Promise<void>;
     /**
-     * The agent surface's OAuth, when the app serves it: the path on the request's own origin
-     * that an access token is for (`/mcp`, its resource), and the declared agent that stands for
-     * an OAuth client, by the client's id (`agentOfClient`), as the files say when asked. The
-     * login is then the surface's authorization server, and refuses a client no agent stands for
-     * (`LoginHalf.bearer`).
+     * The agent surface's OAuth, when the instance has an agent address: that address, and the
+     * declared agent that stands for an OAuth client, by the client's id (`agentOfClient`), as
+     * the files say when asked. The login is then the surface's authorization server, and refuses
+     * a client no agent stands for (`LoginHalf.bearer`). Absent, the login serves no OAuth.
      */
-    oauth?: { resource: string; agentOf(client: string): string | undefined | Promise<string | undefined> };
+    oauth?: { address: AgentAddress; agentOf(client: string): string | undefined | Promise<string | undefined> };
   };
 }
 
@@ -592,10 +592,126 @@ export const LOGIN_PAGE = "/auth/login";
 export const CONSENT_PAGE = "/auth/consent";
 /**
  * RFC 9728's well-known path for a protected resource's metadata, the resource's own path
- * appended (`/.well-known/oauth-protected-resource/mcp`): what the login serves, and the app's
- * 401 at the resource points a client at.
+ * appended (`/.well-known/oauth-protected-resource/mcp`), on the resource's origin: what the login
+ * serves, and the app's 401 at the resource points a client at.
  */
 export const RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
+
+/** Where a staff login's own routes are, and so its issuer's path: Better Auth's base path, which the sign-in page posts under. */
+export const STAFF_AUTH_PATH = "/auth/better-auth";
+/** The agent surface's path (the app's `routes/mcp.ts`): the path of the resource an agent's tokens are for. */
+export const AGENT_SURFACE_PATH = "/mcp";
+
+/**
+ * An instance's one agent address, as it is configured, never read from a request: the issuer its
+ * staff login signs access tokens as (an OAuth authorization server's identifier, RFC 8414) and
+ * the resource they are for (the agent surface's URL, RFC 9728's resource identifier). Both are
+ * absolute URLs written as they are compared (`instanceUrl`: no trailing slash, query, fragment
+ * or user, the host in lower case, a default port left out), and today both are on the app's
+ * own origin, made by `agentAddressAt`: the issuer's path is `STAFF_AUTH_PATH`, where the login's
+ * routes are served, and the resource has a path of its own (`checkAgentAddress`). An address on
+ * another host, a router's, comes with sanoma#777.
+ */
+export interface AgentAddress {
+  issuer: string;
+  resource: string;
+}
+
+/**
+ * The agent address of an app served at the root of `url` (`https://app.acme.example`, a Worker's
+ * workers.dev URL, `http://10.0.0.7:3000`): the staff login there as the issuer and the agent
+ * surface as the resource, on the URL's origin as it is compared. Throws, saying why, for what
+ * is no http(s) URL (`instanceUrl`) or has a path: the app is not served below one.
+ */
+export function agentAddressAt(url: string): AgentAddress {
+  const checked = instanceUrl(url);
+  const origin = "url" in checked ? new URL(checked.url) : undefined;
+  if (!origin || origin.pathname !== "/") {
+    throw new Error(
+      `${JSON.stringify(url)} is not where an app is served: write its origin, an http(s) URL with no path, user, query or fragment, such as https://app.sanoma.example`,
+    );
+  }
+  return { issuer: `${origin.origin}${STAFF_AUTH_PATH}`, resource: `${origin.origin}${AGENT_SURFACE_PATH}` };
+}
+
+/**
+ * Refuses, saying why, an agent address no token could match or no client could use: an issuer
+ * or a resource not written as it is compared (`instanceUrl`), an issuer whose path is not
+ * `STAFF_AUTH_PATH` (the login's routes are served only there, so its metadata would name
+ * endpoints that answer 404), or a resource at its origin's root. A staff login checks it when
+ * it is made, so a wrong one fails the start rather than every sign-in.
+ */
+export function checkAgentAddress(address: AgentAddress): void {
+  for (const part of ["issuer", "resource"] as const) {
+    const written = address[part];
+    const checked = instanceUrl(written);
+    if (!("url" in checked) || checked.url !== written) {
+      throw new Error(
+        `the agent address's ${part} is ${JSON.stringify(written)}: write an http(s) URL as it is compared, with no trailing slash, query, fragment or user` +
+          ("url" in checked ? ` (${checked.url})` : ""),
+      );
+    }
+  }
+  const later = "an agent address on another host or path comes with sanoma#777";
+  if (new URL(address.issuer).pathname !== STAFF_AUTH_PATH) {
+    throw new Error(
+      `the agent address's issuer is ${JSON.stringify(address.issuer)}: its path must be ${STAFF_AUTH_PATH}, where the staff login's routes are served (${later})`,
+    );
+  }
+  if (new URL(address.resource).pathname === "/") {
+    throw new Error(
+      `the agent address's resource is ${JSON.stringify(address.resource)}: it needs a path, such as ${AGENT_SURFACE_PATH} (${later})`,
+    );
+  }
+}
+
+/** The variables an instance's agent address is made from (`agentAddressFrom`), in the order they are read. */
+export const AGENT_ADDRESS_ENV = ["SANOMA_HOSTNAME", "SANOMA_HOST_URL"] as const;
+
+/**
+ * The agent address an instance's environment names, the one rule for every launcher (the
+ * `sanoma` bin beyond this machine, the Worker): `SANOMA_HOSTNAME`, the hostname the app is
+ * served at over HTTPS (`https://<hostname>`), else `SANOMA_HOST_URL`, the instance's own URL
+ * (what its wakeup reaches it by: a Worker's workers.dev URL, or an address with a port or plain
+ * http), each trimmed; undefined with neither. Throws, naming the variable, for a
+ * `SANOMA_HOSTNAME` that is no hostname or a `SANOMA_HOST_URL` that is no origin.
+ */
+export function agentAddressFrom(
+  env: Partial<Record<(typeof AGENT_ADDRESS_ENV)[number], string>>,
+): AgentAddress | undefined {
+  const hostname = env.SANOMA_HOSTNAME?.trim();
+  if (hostname) {
+    if (!DOMAIN_NAME.test(hostname.toLowerCase())) {
+      throw new Error(
+        `SANOMA_HOSTNAME is ${JSON.stringify(hostname)}: write the hostname the app is served at over HTTPS, with no scheme, port or path, such as app.sanoma.example (for any other address, its URL in SANOMA_HOST_URL)`,
+      );
+    }
+    return agentAddressAt(`https://${hostname}`);
+  }
+  const url = env.SANOMA_HOST_URL?.trim();
+  if (!url) return undefined;
+  try {
+    return agentAddressAt(url);
+  } catch (err) {
+    throw new Error(`SANOMA_HOST_URL: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
+}
+
+/** What an instance with no agent address says, at its start and at `/mcp`: why no agent signs in, and what gives it one. */
+export const NO_AGENT_ADDRESS =
+  "No agent can sign in at /mcp: this instance has no agent address. Set SANOMA_HOSTNAME to the hostname the app is " +
+  "served at over HTTPS, or SANOMA_HOST_URL to its own URL";
+
+/**
+ * Where RFC 9728's metadata for an address's resource is: the well-known path with the
+ * resource's own appended (`path`), on the resource's origin (`url`), which the app's 401 at
+ * the resource names and the login serves.
+ */
+export function resourceMetadataOf(address: AgentAddress): { path: string; url: string } {
+  const resource = new URL(address.resource);
+  const path = `${RESOURCE_METADATA}${resource.pathname}`;
+  return { path, url: `${resource.origin}${path}` };
+}
 
 /**
  * A request's origin, https when a proxy that ends TLS says so (`x-forwarded-proto: https`), as
