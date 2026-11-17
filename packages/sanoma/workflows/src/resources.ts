@@ -14,6 +14,7 @@ import { Principal } from "./define.ts";
 import { NotAdmittedError } from "./errors.ts";
 import {
   AGENTS,
+  agentOfClient,
   ANONYMOUS,
   ANONYMOUS_PRINCIPAL,
   type At,
@@ -259,6 +260,31 @@ export function agentActing(
 }
 
 /**
+ * The principal of the declared agent that stands for the OAuth client `client` (its `client`,
+ * `agentOfClient`), acting on behalf of the declared person `person`, who signed that client in:
+ * `agentActing` for that agent. Asked on every request a client's token makes, so a declaration
+ * removed (or a second agent declaring the same client) refuses its tokens at once, however
+ * recently issued. Throws `NotAdmittedError`, naming what to declare, when no agent stands for
+ * the client, and as `agentActing` does.
+ */
+export function clientActing(
+  client: string,
+  person: string,
+  declared: { people: readonly PeopleResource[]; problems: readonly ResourceProblem[] },
+): Principal {
+  mustAct.files(client, declared.problems);
+  const agent = agentOfClient(client, declared.people);
+  if (agent === undefined) {
+    throw new NotAdmittedError(
+      client,
+      [],
+      `No agent resources/people.ts declares stands for the client ${client}: declare one, sanoma.agent({ id: "<its name>", client: ${JSON.stringify(client)} })`,
+    );
+  }
+  return agentActing(agent, person, declared);
+}
+
+/**
  * The principal of the in-app chat's agent (`CHAT_AGENT`) acting on behalf of `person`, the
  * person whose chat turn it is: its id, its groups (`agents`, and any a declared group gives it,
  * `principalOf`) and `onBehalfOf` the person, so the agent rules bind it (`isDeclaredAgent`) and
@@ -281,8 +307,8 @@ export function chatAgentActing(
 
 /**
  * Two agents declaring one `client` (`readPeople`'s people): a problem `sanoma check` reports,
- * but not one of `readPeople`'s, which would admit nobody, since nothing reads a client at run time
- * yet; `agentOfClient` answers no agent for such a client.
+ * but not one of `readPeople`'s, which would admit nobody; `agentOfClient` answers no agent for
+ * such a client, so its tokens are refused (`clientActing`) until one declaration goes.
  */
 export function clientClashes(people: readonly DeclaredResource[]): ResourceProblem[] {
   const clients = new Map<string, DeclaredResource>();

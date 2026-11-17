@@ -11,6 +11,7 @@ import {
   admit,
   agentActing,
   chatAgentActing,
+  clientActing,
   clientClashes,
   describeConfig,
   peopleWarnings,
@@ -339,7 +340,7 @@ export const sales = sanoma.group({ name: "sales", members: [scout] });
     );
     try {
       const read = readPeople(root);
-      // Nothing reads a client at run time yet: the clash locks nobody out.
+      // The clash locks no person out: only the clashing client's tokens (`clientActing`).
       expect(read.problems).toEqual([]);
       expect(admit({ id: "ada" }, read)).toEqual({ id: "ada", groups: ["tools"] });
       expect(clientClashes(read.people).map(problemLine)).toEqual([
@@ -418,6 +419,36 @@ describe("agentActing, and admit for an agent acting for someone", () => {
     expect(admit({ id: "scenarios", onBehalfOf: "ada" }, read)).toEqual({ id: "scenarios", groups: ["agents"] });
     // An agent never signs in, acting for someone or not.
     expect(() => admit({ id: "claude-code", onBehalfOf: "ada" }, read, true)).toThrow("is not declared");
+  });
+});
+
+describe("clientActing: the agent that stands for an OAuth client, for the person who signed it in", () => {
+  const CLIENT = "https://claude.ai/oauth/claude-code-client-metadata";
+  const claudeCode = sanoma.agent({ id: "claude-code", client: CLIENT });
+  const tools = sanoma.group({ name: "tools", members: [claudeCode] });
+  const read = { people: [...people, claudeCode, tools], problems: [] };
+
+  it("is the declared agent acting for the person, as agentActing makes it", () => {
+    expect(clientActing(CLIENT, "ada", read)).toEqual(agentActing("claude-code", "ada", read));
+  });
+
+  it("refuses, not_admitted and naming what to declare, a client no agent declares, or two do", () => {
+    const twin = sanoma.agent({ id: "claude-twin", client: CLIENT });
+    for (const [given, why] of [
+      [{ people, problems: [] }, "a client nobody declares"],
+      [{ people: [...read.people, twin], problems: [] }, "a client two agents declare"],
+    ] as const) {
+      expect(() => clientActing(CLIENT, "ada", given), why).toThrow(
+        `declare one, sanoma.agent({ id: "<its name>", client: "${CLIENT}" })`,
+      );
+      expect(() => clientActing(CLIENT, "ada", given), why).toThrow(expect.objectContaining({ code: "not_admitted" }));
+    }
+  });
+
+  it("refuses as agentActing does: a person not declared, and while the files have problems", () => {
+    expect(() => clientActing(CLIENT, "cy", read)).toThrow("acts for no one but a declared person");
+    const broken = { people: read.people, problems: [{ file: "resources/people.ts", message: "x" }] };
+    expect(() => clientActing(CLIENT, "ada", broken)).toThrow(expect.objectContaining({ code: "not_admitted" }));
   });
 });
 

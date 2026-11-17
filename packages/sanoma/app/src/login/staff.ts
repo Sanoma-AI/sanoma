@@ -1,9 +1,12 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   ADMIN,
+  CONSENT_PAGE,
   errorMessage,
   INVITE_SECONDS,
   LOGIN_AGENT,
   LOGIN_CODE_WORKFLOW,
+  LOGIN_PAGE,
   type LoginContext,
   type LoginHalf,
   type LoginIdentity,
@@ -11,14 +14,16 @@ import {
   personOf,
   principalOf,
   requestOrigin,
+  RESOURCE_METADATA,
   sameOrigin,
   sealLoginCode,
   type SocialClients,
 } from "sanoma/workflows";
 import { admit } from "sanoma/workflows/describe";
-import { personsOf } from "sanoma/workflows/shared";
+import { agentOfClient, personsOf } from "sanoma/workflows/shared";
 import { z } from "zod";
 import type { AppContext, LoginProvider } from "../context.ts";
+import type { AppSnapshot } from "../snapshot.ts";
 import { secretValues } from "../server/secrets.ts";
 import { loginKey } from "./keys.ts";
 import { type Company, companyOf, firstWordOf, initialsOf } from "../lib/names.ts";
@@ -30,7 +35,11 @@ import { escapeHtml, type PageFrame, smallPage, wantsJson } from "./page.ts";
 // sign-in goes to. On Node and on a Worker alike: the half reaches the database through the
 // request's client, and keeps nothing between requests.
 // Here too: the sign-in page (`/auth/login`, and any page asked for signed out), an invite's
-// landing page and `POST /auth/invite`.
+// landing page and `POST /auth/invite`. And the agent surface's own sign-in: the half is the
+// authorization server for `/mcp` (`LoginContext.staff.oauth`), whose sign-in and consent pages
+// are these, and a request to `/mcp` with a bearer is the client's, checked by the half and
+// admitted as the declared agent that stands for that client, for the person who signed it in;
+// without one, `/mcp` answers the 401 that starts a client's sign-in.
 
 /** Makes the staff login half from the app's context: `betterAuthStaffLogin`. */
 export type MakeStaffLogin = (context: LoginContext) => LoginHalf | Promise<LoginHalf>;
@@ -39,8 +48,23 @@ export type MakeStaffLogin = (context: LoginContext) => LoginHalf | Promise<Logi
 export type StaffSocial = SocialClients;
 
 const INVITE = "/auth/invite";
-/** The sign-in page's own address, where a GitHub sign-in that failed comes back to with `?error=`. */
-const LOGIN = "/auth/login";
+/** The agent surface (`routes/mcp.ts`): the resource the half issues tokens for, and the one path a bearer is taken at. */
+const MCP = "/mcp";
+
+/** A bearer, `Authorization: Bearer …` (the scheme in any case, RFC 9110 §11.1): what a client sends `/mcp` once signed in. */
+const hasBearer = (request: Request) => /^bearer \S/i.test(request.headers.get("authorization") ?? "");
+
+/** Whether `pathname` is the agent surface's: `/mcp`, or `/mcp/`, which its route answers too. */
+const atMcp = (pathname: string) => pathname === MCP || pathname === `${MCP}/`;
+
+/**
+ * Whether the request is a client's: any `Authorization` at `/mcp`, then that alone says who
+ * (a bearer the half checks; any other scheme, a DPoP token among them, nobody), never a cookie's.
+ */
+const byToken = (request: Request) => request.headers.has("authorization") && atMcp(new URL(request.url).pathname);
+
+/** Whether a page was sent here by the half's authorize: its query is signed (`sig`), which the half checks. */
+const signedQuery = (url: URL) => url.searchParams.has("sig");
 
 /** `POST /auth/invite`'s body: a declared colleague's email from someone signed in, or a sealed request (`sealInvite`). */
 const InviteBody = z.union([z.object({ email: z.string().email() }), z.object({ request: z.string().min(1) })]);
@@ -60,41 +84,77 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
   let half: LoginHalf | undefined;
   /** Whether `open` failed: the half is then never made, and the pages say so rather than "starting". */
   let failed = false;
-  const people = () => app!.snapshot.people;
+  /** The company as its files say when asked (`open`'s `current`). */
+  let current: (() => AppSnapshot | Promise<AppSnapshot>) | undefined;
+  /**
+   * What each request under way has read of the files. The half asks who is declared through
+   * callbacks that carry no request (`admits`, `agentOf`, several times in one authorize), so
+   * the request is found by the call it is made in, as the Worker's entry finds its client.
+   */
+  const underWay = new AsyncLocalStorage<Reading>();
+  const readings = new WeakMap<Request, Reading>();
+  /** Runs `answer` as part of `request`: what it reads of the files, the request reads once. */
+  const during = <T>(request: Request, answer: () => T): T => {
+    let reading = readings.get(request);
+    if (!reading) readings.set(request, (reading = {}));
+    return underWay.run(reading, answer);
+  };
+  /**
+   * Who the files declare, as they say now: read at each request that asks, so a person or a
+   * client taken out is refused at the login's own routes too, with no page asked in between;
+   * and once for that request, however often it asks (on Node each read checks every file's
+   * stamp, `liveSnapshot`). Outside a request (`invite`), read as asked.
+   */
+  const people = (): Promise<AppSnapshot["people"]> => {
+    const reading = underWay.getStore();
+    return reading ? (reading.people ??= declaredBy(current!)) : declaredBy(current!);
+  };
   /** How the login's pages look: the kit's stylesheet, and the company they are for. */
   const frame = (): PageFrame =>
     app ? { ...(app.stylesheet && { stylesheet: app.stylesheet }), company: companyOf(app.resolved.name) } : {};
-  /** The declared person `identity` names, as admitted, or undefined. */
-  const admitted = (identity: LoginIdentity) => {
+  /**
+   * The same, or undefined when the files could not be read (a file that does not load, which
+   * the log then names): for what must not fail on it. Nobody is admitted meanwhile, as the app's
+   * own admission refuses every request then ("could not be checked", `admitting`).
+   */
+  const peopleIfRead = () =>
+    people().catch((err: unknown) => {
+      console.error(`sanoma app: who is declared could not be read: ${errorMessage(err)}`);
+      return undefined;
+    });
+  /** The declared person `identity` names, as admitted, or undefined: for anyone else, and while the people cannot be read. */
+  const admitted = async (identity: LoginIdentity) => {
+    const declared = await peopleIfRead();
+    if (!declared) return undefined;
     try {
-      return admit(identity, people(), true);
+      return admit(identity, declared, true);
     } catch {
       return undefined;
     }
   };
+  /** Who a bearer at `/mcp` was issued for and to which client, once per request: `handle` asks, then admission. */
+  const tokenOf = oncePerRequest(async (request): Promise<LoginIdentity | undefined> => {
+    const token = await half?.bearer?.(request);
+    if (!token) return undefined;
+    const { email, github, client } = token;
+    return { ...(email && { email }), ...(github && { github }), client };
+  });
   /** Who the half says is signed in, once per request: `handle` asks, then admission. */
-  const verified = new WeakMap<Request, Promise<LoginIdentity | undefined>>();
-  const identityOf = (request: Request) => {
-    let found = verified.get(request);
-    if (!found) {
-      found = (async () => {
-        const session = await half?.verify(request);
-        if (!session) return undefined;
-        const { email, github } = session;
-        return { ...(email && { email }), ...(github && { github }) };
-      })();
-      verified.set(request, found);
-    }
-    return found;
-  };
+  const identityOf = oncePerRequest(async (request): Promise<LoginIdentity | undefined> => {
+    const session = await half?.verify(request);
+    if (!session) return undefined;
+    const { email, github } = session;
+    return { ...(email && { email }), ...(github && { github }) };
+  });
 
   const provider: LoginProvider = {
     name: "staff",
     // The half's (Better Auth's), which the sign-in page posts to as well.
     signOut: "/auth/better-auth/sign-out",
     check() {},
-    async open(context) {
+    async open(context, snapshot) {
       app = context;
+      current = snapshot;
       const { client, resolved } = context;
       try {
         half = await make({
@@ -104,10 +164,15 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
           origins: [],
           ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
           staff: {
-            admits: (identity) => admitted(identity) !== undefined,
+            admits: async (identity) => (await admitted(identity)) !== undefined,
             social,
+            // The agent surface's authorization server: tokens for `/mcp`, and a client only as
+            // the agent the files declare for it, as they read now.
+            oauth: { resource: MCP, agentOf: async (id) => agentOfClient(id, (await people()).people) },
+            // Never throws: the half made the session already, and the ledger's line is not its to lose it for.
             async record(method, identity) {
-              const person = personOf(identity, people().people);
+              const declared = await peopleIfRead();
+              const person = declared && personOf(identity, declared.people);
               if (person === undefined) return;
               await client
                 .recordSignIn(person, method)
@@ -120,7 +185,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
         throw err;
       }
     },
-    resolveActor: identityOf,
+    resolveActor: (request) => (byToken(request) ? tokenOf(request) : identityOf(request)),
     async handle(request) {
       if (!half) {
         return failed
@@ -135,19 +200,35 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       if (pathname.startsWith(`${INVITE}/`) && request.method === "GET")
         return landing(pathname.slice(INVITE.length + 1));
       if (lookFile(pathname, app?.stylesheet)) return undefined;
+      // A client's request: its bearer alone says who, or the 401 that sends it to sign in again;
+      // another scheme gets the challenge that names the one taken here.
+      if (byToken(request)) {
+        if (!hasBearer(request)) return challenge(request);
+        return (await tokenOf(request)) ? undefined : challenge(request, "invalid_token");
+      }
       const signedIn = await identityOf(request);
-      if (pathname === LOGIN && request.method === "GET") {
-        // On to the app only for someone it admits: a session of someone no longer declared signs in again here.
-        if (signedIn && admitted(signedIn))
+      if (pathname === LOGIN_PAGE && request.method === "GET") {
+        // On to the app only for someone it admits: a session of someone no longer declared signs
+        // in again here, as does anyone a client's sign-in sent here (the provider asks again).
+        if (signedIn && !signedQuery(url) && (await admitted(signedIn)))
           return new Response(null, { status: 302, headers: { location: "/", "cache-control": "no-store" } });
         return signInPage(half, frame(), 200, url.searchParams.get("error"));
       }
+      if (pathname === CONSENT_PAGE && request.method === "GET") {
+        const person = signedIn && (await admitted(signedIn));
+        return person ? consentPage(url, person) : signInPage(half, frame(), 401);
+      }
       if (signedIn) return undefined;
+      if (atMcp(pathname)) return challenge(request);
+      // A well-known path nobody answered is no document of this host's: a 404, whatever the
+      // half serves there, never the sign-in page, which a client would read as one.
+      if (pathname.startsWith("/.well-known/"))
+        return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
       return wantsJson(request) ? refuse(401, "Sign in first") : signInPage(half, frame(), 401);
     },
     async invite(email, { origin, by }) {
       if (!half?.invite || !app) throw new Error("The app is starting");
-      const person = personOf({ email }, people().people);
+      const person = personOf({ email }, (await people()).people);
       if (person === undefined) throw new Error(`${email} is not a declared person's email`);
       const { host, protocol } = new URL(origin);
       const token = await half.invite(
@@ -159,6 +240,40 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       return { url: `${origin}${INVITE}/${token}`, expiresAt };
     },
   };
+
+  /**
+   * The consent page for a client's sign-in (`url`, the half's signed request): which client asks,
+   * as which declared agent, for `person` and the company, with Allow and Deny, which post the
+   * signed request back to the half (`/oauth2/consent`). A client no agent stands for any more is
+   * refused here too.
+   */
+  async function consentPage(url: URL, person: { id: string }): Promise<Response> {
+    const client = url.searchParams.get("client_id") ?? "";
+    const { people: declared } = await people();
+    const agent = agentOfClient(client, declared);
+    const look = frame();
+    const company = look.company?.name ?? "this company";
+    if (agent === undefined) {
+      return smallPage(
+        403,
+        "Not declared",
+        `<p>${escapeHtml(company)} declares no agent for the client <code>${escapeHtml(client)}</code>. Agents are declared in <code>resources/people.ts</code>: declare one only for a client you chose to connect.</p>`,
+        look,
+      );
+    }
+    const who = personsOf(declared).find((p) => p.id === person.id) ?? person;
+    return smallPage(
+      200,
+      "Allow access",
+      `<div class="lede"><h1>Let ${escapeHtml(agent)} act for you?</h1>` +
+        `<p>${escapeHtml(client)} asks to work in ${escapeHtml(company)} as the agent <strong>${escapeHtml(agent)}</strong>, ` +
+        `for ${escapeHtml(nameOf(who))}. It may do only what both you and that agent may do, and the company's policy decides each call.</p></div>` +
+        `<div class="links"><button id="allow" type="button" class="button">Allow</button>` +
+        `<button id="deny" type="button" class="link">Deny</button></div>` +
+        `<p id="message" class="message" role="status"></p><script>${CONSENT_SCRIPT}</script>`,
+      look,
+    );
+  }
 
   /** `POST /auth/invite`: `{ email }` from someone signed in and declared, on this page; `{ request }` sealed with the signing key. */
   async function mint(request: Request): Promise<Response> {
@@ -178,14 +293,14 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     } else {
       if (!sameOrigin(request)) return refuse(403, "Ask for an invite from this app's own page");
       const identity = await identityOf(request);
-      const asking = identity && admitted(identity);
+      const asking = identity && (await admitted(identity));
       if (!asking) return refuse(401, "Sign in first");
       // An invite signs its holder in as that person: only an admin hands one out.
       if (!asking.groups?.includes(ADMIN)) return refuse(403, `Only someone in ${ADMIN} makes an invite link`);
       ({ email } = body.data);
       by = asking.id;
     }
-    if (personOf({ email }, people().people) === undefined) {
+    if (personOf({ email }, (await people()).people) === undefined) {
       return refuse(403, `${email} is not a declared person's email`);
     }
     const { url } = await provider.invite!(email, { origin: requestOrigin(request), by });
@@ -221,7 +336,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
 
   /** The declared person an invite for `email` signs in, with their groups, and who sent it (none for a sealed request's). */
   async function named(email: string): Promise<Invited> {
-    const declared = people().people;
+    const declared = (await people()).people;
     const persons = personsOf(declared);
     const invited = persons.find((p) => p.id === personOf({ email }, declared));
     if (!invited) return {};
@@ -235,7 +350,19 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     return { person, ...(sender && { sender }) };
   }
 
-  return provider;
+  return {
+    ...provider,
+    resolveActor: (request) => during(request, () => provider.resolveActor(request)),
+    handle: (request) => during(request, () => provider.handle!(request)),
+  };
+}
+
+/** The people a snapshot read now declares. */
+const declaredBy = async (current: () => AppSnapshot | Promise<AppSnapshot>) => (await current()).people;
+
+/** What a request has read of the company's files so far: the people, once it asked. */
+interface Reading {
+  people?: Promise<AppSnapshot["people"]>;
 }
 
 /**
@@ -247,9 +374,31 @@ export async function sendLoginCode(client: AppContext["client"], email: string,
   await client.start(LOGIN_CODE_WORKFLOW, { to: email, code: sealLoginCode(email, code) }, { startedBy: LOGIN_AGENT });
 }
 
-/** A refusal of `POST /auth/invite`, as JSON saying why. */
-const refuse = (status: number, error: string) =>
-  Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
+/**
+ * The 401 a client gets at `/mcp` without a token it may use (RFC 6750, with RFC 9728's pointer to
+ * the resource's metadata), which is what starts its sign-in; `error` says why one was refused.
+ */
+function challenge(request: Request, error?: "invalid_token"): Response {
+  const metadata = `${requestOrigin(request)}${RESOURCE_METADATA}${MCP}`;
+  const why = error
+    ? `error="${error}", error_description="The access token is not one this company's sign-in issued for its agent surface, or it expired", `
+    : "";
+  return refuse(401, "Sign in first", { "www-authenticate": `Bearer ${why}resource_metadata="${metadata}"` });
+}
+
+/** A refusal as JSON saying why (`POST /auth/invite`'s, a server function's, `/mcp`'s), never kept, with `headers` besides. */
+const refuse = (status: number, error: string, headers: Record<string, string> = {}) =>
+  Response.json({ error }, { status, headers: { "cache-control": "no-store", ...headers } });
+
+/** `read`'s answer for a request, asked for once however often it is called for that request. */
+function oncePerRequest<T>(read: (request: Request) => Promise<T>): (request: Request) => Promise<T> {
+  const answers = new WeakMap<Request, Promise<T>>();
+  return (request) => {
+    let answer = answers.get(request);
+    if (!answer) answers.set(request, (answer = read(request)));
+    return answer;
+  };
+}
 
 /** What a page names a declared person by: their name, else their id. */
 type Named = { id: string; name?: string };
@@ -359,7 +508,7 @@ function invitePage(
     `<div class="lede">${lede}</div>` +
     `<a class="button tall" href="${escapeHtml(invitation.path)}">Continue as ${escapeHtml(invitation.email)}</a>` +
     `<p class="small muted note">${CLOCK_ICON}<span>This link works once and expires in 24 hours.</span></p>` +
-    `<p class="rule">Not ${escapeHtml(person ? firstNameOf(person) : invitation.email)}? <a href="${LOGIN}">Sign in with your own email</a></p>`
+    `<p class="rule">Not ${escapeHtml(person ? firstNameOf(person) : invitation.email)}? <a href="${LOGIN_PAGE}">Sign in with your own email</a></p>`
   );
 }
 
@@ -367,26 +516,53 @@ const GITHUB_ICON = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0
 const CLOCK_ICON = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
 
 /**
+ * What the consent page does: it posts the person's answer and the half's signed request (the
+ * page's own query) to the half's consent, and goes where the half says: back to the client, with
+ * a code or with `access_denied`.
+ */
+const CONSENT_SCRIPT = `
+const say=(text)=>{document.getElementById("message").textContent=text};
+const answer=async(accept)=>{const done=await fetch("/auth/better-auth/oauth2/consent",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({accept,oauth_query:location.search.slice(1)})}).catch(()=>null);
+const {url}=done?.ok?await done.json().catch(()=>({})):{};if(url){location.assign(url);return}say("That did not work. Start the sign-in again from the agent.")};
+document.getElementById("allow").addEventListener("click",()=>answer(true));
+document.getElementById("deny").addEventListener("click",()=>answer(false));
+`;
+
+/**
  * What the sign-in page does: it posts JSON to the login's routes (Better Auth's email code and
- * GitHub), says what went wrong by Better Auth's error codes, and once signed in goes back to the
- * page asked for on this host (`/` from the sign-in page itself; leading slashes count as one, so
+ * GitHub), says what went wrong by Better Auth's error codes, and once signed in goes on where a
+ * client's sign-in continues (when the half's authorize sent it here: its signed query is posted
+ * along, `oauth_query`, and the half answers the consent page or the client's redirect), else back
+ * to the page asked for on this host (`/` from the sign-in page itself; leading slashes count as one, so
  * a path like `//elsewhere` never leads off it). A GitHub sign-in that fails comes back to
- * `/auth/login?error=<code>`.
+ * `/auth/login?error=<code>`, with the signed query before it when there is one, so a code after
+ * it still goes on with the client's sign-in.
+ *
+ * The signed query is the page's own without what the half did not sign (the parameters it names
+ * in `ba_param`, and `sig`): the `error` GitHub's failure adds would undo the signature. It lasts
+ * ten minutes; after that the half answers `invalid_signature`, to a code or to GitHub's start,
+ * which the page says as the client's sign-in having expired, never as a wrong code.
  */
 const SIGN_IN_SCRIPT = `
 const post=(path,body)=>fetch("/auth/better-auth"+path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
 const $=(id)=>document.getElementById(id);const message=$("message");const say=(text)=>{message.textContent=text};
-const here="/"+location.pathname.replace(/^[/]+/,"");const back=here===${JSON.stringify(LOGIN)}?"/":here+location.search;
+const here="/"+location.pathname.replace(/^[/]+/,"");const back=here===${JSON.stringify(LOGIN_PAGE)}?"/":here+location.search;
 const AGAIN="That did not work. Try again in a moment.";let email="";let wrong=0;
+const asked=new URLSearchParams(location.search);const names=new Set(asked.getAll("ba_param"));
+const signed=asked.has("sig")?new URLSearchParams([...asked].filter(([name])=>!names.size||name==="sig"||name==="ba_param"||names.has(name))).toString():"";
+const oauth=signed?{oauth_query:signed}:{};
+const EXPIRED="This sign-in from the agent has expired. Start it again from the agent.";const expired=(said)=>said?.error==="invalid_signature";
+const next=async(done)=>{const {url}=signed?await done.json().catch(()=>({})):{};location.assign(url||back)};
 const send=()=>post("/email-otp/send-verification-otp",{email,type:"sign-in"}).then((r)=>r.ok,()=>false);
 $("email")?.addEventListener("submit",async(e)=>{e.preventDefault();email=String(new FormData(e.target).get("email"));
 if(!await send()){say(AGAIN);return}
 say("");wrong=0;$("email-step").hidden=true;$("code-step").hidden=false;$("resent").hidden=true;$("code").reset();$("code").querySelector("input").focus()});
 $("code")?.addEventListener("submit",async(e)=>{e.preventDefault();
-const done=await post("/sign-in/email-otp",{email,otp:String(new FormData(e.target).get("otp"))}).catch(()=>null);
-if(done?.ok){location.assign(back);return}
+const done=await post("/sign-in/email-otp",{email,otp:String(new FormData(e.target).get("otp")),...oauth}).catch(()=>null);
+if(done?.ok){await next(done);return}
 if(!done){say(AGAIN);return}
-const {code}=await done.json().catch(()=>({}));
+const said=await done.json().catch(()=>({}));const {code}=said;
+if(expired(said)){say(EXPIRED);return}
 if(code==="OTP_EXPIRED")say("That code has expired. Send a new one.");
 else if(code==="TOO_MANY_ATTEMPTS"||++wrong>=3)say("Three wrong codes: send a new one.");
 else say("That code did not work. Check it, or send a new one.")});
@@ -394,6 +570,6 @@ $("again")?.addEventListener("click",async()=>{if(!await send()){say(AGAIN);retu
 say("");wrong=0;$("resent").hidden=false;$("code").reset();$("code").querySelector("input").focus()});
 $("different")?.addEventListener("click",()=>{say("");$("code-step").hidden=true;$("email-step").hidden=false;$("email").querySelector("input").focus()});
 $("github")?.addEventListener("click",async()=>{
-const started=await post("/sign-in/social",{provider:"github",callbackURL:back,errorCallbackURL:${JSON.stringify(LOGIN)}}).then((r)=>r.json()).catch(()=>({}));
-if(started.url)location.href=started.url;else say("GitHub sign-in did not start. Try again in a moment.")});
+const started=await post("/sign-in/social",{provider:"github",callbackURL:back,errorCallbackURL:${JSON.stringify(LOGIN_PAGE)}+(signed&&"?"+signed),...oauth}).then((r)=>r.json()).catch(()=>({}));
+if(started.url)location.href=started.url;else say(expired(started)?EXPIRED:"GitHub sign-in did not start. Try again in a moment.")});
 `;

@@ -34,11 +34,19 @@ export function smallPage(status: number, title: string, body: string, frame: Pa
         `<span>${escapeHtml(company.name)}</span></div>`
       : "") +
     `<section class="card">${body}</section>${footer ? `<p class="foot">${footer}</p>` : ""}</main></body></html>`;
-  return new Response(html, {
-    status,
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-  });
+  return new Response(html, { status, headers: { ...PAGE_HEADERS } });
 }
+
+/**
+ * A small page's headers: never kept, and framed by no page at all, so no other site can lay
+ * the sign-in, an invite or a consent's Allow under a click of its own.
+ */
+const PAGE_HEADERS = {
+  "content-type": "text/html; charset=utf-8",
+  "cache-control": "no-store",
+  "content-security-policy": "frame-ancestors 'none'",
+  "x-frame-options": "DENY",
+} as const;
 
 /**
  * The app's theme, before the page paints: `dark` or `light` on <html> from what the app keeps

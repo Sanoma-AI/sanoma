@@ -55,6 +55,7 @@ export {
   admit,
   agentActing,
   chatAgentActing,
+  clientActing,
   clientClashes,
   loadDataFiles,
   peopleWarnings,

@@ -112,9 +112,13 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
   );
   // The staff sign-in that cannot start (its key, SANOMA_SIGNING_KEY, unset) is logged, and the
   // app's own pages answer 503 while the sites are served, as a site whose half failed.
-  const opened = staff.open?.(app.context).catch((err: unknown) => {
-    console.error(`sanoma: the staff sign-in could not start, so the app's pages are not served: ${errorMessage(err)}`);
-  });
+  const opened = staff
+    .open?.(app.context, () => snapshot)
+    .catch((err: unknown) => {
+      console.error(
+        `sanoma: the staff sign-in could not start, so the app's pages are not served: ${errorMessage(err)}`,
+      );
+    });
   await Promise.all([opened, ...halves]);
   return app;
 }
