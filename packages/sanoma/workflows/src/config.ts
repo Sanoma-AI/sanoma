@@ -101,7 +101,7 @@ import {
   RESHAPE_WORKFLOW,
   OPERATIONS_VENDOR,
   errorMessage,
-  siteAtHostname,
+  routerHostnameTaken,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
@@ -629,6 +629,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     }
     names.set(wf.name, wf);
   }
+  // The agents' router, whose hostname a host that derives attaches (`deriveHosts`).
+  const router = config.router === undefined ? undefined : checkRouter(config.router, collections);
   // Built-in: checking the resources the data files declare against their vendors, and applying them.
   const read = (options: ReadOptions = {}) =>
     readDeclared(root, connectors, declarable, types, connections, {
@@ -637,6 +639,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       builtInStore: !config.secrets?.store,
       bindings: config.secrets?.bindings,
       ...(isOp(config.login?.sender) && { sender: config.login.sender.vendor }),
+      ...(router && { router: router.hostname }),
     });
   if (types.size) {
     names.set(
@@ -694,7 +697,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: sending a sign-in code, when the config names how.
   const login = config.login && checkLogin(config.login, ops, drivers, name);
   if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, name));
-  const router = config.router === undefined ? undefined : checkRouter(config.router, collections);
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   const bundled = rootSnapshot(root);
   return {
@@ -868,15 +870,15 @@ export function routerOptionsFrom(
   env: { SANOMA_HOSTNAME?: string; SANOMA_ROUTER_SECRET?: string },
   domains: Readonly<Record<string, string>> = {},
 ): { secret?: string } {
-  if (env.SANOMA_HOSTNAME?.trim().toLowerCase() === hostname) {
+  const taken = routerHostnameTaken(hostname, env.SANOMA_HOSTNAME, domains);
+  if (taken?.app) {
     throw new Error(
       `The config's \`router.hostname\`, ${hostname}, is SANOMA_HOSTNAME, the app's own hostname: give the router a hostname of its own, such as mcp.${hostname}`,
     );
   }
-  const site = siteAtHostname(hostname, domains);
-  if (site !== undefined) {
+  if (taken) {
     throw new Error(
-      `The config's \`router.hostname\`, ${hostname}, is the domain of the public site ${site} (SANOMA_DOMAINS): give the router a hostname of its own`,
+      `The config's \`router.hostname\`, ${hostname}, is the domain of the public site ${taken.site} (SANOMA_DOMAINS): give the router a hostname of its own`,
     );
   }
   const secret = routerSecretFrom(env);
@@ -1160,6 +1162,7 @@ async function readDeclared(
     builtInStore: boolean;
     bindings?: SecretConfiguration["bindings"];
     sender?: string;
+    router?: string;
   },
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
   // Loaded when a run reads the files, not with the worker.
@@ -1181,6 +1184,7 @@ async function readDeclared(
       builtInStore: options.builtInStore,
       bindings: options.bindings,
       ...(options.sender !== undefined && { sender: options.sender }),
+      ...(options.router !== undefined && { router: options.router }),
       mint: !!options.mint && !!run && !run.sandbox,
       sandbox: !!run?.sandbox,
     });

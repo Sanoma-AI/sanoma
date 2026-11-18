@@ -9,11 +9,17 @@ import {
   type PlanAction,
   resolveSecrets,
   retryableStatus,
+  agentAddressFrom,
+  routedAgentsSchema,
+  ROUTER_SECRET,
+  routerOptionsFrom,
+  routingProblems,
   WAKE_PATH,
   type WakeupRegistration,
 } from "sanoma/workflows";
 import { domainsOf, domainsText, hostnameUrl, siteAtHostname } from "sanoma/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "sanoma/workflows/wakeup-service";
+import type { z } from "zod";
 import { alarm, container, type host } from "./connector.ts";
 import { refused } from "./errors.ts";
 import { accountPinned } from "./registry.ts";
@@ -55,8 +61,19 @@ const TEXT = {
   domains: "SANOMA_DOMAINS",
   /** The app's own custom domain, when declared: the state's `url` is then `https://<hostname>`. */
   hostname: "SANOMA_HOSTNAME",
+  /**
+   * The hostname of the agents' router the company's config serves, once declared: the app reads
+   * it from its config, and this records it as attached for Sanoma, so it is Sanoma's to detach.
+   */
+  routerHostname: "SANOMA_ROUTER_HOSTNAME",
   url: HOST_URL,
 } as const;
+/**
+ * A company behind a router (`agents`): the plain-text halves of its agent address, as every
+ * launcher reads them (`agentAddressFrom`). Its secret there is `ROUTER_SECRET`, one of the
+ * host's secrets. The Worker's own names (`RESERVED`) only for a host that declares `agents`.
+ */
+const ROUTED = { url: "SANOMA_AGENT_URL", company: "SANOMA_COMPANY" } as const;
 /** The app's database, a Hyperdrive config over the host's `SANOMA_DATABASE_URL` (`AppBundleEnv.DATABASE`). */
 const DATABASE = "DATABASE";
 /** The app bundle's static assets (`AppBundleEnv.ASSETS`). */
@@ -284,15 +301,15 @@ const textOf = (bindings: ReadBinding[] | undefined) =>
   new Map((bindings ?? []).filter((b) => b.type === "plain_text").map((b) => [b.name, b.text ?? ""]));
 
 /**
- * The hostnames the Worker's bindings say it was declared to serve (`SANOMA_DOMAINS` and
- * `SANOMA_HOSTNAME`): the custom domains that are Sanoma's to detach. One attached by hand and
- * never declared is left alone.
+ * The hostnames the Worker's bindings say it was declared to serve (`SANOMA_DOMAINS`,
+ * `SANOMA_HOSTNAME` and `SANOMA_ROUTER_HOSTNAME`): the custom domains that are Sanoma's to
+ * detach. One attached by hand and never declared is left alone.
  */
 const declaredBefore = (bindings: ReadBinding[] | undefined) => {
   const text = textOf(bindings);
   const domains = text.get(TEXT.domains);
-  const hostname = text.get(TEXT.hostname);
-  return new Set([...(domains ? Object.values(domainsOf(domains)) : []), ...(hostname ? [hostname] : [])]);
+  const names = [text.get(TEXT.hostname), text.get(TEXT.routerHostname)].filter((name) => name);
+  return new Set([...(domains ? Object.values(domainsOf(domains)) : []), ...(names as string[])]);
 };
 
 /** Where the app answers: its declared hostname, else the Worker's workers.dev URL. */
@@ -315,6 +332,29 @@ const checkHostname = (name: unknown, hostname: unknown, domains: unknown) => {
   }
 };
 
+/**
+ * Refuses, before any request, a host no Worker could serve a router with or behind one, as
+ * `routingProblems` says it: `describeConfig` and apply report the same at a data file's
+ * declaration; this guards a workflow's own call, which no data file declares.
+ */
+const checkRouting = ({ name, hostname, domains, routerHostname, agents }: Record<string, unknown>) => {
+  const [problem] = routingProblems({ router: routerHostname, hostname, domains, agents });
+  if (problem) throw refused(`container ${String(name)}: ${problem}`, "invalid");
+};
+
+/** A declared `agents`' URL and company, as `routedText` takes them. */
+const routedPair = (agents: unknown): [unknown, unknown] => {
+  const { url, company } = (agents ?? {}) as { url?: unknown; company?: unknown };
+  return [url, company];
+};
+
+/**
+ * A routed address as a plan compares it, a declaration's (`agents`) with the Worker's two
+ * bindings as they are: its URL and its company, each absent or as written; none is "".
+ */
+const routedText = (url: unknown, company: unknown) =>
+  url == null && company == null ? "" : JSON.stringify([url ?? null, company ?? null]);
+
 type ContainerState = {
   id: string | null;
   name: string;
@@ -326,6 +366,9 @@ type ContainerState = {
   port: number;
   domains?: Record<string, string>;
   hostname?: string;
+  routerHostname?: string;
+  /** The router the company is behind, as its plain-text bindings say: never its secret. */
+  agents?: { url: string; company: string };
   url: string;
   worker_url: string;
   healthy: boolean;
@@ -369,9 +412,10 @@ const COMPARED = [
   "port",
   "domains",
   "hostname",
+  "routerHostname",
 ] as const;
 /** The compared fields a declaration may leave out: leaving one out is a change when the Worker has it. */
-const OPTIONAL = new Set<string>(["configurationRevision", "domains", "hostname"]);
+const OPTIONAL = new Set<string>(["configurationRevision", "domains", "hostname", "routerHostname"]);
 const same = (field: (typeof COMPARED)[number], a: unknown, b: unknown) =>
   field === "domains"
     ? domainsText((a ?? {}) as Record<string, string>) === domainsText((b ?? {}) as Record<string, string>)
@@ -542,13 +586,20 @@ export function containerOps(
     const text = textOf(bindings);
     const served = text.get(TEXT.domains);
     const declaredHostname = text.get(TEXT.hostname) || undefined;
-    // The domains and the hostname it serves that are attached: one whose attach failed, or
+    const declaredRouter = text.get(TEXT.routerHostname) || undefined;
+    // The domains and the hostnames it serves that are attached: one whose attach failed, or
     // detached by hand, is drift, so the next apply attaches it again.
-    const attached = new Set(served || declaredHostname ? (await cf.domains(script)).map((d) => d.hostname) : []);
+    const attached = new Set(
+      served || declaredHostname || declaredRouter ? (await cf.domains(script)).map((d) => d.hostname) : [],
+    );
     const domains = served
       ? Object.fromEntries(Object.entries(domainsOf(served)).filter(([, hostname]) => attached.has(hostname)))
       : undefined;
     const hostname = declaredHostname && attached.has(declaredHostname) ? declaredHostname : undefined;
+    const routerHostname = declaredRouter && attached.has(declaredRouter) ? declaredRouter : undefined;
+    // The routed address its two bindings give, when they give one whole: a binding deleted or
+    // altered by hand is none in the state, which drift then reports, never a read that fails.
+    const routed = routedAgentsSchema.safeParse({ url: text.get(ROUTED.url), company: text.get(ROUTED.company) });
     const state: ContainerState = {
       id: app?.id ?? null,
       name,
@@ -561,6 +612,8 @@ export function containerOps(
       port: Number(text.get(TEXT.port) ?? 0),
       ...(domains && Object.keys(domains).length > 0 && { domains }),
       ...(hostname && { hostname }),
+      ...(routerHostname && { routerHostname }),
+      ...(routed.success && { agents: routed.data }),
       // Where the app answers now: at its hostname once attached; its health is asked on workers.dev.
       url: servedAt(hostname, url),
       worker_url: url,
@@ -568,7 +621,13 @@ export function containerOps(
     };
     const secrets = bindings.filter((b) => b.type === "secret_text").map((b) => b.name);
     // The app at the revision its bindings name: only the upload with R's app is tagged with R.
-    return { state, secrets, serves: settings.annotations?.["workers/tag"] === state.revision };
+    return {
+      state,
+      secrets,
+      serves: settings.annotations?.["workers/tag"] === state.revision,
+      // The two bindings as they are, whole or not: what a plan compares the declared address with.
+      routed: routedText(text.get(ROUTED.url), text.get(ROUTED.company)),
+    };
   };
 
   const read = async ({ id }: { id: string }) => {
@@ -577,7 +636,16 @@ export function containerOps(
   };
 
   const plan = async ({ id, desired }: { id?: string; desired?: Record<string, unknown> }): Promise<Planned> => {
-    if (desired) checkHostname(desired.name, desired.hostname, desired.domains);
+    if (desired) {
+      checkHostname(desired.name, desired.hostname, desired.domains);
+      checkRouting(desired);
+      // A workflow's own call: a data file's declaration is checked by the schema already.
+      const routed = routedAgentsSchema.nullish().safeParse(desired.agents);
+      if (!routed.success) {
+        const said = routed.error.issues.map((issue) => issue.message).join("; ");
+        throw refused(`container ${String(desired.name)}: agents: ${said}`, "invalid");
+      }
+    }
     const found = id === undefined ? undefined : await inspect(id, false);
     if (!desired) return { action: found ? "delete" : "none", ...NONE };
     const { secrets, ...declared } = desired;
@@ -588,18 +656,19 @@ export function containerOps(
     const { state } = found;
     if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
     const changed =
-      // `domains` and `hostname` left out are compared too: removing one is a change.
+      // `domains`, `hostname`, `routerHostname` and `agents` left out are compared too: removing one is a change.
       COMPARED.some(
         (field) => (field in planned || OPTIONAL.has(field)) && !same(field, planned[field], state[field]),
       ) ||
       // The instance token is bound whether declared or not.
+      routedText(...routedPair(planned.agents)) !== found.routed ||
       sorted(new Set([...Object.keys(secrets ?? {}), WAKEUP_TOKEN])) !== sorted(found.secrets) ||
       // A deploy that ended before its upload of the app.
       !found.serves;
     if (!changed) return { action: "none", planned: state, ...NONE };
-    // What the Worker will serve: the declared domains and hostname, none of the found ones left
-    // out; the app at the declared hostname, or on workers.dev without one.
-    const { domains: _domains, hostname: _hostname, ...was } = state;
+    // What the Worker will serve: the declared domains, hostnames and routed address, none of the
+    // found ones left out; the app at the declared hostname, or on workers.dev without one.
+    const { domains: _domains, hostname: _hostname, routerHostname: _router, agents: _agents, ...was } = state;
     const url = servedAt(planned.hostname as string | null | undefined, state.worker_url);
     return {
       action: "update",
@@ -698,12 +767,36 @@ export function containerOps(
 
   /** Makes the Worker and its application match `desired` at its revision, in the three steps of `containerOps`: a create and an update alike. */
   const put = async (desired: Record<string, unknown>, { secrets: store }: CallContext) => {
+    // Before the secrets are read.
+    checkRouting(desired);
     const { declared, token } = await resolved(desired, store);
     const { name, image, source, ref, revision, configurationRevision, domains } = declared;
     const port = declared.port ?? RUNTIME_PORT;
     const hostname = declared.hostname ?? undefined;
     checkHostname(name, hostname, domains);
+    // `cloudflare.host`'s alone: `cloudflare.container`'s schema leaves them out.
+    const { agents, routerHostname } = declared as z.infer<typeof host.schema>;
     const secrets: Record<string, string> = { ...declared.secrets, [WAKEUP_TOKEN]: token };
+    // What the launchers read of the agents' router, built once: checked by their own readers
+    // (`agentAddressFrom`, `routerOptionsFrom`), so a value the runtime would refuse at its start
+    // never reaches the Worker, then written as bindings. A refusal never says a secret.
+    const routed = agents ? { [ROUTED.url]: agents.url, [ROUTED.company]: agents.company } : {};
+    const routerSecret = secrets[ROUTER_SECRET];
+    if ((agents || routerHostname) && !routerSecret?.trim()) {
+      throw refused(
+        `container ${name ?? ""}: no ${ROUTER_SECRET} among its secrets: ${agents ? "this company's own secret at the router it is behind" : "the master secret of the router it serves"}, which apply gives a host`,
+        "invalid",
+      );
+    }
+    try {
+      if (agents) agentAddressFrom({ ...routed, [ROUTER_SECRET]: routerSecret });
+      else if (routerHostname) {
+        const env = { ...(hostname && { SANOMA_HOSTNAME: hostname }), [ROUTER_SECRET]: routerSecret };
+        routerOptionsFrom({ hostname: routerHostname }, env, domains ?? {});
+      }
+    } catch (error) {
+      throw refused(`container ${name ?? ""}: ${errorMessage(error)}`, "invalid");
+    }
     if (!name || !image || !source || !ref) {
       const missing = !name ? "name" : !image ? "image" : !source ? "source" : "ref";
       throw refused(`container ${name ?? ""}: no ${missing}: apply gives a host one`);
@@ -713,7 +806,7 @@ export function containerOps(
         `container ${name}: no revision: apply sets it from ${ref} once its source exists (apply again after a repository it creates)`,
       );
     }
-    const taken = Object.keys(secrets).filter((key) => RESERVED.has(key));
+    const taken = Object.keys(secrets).filter((key) => RESERVED.has(key) || Object.hasOwn(routed, key));
     if (taken.length)
       throw refused(`container ${name}: ${taken.join(", ")} is the Worker's own; name the secret otherwise`);
     if (!secrets.SANOMA_DATABASE_URL) {
@@ -736,9 +829,13 @@ export function containerOps(
     // the Worker as it was. Each apply asks again, which costs a manifest's HEAD once the copy is
     // there, and puts back one gone; the object starts only a pinned image of the account's.
     // The custom domains are read first too: the ones an update's Worker has, and each declared
-    // one missing (a site's domain or the app's hostname), with its zone, so a domain whose zone
-    // the account lacks is refused here.
-    const hostnames = new Set([...Object.values(domains ?? {}), ...(hostname ? [hostname] : [])]);
+    // one missing (a site's domain, the app's hostname or its router's), with its zone, so a
+    // domain whose zone the account lacks is refused here.
+    const hostnames = new Set([
+      ...Object.values(domains ?? {}),
+      ...(hostname ? [hostname] : []),
+      ...(routerHostname ? [routerHostname] : []),
+    ]);
     const before = declaredBefore(current?.bindings);
     const attached = current && (hostnames.size > 0 || before.size > 0) ? await cf.domains(script) : [];
     const held = new Set(attached.map((d) => d.hostname));
@@ -765,6 +862,8 @@ export function containerOps(
       [TEXT.url]: url,
       ...(served && { [TEXT.domains]: served }),
       ...(hostname && { [TEXT.hostname]: hostname }),
+      ...(routerHostname && { [TEXT.routerHostname]: routerHostname }),
+      ...routed,
     };
     const bindings: Binding[] = [
       { type: "durable_object_namespace", name: NAMESPACE, class_name: OBJECT_CLASS },
@@ -872,6 +971,8 @@ export function containerOps(
       port,
       ...(domains && { domains }),
       ...(hostname && { hostname }),
+      ...(routerHostname && { routerHostname }),
+      ...(agents && { agents: { url: agents.url, company: agents.company } }),
       url: servedAt(hostname, url),
       worker_url: url,
       healthy: true,

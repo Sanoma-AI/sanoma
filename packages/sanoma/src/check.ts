@@ -12,6 +12,7 @@ import {
   peopleWarnings,
   permissionsGrid,
   readPeople,
+  routerWarnings,
   schemaOf,
   writeGenerated,
 } from "sanoma/workflows/describe";
@@ -44,8 +45,9 @@ const LINTED = ["workflows", "operations", "resources", "sites", "apps"];
  * problems in the order tsc, the sites' tsc, oxlint, the policies, the config, the folders refused
  * as sites, the content's problems, the sites' build, the app bundle's. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
  * problem. `ok` when there are no problems; the warnings beside them (the sites', an import
- * from one app's folder into another's, and an agent with no fixed person in a declared group,
- * `peopleWarnings`) never make it not.
+ * from one app's folder into another's, an agent with no fixed person in a declared group,
+ * `peopleWarnings`, and a declared host that sets up no router in a config that serves one,
+ * `routerWarnings`) never make it not.
  * With them, the repo's Permissions grid (`permissionsGrid`, as the app's Permissions page has
  * it), from the same config and description, which a change is reviewed by: none when the
  * policies do not hold, since every cell would be the refusing policy's deny. What the people's
@@ -107,6 +109,8 @@ export async function check(
     // An agent that acts for whoever names it, in a declared group: its groups reach them. And a
     // built-in client refused because its agent's id is taken, or turned off to no effect.
     ...peopleWarnings(readPeople(root).people),
+    // A declared host of a type that sets up no router, in a config that serves one.
+    ...routerWarnings(description.resources, resolved.types, resolved.router?.hostname),
   ].map(warningLine);
   const grid = policies.length ? undefined : permissionsGrid(resolved, description);
   for (const client of description.builtInClients) log(`built-in client: ${builtInClientLine(client)}`);

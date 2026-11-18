@@ -4,7 +4,7 @@ import type { Authentication, CallAuthentication } from "./authentication.ts";
 import type { ConnectionSnapshot } from "./connection.ts";
 import type { HarnessV1 } from "@ai-sdk/harness";
 import type { ProviderV4 } from "@ai-sdk/provider";
-import type { z } from "zod";
+import { z } from "zod";
 import type { Fake } from "./fake.ts";
 import type { SandboxBackend, SandboxContext } from "./sandbox-contract.ts";
 import type { Secrets } from "./secret.ts";
@@ -764,6 +764,35 @@ const ROUTED_RULES = {
       : "letters, digits, - and _ only, as the router lists it",
   secret: secretProblem,
 };
+
+/**
+ * Why `value` breaks the rule of one part of a routed address (its `url`, its `company`, its
+ * `secret`), said after what names the value, or undefined: the rules `routedAgentAddress` and
+ * `agentAddressFrom` refuse by, for what checks a part alone. Never says a secret.
+ */
+export const routedProblem = (part: keyof typeof ROUTED_RULES, value: unknown): string | undefined =>
+  ROUTED_RULES[part](value);
+
+/** A string schema refusing what `routedProblem` does for `part`, in its words after `what`. */
+const routedPart = (part: "url" | "company", what: (value: string) => string) =>
+  z.string().superRefine((value, ctx) => {
+    const problem = routedProblem(part, value);
+    if (problem) ctx.addIssue({ code: "custom", message: `${what(value)}: ${problem}` });
+  });
+
+/**
+ * A company behind a router as a host's declaration says it (`HostSpec.inputs.agents`): the
+ * router's agent surface and this company's id there, the launchers' `SANOMA_AGENT_URL` and
+ * `SANOMA_COMPANY`. Its secret there is no part of it: the stored `SANOMA_ROUTER_SECRET`.
+ */
+export const routedAgentsSchema = z.object({
+  url: routedPart("url", (url) => `${JSON.stringify(url)} is not a router's agent surface`).describe(
+    "The router's agent surface, `https://mcp.acme.example/mcp`: the instance's `SANOMA_AGENT_URL`",
+  ),
+  company: routedPart("company", (company) => `${JSON.stringify(company)} is no company's id at a router`).describe(
+    "This company's id in the router's list: the instance's `SANOMA_COMPANY`",
+  ),
+});
 
 /**
  * The agent address of a company behind a router whose agent surface is `url`

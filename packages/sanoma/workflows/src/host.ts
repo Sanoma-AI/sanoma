@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { routerHostnameTaken } from "./shared.ts";
 
 // The `Host` contract: what a resource type that runs the company (a container, a Render service,
 // a Fly app) declares about itself, so hosts are swappable and one conformance kit decides
@@ -85,6 +86,20 @@ export interface HostSpec {
      */
     hostname?: string;
     /**
+     * The hostname of the agents' router the config serves (`router.hostname`), for a host that
+     * derives: filled from the config, never declared, and attached beside `hostname` and the
+     * sites' domains. With it apply gives the host the router's master secret, the stored
+     * `ROUTER_SECRET`, which must have a value.
+     */
+    router?: string;
+    /**
+     * The router this company is behind (`{ url, company }`, `routedAgentsSchema`: the launchers'
+     * `SANOMA_AGENT_URL` and `SANOMA_COMPANY`), which a data file declares. With it apply gives the
+     * host this company's own secret there, the stored `ROUTER_SECRET`, which must have a value.
+     * Never with a config that serves a router of its own (`routingProblems`).
+     */
+    agents?: string;
+    /**
      * The runtime image, for a host that derives: the installed `sanoma`'s (`runtimeImage`) when a
      * data file leaves it out, an override otherwise.
      */
@@ -126,6 +141,43 @@ export interface HostSpec {
    */
   derives?: boolean;
   outputs: (state: Record<string, unknown>) => HostOutputs;
+}
+
+/** The variable that holds a router's master secret on the instance that serves it, and a company's own behind one. */
+export const ROUTER_SECRET = "SANOMA_ROUTER_SECRET";
+
+/**
+ * What is wrong between a host and the agents' router, each said once for `describeConfig`,
+ * apply (`deriveHosts`) and a host's own operations: of a host that serves the router at
+ * `router` (the config's `router.hostname`), that hostname being the app's (`hostname`) or a
+ * public site's domain (`domains`), where the app would serve no router (`routerHostnameTaken`,
+ * the launchers' rule), and the host declared behind a router too (`agents`): `ROUTER_SECRET`
+ * would be the router's master secret and this company's own at once.
+ */
+export function routingProblems(host: {
+  router?: unknown;
+  hostname?: unknown;
+  domains?: unknown;
+  agents?: unknown;
+}): string[] {
+  const { router, hostname, domains, agents } = host;
+  if (typeof router !== "string") return [];
+  const taken = routerHostnameTaken(
+    router,
+    typeof hostname === "string" ? hostname : undefined,
+    (domains ?? {}) as Record<string, unknown>,
+  );
+  const other = taken?.app ? "the app's hostname" : taken && `the domain of the site ${taken.site}`;
+  return [
+    ...(other
+      ? [`${router} is the config's \`router.hostname\` and ${other}: give the router a hostname of its own`]
+      : []),
+    ...(agents != null
+      ? [
+          `it serves the config's router and is declared behind one (\`agents\`): ${ROUTER_SECRET} would be the router's master secret and this company's own at once, which is not supported. Leave out \`agents\`, or serve the router from another instance`,
+        ]
+      : []),
+  ];
 }
 
 /** The runtime image a host runs, tagged with the installed `sanoma`'s version: GitHub's registry. */

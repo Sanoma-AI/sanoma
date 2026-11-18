@@ -33,6 +33,7 @@ export async function hostDerived({ client, resolved, snapshot }: AppContext): P
     builtInStore: !resolved.secrets.store,
     bindings: resolved.secrets.bindings,
     ...(resolved.login && { sender: resolved.login.sender.vendor }),
+    ...(resolved.router && { router: resolved.router.hostname }),
     mint: false,
   });
   if (!facts) return null;
