@@ -8,7 +8,7 @@ import { z } from "zod";
 import { lineStartsOf, offsetOf, readSource } from "../src/ast.ts";
 import { type OutlineNode, outlineWorkflow } from "../src/describe.ts";
 import * as sanoma from "../src/index.ts";
-import { defineConnector, defineWorkflow, type WorkflowDefinition } from "../src/index.ts";
+import { defineConnector, defineOperation, defineWorkflow, type WorkflowDefinition } from "../src/index.ts";
 import { callAt, callsOf, outlineWithSource } from "../src/outline.ts";
 import { flatten } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
@@ -410,6 +410,50 @@ describe("outlineWorkflow", () => {
       "5 repeat",
       "5.0.0 op",
       "6 op",
+    ]);
+  });
+});
+
+/** An operation named as a workflow of the same file is: each is found by its kind. */
+const busyOperation = defineOperation({
+  name: "busy",
+  input: z.object({ threads: z.array(z.string()) }),
+  uses: [forum.comments.list],
+  run: async (ctx, { threads }) => {
+    let total = 0;
+    for (const thread of threads) total += (await ctx.forum.comments.list({ thread })).length;
+    return total;
+  },
+});
+
+/** Calls company operations, the root's and an app's, which are ops of the outline. */
+const quoting = defineWorkflow({
+  name: "quoting",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [busyOperation],
+  run: async (ctx) => {
+    await ctx.operations.busy.run({ threads: [] });
+    await (ctx.operations as any).crm.score.run({ email: "a" });
+  },
+});
+
+describe("outlineWorkflow, a company operation", () => {
+  it("outlines an operation's run from its file, found by its kind and name", () => {
+    expect(outlined(busyOperation as never).nodes).toMatchObject([
+      { kind: "repeat", body: [{ kind: "op", id: "forum.comments.list" }] },
+    ]);
+    // The workflow of the same name in this file is still the workflow's.
+    expect(outlined(busy).nodes[0]).toMatchObject({ kind: "all" });
+    expect(() => outlined({ ...busyOperation, resource: "absent" } as never)).toThrow(
+      /outline\.test\.ts holds no operation named "absent"$/,
+    );
+  });
+
+  it("names a call to an operation by its id, an app's of four segments", () => {
+    expect(outlined(quoting).nodes.map((n) => (n.kind === "op" ? n.id : n.kind))).toEqual([
+      "operations.busy.run",
+      "operations.crm.score.run",
     ]);
   });
 });

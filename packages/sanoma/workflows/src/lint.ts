@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
 import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
-import { APPS_DIR, COLLECTIONS_FILE, inside, nearestDir, RELATIVE } from "./paths.ts";
+import { APPS_DIR, COLLECTIONS_FILE, inside, kindDirOf, RELATIVE } from "./paths.ts";
 import { LOCAL_ENTRIES } from "./shared.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
@@ -64,14 +64,18 @@ const NOT_ALLOWED =
 const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError", "RejectedError", "WithdrawnError"]);
 
 /**
- * Checks a workflow file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
+ * Checks a workflow file, or a company operation's (a file of `operations/`), which is held to the
+ * same rules. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
  * type from `sanoma/workflows` or `sanoma`, `LOCAL_ENTRIES`, `@sanoma-ai/connector-<vendor>`,
- * `zod`, and relative files. With `filename`, a relative import must stay inside the file's nearest `workflows/` directory, or its
- * own directory when it has none; the one file outside it a workflow may import is the company's
- * `resources/data.ts`, its collections (by real path). No
+ * `zod`, and relative files. With `filename`, a relative import must stay inside the file's
+ * `workflows/` (or `operations/`) directory, the root's or an app's, a subfolder of either name
+ * part of it (`kindDirOf`), or its own directory when it has none; the files
+ * outside it a workflow may import are the company's `resources/data.ts`, its collections, and
+ * the files of its `operations/`, its company operations (the root's or an app's, by real path);
+ * an operation, `resources/data.ts` alone. No
  * `instanceof` against the runtime's error classes: read `errorCode(err)`.
  *
- * In each workflow's `run` (the literal `defineWorkflow` is called with), it reports what the
+ * In each workflow's `run` (the literal `defineWorkflow` or `defineOperation` is called with), it reports what the
  * outline cannot draw, as the worker refuses to start with (`outlineBody`): `ctx` used other
  * than called directly (passed on, aliased, destructured), a function defined in `run` that uses
  * `ctx` where the outline does not read it, `ctx` in a `finally`, a step name that is no literal
@@ -90,7 +94,7 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   const read = typeof input === "string" ? parsed(input, filename ?? "workflow.ts") : input;
   const { program, at } = read;
   const problems = [...read.problems];
-  const root = filename === undefined ? undefined : nearestDir(filename, ["workflows"]);
+  const root = filename === undefined ? undefined : kindDirOf(filename, ["workflows", "operations"]);
 
   const checkSource = (node: Node) => {
     const spec: string = node.source.value;
@@ -194,16 +198,23 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
     if (filename === undefined || root === undefined) return undefined;
     const target = join(dirname(filename), spec);
     if (inside(root, target)) return undefined;
-    const tree = basename(root) === "workflows";
-    // The collections, which a workflow names in `uses`: the one data file the runtime imports too,
-    // the root's or an app's (`apps/<app>/resources/data.ts`), wherever the workflow is.
-    if (tree && isCollectionsFile(realPath(target), realPath(dirname(root)))) return undefined;
-    return (
-      `it reaches outside ${tree ? `${basename(root)}/` : "this directory"}, toward the config and its drivers; ${THROUGH_CTX}` +
-      (tree
-        ? "; of the files outside it, only resources/data.ts (the collections, the root's or an app's apps/<app>/resources/data.ts) may be imported"
-        : "")
-    );
+    const tree = basename(root);
+    const workflow = tree === "workflows";
+    if (workflow || tree === "operations") {
+      const parts = companyParts(realPath(target), realPath(dirname(root)));
+      // The collections, which a workflow or an operation names in `uses`: the one data file the
+      // runtime imports too, the root's or an app's (`apps/<app>/resources/data.ts`), wherever it is.
+      if (parts.length === 2 && parts[0] === "resources" && parts[1] === COLLECTIONS_FILE) return undefined;
+      // The company's operations, which a workflow names in `uses`, the root's or an app's.
+      if (workflow && parts.length > 1 && parts[0] === "operations") return undefined;
+      return (
+        `it reaches outside ${tree}/, toward the config and its drivers; ${THROUGH_CTX}; of the files outside it, only ` +
+        "resources/data.ts (the collections, the root's or an app's apps/<app>/resources/data.ts)" +
+        (workflow ? " and the files of operations/ (the company's operations, the root's or an app's)" : "") +
+        " may be imported"
+      );
+    }
+    return `it reaches outside this directory, toward the config and its drivers; ${THROUGH_CTX}`;
   }
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
   for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
@@ -211,15 +222,15 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
 }
 
 /**
- * Whether `target` is a collections file of the company whose workflows' tree is in `base` (the
- * root, or an app's `apps/<app>/`): `<root>/resources/data.ts` or `<root>/apps/<app>/resources/data.ts`.
+ * Where `target` is in the company whose workflows' or operations' tree is in `base` (the root, or
+ * an app's `apps/<app>/`): its path's segments from the root, or from its app's folder when it is
+ * in one (`resources/data.ts` for `<root>/apps/<app>/resources/data.ts`).
  */
-function isCollectionsFile(target: string, base: string): boolean {
+function companyParts(target: string, base: string): string[] {
   const root = basename(dirname(base)) === APPS_DIR ? dirname(dirname(base)) : base;
   const parts = relative(root, target).split(sep);
   const [first, app] = parts;
-  const rest = first === APPS_DIR && app !== undefined ? parts.slice(2) : parts;
-  return rest.length === 2 && rest[0] === "resources" && rest[1] === COLLECTIONS_FILE;
+  return first === APPS_DIR && app !== undefined ? parts.slice(2) : parts;
 }
 
 /** A path's real path, or the path itself when it does not exist. */

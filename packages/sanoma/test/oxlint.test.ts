@@ -29,6 +29,14 @@ import { declareSlug } from "sanoma/init";
 export const all = [calculateInvoice, renderInvoice, declareSlug];
 `;
   writeFileSync(join(dir, "workflows/invoice.ts"), invoices);
+  // A company operation, held to a workflow's rules: defineOperation passes, the config and the clock do not.
+  mkdirSync(join(dir, "operations"));
+  writeFileSync(
+    join(dir, "operations/quote.ts"),
+    `import { defineOperation, defineConfig, z } from "sanoma";
+export const all = [defineOperation, defineConfig, z, Date.now()];
+`,
+  );
   // A data file is loaded, not linted: a computed value is fine.
   mkdirSync(join(dir, "resources"));
   writeFileSync(
@@ -89,7 +97,10 @@ export const Route = createFileRoute("/fn")({ server: { handlers: {} } });
   // The build's listing, which the site rules do not read.
   writeFileSync(join(dir, "sites/__virtual.ts"), "export const key = process.env.KEY;\n");
   const oxlint = join(repo, "packages/sanoma/node_modules/.bin/oxlint");
-  const out = spawnSync(oxlint, ["-f", "json", "workflows", "resources", "sites"], { cwd: dir, encoding: "utf8" });
+  const out = spawnSync(oxlint, ["-f", "json", "workflows", "operations", "resources", "sites"], {
+    cwd: dir,
+    encoding: "utf8",
+  });
   const { diagnostics } = JSON.parse(out.stdout) as {
     diagnostics: {
       filename: string;
@@ -133,6 +144,18 @@ describe("the shipped oxlint.json", () => {
   it("refuses what a workflow may not import from sanoma and the clock, and nothing in a data file or of sanoma/invoices and sanoma/init", () => {
     const imports = "eslint(no-restricted-imports)";
     expect(found.filter((f) => !f.file.startsWith("sites/"))).toEqual([
+      {
+        file: "operations/quote.ts",
+        line: 1,
+        rule: imports,
+        text: expect.stringMatching(/'defineConfig'.*belongs in sanoma\.config\.ts/),
+      },
+      {
+        file: "operations/quote.ts",
+        line: 2,
+        rule: "sanoma(date)",
+        text: expect.stringMatching(/reads the clock with `await ctx\.now\(\)`, never `Date`/),
+      },
       {
         file: "workflows/via-sanoma.ts",
         line: 1,

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
-import { upFrom } from "./company-file.ts";
+import { configDirOf, upFrom } from "./company-file.ts";
 import { APP_NAME, APPS_DIR, appOfPath } from "./shared.ts";
 
 // Where an import may reach, as the lints and the data-file reader all decide it, the one walk up
@@ -25,9 +25,21 @@ export const COLLECTIONS_FILE = "data.ts";
 /** A relative import specifier: `./x.ts`, `../y.ts`. */
 export const RELATIVE = /^\.\.?\//;
 
-/** The file's nearest ancestor directory with one of `names` (`workflows`, `resources`), else its own directory. */
-export function nearestDir(filename: string, names: readonly string[]): string {
-  return upFrom(dirname(filename), (dir) => (names.includes(basename(dir)) ? dir : undefined)) ?? dirname(filename);
+/**
+ * The folder of a kind (`names`: `workflows`, `operations`) the file is in: its outermost ancestor
+ * with one of `names` short of its company's root (`configDirOf`; anywhere outside a company), as
+ * the kinds' folders are at the root and in each app's folder (`kindDirs`), so a subfolder of the
+ * same name (`workflows/operations/`) is part of the folder it is in; else its own directory.
+ */
+export function kindDirOf(filename: string, names: readonly string[]): string {
+  const company = configDirOf(dirname(filename));
+  let outermost: string | undefined;
+  upFrom(dirname(filename), (dir) => {
+    if (dir === company) return true;
+    if (names.includes(basename(dir))) outermost = dir;
+    return undefined;
+  });
+  return outermost ?? dirname(filename);
 }
 
 /** True when `path` is `dir` or inside it. */
@@ -79,18 +91,20 @@ export const kindDirs = (root: string, kind: string): string[] => [
 /**
  * The files whose declarations join the config's, as `sanoma` loads it and the Worker's bundle
  * imports them: each workflow source under `workflows/` and each app's (a test or a declaration
- * file aside), then each `resources/data.ts` there is.
+ * file aside), each company operation's under `operations/` the same way, then each
+ * `resources/data.ts` there is.
  */
-export function declarationFiles(root: string): { workflows: string[]; data: string[] } {
+export function declarationFiles(root: string): { workflows: string[]; operations: string[]; data: string[] } {
   return {
     workflows: kindDirs(root, "workflows").flatMap((dir) => filesUnder(dir, isWorkflowSource)),
+    operations: kindDirs(root, "operations").flatMap((dir) => filesUnder(dir, isWorkflowSource)),
     data: kindDirs(root, "resources")
       .map((dir) => join(dir, COLLECTIONS_FILE))
       .filter((path) => existsSync(path)),
   };
 }
 
-/** A workflow file's name: `.ts`, but a test (`.test.ts`, `.spec.ts`) or a declaration. */
+/** A workflow's or an operation's file name: `.ts`, but a test (`.test.ts`, `.spec.ts`) or a declaration. */
 const isWorkflowSource = (name: string) => name.endsWith(".ts") && !/\.(test|spec|d)\.ts$/.test(name);
 
 /** Where a company's scenarios are, under its root and each app's folder. */

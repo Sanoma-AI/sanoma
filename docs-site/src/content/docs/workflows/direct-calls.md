@@ -2,7 +2,7 @@
 title: Direct calls
 description: "An operation may also be called directly, outside a run, as the person on a page."
 sidebar:
-  order: 6
+  order: 7
 ---
 
 An operation may also be called directly, outside a run, as the person on a page: `isDirect(op, types)` says which, the one rule the app and the SDK read (`describeConfig` gives it as each operation's `direct`). A collection's operations may, and a vendor's `read`, but not the runtime's own (`sanoma.source.resolve`) or a resource type's (`isResourceOp`: only drift and apply call those); anything with an effect at a vendor is a workflow's.

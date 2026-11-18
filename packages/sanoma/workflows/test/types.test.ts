@@ -4,6 +4,7 @@ import { ghost } from "@sanoma-ai/connector-ghost";
 import {
   defineConnector,
   defineDriver,
+  defineOperation,
   defineWorkflow,
   type Op,
   type SanomaClient,
@@ -41,6 +42,43 @@ export const wf = defineWorkflow({
     return total;
   },
 });
+
+/** The company's own operation over the shop: its ctx holds what it uses, typed. */
+export const quote = defineOperation({
+  name: "quote",
+  input: z.object({ id: z.string(), hours: z.number() }),
+  uses: [shop.order.get],
+  run: async (ctx, { id, hours }) => {
+    const order = await ctx.shop.order.get({ id });
+    // @ts-expect-error refund is not in `uses`
+    await ctx.shop.order.refund({ id });
+    // @ts-expect-error a sleep is a workflow's, never an operation's
+    await ctx.sleep({ minutes: 5 });
+    return { total: order.total * hours };
+  },
+});
+
+export const quoting = defineWorkflow({
+  name: "quoting",
+  trigger: "manual",
+  input: z.object({ id: z.string() }),
+  uses: [quote],
+  run: async (ctx, { id }) => {
+    // The operation as a step: its input checked, its output typed.
+    const quoted = await ctx.operations.quote.run({ id, hours: 2 });
+    const total: number = quoted.total;
+    // @ts-expect-error hours is a number
+    await ctx.operations.quote.run({ id, hours: "2" });
+    // An app's operation is reached by its app, untyped: `operations.<app>.<name>.run`.
+    await ctx.operations.crm.score.run({ email: "a" });
+    return total;
+  },
+});
+
+/** Never called: `defineOperation` refuses it when run too. */
+export const held = () =>
+  // @ts-expect-error uses lists operations only: an approval is a workflow's
+  defineOperation({ name: "held", input: z.object({}), uses: ["approval"], run: async () => null });
 
 export const fan = defineWorkflow({
   name: "fan",

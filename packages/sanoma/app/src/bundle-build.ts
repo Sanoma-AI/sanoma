@@ -171,8 +171,9 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot, p
         'import { joinDeclarations } from "sanoma/workflows";\n',
         `import config from ${specifier(configFile)};\n`,
         ...files.workflows.map((path, i) => `import * as workflow${i} from ${specifier(path)};\n`),
+        ...files.operations.map((path, i) => `import * as operation${i} from ${specifier(path)};\n`),
         ...files.data.map((path, i) => `import * as data${i} from ${specifier(path)};\n`),
-        `joinDeclarations(config, { workflows: ${entries(files.workflows, "workflow")}, data: ${entries(files.data, "data")} });\n`,
+        `joinDeclarations(config, { workflows: ${entries(files.workflows, "workflow")}, operations: ${entries(files.operations, "operation")}, data: ${entries(files.data, "data")} });\n`,
         "export { config };\n",
       ].join("");
     },

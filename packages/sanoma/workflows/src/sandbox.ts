@@ -7,7 +7,7 @@ import { connectionFakes } from "./fake.ts";
 import { applyGivens, refuseUnfaked } from "./givens.ts";
 import type { ConnectionCatalog, ConnectionRef, ConnectionSnapshot } from "./connection.ts";
 import { entry, write } from "./ledger.ts";
-import type { DriverFn } from "./op.ts";
+import { type DriverFn, isOperation } from "./op.ts";
 import type { Run } from "./run.ts";
 import { memorySecrets } from "./secret.ts";
 import { writeRunChecks } from "./db.ts";
@@ -92,9 +92,13 @@ export async function seedSandbox(run: Run, name: string, input: unknown): Promi
       );
       // The built-in call workflow selects exactly one operation. Other direct operations
       // (including live connection mutations) need no fake unless this scenario calls them,
-      // which `applyGivens` checks.
-      const uses =
-        run.workflow === CALL_WORKFLOW ? [CallInput.parse(input).op] : opIdsOf(state.workflows.get(run.workflow)!);
+      // which `applyGivens` checks. A company operation has no fake: what it uses does.
+      const uses = (
+        run.workflow === CALL_WORKFLOW ? [CallInput.parse(input).op] : opIdsOf(state.workflows.get(run.workflow)!)
+      ).flatMap((id) => {
+        const op = state.ops.get(id);
+        return isOperation(op) ? opIdsOf(op) : [id];
+      });
       refuseUnfaked(
         uses,
         drivers,

@@ -64,6 +64,14 @@ export type LedgerRecord = {
        * records written before steps had names.
        */
       name?: string;
+      /**
+       * For a call a company operation's body made (`defineOperation`): the `seq` of that
+       * operation's own call, whose `op.called` it belongs under, so two calls of one operation (a
+       * loop's two passes, two `ctx.all` members) keep their calls apart. Its `node` is then under
+       * the operation's: `<operation's node>.0.<its node in the operation's outline>`. Absent for a
+       * call the workflow made itself.
+       */
+      within?: number;
       effect: Effect;
       input: unknown;
       /** The policy's decision, with its `reasons` and the policy's `policyVersion` when there are any. */
@@ -87,6 +95,8 @@ export type LedgerRecord = {
       node?: string;
       /** The step's name: the title for a `ctx.approval`, the held call's name for a policy request; as for `op.called`. */
       name?: string;
+      /** For a policy request on a call a company operation made: that operation's call's `seq`; as for `op.called`. */
+      within?: number;
       title: string;
       approver: Approver;
       requestedBy: "workflow" | "policy";

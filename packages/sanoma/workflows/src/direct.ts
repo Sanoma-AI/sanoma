@@ -1,12 +1,12 @@
 import type { Op } from "./op.ts";
 import { isResourceOp } from "./resource.ts";
-import { APPS_LIST, DATA_VENDOR, STORE_MOVE_DIRECT } from "./shared.ts";
+import { APPS_LIST, DATA_VENDOR, OPERATIONS_VENDOR, STORE_MOVE_DIRECT } from "./shared.ts";
 
 /**
  * Whether an operation may be called directly, outside a run (`SanomaClient.call`), as the
  * person: a collection's (`data.<name>.<op>`), the runtime's listing of apps (`sanoma.apps.list`,
- * which a page calls), run inspection, connection management, a secret store move's plan and its cancel, or a `read` that is neither the runtime's own (the vendor `sanoma`) nor a
- * resource type's (`isResourceOp`), which only drift and apply call.
+ * which a page calls), run inspection, connection management, a secret store move's plan and its cancel, or a `read` that is neither the runtime's own (the vendor `sanoma`), a
+ * company operation (the vendor `operations`, a workflow's step only for now) nor a resource type's (`isResourceOp`), which only drift and apply call.
  * Anything else (an effect at a vendor) is a workflow's. The one rule: the built-in `call`
  * workflow, the SDK and the app read it, from here or from `OpEntry.direct`, and never derive it.
  */
@@ -28,4 +28,4 @@ export const isDirect = (
   op.id === "sanoma.connection.authorize" ||
   op.id === "sanoma.connection.test" ||
   STORE_MOVE_DIRECT.has(op.id) ||
-  (op.effect === "read" && op.vendor !== "sanoma" && !isResourceOp(op, types));
+  (op.effect === "read" && op.vendor !== "sanoma" && op.vendor !== OPERATIONS_VENDOR && !isResourceOp(op, types));

@@ -9,7 +9,7 @@ sidebar:
 
 ## The lint
 
-`sanoma check` lints `workflows/`, `resources/`, `sites/` and `apps/`, those that exist, with oxlint, run in the repo's root on the repo's own `.oxlintrc.json`, so an editor's oxlint reads the same file and the rules' `workflows/**` globs match against the root. `sanoma check` writes that file when there is none:
+`sanoma check` lints `workflows/`, `operations/` (the company's [own operations](/workflows/your-own-operations/), held to a workflow's rules), `resources/`, `sites/` and `apps/`, those that exist, with oxlint, run in the repo's root on the repo's own `.oxlintrc.json`, so an editor's oxlint reads the same file and the rules' `workflows/**` globs match against the root. `sanoma check` writes that file when there is none:
 
 ```json
 {

@@ -36,6 +36,8 @@ export const deals = collection({ name: "deals", key: "id", fields: { id: "text"
 const title = (name: string) => `export const title = "${name}";\n`;
 
 /** A workflow file's text: `name`, its default export. */
+const operation = (name: string) =>
+  `import { defineOperation, z } from "sanoma";\nexport default defineOperation({ name: "${name}", input: z.object({}), uses: [], run: async () => 1 });\n`;
 const workflow = (name: string) =>
   `import { defineWorkflow } from "sanoma";\nexport default defineWorkflow({ name: "${name}", trigger: "manual", uses: [], run: async () => ({}) });\n`;
 
@@ -84,6 +86,29 @@ describe("loadConfig", () => {
       }),
     );
     expect(config.workflows?.map((w) => w.name)).toEqual(["hello", "later", "crm.follow-up"]);
+  });
+
+  it("adds each operation operations/ and the apps' operations/ export by default, and skips a helper", async () => {
+    const { config } = await loadConfig(
+      company({
+        "sanoma.config.ts": CONFIG(),
+        "operations/quote.ts": operation("quote"),
+        "operations/lib/round.ts": "export const round = Math.round;\n",
+        "apps/crm/operations/score.ts": operation("score"),
+      }),
+    );
+    expect(config.operations?.map((op) => op.id)).toEqual(["operations.quote.run", "operations.crm.score.run"]);
+    expect(resolveConfig(config).ops.get("operations.crm.score.run")).toBe(config.operations![1]);
+  });
+
+  it("refuses an operations/ file whose default export is no operation, naming the file", async () => {
+    const root = company({
+      "sanoma.config.ts": 'import { defineConfig } from "sanoma";\nexport default defineConfig({ connectors: [] });\n',
+      "operations/odd.ts": workflow("odd"),
+    });
+    await expect(loadConfig(root)).rejects.toThrow(
+      /\/operations\/odd\.ts's default export is not an operation: a file of operations\/ exports one, `export default defineOperation\(\{ … \}\)`, or none \(a helper\)$/,
+    );
   });
 
   it("refuses a workflows/ file whose default export is no workflow, naming the file", async () => {

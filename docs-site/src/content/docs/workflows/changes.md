@@ -2,7 +2,7 @@
 title: Changes
 description: "A change is how an edit to the company's repository goes live once the repository has a remote (origin)."
 sidebar:
-  order: 10
+  order: 11
 ---
 
 A change is how an edit to the company's repository goes live once the repository has a remote (`origin`): an agent's draft, reviewed and published in the app. Without a remote there is no change: saving is publishing.
