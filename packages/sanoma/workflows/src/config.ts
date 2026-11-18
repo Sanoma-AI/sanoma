@@ -10,7 +10,7 @@ import {
 import { type Secrets, secretNamesIn, secretsForInput } from "./secret.ts";
 import { isRunControlError, vendorCodeOf } from "./errors.ts";
 import type { CallAuthentication } from "./authentication.ts";
-import { currentRun } from "./run.ts";
+import { currentRun, type RunArgs } from "./run.ts";
 import {
   connectionCatalog,
   ConnectionRegistry,
@@ -397,13 +397,16 @@ export const DEFAULT_DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/s
  * The queue a run of `workflow` must wait on: a live apply's is the apply queue, which runs one at
  * a time across the database's workers, so two never write the hosts at once; anything else, a
  * sandbox apply too (it calls fakes), none (the client queues it on the app's, a run's child runs
- * at once). The one rule the client and the worker share.
+ * at once). A run held at its start (`hold`) waits on none, so it never keeps the queue's one place
+ * while a person decides: approved, the worker runs it as its child, which waits here (`runOn`).
+ * The one rule the client and the worker share.
  */
 export const queueFor = (
   { applyQueueName }: Pick<ResolvedConfig, "applyQueueName">,
   workflow: string,
-  sandbox: string | undefined,
-): string | undefined => (workflow === APPLY_WORKFLOW && sandbox === undefined ? applyQueueName : undefined);
+  { sandbox, hold }: Pick<RunArgs, "sandbox" | "hold">,
+): string | undefined =>
+  workflow === APPLY_WORKFLOW && sandbox === undefined && hold === undefined ? applyQueueName : undefined;
 
 /** Returns the config, with the file it is called from as its `file`: its directory is the config's `root`. */
 export function defineConfig(config: SanomaConfig): SanomaConfig {

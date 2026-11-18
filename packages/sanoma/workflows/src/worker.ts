@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { DBOS, Error as DBOSErrors, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
-import type { WorkerApp } from "./app-steps.ts";
+import { child, type WorkerApp } from "./app-steps.ts";
 import { readApps } from "./apps.ts";
 import type { AppSteps } from "./app-workflows.ts";
 import { awaitApproval } from "./approvals.ts";
@@ -249,6 +249,7 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
   const reload = options.reload && (() => OUTSIDE_ANY_RUN(options.reload!));
   const state: WorkerState = {
     app: resolved.appName,
+    applyQueueName: resolved.applyQueueName,
     connections: resolved.connections,
     ops: resolved.ops,
     drivers: resolved.drivers,
@@ -296,7 +297,7 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
       const fn = registered.get(name) as unknown as ((args: RunArgs) => Promise<unknown>) | undefined;
       if (!fn) throw new Error(`The worker has no workflow "${name}" to start`);
       // A live apply waits its turn on the apply queue, as the client's do; anything else runs at once.
-      const queueName = queueFor(resolved, name, args.sandbox);
+      const queueName = queueFor(resolved, name, args);
       // A built-in run's code, as the client's start sets it, so a worker on another version may carry
       // it: a child (a change's apply and drift, a follow's apply) with its parent, which waits for it.
       const builtInCode = resolved.builtInCodes[name];
@@ -734,12 +735,19 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
         const decision = await decide();
         next = decision.kind === "approve" ? startHoldOf(wf.name, decision) : undefined;
       }
-      if (sandbox !== undefined) {
-        // Imported here, so a live worker never loads the Gherkin parser or faker.
-        const { seedSandbox } = await import("./sandbox.ts");
-        await seedSandbox(run, sandbox, parsed);
+      if (hold && queueFor(state, wf.name, { sandbox })) {
+        // Held at its start, it waited off its queue (`queueFor`): approved, it runs as its child there.
+        const { runId, output: report, error } = await child(run, wf.name, wf.name, input);
+        if (error !== undefined) throw new Error(`${wf.name} did not finish in its run ${runId}: ${error}`);
+        output = report;
+      } else {
+        if (sandbox !== undefined) {
+          // Imported here, so a live worker never loads the Gherkin parser or faker.
+          const { seedSandbox } = await import("./sandbox.ts");
+          await seedSandbox(run, sandbox, parsed);
+        }
+        output = await currentRun.run(run, () => wf.run(buildCtx(wf, run), parsed));
       }
-      output = await currentRun.run(run, () => wf.run(buildCtx(wf, run), parsed));
     } finally {
       // Before the outcome is written: a call still queued must find the run ended.
       run.ended = true;
