@@ -1,8 +1,6 @@
 import {
-  COMPANY_ID,
   compareDeclared,
-  routedAgentAddress,
-  ROUTER_SECRET_MIN,
+  routedAgentsSchema,
   RUNTIME_PORT,
   UNNAMED,
   type Connector,
@@ -88,46 +86,6 @@ const containerSchema = z.object({
 });
 
 /**
- * Why `url` is no router's agent surface, by the runtime's own rule (`routedAgentAddress`, asked
- * with a company and a secret that pass it), or undefined: a wrong one is a declaration's problem,
- * not a Worker that signs no agent in.
- */
-function routedUrlProblem(url: string): string | undefined {
-  try {
-    routedAgentAddress(url, { company: "company", secret: "x".repeat(ROUTER_SECRET_MIN) });
-    return undefined;
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-}
-
-/** A company behind a router, as `cloudflare.host` declares it: the launchers' three variables (`agentAddressFrom`). */
-const agentsSchema = z.object({
-  url: z
-    .string()
-    .superRefine((url, ctx) => {
-      const problem = routedUrlProblem(url);
-      if (problem) ctx.addIssue({ code: "custom", message: problem });
-    })
-    .describe("The router's agent surface, `https://mcp.acme.example/mcp`: the Worker's `SANOMA_AGENT_URL`"),
-  company: z
-    .string()
-    .regex(COMPANY_ID, "letters, digits, - and _ only, as the router lists it")
-    .describe("This company's id in the router's list: the Worker's `SANOMA_COMPANY`"),
-  secret: z
-    .string()
-    .min(1)
-    // Write-only: a state never holds it, so a plan refuses a declaration without one.
-    .nullish()
-    .describe(
-      "This company's own secret at the router (`routerSecretFor(master, company)`), a `secret(\"NAME\")` naming a stored value, never the value: the Worker's `SANOMA_ROUTER_SECRET`",
-    ),
-});
-
-/** A routed address's URL and company alone: what an operation checks before its secret is resolved (`checkRouting`). */
-export const routedSchema = agentsSchema.omit({ secret: true });
-
-/**
  * `cloudflare.host`'s fields: the decisions a data file makes (`name`, `hostname`, `database`,
  * `agents`), and what apply fills when it is left out (`image`, `source`, `ref`, `port`) or always
  * (`revision`, `secrets`, `domains`, `routerHostname`), which a data file never declares (`deriveHosts`).
@@ -173,10 +131,10 @@ const hostSchema = containerSchema.extend({
   domains: containerSchema.shape.domains.describe(
     "Each public site's domain, by site name, never declared: from `defineSite({ public: true, domain })`",
   ),
-  agents: agentsSchema
+  agents: routedAgentsSchema
     .nullish()
     .describe(
-      "The router this company is behind, `{ url, company, secret }`: its agents connect at the router's `/mcp`. Never on the instance that serves that router",
+      "The router this company is behind, `{ url, company }`: its agents connect at the router's `/mcp`, and apply gives the host this company's own secret there, stored as `SANOMA_ROUTER_SECRET`. Never on the instance that serves that router",
     ),
   routerHostname: z
     .string()
@@ -254,11 +212,12 @@ export const container = defineResource({
  * as secrets its database's URL, its keys, the source key it clones with (whose public half apply
  * declares on the repository) and the credentials it deploys itself with: names only, never a value.
  *
- * The agents' router, either side of it. `agents: { url, company, secret }` puts the company
- * behind one: the Worker's `SANOMA_AGENT_URL` and `SANOMA_COMPANY`, and the stored secret
- * `secret` names as its `SANOMA_ROUTER_SECRET`. A config that serves one (`router.hostname`) has
- * apply fill `routerHostname`, attached beside `hostname`, and give the host the router's master
- * secret, stored as `SANOMA_ROUTER_SECRET`. Not both: the one variable would hold two secrets.
+ * The agents' router, either side of it. `agents: { url, company }` puts the company behind one:
+ * the Worker's `SANOMA_AGENT_URL` and `SANOMA_COMPANY`. A config that serves one
+ * (`router.hostname`) has apply fill `routerHostname`, attached beside `hostname`. Either way
+ * apply gives the host the stored `SANOMA_ROUTER_SECRET` among its secrets: this company's own
+ * at the router it is behind, or the master of the one it serves. Not both: the one variable
+ * would hold two secrets.
  */
 export const host = defineResource({
   vendor: "cloudflare",
@@ -271,7 +230,7 @@ export const host = defineResource({
   fields: {
     immutable: ["name"],
     vendorOwned: ["id", "url", "worker_url", "healthy"],
-    writeOnly: ["secrets", "database", "agents.secret"],
+    writeOnly: ["secrets", "database"],
     references: {
       source: { type: "github.repository", by: ["http_clone_url"] },
       database: { type: ["neon.project", "supabase.project"] },
