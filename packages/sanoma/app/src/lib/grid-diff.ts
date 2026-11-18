@@ -33,7 +33,7 @@ export interface DiffRow {
   title?: string;
   status: "same" | "added" | "removed" | "changed";
   cells: DiffCell[];
-  /** A workflow's: the operations it uses, in its order. */
+  /** A workflow's: the operations it uses, in its order; a company operation's: the calls inside it. */
   ops?: DiffRow[];
 }
 
@@ -84,7 +84,8 @@ function byOccurrence<R extends PermissionsRow>(rows: readonly R[]): Map<string,
 /**
  * `before` against `after`: the columns of both, by group, `after`'s in its order and then the
  * removed ones; the workflows by id, each with the operations it uses by `id#occurrence`; the
- * direct operations by id. A row or column only `after` has is `added`, only `before` `removed`.
+ * direct operations by id; a company operation's calls under it, by `id#occurrence`. A row or
+ * column only `after` has is `added`, only `before` `removed`.
  */
 export function diffGrids(before: PermissionsGrid, after: PermissionsGrid): GridDiff {
   const columns = union(before.groups, after.groups);
@@ -117,10 +118,11 @@ export function diffGrids(before: PermissionsGrid, after: PermissionsGrid): Grid
     return union([...a.keys()], [...b.keys()]).map((key) => row(a.get(key), b.get(key)));
   };
 
-  const workflows = rowsOf(before.workflows, after.workflows, (was, now) =>
-    rowOf(was, now, rowsOf(was?.ops ?? [], now?.ops ?? [], rowOf)),
-  );
-  const ops = rowsOf(before.ops, after.ops, rowOf);
+  /** A row of both grids with the rows under it, at every level: a workflow's operations, a company operation's calls. */
+  const diffRow = (was?: PermissionsRow, now?: PermissionsRow): DiffRow =>
+    rowOf(was, now, was?.ops || now?.ops ? rowsOf(was?.ops ?? [], now?.ops ?? [], diffRow) : undefined);
+  const workflows = rowsOf(before.workflows, after.workflows, diffRow);
+  const ops = rowsOf(before.ops, after.ops, diffRow);
   const groups = columns.map((group, i): GridDiff["groups"][number] => ({
     group,
     status: beforeAt[i] === -1 ? "added" : afterAt[i] === -1 ? "removed" : "same",
@@ -181,14 +183,17 @@ export const CHANGE_WORDS: Record<CellChange, string> = {
 /** A column's heading: the group's name, or what the two columns of no group are. */
 export const columnLabel = (group: Group) => (group === null ? "No group" : group === ANONYMOUS ? "Anonymous" : group);
 
+/** Rows, each with the rows under it while it is kept: a new or removed one counts once. */
+const counted = (rows: readonly DiffRow[]): DiffRow[] =>
+  rows.flatMap((row) => [row, ...(row.status === "same" || row.status === "changed" ? counted(row.ops ?? []) : [])]);
+
 /**
  * The diff in one line's parts: how many cells loosened, tightened or changed, each new or
  * removed column by name, and how many rows are new or removed ("3 loosened · new column finance"),
- * a new or removed workflow one row with the operations under it.
+ * a new or removed row one row with the rows under it (a workflow's operations, a company operation's calls).
  */
 export function diffSummary(diff: GridDiff): string[] {
-  const kept = diff.workflows.filter((w) => w.status === "same" || w.status === "changed");
-  const rows = [...diff.workflows, ...kept.flatMap((w) => w.ops ?? []), ...diff.ops];
+  const rows = [...counted(diff.workflows), ...counted(diff.ops)];
   const sides = ["added", "removed"] as const;
   return [
     ...(["looser", "tighter", "changed"] as const)
