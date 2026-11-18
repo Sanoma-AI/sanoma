@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { checkSandbox } from "sanoma/testing/sandbox";
 import { installedSanoma, RUNNER_PORT, runnerHealth } from "sanoma/workflows";
 import { slugged } from "sanoma/workflows/shared";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { agent37Api } from "../src/api.ts";
 import { agent37Backend, BOX, BOX_IMAGE, labelOf } from "../src/backend.ts";
 import { BASE, instance } from "../src/connector.ts";
@@ -19,15 +19,18 @@ beforeAll(async () => {
 afterAll(() => vendor.close());
 beforeEach(() => {
   vi.stubGlobal("fetch", vendor.fetch);
+  vi.stubGlobal("WebSocket", vendor.WebSocket);
   vendor.sent.length = 0;
   return () => vi.unstubAllGlobals();
 });
+// The account key goes to Agent37's API alone, never in a request to a box.
+afterEach(() => vendor.keyless());
 
 /** What the boxes may reach. */
 const HOSTS = ["registry.npmjs.org", "api.anthropic.com"];
 const secrets = async (names: readonly string[]) => new Map(names.map((name) => [name, KEY]));
 const backendOf = (declared: Record<string, unknown> = {}) =>
-  agent37Backend({ secrets, declared }, { edge: vendor.edge, budgetMs: 20_000 });
+  agent37Backend({ secrets, declared }, { budgetMs: 20_000 });
 /** Opens the box `name` of the default shape, on Agent37's plain template. */
 const open = (backend: ReturnType<typeof backendOf>, name: string) =>
   backend.open({ hosts: HOSTS, name, image: BASE, size: 2 });
@@ -81,16 +84,37 @@ describe("agent37Backend", () => {
     expect(labelOf(name)).toHaveLength(60);
     expect(labelOf(name)).toBe(labelOf(name));
     expect(labelOf("sanoma-acme-ada")).toBe("sanoma-acme-ada");
-    // It started the runner with exec, and asked the edge for it with the key.
+    // It started the runner with exec.
     expect(execs(box.id)).toBeGreaterThan(0);
-    expect(new Set(vendor.headersSeen)).toEqual(new Set([KEY]));
-    expect(await box.expose(3000)).toEqual({ url: vendor.edge(box.id, 3000), headers: { "X-Agent37-Key": KEY } });
     const ran = await box.run("pwd");
     expect(await new Response(ran.stdout).text()).toBe(`${vendor.home(box.id)}\n`);
     await box.stop();
     expect(vendor.instances.get(box.id)?.status).toBe("sleeping");
     await backendOf().discard({ name });
     expect(vendor.instances.has(box.id)).toBe(false);
+  });
+
+  it("reaches a box's runner and ports over signed links, the account key sent only to Agent37's API", async () => {
+    const backend = backendOf();
+    const box = await open(backend, "sanoma-keyless");
+    const ran = await box.run("echo over the link");
+    expect(await new Response(ran.stdout).text()).toBe("over the link\n");
+    const exposed = await box.expose(3000);
+    expect(exposed).toEqual({ url: expect.stringContaining("a37_token=") });
+    expect(new URL(exposed.url).origin).toBe(new URL(vendor.edge(box.id, 3000)).origin);
+    await box.stop();
+    // Connected again after the stop closed the connection: over a link of its own.
+    const again = await box.run("echo again");
+    expect(await new Response(again.stdout).text()).toBe("again\n");
+    await box.stop();
+    // The links were minted with the key, at the API: the runner's, which the open and the first
+    // connect share, the port's, and the runner's again for the next connect. The edge refuses a
+    // request to a box that carries the key, so the runner answered over the links alone.
+    const minted = vendor.sent.filter((s) => s.path === `/instances/${box.id}/signed-url`);
+    expect(minted.map((s) => s.body?.port)).toEqual([RUNNER_PORT, 3000, RUNNER_PORT]);
+    expect(minted.map((s) => s.body?.ttl_seconds)).toEqual([3600, 86_400, 3600]);
+    expect(vendor.keyed).toEqual([]);
+    await backend.discard({ name: "sanoma-keyless" });
   });
 
   it("wakes a sleeping box, waiting out a checkpoint still being written, its runner still running", async () => {
@@ -248,7 +272,8 @@ describe("agent37Backend", () => {
     await api.start(box.id);
     const old = `require("node:http").createServer((q, s) => s.end(JSON.stringify({ protocol: 0, pid: process.pid }))).listen(process.env.SANOMA_RUNNER_PORT, "127.0.0.1")`;
     await api.exec(box.id, `cd && { nohup node -e '${old}' >/dev/null 2>&1 </dev/null & }`);
-    const health = () => runnerHealth(vendor.edge(box.id, RUNNER_PORT), { "X-Agent37-Key": KEY });
+    const { url } = await api.signedUrl(box.id, RUNNER_PORT, 60);
+    const health = () => runnerHealth(url);
     await expect.poll(health).toMatchObject({ protocol: 0 });
     vendor.sent.length = 0;
     const again = await open(backend, "sanoma-old");

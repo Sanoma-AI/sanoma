@@ -268,8 +268,8 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
 
   /** Where the host reaches its bridge: the box's exposed port, as a websocket when asked. */
   getPortEndpoint = async ({ port, protocol = "http" }: { port: number; protocol?: "http" | "https" | "ws" }) => {
-    const { url, headers } = await this.#box.expose(port);
-    return { url: protocol === "ws" ? url.replace(/^http/, "ws") : url, ...(headers && { headers }) };
+    const { url } = await this.#box.expose(port);
+    return { url: protocol === "ws" ? url.replace(/^http/, "ws") : url };
   };
 
   getPortUrl = async (options: { port: number; protocol?: "http" | "https" | "ws" }) =>
