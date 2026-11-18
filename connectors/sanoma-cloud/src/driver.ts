@@ -53,8 +53,8 @@ const Listed = z.array(CompanyRow);
 /** `cloud-invite`'s output. */
 const Invited = z.object({ url: z.url({ protocol: /^https?$/ }) });
 
-/** A link `cloud-box-open` and `cloud-box-expose` answer: opaque, its credential in it. */
-const Link = z.object({ url: z.url({ protocol: /^https?$/ }), expiresAt: z.iso.datetime({ offset: true }) });
+/** A link `cloud-box-open` and `cloud-box-expose` answer: opaque, its credential in it (its `expiresAt` not kept). */
+const Link = z.object({ url: z.url({ protocol: /^https?$/ }) });
 
 /** `cloud-box-open`'s output. */
 const Opened = Link.extend({ id: z.string().min(1), protocol: z.number().int() });
@@ -67,16 +67,20 @@ function answered<T>(workflow: string, schema: z.ZodType<T>, output: unknown): T
 }
 
 /** The id a call's start of `workflow` takes: the same for each attempt of the call, so a retry resumes its run. */
-const runIdOf = (call: CallContext, workflow: string) =>
+const runIdOf = (call: CallContext) => (workflow: string) =>
   `sanoma-cloud-${createHash("sha256").update(`${call.idempotencyKey}\n${workflow}`).digest("hex").slice(0, 32)}`;
 
 /**
  * Sanoma Cloud's API with the token `secret` reads: sanoma-ops's workflows, each run with
- * `cloudRun`. Within one operation's call (`call`), a write's run takes an id per call, so each
- * attempt of the call resumes it; without one (a sandbox backend's), each starts a run, which the
- * box workflows are safe to.
+ * `cloudRun`. A write's run takes the id `runId` gives (an operation's call's, so each attempt of
+ * the call resumes it); without it (a sandbox backend's), each starts a run, which the box
+ * workflows are safe to.
  */
-export function workflowsApi(secret: ReadSecret, options: CloudDriverOptions = {}, call?: CallContext): CloudApi {
+export function workflowsApi(
+  secret: ReadSecret,
+  options: CloudDriverOptions = {},
+  runId?: (workflow: string) => string,
+): CloudApi {
   /** Read once, when the first run starts. */
   let token: Promise<string> | undefined;
   /** Starts `workflow` with `input` and answers its output once the run ends; a failed run fails the call. */
@@ -84,7 +88,7 @@ export function workflowsApi(secret: ReadSecret, options: CloudDriverOptions = {
     cloudRun(workflow, input, { ...options, token: (token ??= tokenOf(secret)), id });
 
   /** A write's run: its id the call's, so each attempt of the call resumes the same run. */
-  const resume = (workflow: string, input: unknown) => run(workflow, input, call && runIdOf(call, workflow));
+  const resume = (workflow: string, input: unknown) => run(workflow, input, runId?.(workflow));
 
   return {
     signup: (input) => resume("cloud-signup", input),
@@ -111,7 +115,7 @@ export function workflowsApi(secret: ReadSecret, options: CloudDriverOptions = {
 export function cloudDriver(options: CloudDriverOptions = {}) {
   return defineDriver(
     cloudOps,
-    cloudOperations((call) => workflowsApi((name) => call.secrets.get(name), options, call)),
+    cloudOperations((call) => workflowsApi((name) => call.secrets.get(name), options, runIdOf(call))),
     { env },
   );
 }

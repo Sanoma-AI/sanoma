@@ -481,7 +481,7 @@ export const INFRA = "resources/sanoma/infra.ts";
 export const declareBox = (cloud: boolean) =>
   `Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: ${
     cloud
-      ? `declare Sanoma Cloud's in ${INFRA} (\`export const box = cloud.sandbox({})\`): Sanoma Cloud runs it, with nothing to set`
+      ? `declare Sanoma Cloud's agent box in ${INFRA} (\`export const box = cloud.sandbox({})\`): Sanoma Cloud runs it, with nothing to set`
       : `declare one in ${INFRA} (\`export const box = agent37.instance({})\`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY`
   }`;
 

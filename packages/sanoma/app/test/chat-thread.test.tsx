@@ -3,7 +3,7 @@ import { useChat } from "@ai-sdk/react";
 import { type AiSdkChat, createChat } from "@shadcn/helpers/ai-sdk";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { type ReactNode, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -12,7 +12,7 @@ import { declareBox } from "../src/api.ts";
 import { stepLabel, type ToolPart } from "../src/components/shell/chat-parts.tsx";
 import { ChatColumn } from "../src/components/shell/chat.tsx";
 import { Composer } from "../src/components/shell/composer.tsx";
-import { ConnectAgent } from "../src/components/shell/connect-agent.tsx";
+import { ConnectAgent, useDeclareBox } from "../src/components/shell/connect-agent.tsx";
 import sanoma from "../src/icon-small.svg?url";
 import { Thread } from "../src/components/shell/thread.tsx";
 import type { AppConfig, CompanyState } from "../src/api.ts";
@@ -438,6 +438,13 @@ describe("the chat's engines", () => {
   });
 });
 
+/** A query client that knows the company's state: its host `declared` where it runs. */
+const knowing = (declared: CompanyState["declared"]) => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } } });
+  queryClient.setQueryData(companyStateQuery().queryKey, { declared } as CompanyState);
+  return queryClient;
+};
+
 describe("Connect your agent", () => {
   const choose = vi.fn<(engine: string) => void>();
 
@@ -465,18 +472,33 @@ describe("Connect your agent", () => {
   });
 
   it("says, live with no box declared, what to declare in place of the Claude plan's sign-in", async () => {
-    draw(() => <ConnectAgent onChoose={choose} />, config("live", false));
+    draw(() => <ConnectAgent onChoose={choose} />, config("live", false), knowing("own"));
     expect(await screen.findByText(`${declareBox(false)}.`)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Sign in with Claude" })).toBeNull();
     expect(screen.queryByText(/Other agents/)).toBeNull();
   });
 
   it("says, on Sanoma Cloud with no box declared, to declare the Cloud's box", async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } } });
-    queryClient.setQueryData(companyStateQuery().queryKey, { declared: "cloud" } as CompanyState);
-    draw(() => <ConnectAgent onChoose={choose} />, config("live", false), queryClient);
+    draw(() => <ConnectAgent onChoose={choose} />, config("live", false), knowing("cloud"));
     expect(await screen.findByText(`${declareBox(true)}.`)).toBeTruthy();
     expect(screen.queryByText(/AGENT37_API_KEY/)).toBeNull();
+  });
+
+  it("says what to declare only once the company's state says where it runs", async () => {
+    // No server here: the state is never read.
+    draw(() => <ConnectAgent onChoose={choose} />, config("live", false));
+    expect(await screen.findByText(/^Your Claude plan/)).toBeTruthy();
+    expect(screen.queryByText(/declares none/)).toBeNull();
+  });
+
+  it("gives Hosting's notice, as Hosting reads the company's state, Sanoma Cloud's box to declare", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } } });
+    queryClient.setQueryData(companyStateQuery({ force: true }).queryKey, { declared: "cloud" } as CompanyState);
+    const { result } = renderHook(() => useDeclareBox({ force: true }), {
+      wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+    });
+    expect(result.current).toBe(`${declareBox(true)}.`);
+    expect(result.current).not.toContain("AGENT37_API_KEY");
   });
 });
 

@@ -1,5 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import {
   harnessSessionDataDirectoryPath,
   harnessStateDirectoryPath,
@@ -14,11 +13,12 @@ import {
   type ResolvedConfig,
   valueAt,
 } from "sanoma/workflows";
+import { loadDataFiles } from "sanoma/workflows/describe";
 import { errorMessage } from "sanoma/workflows/shared";
-import { declareBox, INFRA } from "../../api.ts";
+import { declareBox } from "../../api.ts";
 import { errorParts, localBox, noKeyText } from "../../lib/chat.ts";
+import { declaredHostOf } from "../../lib/company-state.ts";
 import { placeOf } from "../../loopback.ts";
-import { accountOf } from "../../server/go-live.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { boxTurn, carryIn, checkFailed, checkIn } from "./carrier.ts";
 import { agentHome, boxName, inCheckout, type RealPaths, realIn, under, within } from "./checkout.ts";
@@ -58,11 +58,6 @@ export const OWN_AGENTS_DIR = ".acp";
  */
 export const noBox = (cloud: boolean) => (cloud ? declareBox(true) : noKeyText("agent37", declareBox(false)));
 
-/** Whether `infra.ts` declares the company's host on Sanoma Cloud (`accountOf`, a host that binds its own bootstrap). */
-const onCloud = async (resolved: ResolvedConfig) =>
-  resolved.root !== undefined &&
-  accountOf({ resolved }, await readFile(join(resolved.root, INFRA), "utf8").catch(() => "")) !== undefined;
-
 /**
  * The hosts a box of `resolved`'s may reach (`SandboxBackend.open`'s `hosts`): the package registry
  * and those every installed coding agent declares, on either plan, since one box holds them all.
@@ -85,7 +80,7 @@ export const boxHosts = ({ agents }: Pick<ResolvedConfig, "agents">): string[] =
  * inside a live instance, nor as the app's user on a server people sign in to.
  */
 export async function personBox(
-  step: Pick<AppStepContext, "source" | "resolved" | "by" | "client" | "loopbackLogin">,
+  step: Pick<AppStepContext, "source" | "config" | "resolved" | "by" | "client" | "loopbackLogin">,
 ): Promise<{ name: string; open: () => Promise<Box> }> {
   const { resolved, client } = step;
   const name = boxName(resolved.appName, step.by.id);
@@ -110,7 +105,11 @@ export async function personBox(
         }),
     };
   }
-  if (!localBox(placeOf(resolved.databaseUrl), step.loopbackLogin)) throw new Error(noBox(await onCloud(resolved)));
+  if (!localBox(placeOf(resolved.databaseUrl), step.loopbackLogin)) {
+    // Worded by where the declared host runs, as the company's state says it (`declaredHostOf`).
+    const { resources } = loadDataFiles(resolved.root, step.config.connectors, resolved.types);
+    throw new Error(noBox(declaredHostOf(resources, resolved.types)?.place === "cloud"));
+  }
   // This machine is the local box's image and size.
   return { name, open: () => localBackend(agentHome(step, "boxes")).open({ name, hosts }) };
 }
@@ -123,7 +122,9 @@ export async function personBox(
  * result of one problem saying why. `step.signal` stops it.
  */
 export async function checkDraft(
-  step: Pick<AppStepContext, "source" | "resolved" | "by" | "client" | "loopbackLogin"> & { signal?: AbortSignal },
+  step: Pick<AppStepContext, "source" | "config" | "resolved" | "by" | "client" | "loopbackLogin"> & {
+    signal?: AbortSignal;
+  },
   { id }: { id: string },
 ): Promise<CheckResult> {
   const { signal } = step;

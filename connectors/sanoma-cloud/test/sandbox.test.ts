@@ -3,12 +3,12 @@ import { type CallContext, memorySecrets, RUNNER_PROTOCOL } from "sanoma/workflo
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { cloudBackend } from "../src/backend.ts";
 import { sandbox } from "../src/connector.ts";
-import { BOX_LIMITS, BOXES_BUSY, fakeCloud } from "../src/fake.ts";
+import { BOXES_BUSY, fakeCloud } from "../src/fake.ts";
 import type { CloudApi } from "../src/operations.ts";
 
-// `cloud.sandbox`'s backend over the fake Cloud's boxes, which run Sanoma's runner on this machine:
-// the Sandbox contract's conformance kit, the boxes named by the company, the company's limits and
-// the account's, a runner of another protocol refused, and the declaration bound to the company.
+// `cloud.sandbox`'s backend: the Sandbox contract's conformance kit over the fake Cloud's boxes,
+// which run Sanoma's runner on this machine; what it starts at the Cloud, and what it refuses
+// before it starts anything; and the declaration bound to the company.
 
 /** The id the fake gives the token's company. */
 const COMPANY = "fake-company-1";
@@ -28,14 +28,31 @@ const call = (opId: string): CallContext => ({
 });
 const op = (name: string, input: object) => fake.driver.ops[name]!(input, call(`cloud.${name}`)) as Promise<any>;
 
-/** A Cloud whose `cloud-box-open` answers a runner of `protocol`. */
-const answering = (protocol: number) =>
-  ({
-    boxOpen: async () => ({ id: "i1", url: "https://i1-7700.agent37.app/?a37_token=t", expiresAt: "", protocol }),
-  }) as unknown as CloudApi;
+/** A Cloud that records which box workflows were started, with what, and answers what `answers` gives. */
+function stubCloud(answers: Partial<CloudApi> = {}) {
+  const started: [string, unknown][] = [];
+  const workflow =
+    (method: "boxOpen" | "boxExpose" | "boxStop" | "boxDiscard") =>
+    async (input: never): Promise<never> => {
+      started.push([method, input]);
+      return ((await answers[method]?.(input)) ?? {}) as never;
+    };
+  const api = {
+    boxOpen: workflow("boxOpen"),
+    boxExpose: workflow("boxExpose"),
+    boxStop: workflow("boxStop"),
+    boxDiscard: workflow("boxDiscard"),
+  } as unknown as CloudApi;
+  return { api, started };
+}
 
-describe("cloud.sandbox's backend on the fake Cloud", () => {
-  it("passes the sandbox conformance kit", async () => {
+/** A box at a runner no one listens on: its commands fail, its stop kills nothing. */
+const nowhere = (protocol = RUNNER_PROTOCOL) => ({
+  boxOpen: async () => ({ id: "i1", url: "http://127.0.0.1:9/?a37_token=t", protocol }),
+});
+
+describe("cloud.sandbox's backend", () => {
+  it("passes the sandbox conformance kit on the fake Cloud", async () => {
     const results = await checkSandbox({
       backend: fake.sandbox(),
       capabilities: sandbox.sandbox!.capabilities,
@@ -45,68 +62,84 @@ describe("cloud.sandbox's backend on the fake Cloud", () => {
     expect(results).toHaveLength(9);
   });
 
-  it("names a box by the company, opens it to its hosts, and puts it to sleep on stop", async () => {
-    const box = await fake.sandbox().open({ name: "sanoma-acme-ada", hosts: HOSTS });
-    expect(fake.state.boxes).toEqual({ [`${COMPANY}/sanoma-acme-ada`]: { id: box.id, awake: true, hosts: HOSTS } });
-    const ran = await box.run("echo hi");
-    expect(await new Response(ran.stdout).text()).toBe("hi\n");
-    expect((await box.expose(4321)).url).toMatch(/^http:\/\/127\.0\.0\.1:4321\/\?a37_token=fake-\d+$/);
-    await box.stop();
-    expect(fake.state.boxes[`${COMPANY}/sanoma-acme-ada`]?.awake).toBe(false);
+  it("refuses, before any workflow starts, a name or hosts the Cloud would refuse", async () => {
+    const { api, started } = stubCloud(nowhere());
+    const backend = cloudBackend(api);
+    const many = Array.from({ length: 101 }, (_, i) => `h${i}.example.com`);
+    for (const hosts of [[], many, ["10.0.0.1"], ["169.254.169.254"], ["*"], ["*.com"], ["localhost"], ["a b.com"]]) {
+      await expect(backend.open({ name: "sanoma-acme-ada", hosts }), hosts.join()).rejects.toMatchObject({
+        vendorCode: "invalid_box",
+        retryable: false,
+      });
+    }
+    for (const name of ["", "Ada", "../x", "a/b", "a".repeat(201)]) {
+      await expect(backend.open({ name, hosts: HOSTS }), name).rejects.toMatchObject({ vendorCode: "invalid_box" });
+      await expect(backend.discard({ name }), name).rejects.toMatchObject({ vendorCode: "invalid_box" });
+    }
+    expect(started).toEqual([]);
+    // The hosts the app asks for, a subdomain wildcard among them (Copilot's), and a name it makes.
+    await backend.open({ name: "sanoma-acme-ada%40example%2Ecom", hosts: [...HOSTS, "*.githubcopilot.com"] });
+    expect(started).toEqual([
+      ["boxOpen", { name: "sanoma-acme-ada%40example%2Ecom", hosts: [...HOSTS, "*.githubcopilot.com"] }],
+    ]);
   });
 
-  it("keeps a company to its boxes and its awake ones, and says when the Cloud's are all busy", async () => {
-    const backend = fake.sandbox();
-    const opened = [];
-    for (let i = 0; i < BOX_LIMITS.awake; i++) opened.push(await backend.open({ name: `box-${i}`, hosts: HOSTS }));
-    await expect(backend.open({ name: "box-2", hosts: HOSTS })).rejects.toThrow(
-      `${BOX_LIMITS.awake} of this company's agent boxes are in use already`,
-    );
-    // An awake box opens again.
-    await backend.open({ name: "box-0", hosts: HOSTS });
-    for (const box of opened) await box.stop();
-    for (let i = BOX_LIMITS.awake; i < BOX_LIMITS.boxes; i++) {
-      await (await backend.open({ name: `box-${i}`, hosts: HOSTS })).stop();
-    }
-    await expect(backend.open({ name: "one-more", hosts: HOSTS })).rejects.toThrow(
-      `This company has ${BOX_LIMITS.boxes} agent boxes already`,
-    );
-    await backend.discard({ name: "box-0" });
-    await (await backend.open({ name: "one-more", hosts: HOSTS })).stop();
+  it("refuses a runner of another protocol than this release's, saying which side to update", async () => {
+    await expect(
+      cloudBackend(stubCloud(nowhere(RUNNER_PROTOCOL + 1)).api).open({ name: "a", hosts: HOSTS }),
+    ).rejects.toThrow("update the company's sanoma package");
+    await expect(
+      cloudBackend(stubCloud(nowhere(RUNNER_PROTOCOL - 1)).api).open({ name: "a", hosts: HOSTS }),
+    ).rejects.toThrow("Sanoma Cloud has not moved to this release yet");
+  });
 
+  it("kills what runs in the box at stop, then puts it to sleep, and sleeps one whose runner it cannot reach", async () => {
+    const box = await fake.sandbox().open({ name: "a", hosts: HOSTS });
+    const long = await box.run("sleep 30");
+    await box.stop();
+    expect((await long.wait()).exitCode).not.toBe(0);
+    expect(Object.values(fake.state.boxes).map((b) => b.awake)).toEqual([false]);
+
+    const { api, started } = stubCloud(nowhere());
+    await (await cloudBackend(api).open({ name: "a", hosts: HOSTS })).stop();
+    expect(started.map(([method]) => method)).toEqual(["boxOpen", "boxStop"]);
+    expect(started[1]).toEqual(["boxStop", { name: "a" }]);
+  });
+
+  it("exposes a port through the link the Cloud answers, and discards through the Cloud", async () => {
+    const { api, started } = stubCloud({
+      ...nowhere(),
+      boxExpose: async () => ({ url: "https://i1-3000.agent37.app/?a37_token=t2" }),
+    });
+    const backend = cloudBackend(api);
+    const box = await backend.open({ name: "a", hosts: HOSTS });
+    expect(await box.expose(3000)).toEqual({ url: "https://i1-3000.agent37.app/?a37_token=t2" });
+    await backend.discard({ name: "a" });
+    expect(started.slice(1)).toEqual([
+      ["boxExpose", { name: "a", port: 3000 }],
+      ["boxDiscard", { name: "a" }],
+    ]);
+  });
+
+  it("fails with the Cloud's refusal as it is written for people", async () => {
     const busy = fakeCloud({ slug: "acme", awakeBoxes: 1 });
     try {
       await busy.sandbox().open({ name: "first", hosts: HOSTS });
-      await expect(busy.sandbox().open({ name: "second", hosts: HOSTS })).rejects.toThrow(BOXES_BUSY);
+      await expect(busy.sandbox().open({ name: "second", hosts: HOSTS })).rejects.toMatchObject({
+        message: BOXES_BUSY,
+        retryable: false,
+      });
     } finally {
       await busy.close();
     }
   });
 
-  it("refuses a link to a box there is not, and discards one there is not as done", async () => {
-    const backend = fake.sandbox();
-    await backend.discard({ name: "never" });
-    const box = await backend.open({ name: "a", hosts: HOSTS });
-    await backend.discard({ name: "a" });
-    expect(fake.state.boxes).toEqual({});
-    await expect(box.expose(3000)).rejects.toThrow("Sanoma Cloud: cloud-box-expose: There is no agent box a");
-  });
-
-  it("refuses a runner of another protocol than this release's, saying which side to update", async () => {
-    await expect(cloudBackend(answering(RUNNER_PROTOCOL + 1)).open({ name: "a", hosts: HOSTS })).rejects.toThrow(
-      "update the company's sanoma package",
-    );
-    await expect(cloudBackend(answering(RUNNER_PROTOCOL - 1)).open({ name: "a", hosts: HOSTS })).rejects.toThrow(
-      "Sanoma Cloud has not moved to this release yet",
-    );
-  });
-
-  it("discards the company's boxes when it closes", async () => {
+  it("is gone with the company's boxes when the company closes", async () => {
     await op("database.create", { desired: { region: "us-east" } });
     await (await fake.sandbox().open({ name: "a", hosts: HOSTS })).stop();
     await op("database.delete", { id: COMPANY });
     expect(fake.state.boxes).toEqual({});
-    expect(fake.state.revoked).toBe(true);
+    expect(() => fake.sandbox()).toThrow("the Cloud token is revoked");
   });
 });
 

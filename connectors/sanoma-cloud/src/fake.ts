@@ -11,7 +11,7 @@ import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { CLOUD_SLUG, cloudHostnameOf, oneAtATime } from "sanoma/workflows/shared";
 import { cloudBackend } from "./backend.ts";
 import { REGIONS, cloudOps } from "./connector.ts";
-import { type CloudApi, cloudOperations, type Company } from "./operations.ts";
+import { BOX_INPUTS, boxProblem, type CloudApi, cloudOperations, type Company } from "./operations.ts";
 
 /** What `start` runs for a company's host: a runtime answering at `url`, until `stop`. */
 export interface FakeRuntime {
@@ -75,12 +75,14 @@ export interface FakeCloudState extends Record<string, unknown> {
   revoked?: true;
 }
 
-/** A company's workflow refusing, as sanoma-ops's do: the run fails, which the api answers 422, and its call with it. */
-const fail = (workflow: string, message: string) =>
-  new DriverError(`Sanoma Cloud: ${workflow}: ${message}`, { retryable: false, status: 422 });
+/**
+ * A company's workflow refusing, as sanoma-ops's do: the run fails, which the api
+ * answers 422, and its call with it, in the workflow's own words (`cloudRun`).
+ */
+const fail = (message: string) => new DriverError(message, { retryable: false, status: 422 });
 
 /** The most boxes a company has at Sanoma Cloud, and the most of them awake at once. */
-export const BOX_LIMITS = { boxes: 5, awake: 2 } as const;
+const BOX_LIMITS = { boxes: 5, awake: 2 } as const;
 
 /** What `cloud-box-open` says when Sanoma's account has every box it may keep awake awake already. */
 export const BOXES_BUSY = "All of Sanoma Cloud's agent boxes are busy. Try again in a few minutes.";
@@ -92,8 +94,10 @@ const LINK_MS = 60 * 60_000;
  * The token's company's box `name`, under its name at the Cloud (`key`, `<company id>/<name>`), and
  * every box of the company's; refused while the token is for no company.
  */
-function boxOf(state: FakeCloudState, workflow: string, name: string) {
-  if (!state.company) throw fail(workflow, "This token is for no company");
+function boxOf(state: FakeCloudState, name: string) {
+  const problem = boxProblem(BOX_INPUTS.name, { name });
+  if (problem) throw fail(problem);
+  if (!state.company) throw fail("This token is for no company");
   const prefix = `${state.company.id}/`;
   const held = Object.entries(state.boxes).filter(([key]) => key.startsWith(prefix));
   return { key: `${prefix}${name}`, box: state.boxes[`${prefix}${name}`], held: held.map(([, box]) => box) };
@@ -118,8 +122,8 @@ function newCompany(id: string, slug: string, name = slug): FakeCompany {
 }
 
 /** The token's company `id`, or the workflow's refusal: a token acts on its own company alone. */
-function own(state: FakeCloudState, workflow: string, id: string): FakeCompany {
-  if (state.company?.id !== id) throw fail(workflow, `Company "${id}" not found`);
+function own(state: FakeCloudState, id: string): FakeCompany {
+  if (state.company?.id !== id) throw fail(`Company "${id}" not found`);
   return state.company;
 }
 
@@ -234,17 +238,30 @@ function address(start: StartRuntime) {
   };
 }
 
+/** How long a runner has to end what it started once told to, in ms, before it is killed. */
+const END_MS = 5_000;
+
 /**
  * The fake's boxes on this machine, as Agent37's instances are elsewhere: each box's home a
  * directory of its own under a temporary root, and Sanoma's runner (`runnerScript`) started in it
  * on loopback while it is up, its URL what a link reaches. A sleep keeps the runner, as Agent37's
- * keeps an instance's memory; a discard ends it, and what it started, and deletes the home.
+ * keeps an instance's memory; a discard ends it, and what it started (killed after `END_MS`), and
+ * deletes the home. A test process that exits without closing the fake ends its runners and
+ * deletes the root on its way out.
  */
 function machines() {
   let root: string | undefined;
   const runners = new Map<string, Promise<{ child: ChildProcess; url: string }>>();
+  const live = new Set<ChildProcess>();
+  const atExit = () => {
+    for (const child of live) child.kill("SIGTERM");
+    if (root) rmSync(root, { recursive: true, force: true });
+  };
   const start = async (id: string) => {
-    root ??= mkdtempSync(join(tmpdir(), "sanoma-cloud-boxes-"));
+    if (!root) {
+      root = mkdtempSync(join(tmpdir(), "sanoma-cloud-boxes-"));
+      process.once("exit", atExit);
+    }
     const home = join(root, id);
     mkdirSync(home, { recursive: true });
     const script = join(root, "runner.cjs");
@@ -259,7 +276,9 @@ function machines() {
       },
       stdio: ["ignore", "pipe", "inherit"],
     });
-    // A fake no one closes keeps no process of this one up.
+    // A fake no one closes keeps no process of this one up, and ends its runners as it exits (`atExit`).
+    live.add(child);
+    child.once("exit", () => live.delete(child));
     child.unref();
     (child.stdout as Socket).unref();
     // It says where it listens: `sanoma runner listening on <host>:<port>`.
@@ -285,7 +304,8 @@ function machines() {
       if (runner && runner.exitCode === null) {
         const exited = once(runner, "exit");
         runner.kill("SIGTERM");
-        await exited;
+        const timer = setTimeout(() => runner.kill("SIGKILL"), END_MS);
+        await exited.finally(() => clearTimeout(timer));
       }
       if (root) rmSync(join(root, id), { recursive: true, force: true });
     },
@@ -294,6 +314,7 @@ function machines() {
       await Promise.all([...runners.keys()].map((id) => this.remove(id)));
       if (root) rmSync(root, { recursive: true, force: true });
       root = undefined;
+      process.off("exit", atExit);
     },
   };
 }
@@ -343,11 +364,11 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
   const owner = options.owner ?? "sanoma-test";
   const taken = new Set(options.taken);
   /** An address the company `id` takes (a new company's, or a rename's), refused as `cloud-signup` and `cloud-deploy` refuse it. */
-  const claim = (state: FakeCloudState, workflow: string, slug: string, id: string) => {
-    if (!CLOUD_SLUG.test(slug)) throw fail(workflow, `${slug} is not a company's address`);
+  const claim = (state: FakeCloudState, slug: string, id: string) => {
+    if (!CLOUD_SLUG.test(slug)) throw fail(`${slug} is not a company's address`);
     const holder = state.addresses[slug];
     if (taken.has(slug) || (holder !== undefined && holder !== id)) {
-      throw fail(workflow, `${cloudHostnameOf(slug)} is taken: pick another address`);
+      throw fail(`${cloudHostnameOf(slug)} is taken: pick another address`);
     }
     state.addresses[slug] = id;
     return slug;
@@ -365,26 +386,26 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
     async signup(input) {
       const { part, repository, ref, revision, region } = input;
       if (region && !(REGIONS as readonly string[]).includes(region)) {
-        throw fail("cloud-signup", `Sanoma Cloud has no region ${region}`);
+        throw fail(`Sanoma Cloud has no region ${region}`);
       }
       let company: FakeCompany;
-      if (input.id !== undefined) company = own(state, "cloud-signup", input.id);
+      if (input.id !== undefined) company = own(state, input.id);
       else if (state.company) {
         // One token, one company: a sign-up by slug names the token's own, or is refused.
         if (state.company.slug !== input.slug) {
-          throw fail("cloud-signup", `${cloudHostnameOf(input.slug)} is not this token's company`);
+          throw fail(`${cloudHostnameOf(input.slug)} is not this token's company`);
         }
         company = state.company;
       } else {
         const id = `fake-company-${++state.seq}`;
-        company = state.company = newCompany(id, claim(state, "cloud-signup", input.slug, id), input.name);
+        company = state.company = newCompany(id, claim(state, input.slug, id), input.name);
       }
       if (repository) company.repository = { ...repository, ref: ref ?? "main" };
       if (part === "repository") company.repository ??= { owner, name: company.slug, ref: "main" };
       else if (part === "database") company.database ??= { id: `fake-db-${++state.seq}`, region: region ?? "us-east" };
       else {
-        if (!company.repository) throw fail("cloud-signup", "The host needs a repository: pass `repository`");
-        if (!company.database) throw fail("cloud-signup", "The host needs the company's database: make it first");
+        if (!company.repository) throw fail("The host needs a repository: pass `repository`");
+        if (!company.database) throw fail("The host needs the company's database: make it first");
         const at = revision ?? company.host?.revision ?? "";
         company.host = { revision: at };
         await siteOf().run(at);
@@ -394,9 +415,9 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
     list: async ({ id }) =>
       state.company && (id === undefined || id === state.company.id) ? [listed(state.company)] : [],
     async deploy({ id, slug, revision }) {
-      const company = own(state, "cloud-deploy", id);
-      if (!company.host) throw fail("cloud-deploy", `Company "${id}" has no host: make it with cloud-signup`);
-      if (slug !== company.slug) company.slug = claim(state, "cloud-deploy", slug, id);
+      const company = own(state, id);
+      if (!company.host) throw fail(`Company "${id}" has no host: make it with cloud-signup`);
+      if (slug !== company.slug) company.slug = claim(state, slug, id);
       company.host.revision = revision;
       return { id, revision, url: await siteOf().run(revision) };
     },
@@ -408,18 +429,18 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
       };
     },
     async invite({ id, email }) {
-      const company = own(state, "cloud-invite", id);
-      if (!company.host) throw fail("cloud-invite", `Company "${id}" has no host to sign in on`);
+      const company = own(state, id);
+      if (!company.host) throw fail(`Company "${id}" has no host to sign in on`);
       return { url: `${listed(company).url}/auth/invite/fake-${++state.seq}-${email}` };
     },
     async close({ id, part }) {
-      const company = own(state, "cloud-close", id);
+      const company = own(state, id);
       if (part === "host") {
         delete company.host;
         await site?.remove();
       } else {
         if (company.host) {
-          throw fail("cloud-close", "Close the company's host before deleting its database, or close both together");
+          throw fail("Close the company's host before deleting its database, or close both together");
         }
         delete company.database;
       }
@@ -433,19 +454,19 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
       return {};
     },
     async boxOpen({ name, hosts }) {
-      const { key, box: found, held } = boxOf(state, "cloud-box-open", name);
+      const problem = boxProblem(BOX_INPUTS.open, { name, hosts });
+      if (problem) throw fail(problem);
+      const { key, box: found, held } = boxOf(state, name);
       if (!found && held.length >= BOX_LIMITS.boxes) {
         throw fail(
-          "cloud-box-open",
           `This company has ${BOX_LIMITS.boxes} agent boxes already, the most Sanoma Cloud keeps for one company`,
         );
       }
       if (!found?.awake) {
         const awake = Object.values(state.boxes).filter((b) => b.awake).length;
-        if (options.awakeBoxes !== undefined && awake >= options.awakeBoxes) throw fail("cloud-box-open", BOXES_BUSY);
+        if (options.awakeBoxes !== undefined && awake >= options.awakeBoxes) throw fail(BOXES_BUSY);
         if (held.filter((b) => b.awake).length >= BOX_LIMITS.awake) {
           throw fail(
-            "cloud-box-open",
             `${BOX_LIMITS.awake} of this company's agent boxes are in use already, the most at once on Sanoma Cloud. Try again when one is done.`,
           );
         }
@@ -456,18 +477,18 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
       return { id: box.id, ...link(state, await boxes.up(box.id)), protocol: RUNNER_PROTOCOL };
     },
     async boxExpose({ name, port }) {
-      const { box } = boxOf(state, "cloud-box-expose", name);
-      if (!box) throw fail("cloud-box-expose", `There is no agent box ${name}`);
+      const { box } = boxOf(state, name);
+      if (!box) throw fail(`There is no agent box ${name}`);
       // The box is this machine: its port is loopback's.
       return link(state, `http://127.0.0.1:${port}`);
     },
     async boxStop({ name }) {
-      const { box } = boxOf(state, "cloud-box-stop", name);
+      const { box } = boxOf(state, name);
       if (box) box.awake = false;
       return {};
     },
     async boxDiscard({ name }) {
-      const { key, box } = boxOf(state, "cloud-box-discard", name);
+      const { key, box } = boxOf(state, name);
       if (box) await boxes.remove(box.id);
       delete state.boxes[key];
       return {};

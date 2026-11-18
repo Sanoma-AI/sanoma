@@ -250,8 +250,9 @@ describe("personBox", () => {
       "resources/infra.ts":
         'import { testsandbox } from "@sanoma-ai/testing-sandbox/resources";\nexport const box = testsandbox.box({ name: "box", image: "node:26", size: 2 });\n',
     });
-    const resolved = resolveConfig({ workflows: [], connectors: [connector], root: declaring, databaseUrl: LIVE });
-    const chosen = await personBox({ resolved, by, client: undefined as never, loopbackLogin: false });
+    const config = { workflows: [], connectors: [connector], root: declaring, databaseUrl: LIVE };
+    const resolved = resolveConfig(config);
+    const chosen = await personBox({ config, resolved, by, client: undefined as never, loopbackLogin: false });
     expect(chosen.name).toBe(boxName("acme", "ada"));
     const opening = await chosen.open();
     expect(await homeOf(opening)).toBe(join(fake.root, chosen.name));
@@ -275,19 +276,28 @@ describe("personBox", () => {
   });
 
   it("opens the local backend's box under the repository's .sanoma when none is declared, on this computer", async () => {
-    const resolved = resolveConfig({ workflows: [], connectors: [], root: company() });
+    const config = { workflows: [], connectors: [], root: company() };
+    const resolved = resolveConfig(config);
     const draft = { root: base, draft: () => undefined, diff: () => undefined } as unknown as Source;
-    const chosen = await personBox({ resolved, by, client: undefined as never, source: draft, loopbackLogin: true });
+    const chosen = await personBox({
+      config,
+      resolved,
+      by,
+      client: undefined as never,
+      source: draft,
+      loopbackLogin: true,
+    });
     expect(await homeOf(await chosen.open())).toBe(join(base, ".sanoma/agent-home/boxes", boxName("acme", "ada")));
   });
 
   it("refuses the local box under a login provider, even on this computer's database, and a box is still declared there", async () => {
     // A self-hosted server people sign in to, its database on loopback: every staff member's agent
     // would otherwise run as the app's user.
-    const resolved = resolveConfig({ workflows: [], connectors: [], root: company() });
+    const config = { workflows: [], connectors: [], root: company() };
+    const resolved = resolveConfig(config);
     expect(placeOf(resolved.databaseUrl)).toBe("this-computer");
     const draft = { root: base, draft: () => undefined, diff: () => undefined } as unknown as Source;
-    const step = { resolved, by, client: undefined as never, source: draft, loopbackLogin: false };
+    const step = { config, resolved, by, client: undefined as never, source: draft, loopbackLogin: false };
     await expect(personBox(step)).rejects.toThrow(noBox(false));
     expect(await checkDraft(step, { id: "d1" })).toMatchObject({
       ok: false,
@@ -297,8 +307,9 @@ describe("personBox", () => {
 
   it("refuses both engines' turns on a live instance that declares none, saying what to declare, before any draft, and makes its check one problem", async () => {
     // Pi's and Copilot's connectors, which give the engines their agents.
-    const resolved = resolveConfig({ workflows: [], connectors: [pi, github], root: company(), databaseUrl: LIVE });
-    const live = { resolved, by, client: undefined as never, loopbackLogin: true };
+    const config = { workflows: [], connectors: [pi, github], root: company(), databaseUrl: LIVE };
+    const resolved = resolveConfig(config);
+    const live = { config, resolved, by, client: undefined as never, loopbackLogin: true };
     await expect(personBox(live)).rejects.toThrow(noBox(false));
     const declare =
       "Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY";
@@ -309,7 +320,7 @@ describe("personBox", () => {
       problems: [`sanoma check: ${declare}`],
       warnings: [],
     });
-    const step = { resolved, by, signal: new AbortController().signal } as unknown as ChatTurnContext;
+    const step = { config, resolved, by, signal: new AbortController().signal } as unknown as ChatTurnContext;
     const turn = { step, chat: { id: "c" } as Chat, messages: [], message: "m" };
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -323,16 +334,25 @@ describe("personBox", () => {
     }
   });
 
-  it("says, on a live Sanoma Cloud company that declares none, to declare the Cloud's box, which needs no key", async () => {
-    const onCloud = company({
-      "resources/sanoma/infra.ts":
-        'import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";\nexport const store = cloud.database({});\nexport const host = cloud.host({ hostname: "acme.sanoma.work", database: store });\n',
-    });
-    const resolved = resolveConfig({ workflows: [], connectors: [cloud], root: onCloud, databaseUrl: LIVE });
-    const live = { resolved, by, client: undefined as never, loopbackLogin: false };
-    await expect(personBox(live)).rejects.toThrow(noBox(true));
+  it("says, on a live Sanoma Cloud company that declares none, to declare the Cloud's box, which needs no key, however its host is written", async () => {
+    const imports = 'import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";\n';
+    for (const infra of [
+      // As going live writes it.
+      `${imports}export const store = cloud.database({});\nexport const host = cloud.host({ hostname: "acme.sanoma.work", database: store });\n`,
+      // Another name, over two lines.
+      `${imports}const store = cloud.database({});\nexport const site =\n  cloud.host({ hostname: "acme.sanoma.work", database: store });\nexport { store };\n`,
+    ]) {
+      const config = {
+        workflows: [],
+        connectors: [cloud],
+        root: company({ "resources/sanoma/infra.ts": infra }),
+        databaseUrl: LIVE,
+      };
+      const live = { config, resolved: resolveConfig(config), by, client: undefined as never, loopbackLogin: false };
+      await expect(personBox(live)).rejects.toThrow(noBox(true));
+    }
     expect(noBox(true)).toBe(
-      "Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: declare Sanoma Cloud's in resources/sanoma/infra.ts (`export const box = cloud.sandbox({})`): Sanoma Cloud runs it, with nothing to set",
+      "Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: declare Sanoma Cloud's agent box in resources/sanoma/infra.ts (`export const box = cloud.sandbox({})`): Sanoma Cloud runs it, with nothing to set",
     );
   });
 
@@ -351,8 +371,9 @@ describe("personBox", () => {
         discard: async () => {},
       }),
     });
-    const resolved = resolveConfig({ workflows: [], connectors: [connector], root: declaring, databaseUrl: LIVE });
-    const chosen = await personBox({ resolved, by, client: undefined as never, loopbackLogin: false });
+    const config = { workflows: [], connectors: [connector], root: declaring, databaseUrl: LIVE };
+    const resolved = resolveConfig(config);
+    const chosen = await personBox({ config, resolved, by, client: undefined as never, loopbackLogin: false });
     expect(await chosen.open()).toBe(box);
     expect(opened).toEqual([{ name: boxName("acme", "ada"), hosts: [REGISTRY] }]);
   });

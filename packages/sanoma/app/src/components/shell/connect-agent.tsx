@@ -26,6 +26,16 @@ const CLAUDE = "claude-code";
 const CODEX = "codex";
 
 /**
+ * What a live instance that declares no box says to declare (`declareBox`), once the company's
+ * state says where it runs (Sanoma Cloud's box, else Agent37's): nothing while it is not known.
+ * Hosting's notice (`force`, as Hosting reads the state) and the Claude plan's card.
+ */
+export function useDeclareBox({ force = false } = {}): string | undefined {
+  const { data: company } = useQuery(companyStateQuery({ force }));
+  return company && `${declareBox(company.declared === "cloud")}.`;
+}
+
+/**
  * The cards, each with its agent's mark: Your Claude plan (its sign-in starts at once; on a live
  * instance that declares no box, what to declare instead, `declareBox`), Your ChatGPT plan
  * through Codex (on a live instance, where OpenAI's plan sign-in does not reach, an OpenAI API key,
@@ -37,7 +47,7 @@ const CODEX = "codex";
  */
 export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: (engine: string) => void }) {
   const { data: config } = useQuery(configQuery());
-  const { data: company } = useQuery(companyStateQuery());
+  const declare = useDeclareBox();
   const live = config?.place === "live";
   const noBox = config !== undefined && boxless(config);
   // The own plans the chat can open on here; with no box, Claude's still has its card, saying what to declare.
@@ -65,9 +75,7 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
                 Your Claude plan <Badge variant="secondary">Recommended</Badge>
               </ItemTitle>
               <ItemDescription>
-                {noBox
-                  ? `${declareBox(company?.declared === "cloud")}.`
-                  : "Pro or Max. Sign in once in your browser; nothing extra to pay."}
+                {noBox ? declare : "Pro or Max. Sign in once in your browser; nothing extra to pay."}
               </ItemDescription>
             </ItemContent>
             {!noBox && (
