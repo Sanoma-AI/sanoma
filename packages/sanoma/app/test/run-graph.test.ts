@@ -3,7 +3,7 @@ import type { OutlineNode } from "sanoma/workflows/describe";
 import { DEFAULT_SLEEP_NAME } from "sanoma/workflows/shared";
 import { describe, expect, it } from "vitest";
 import { runGraph } from "../src/graph/run-graph.ts";
-import { pairs, spans, summary } from "./graph-helpers.ts";
+import { labels, pairs, spans, summary } from "./graph-helpers.ts";
 
 // Hand-built ledgers, in the shapes the runtime writes (see packages/sanoma/workflows/src/ledger.ts).
 
@@ -71,6 +71,8 @@ const requested = (title: string, id = `approval-${title}`, more: object = {}): 
 });
 /** A sleep, until a time. */
 const slept = (until: number, more: object = {}): Body => ({ type: "sleep.started", until, ...more });
+/** A call made inside the company operation call numbered `within` at the node `0.0.0`, at its body's `path`. */
+const inner = (op: string, within: number, path = "0") => called(op, { within, node: `0.0.0.0.${path}` });
 const inGroup = (body: Body, index: number, size = 3, id = "all:1"): Body => ({ ...body, group: { id, index, size } });
 
 describe("runGraph", () => {
@@ -423,6 +425,133 @@ describe("runGraph", () => {
     it("places a policy's held call at the node its approval names", () => {
       const held = requested("Hold", "h1", { op: "ghost.post.create", opSeq: 2, node: "3.0.0", requestedBy: "policy" });
       expect(spansIn(ledger(started, held))).toEqual(["start null", "op:2 [140,150]", "end null"]);
+    });
+  });
+
+  describe("a company operation", () => {
+    // The workflow calls `quote` in a loop; its body reads a customer and sends a mail.
+    const QUOTE = "operations.quote.run";
+    const outline: OutlineNode[] = [
+      {
+        kind: "repeat",
+        label: "for each of orders",
+        path: "0",
+        span: [0, 100],
+        body: [{ kind: "op", path: "0.0.0", id: QUOTE, name: "price it", span: [10, 40] }],
+      },
+    ];
+
+    it("draws its call as a box with its own record and place, holding the calls made within it, which have none", () => {
+      // Its own record is written after its body, and sorts first at its seq: as the ledger reads it.
+      const graph = runGraph(
+        ledger(
+          started,
+          called(QUOTE, { node: "0.0.0", name: "price it" }),
+          inner("data.shop.customers.get", 1),
+          inner("resend.email.send", 1, "1"),
+          { type: "run.finished", output: {} },
+        ),
+        run("completed"),
+        NOW,
+        outline,
+      );
+      expect(labels(graph.nodes)).toEqual([
+        "start start",
+        "op:1 price it",
+        "op:2 data.shop.customers.get in op:1",
+        "op:3 resend.email.send in op:1",
+        "end finished",
+      ]);
+      expect(pairs(graph.edges)).toEqual(["start->op:1", "op:1->op:2", "op:2->op:3", "op:3->op:1", "op:1->end"]);
+      expect(graph.nodes[1]).toEqual({
+        id: "op:1",
+        kind: "cluster",
+        label: "price it",
+        op: { id: QUOTE, name: "price it" },
+        span: [10, 40],
+        state: { tone: "ok", recordId: "r1", decision: "allow", durationMs: 12 },
+      });
+      expect(spans(graph.nodes).slice(2, 4)).toEqual(["op:2 null", "op:3 null"]);
+      expect(summary(graph.nodes)).toEqual(["start ok", "op:1 ok", "op:2 ok", "op:3 ok", "end ok"]);
+    });
+
+    it("keeps each pass of a loop's call in its own box", () => {
+      const { nodes } = runGraph(
+        ledger(
+          started,
+          called(QUOTE, { node: "0.0.0" }),
+          inner("data.shop.customers.get", 1),
+          called(QUOTE, { node: "0.0.0" }),
+          inner("data.shop.customers.get", 3),
+        ),
+        run("running"),
+        NOW,
+        outline,
+      );
+      expect(labels(nodes)).toEqual([
+        "start start",
+        `op:1 ${QUOTE}`,
+        "op:2 data.shop.customers.get in op:1",
+        `op:3 ${QUOTE}`,
+        "op:4 data.shop.customers.get in op:3",
+        "end pending",
+      ]);
+    });
+
+    it("draws a call still running as a box at its node, active, then off once the run has ended", () => {
+      const records = [record(0, started), record(2, inner("data.shop.customers.get", 1))];
+      const running = runGraph(records, run("running"), NOW, outline);
+      expect(labels(running.nodes)).toEqual([
+        "start start",
+        "op:1 price it",
+        "op:2 data.shop.customers.get in op:1",
+        "end pending",
+      ]);
+      expect(running.nodes[1]).toMatchObject({ kind: "cluster", op: { id: QUOTE, name: "price it" }, span: [10, 40] });
+      expect(summary(running.nodes)).toEqual(["start ok", "op:1 active", "op:2 ok", "end off"]);
+      expect(summary(runGraph(records, run("cancelled"), NOW, outline).nodes)[1]).toBe("op:1 off");
+    });
+
+    it("draws a call inside it that a policy holds in the box, and the operation itself held as an empty box", () => {
+      const asked = approval("pending", { requestedBy: "policy", op: "resend.email.send", opSeq: 2 });
+      const held = runGraph(
+        [
+          record(0, started),
+          record(3, {
+            ...requested("Send?", "approval-1", { requestedBy: "policy" }),
+            op: "resend.email.send",
+            opSeq: 2,
+            within: 1,
+            node: "0.0.0.0.0",
+          }),
+        ],
+        run("waiting", [asked]),
+        NOW,
+        outline,
+      );
+      expect(labels(held.nodes)).toEqual([
+        "start start",
+        "op:1 price it",
+        "op:2 resend.email.send in op:1",
+        "end pending",
+      ]);
+      expect(summary(held.nodes)).toEqual(["start ok", "op:1 active", "op:2 waiting", "end off"]);
+
+      const whole = approval("pending", { requestedBy: "policy", op: QUOTE, opSeq: 1 });
+      const box = runGraph(
+        ledger(started, {
+          ...requested("Quote?", "approval-1", { requestedBy: "policy" }),
+          op: QUOTE,
+          opSeq: 1,
+          node: "0.0.0",
+        }),
+        run("waiting", [whole]),
+        NOW,
+        outline,
+      );
+      expect(labels(box.nodes)).toEqual(["start start", `op:1 ${QUOTE}`, "end pending"]);
+      expect(box.nodes[1]).toMatchObject({ kind: "cluster", op: { id: QUOTE }, state: { tone: "waiting" } });
+      expect(pairs(box.edges)).toEqual(["start->op:1", "op:1->op:1", "op:1->end"]);
     });
   });
 });

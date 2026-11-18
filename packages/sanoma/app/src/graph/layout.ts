@@ -5,7 +5,7 @@ import { LIST_HEADER, ROW_HEIGHT, wildcardRows } from "./wildcard.ts";
 /**
  * Each kind's box, in px. The node components draw to these sizes: an operation's two lines
  * (its id, then its effect, decision and duration badges) need the widest. A `cluster` is sized
- * to what it holds; this is its size when it holds nothing. An operation with `ops` is taller
+ * to what it holds; this is its size when it holds nothing (a company operation's, an op's width). An operation with `ops` is taller
  * by its rows (`nodeSize`).
  */
 export const NODE_SIZE: Record<GraphNodeKind, { width: number; height: number }> = {
@@ -175,9 +175,14 @@ export function layout({ nodes, edges }: Graph): Layout {
         );
       }
     }
-    // An empty cluster still has room for its label.
+    // An empty cluster still has room for its label; a company operation's for an op's line.
     const { width = 0, height = 0 } = g.graph();
-    const least = inside ? NODE_SIZE.cluster : { width: 0, height: 0 };
+    const holder = parent === undefined ? undefined : nodeOf.get(parent);
+    const least = !inside
+      ? { width: 0, height: 0 }
+      : holder?.kind === "cluster" && holder.op
+        ? { ...NODE_SIZE.cluster, width: NODE_SIZE.op.width }
+        : NODE_SIZE.cluster;
     const size = { width: Math.max(width, least.width), height: Math.max(height + top, least.height) };
     const [enter, exit] = inside ? [g.node(ENTER).y + top, g.node(EXIT).y + top] : [0, 0];
     // Where a line leaves a node, and where it arrives: the middle of its side, or a cluster's

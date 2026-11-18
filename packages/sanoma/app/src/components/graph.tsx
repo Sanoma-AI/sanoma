@@ -32,6 +32,7 @@ import {
   type GraphNodeKind,
   isPending,
   isSelectable,
+  type OpState,
 } from "../graph/types.ts";
 import { MAX_VENDORS, wildcardHeader, wildcardRows } from "../graph/wildcard.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
@@ -74,19 +75,32 @@ const PRO_OPTIONS = { hideAttribution: true };
 /** Below this zoom the badges cannot be read: fit one end of the graph instead of all of it. */
 const READABLE_ZOOM = 0.8;
 
+/** A node's border in its tone. */
+const TONE_BORDER = {
+  ok: "border-tone-ok-foreground/40",
+  bad: "border-tone-bad-foreground/70",
+  waiting: "border-tone-waiting-foreground/70",
+  active: "border-tone-active-foreground/70",
+  idle: "border-tone-idle-foreground/50",
+  off: "border-border",
+} satisfies Record<Tone, string>;
+
 const frame = cva("flex size-full flex-col justify-center gap-1 px-2.5 text-xs shadow-xs transition-colors", {
   variants: {
-    tone: {
-      ok: "border-tone-ok-foreground/40",
-      bad: "border-tone-bad-foreground/70",
-      waiting: "border-tone-waiting-foreground/70",
-      active: "border-tone-active-foreground/70",
-      idle: "border-tone-idle-foreground/50",
-      off: "border-border",
-    } satisfies Record<Tone, string>,
+    tone: TONE_BORDER,
     pending: { true: "border-dashed bg-transparent text-muted-foreground" },
     // A click selects it.
     clickable: { true: "cursor-pointer hover:bg-muted" },
+    selected: { true: "ring-2 ring-ring" },
+  },
+});
+
+/** A cluster's box: dashed and muted around a loop's body; a company operation's in its tone, selectable. */
+const clusterBox = cva("size-full rounded-lg border", {
+  variants: {
+    tone: TONE_BORDER,
+    op: { false: "border-dashed border-muted-foreground/40" },
+    clickable: { true: "cursor-pointer" },
     selected: { true: "ring-2 ring-ring" },
   },
 });
@@ -111,6 +125,7 @@ const nameOf = (node: GraphNode) => {
     const clock = node.state ? `sleep ${node.label}` : node.label;
     return node.name ? `${node.name}: ${clock}` : clock;
   }
+  if (node.kind === "cluster" && node.op) return node.op.name ? `${node.op.name}: ${node.op.id}` : node.op.id;
   return node.kind === "op" && node.name ? `${node.name}: ${node.label}` : node.label;
 };
 
@@ -178,7 +193,7 @@ const vendorName = (vendor: string) => <span className="shrink-0 text-muted-fore
  * config says of them: their distinct vendors, and the effect they share, if they share one. The
  * effect is the config's, as a call still held for its approval has no record yet.
  */
-function useOpFacts(node: Extract<GraphNode, { kind: "op" }>) {
+function useOpFacts(node: Pick<Extract<GraphNode, { kind: "op" }>, "ops" | "label">) {
   const ops = use(Ops);
   return useMemo(() => {
     const reach = (node.ops ?? [node.label]).map((id) => ops.get(id)).filter((op) => op !== undefined);
@@ -199,7 +214,6 @@ function OpNode(props: Props<"op">) {
   const { node } = props.data;
   const { vendors, effect } = useOpFacts(node);
   const { state } = node;
-  const held = state?.approval && state.decision === undefined ? state.approval : undefined;
   return (
     <Frame {...props}>
       <Line>
@@ -223,13 +237,7 @@ function OpNode(props: Props<"op">) {
       )}
       <Line>
         {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
-        {held ? (
-          <ToneBadge tone={APPROVAL_TONE[held.status]} title={held.title}>
-            {held.status === "pending" ? `held · ${approverLabel(held.approver)}` : held.status}
-          </ToneBadge>
-        ) : (
-          state?.decision && <ToneBadge tone={DECISION_TONE[state.decision]}>{state.decision}</ToneBadge>
-        )}
+        <Decision state={state} />
         {state?.errorCode ? (
           <span className="truncate text-destructive">{state.errorCode}</span>
         ) : (
@@ -318,15 +326,55 @@ function PendingNode(props: Props<"pending">) {
   );
 }
 
-/** A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a badge. */
-function ClusterNode({ data: { node } }: Props<"cluster">) {
+/** A call's decision, or the approval holding it, once a run says. */
+function Decision({ state }: { state: OpState | undefined }) {
+  const held = state?.approval && state.decision === undefined ? state.approval : undefined;
+  if (held) {
+    return (
+      <ToneBadge tone={APPROVAL_TONE[held.status]} title={held.title}>
+        {held.status === "pending" ? `held · ${approverLabel(held.approver)}` : held.status}
+      </ToneBadge>
+    );
+  }
+  return state?.decision && <ToneBadge tone={DECISION_TONE[state.decision]}>{state.decision}</ToneBadge>;
+}
+
+/**
+ * A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a
+ * badge. A company operation's (`op`) says along its top what the operation is, as an op node
+ * does: its tone, its name or id, its effect and, in a run, its decision or the approval holding it.
+ */
+function ClusterNode({ data: { node, selectable }, selected }: Props<"cluster">) {
+  const { state } = node;
   return (
-    <div className="size-full rounded-lg border border-dashed border-muted-foreground/40" title={node.label}>
+    <div
+      // cn: a loop's dashed muted border wins over the tone's.
+      className={cn(clusterBox({ tone: state?.tone ?? "off", op: !!node.op, clickable: selectable, selected }))}
+      title={nameOf(node)}
+    >
       <Handles />
-      {/* Inside the box however long the label: the title above has it whole. */}
-      <Badge variant="outline" className="m-1.5 max-w-[calc(100%-12px)] bg-card">
-        <span className="min-w-0 truncate">{node.label}</span>
-      </Badge>
+      {node.op ? (
+        <OpStrip node={node} op={node.op} />
+      ) : (
+        // Inside the box however long the label: the title above has it whole.
+        <Badge variant="outline" className="m-1.5 max-w-[calc(100%-12px)] bg-card">
+          <span className="min-w-0 truncate">{node.label}</span>
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+/** A company operation's box's top line, `CLUSTER_HEADER` high. */
+function OpStrip({ node, op }: { node: Extract<GraphNode, { kind: "cluster" }>; op: { id: string; name?: string } }) {
+  const { effect } = useOpFacts({ label: op.id });
+  return (
+    <div className="flex h-7 min-w-0 items-center gap-1.5 px-2.5 text-xs">
+      <Dot tone={node.state?.tone} />
+      {op.name && <span className="shrink-0 font-medium">{op.name}</span>}
+      <code className={cn("truncate", op.name && "text-muted-foreground")}>{op.id}</code>
+      {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
+      <Decision state={node.state} />
     </div>
   );
 }

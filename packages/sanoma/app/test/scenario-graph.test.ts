@@ -100,6 +100,14 @@ describe("annotateGraph", () => {
     ]);
   });
 
+  it("marks the calls inside a company operation's box, as any other call", () => {
+    const boxed = outlineGraph([{ kind: "op", id: "operations.quote.run", calls: [op("data.shop.customers.get")] }]);
+    const marked = annotateGraph(boxed, {
+      steps: [{ text: "a shop customer exists", kind: "given", op: "data.shop.customers.get" }],
+    });
+    expect(marks(marked.nodes)).toEqual(["start -", "cluster:0 -", "op:1 seeded", "end -"]);
+  });
+
   it("returns the graph as it is for a scenario that names no operation", () => {
     expect(annotateGraph(graph, { steps: [{ text: "announce runs", kind: "when" }] })).toBe(graph);
   });

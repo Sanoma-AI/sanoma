@@ -49,8 +49,19 @@ export type Step =
   /**
    * `ops`: for an id with a computed segment, the operations it can reach (the outline's `ops`).
    * `name`: the step's name, when the call gave one (an outline's) or a run recorded one.
+   * `calls`: for a company operation, the calls inside it: its own outline's (without their spans,
+   * which index its file), or in a run those recorded within its call.
    */
-  | { kind: "op"; id: string; ops?: string[]; name?: string; key?: string; span?: Span; state?: OpState }
+  | {
+      kind: "op";
+      id: string;
+      ops?: string[];
+      name?: string;
+      key?: string;
+      span?: Span;
+      state?: OpState;
+      calls?: Step[];
+    }
   | { kind: "approval"; title?: string; key?: string; span?: Span; state?: ApprovalStepState }
   /** `label`: a run's says until when. `name`: the step's name, as the outline or the run's record has it. */
   | { kind: "sleep"; name?: string; key?: string; label?: string; span?: Span; state?: StepState }
@@ -90,8 +101,12 @@ export type GraphNode =
   /** `name`: the step's name, when it is not the default (`DEFAULT_SLEEP_NAME`), drawn above the clock. */
   | (Base & { kind: "sleep"; name?: string; state?: StepState })
   | (Base & { kind: "pending" })
-  /** A box around a loop's body, a computed `ctx.all`'s member or a `try`'s handler, which `label` names. */
-  | (Base & { kind: "cluster" })
+  /**
+   * A box around a loop's body, a computed `ctx.all`'s member or a `try`'s handler, which `label`
+   * names; or around the calls inside a company operation (`op`, its id and the step's name when
+   * it is not the id), with the operation call's state and place in the source.
+   */
+  | (Base & { kind: "cluster"; op?: { id: string; name?: string }; state?: OpState })
   /** Where a branch splits into its cases. */
   | (Base & { kind: "split" })
   /** A branch's way past its cases, when it has one: an `if` without `else`, say. */
