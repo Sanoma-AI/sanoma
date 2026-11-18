@@ -79,18 +79,20 @@ export const kindDirs = (root: string, kind: string): string[] => [
 /**
  * The files whose declarations join the config's, as `sanoma` loads it and the Worker's bundle
  * imports them: each workflow source under `workflows/` and each app's (a test or a declaration
- * file aside), then each `resources/data.ts` there is.
+ * file aside), each company operation's under `operations/` the same way, then each
+ * `resources/data.ts` there is.
  */
-export function declarationFiles(root: string): { workflows: string[]; data: string[] } {
+export function declarationFiles(root: string): { workflows: string[]; operations: string[]; data: string[] } {
   return {
     workflows: kindDirs(root, "workflows").flatMap((dir) => filesUnder(dir, isWorkflowSource)),
+    operations: kindDirs(root, "operations").flatMap((dir) => filesUnder(dir, isWorkflowSource)),
     data: kindDirs(root, "resources")
       .map((dir) => join(dir, COLLECTIONS_FILE))
       .filter((path) => existsSync(path)),
   };
 }
 
-/** A workflow file's name: `.ts`, but a test (`.test.ts`, `.spec.ts`) or a declaration. */
+/** A workflow's or an operation's file name: `.ts`, but a test (`.test.ts`, `.spec.ts`) or a declaration. */
 const isWorkflowSource = (name: string) => name.endsWith(".ts") && !/\.(test|spec|d)\.ts$/.test(name);
 
 /** Where a company's scenarios are, under its root and each app's folder. */

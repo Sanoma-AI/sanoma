@@ -6,7 +6,7 @@ import { readPolicyFiles } from "./cedar.ts";
 import { recordSchemaOf } from "./collection.ts";
 import { decideCall } from "./call.ts";
 import { connectorsOf, type ResolvedConfig, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
-import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
+import { type Builtin, jsonSchemaOf, type Operation, opIdsOf, type Use, type WorkflowDefinition } from "./define.ts";
 import {
   CAPABILITIES,
   type CollectionEntry,
@@ -22,7 +22,7 @@ import { codeMail } from "./login-code.ts";
 import { lintWorkflow } from "./lint.ts";
 import { fresh, stampOf, stampsOf } from "./load.ts";
 import { LOCKFILE } from "./lockfile.ts";
-import { VENDOR, type VendorInfo } from "./op.ts";
+import { isOperation, VENDOR, type VendorInfo } from "./op.ts";
 import { outlineWithSource } from "./outline.ts";
 import { APPS_DIR, kindDirs } from "./paths.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
@@ -37,6 +37,7 @@ import {
   errorMessage,
   LOGIN_AGENT,
   LOGIN_CODE_WORKFLOW,
+  OPERATIONS_VENDOR,
   type PeopleResource,
   principalOf,
   problemLine,
@@ -50,7 +51,7 @@ import { sourceKeyIds } from "./host.ts";
 // `sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
 export * from "./description.ts";
-export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
+export { outlineWorkflow, type Outline, type OutlineNode, type Span, withPaths } from "./outline.ts";
 export { companyRootOf, configDirOf } from "./company-file.ts";
 export {
   admit,
@@ -157,13 +158,18 @@ export function liveDescription(config: SanomaConfig): () => ConfigDescription {
     return { description, stamps: new Map([...extra, ...stampsOf(root)]) };
   };
   let now = described();
-  // The workflows as the config imported them, which the worker runs: their outlines and sources
-  // from the first description, never a file edited since.
+  // The workflows and the company's operations as the config imported them, which the worker runs:
+  // their outlines and sources from the first description, never a file edited since.
   const { workflows } = now.description;
+  const operations = now.description.ops.filter((op) => op.vendor === OPERATIONS_VENDOR);
   return () => {
     if (!fresh(now.stamps)) {
       now = described(now.description);
       now.description.workflows = workflows;
+      now.description.ops = [
+        ...now.description.ops.filter((op) => op.vendor !== OPERATIONS_VENDOR),
+        ...operations,
+      ].toSorted((a, b) => a.id.localeCompare(b.id));
     }
     return now.description;
   };
@@ -237,6 +243,26 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     }))
     .toSorted((a, b) => a.name.localeCompare(b.name));
 
+  const read = memoised(readSource);
+  const lint = memoised((file: SourceFile) => lintWorkflow(file));
+  /**
+   * A workflow's or a company operation's code, read from its file: the file, its outline, what is
+   * wrong in it (none for a built-in) and its text.
+   */
+  const codeOf = (def: WorkflowDefinition<any, any> | Operation, builtin: boolean) => {
+    const file = read(def.file);
+    const { outline, source, found } = outlineWithSource(def, file);
+    // What the lint does not report: the file unread, or no workflow of this name in it.
+    const own = "error" in outline && !found && (typeof file === "string" || !file.problems.length);
+    const problems = builtin
+      ? []
+      : [
+          ...(typeof file === "string" ? [] : lint(file)),
+          ...(own ? [{ line: 1, column: 1, message: outline.error }] : []),
+        ];
+    return { file: def.file, outline, problems, ...(source === undefined ? {} : { source }) };
+  };
+
   const ops: OpEntry[] = [...resolved.ops.values()].map((op) => ({
     ...policyOpOf(op),
     idempotent: op.idempotent,
@@ -245,23 +271,17 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     direct: isDirect(op, resolved.types),
     input: toJsonSchema(op.input, `${op.id} input`, "input", refs),
     output: toJsonSchema(op.output, `${op.id} output`, "output", refs),
+    // A company operation's own code, as a workflow's.
+    ...(isOperation(op) && {
+      ...(op.app !== undefined && { app: op.app }),
+      ops: opIdsOf(op),
+      ...codeOf(op, false),
+    }),
   }));
   ops.sort((a, b) => a.id.localeCompare(b.id));
 
-  const read = memoised(readSource);
-  const lint = memoised((file: SourceFile) => lintWorkflow(file));
   const workflows: WorkflowEntry[] = [...resolved.workflows.values()].map((wf) => {
-    const file = read(wf.file);
-    const { outline, source, found } = outlineWithSource(wf, file);
-    // What the lint does not report: the file unread, or no workflow of this name in it.
-    const own = "error" in outline && !found && (typeof file === "string" || !file.problems.length);
     const builtin = BUILT_IN_WORKFLOWS.has(wf.name);
-    const problems = builtin
-      ? []
-      : [
-          ...(typeof file === "string" ? [] : lint(file)),
-          ...(own ? [{ line: 1, column: 1, message: outline.error }] : []),
-        ];
     return {
       name: wf.name,
       ...(wf.app !== undefined && { app: wf.app }),
@@ -271,10 +291,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
       ops: opIdsOf(wf),
       builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),
-      file: wf.file,
-      outline,
-      problems,
-      ...(source === undefined ? {} : { source }),
+      ...codeOf(wf, builtin),
     };
   });
   workflows.sort((a, b) => a.name.localeCompare(b.name));
@@ -487,9 +504,10 @@ function domainProblems(
 }
 
 /**
- * A site's `api` names each workflow `apiNameOf(name)` beside the vendors' operations and the
- * collections (`api.data`), so a workflow whose name comes out as another's, a vendor's id or
- * `data` is a problem, at 1:1 of its file. A built-in is never the one renamed.
+ * A site's `api` names each workflow `apiNameOf(name)` beside the vendors' operations, the
+ * collections (`api.data`) and the company's operations (`api.operations`), so a workflow whose name
+ * comes out as another's, a vendor's id, `data` or `operations` is a problem, at 1:1 of its file. A
+ * built-in is never the one renamed.
  */
 function addApiNameProblems(workflows: WorkflowEntry[], vendors: ReadonlySet<string>) {
   for (const wf of workflows) {
@@ -500,11 +518,13 @@ function addApiNameProblems(workflows: WorkflowEntry[], vendors: ReadonlySet<str
       ? `as workflow ${others.map((other) => `"${other.name}"`).join(" and ")} is`
       : api === DATA_VENDOR
         ? "which is the collections'"
-        : vendors.has(api)
-          ? `which is the vendor ${api}'s operations`
-          : api === "then"
-            ? "which a promise would take for its own"
-            : undefined;
+        : api === OPERATIONS_VENDOR
+          ? "which is the company's operations'"
+          : vendors.has(api)
+            ? `which is the vendor ${api}'s operations`
+            : api === "then"
+              ? "which a promise would take for its own"
+              : undefined;
     if (taken) wf.problems.push({ line: 1, column: 1, message: apiNameProblem(api, taken) });
   }
 }

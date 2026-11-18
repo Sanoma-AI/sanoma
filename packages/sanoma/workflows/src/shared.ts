@@ -76,6 +76,12 @@ export const APPLY_WORKFLOW = "apply";
  */
 export const DATA_VENDOR = "data";
 
+/**
+ * The vendor of the company's own operations, `operations.<name>.run` (`defineOperation`, a file
+ * of `operations/`): `operations.<app>.<name>.run` in an app's. No connector may take it.
+ */
+export const OPERATIONS_VENDOR = "operations";
+
 /** The one operation of a collection that stands for others: `saveMany`, each entry a `save` or `delete`. */
 export const BATCH = "saveMany";
 export const isBatch = (op: Pick<OpEntry, "vendor" | "name">): boolean =>

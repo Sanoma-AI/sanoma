@@ -9,6 +9,7 @@ import {
   checkApproval,
   checkSleep,
   ctxOf,
+  type CtxRunner,
   inputOf,
   opCalled,
   outputsOf,
@@ -30,10 +31,10 @@ import {
 } from "./errors.ts";
 import type { Collection } from "./collection.ts";
 import { currentGroup, entry, type LedgerBody, skipped, write, writeFailure } from "./ledger.ts";
-import type { CallContext, Op } from "./op.ts";
+import { type CallContext, isOperation, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
 import { allowAll, type Decision, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
-import type { Run, StartHold, WorkerState } from "./run.ts";
+import type { Run, StartHold, WorkerState, WorkflowOutline } from "./run.ts";
 import { reservedFor, runtimeHold } from "./change.ts";
 import { isChangeOp } from "./resource.ts";
 import { readPeople } from "./resources.ts";
@@ -128,20 +129,38 @@ function refuseIfEnded(run: Run) {
  * The run's `ctx` on DBOS (`ctxOf`): every member that writes a record is placed in the outline
  * where the workflow calls it (`placeCall`) and goes through the run's queue (`serial`), its
  * records carrying the node and the step's name; `ctx.now()` only reads DBOS's clock, queued.
- * `ctx.all` alone skips the queue: it makes no DBOS call or record itself, it only calls its
- * members, whose ctx calls are queued. Queued, it would hold the queue until its members
- * settled, and their calls, queued behind it, would never start.
  */
-export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
-  return ctxOf(wf, run, {
-    place: (member, what) => placeCall(run, member, what),
-    op: (op, input, at, connection) => serial(run, () => callOp(run, op.id, input, at, connection)),
+export const buildCtx = (wf: WorkflowDefinition<any, any>, run: Run): any =>
+  ctxOf(
+    wf,
+    run,
+    runnerOf(run, (member, what) => placeCall(run, run.outline, run.workflow, member, what)),
+  );
+
+/**
+ * How a `ctx` on DBOS makes its calls, each placed by `place`. `ctx.all` alone skips the queue: it
+ * makes no DBOS call or record itself, it only calls its members, whose ctx calls are queued.
+ * Queued, it would hold the queue until its members settled, and their calls, queued behind it,
+ * would never start. A company operation's call (`operationCall`) queues only its own admission,
+ * for the same reason: its body's calls are queued. `within` is the company operation whose body
+ * this `ctx` is, and its call's `seq`: each call it makes is recorded with that `seq`, and decided
+ * with the operation named where a run's workflow is.
+ */
+function runnerOf(run: Run, place: CtxRunner["place"], within?: { id: string; seq: number }): CtxRunner {
+  return {
+    place,
+    op: (op, input, at, connection) =>
+      isOperation(op)
+        ? operationCall(run, op.id, input, at)
+        : serial(run, () =>
+            callOp(run, op.id, input, within ? { ...at, within: within.seq } : at, connection, within?.id),
+          ),
     now: () => serial(run, () => DBOS.now()),
     approval: (title, req, at) => serial(run, () => awaitApproval(run, title, checkApproval(title, req), at)),
     sleep: (req, at) => serial(run, () => sleep(run, req, at)),
     // Placed, so it has its node.
     all: (list, at) => all(run, list, at.node!),
-  });
+  };
 }
 
 /** Where a `ctx` member was called from, as a stack frame says. */
@@ -174,23 +193,23 @@ function callSite(fn: Function): CallSite | undefined {
 }
 
 /**
- * The outline node the workflow calls a `ctx` member at: the call whose code holds the position
- * the workflow called from (`callSite`). `what` is the member's path on `ctx` (`ghost.post.create`,
- * `approval`, `all`). The outline refuses most ways around it before a run (`outlineBody`'s
- * problems); this is the run's own check, for what reaches a `ctx` member from code the outline
- * has no node for: another file, a function defined inside `run` the outline does not read,
- * `arguments`, or a node of another kind. The run fails with `call_not_in_outline`, and every
- * record the call writes names the node, so a run's steps are the outline's calls and nothing else.
+ * The outline node `owner` (the run's workflow, or a company operation whose body runs in it) calls
+ * a `ctx` member at, in its `outline`: the call whose code holds the position it called from
+ * (`callSite`). `what` is the member's path on `ctx` (`ghost.post.create`, `approval`, `all`). The
+ * outline refuses most ways around it before a run (`outlineBody`'s problems); this is the run's
+ * own check, for what reaches a `ctx` member from code the outline has no node for: another file,
+ * a function defined inside `run` the outline does not read, `arguments`, or a node of another
+ * kind. The run fails with `call_not_in_outline`, and every record the call writes names the
+ * node, so a run's steps are the outline's calls and nothing else.
  */
-function placeCall(run: Run, fn: Function, what: string): CallNode {
-  const { outline, workflow } = run;
+function placeCall(run: Run, outline: WorkflowOutline, owner: string, fn: Function, what: string): CallNode {
   const site = callSite(fn);
   if (!site) throw notInOutline(run, what, site, "which the outline cannot place");
   if (site.file !== outline.file)
-    throw notInOutline(run, what, site, `which is not in ${workflow}'s file ${outline.file}`);
+    throw notInOutline(run, what, site, `which is not in ${owner}'s file ${outline.file}`);
   const offset = offsetOf(outline.lineStarts, site.line, site.column);
   const node = offset === undefined ? undefined : callAt(outline.calls, offset);
-  if (!node) throw notInOutline(run, what, site, `which is no ctx call in ${workflow}'s outline`);
+  if (!node) throw notInOutline(run, what, site, `which is no ctx call in ${owner}'s outline`);
   // The member called is the node's call: `ctx.all` at an `all` or `each`, an operation at its op.
   if (!fitsOp(callName(node), what)) throw notInOutline(run, what, site, `where the outline has ctx.${callName(node)}`);
   return node;
@@ -263,7 +282,7 @@ export function deniedKeys(
   };
 }
 
-/** `decideEach` for one call. */
+/** `decideEach` for one call, made by the run's workflow. */
 export async function decide(
   run: Run,
   op: Op,
@@ -278,17 +297,19 @@ export async function decide(
  * Asks the policy about each of the calls a call makes (`callsOf`), in order, with the record a
  * collection's `save` or `delete` replaces as `before` (`beforeOf`, each read keyed by its place).
  * The runtime's own rule first (`runtimeHold`, over the running instance's people): while it
- * holds or denies a call, the company's policy is not asked about it. Runs inside a step, so it
- * must have no side effects of its own.
+ * holds or denies a call, the company's policy is not asked about it. A call a company
+ * operation's body makes names that operation (`within`, its id) where the run's workflow is
+ * named. Runs inside a step, so it must have no side effects of its own.
  */
 export async function decideEach(
   run: Run,
   calls: readonly Call[],
   connection?: ConnectionSnapshot,
+  within?: string,
 ): Promise<RecordedDecision[]> {
   const seen = {
     id: run.id,
-    workflow: run.workflow,
+    workflow: within ?? run.workflow,
     approvals: structuredClone(run.approvals).filter(
       (a) => a.requestedBy !== "policy" || a.connection === connection?.revision,
     ),
@@ -472,18 +493,16 @@ async function refuseDeclared(run: Run, op: Op, input: unknown) {
   }
 }
 
-async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?: ConnectionRef) {
-  // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
-  const op = run.state.ops.get(id);
-  // A sandbox run calls its own fakes, never a vendor.
-  const fn = driverOf(run, id);
-  if (!op || !fn) {
-    throw new Error(
-      run.sandbox === undefined
-        ? `No connector or driver for ${id} in this worker`
-        : `No connector or fake for ${id} in this worker: no fake its connectors attach implements it`,
-    );
-  }
+/**
+ * A call's admission, what each call does before its operation runs, in the run's queue: the
+ * reserved check, the input parsed, the calls it makes (`callsOf`) and their `seq`s, the account it
+ * is made on (a `connection:<id>` step; none for a company operation, which has no vendor), then
+ * the policy (a `policy:<id>` step) and each hold's approval in turn. A deny, a rejection or a
+ * withdrawal writes its failed records and throws. `within` names the company operation whose
+ * body makes the call, for the policy. `records` and `writeFailures` make and write the call's
+ * records, one per call it makes, numbered from `seq`.
+ */
+async function admit(run: Run, op: Op, input: unknown, place: Placed, ref?: ConnectionRef, within?: string) {
   // Only change takes a change's steps; `resolveConfig` refuses any other workflow that uses one.
   const reserved = reservedFor(op);
   if (reserved && !reserved.workflows.includes(run.workflow)) {
@@ -505,16 +524,18 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
   // The decision is recorded as a step, so a replay reuses it instead of asking a policy
   // that may have changed since. The policy must still be deterministic: a run that fails
   // before the step is recorded asks again.
-  const connection = await DBOS.runStep(
-    async () => {
-      if (run.sandbox !== undefined) {
-        if (!run.fakeConnection) throw new SanomaError("invalid_input", "Sandbox account state is unavailable");
-        return run.fakeConnection(op.vendor, ref);
-      }
-      return run.state.connections?.select(op.vendor, ref, run.actor.id);
-    },
-    { name: `connection:${op.id}` },
-  );
+  const connection = isOperation(op)
+    ? undefined
+    : await DBOS.runStep(
+        async () => {
+          if (run.sandbox !== undefined) {
+            if (!run.fakeConnection) throw new SanomaError("invalid_input", "Sandbox account state is unavailable");
+            return run.fakeConnection(op.vendor, ref);
+          }
+          return run.state.connections?.select(op.vendor, ref, run.actor.id);
+        },
+        { name: `connection:${op.id}` },
+      );
   const decideStep = () =>
     DBOS.runStep(
       async () => {
@@ -522,7 +543,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
         // Read in the step, so a replay reuses the first answer, and asked again after each
         // approval, so a call made after a long wait sees the files as they are then.
         if (run.workflow !== APPLY_WORKFLOW && isChangeOp(op, run.state.types)) await refuseDeclared(run, op, parsed);
-        return decideEach(run, calls, connection);
+        return decideEach(run, calls, connection, within);
       },
       { name: `policy:${op.id}` },
     );
@@ -587,7 +608,22 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
     decisions = await decideStep();
     decision = decisionOf(op, calls, decisions, run.state.collections);
   }
+  return { parsed, calls, seq, connection, records, writeFailures };
+}
 
+async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?: ConnectionRef, within?: string) {
+  // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
+  const op = run.state.ops.get(id);
+  // A sandbox run calls its own fakes, never a vendor.
+  const fn = driverOf(run, id);
+  if (!op || !fn) {
+    throw new Error(
+      run.sandbox === undefined
+        ? `No connector or driver for ${id} in this worker`
+        : `No connector or fake for ${id} in this worker: no fake its connectors attach implements it`,
+    );
+  }
+  const { parsed, calls, seq, connection, records, writeFailures } = await admit(run, op, input, place, ref, within);
   const started = Date.now();
   // The try DBOS is on, as it passes it to the step. The last try's error is not retried, so
   // DBOS records and throws it as the vendor gave it, never wrapped with the others.
@@ -644,6 +680,45 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
   } catch (err) {
     // The vendor acted, and nothing records it. A workflow that caught this and called again
     // would repeat the side effect under a new key, so the run makes no further calls.
+    run.ended = true;
+    throw new Error(`${op.id} succeeded, but the ledger could not record it: ${errorMessage(err)}`, { cause: err });
+  }
+  return output;
+}
+
+/**
+ * A company operation's call (`defineOperation`) in a run: admitted as any call is, in the run's
+ * queue (`admit`: its `seq`, its `policy:<id>` step, a hold's approval), then its body run outside
+ * the queue, as a `ctx.all` member's is, on a `ctx` over its own `uses`: each call the body makes is
+ * queued and made as any call is, with its own steps, decision and record, placed in the
+ * operation's outline under the operation's node (`<node>.0.<path>`) and naming its `seq`
+ * (`within`). Its own record is written once the body has ended, at the `seq` it took first.
+ */
+async function operationCall(run: Run, id: string, input: unknown, at: Placed): Promise<unknown> {
+  const op = run.state.ops.get(id);
+  if (!isOperation(op)) throw new Error(`No company operation ${id} in this worker`);
+  const { parsed, seq, records, writeFailures } = await serial(run, () => admit(run, op, input, at));
+  const outline = run.state.outlines.get(op.id)!;
+  const started = Date.now();
+  let output: unknown;
+  try {
+    const place: CtxRunner["place"] = (member, what) => {
+      const node = placeCall(run, outline, op.id, member, what);
+      return { ...node, path: `${at.node}.0.${node.path}` };
+    };
+    output = op.output.parse(await op.run(ctxOf(op, run, runnerOf(run, place, { id: op.id, seq })), parsed));
+  } catch (err) {
+    const failed = () => ({ error: errorInfo(err), durationMs: Date.now() - started });
+    if (isInfrastructureError(err, run.state)) {
+      for (const record of records(failed, started)) skipped(record, `the call was interrupted (${errorMessage(err)})`);
+    } else await writeFailures(failed, err, started);
+    throw err;
+  }
+  try {
+    const done = () => ({ output: recorded(op, output, run.workflow), durationMs: Date.now() - started });
+    for (const record of records(done, started)) await write(run, record);
+  } catch (err) {
+    // The operation's calls are recorded, but not the operation: as for any call, the run makes no further calls.
     run.ended = true;
     throw new Error(`${op.id} succeeded, but the ledger could not record it: ${errorMessage(err)}`, { cause: err });
   }

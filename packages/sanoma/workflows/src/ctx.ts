@@ -4,6 +4,7 @@ import {
   type ApprovalRequest,
   ApprovalRequestSchema,
   type ApprovalResult,
+  type Operation,
   type Principal,
   SleepFor,
   type SleepRequest,
@@ -15,7 +16,7 @@ import {
 } from "./define.ts";
 import { parseOrThrow } from "./errors.ts";
 import type { LedgerBody, LedgerGroup, LedgerRecord } from "./ledger.ts";
-import { isOp, type Op } from "./op.ts";
+import { isOp, isOperation, type Op } from "./op.ts";
 import type { CallNode } from "./outline.ts";
 import { DEFAULT_SLEEP_NAME, entryOpsOf, isBatch, isRecord, LOGIN_CODE_WORKFLOW, shown } from "./shared.ts";
 
@@ -27,11 +28,13 @@ import { DEFAULT_SLEEP_NAME, entryOpsOf, isBatch, isRecord, LOGIN_CODE_WORKFLOW,
  * Where a call is, as its records say: its outline node's `path`, none in a page (which reads no
  * outline), and the step's name, as the outline resolved it (`OutlineNode`'s `name`), or for a
  * call the outline could not name, the operation a computed id called, or an approval's title
- * that is no literal.
+ * that is no literal; and for a call a company operation's body made, the `seq` of that
+ * operation's call (`within`, as the records say it).
  */
 export interface Placed {
   node?: string;
   name: string;
+  within?: number;
 }
 
 /** How a run's `ctx` members are carried out: what `ctxOf` calls, once it has placed a call. */
@@ -56,9 +59,14 @@ const named = (node: CallNode) => ("name" in node ? node.name : undefined);
  * The run's `ctx`: the operations and built-ins its workflow `uses`, and nothing else. Every
  * member that writes a record is placed where the workflow calls it (`CtxRunner.place`) and
  * named (the outline's name, else `fallback`'s), then made by the runner; `ctx.now()` only reads
- * the run's clock, and `ctx.runId` and `ctx.startedBy` are values.
+ * the run's clock, and `ctx.runId` and `ctx.startedBy` are values. A company operation's body gets
+ * its own, over its own `uses`.
  */
-export function ctxOf(wf: WorkflowDefinition<any, any>, run: { id: string; actor: Principal }, runner: CtxRunner): any {
+export function ctxOf(
+  wf: WorkflowDefinition<any, any> | Operation,
+  run: { id: string; actor: Principal },
+  runner: CtxRunner,
+): any {
   const uses = wf.uses as readonly Use[];
   /** A member placed where it is called, then `call`ed there. A refusal rejects, as a member's failure always has. */
   const placed = (
@@ -108,7 +116,8 @@ export function ctxOf(wf: WorkflowDefinition<any, any>, run: { id: string; actor
       () => "all",
       (at, list) => runner.all(list, at),
     );
-  return guarded(members, "ctx", wf.name, { startedBy: startedByOf(run.actor) });
+  const owner = isOperation(wf) ? `operation "${wf.id}"` : `workflow "${wf.name}"`;
+  return guarded(members, "ctx", owner, { startedBy: startedByOf(run.actor) });
 }
 
 /** Who started the run, as `ctx.startedBy` shows it: a plain frozen record, whose absent fields read as undefined. */
@@ -119,25 +128,25 @@ const startedByOf = ({ id, email, github, subject }: Principal): StartedBy =>
 function guarded(
   members: Record<string, unknown>,
   path: string,
-  workflow: string,
+  owner: string,
   plain: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(members)) {
     out[key] =
       typeof value === "object" && value !== null
-        ? guarded(value as Record<string, unknown>, `${path}.${key}`, workflow)
+        ? guarded(value as Record<string, unknown>, `${path}.${key}`, owner)
         : value;
   }
-  return strict({ ...out, ...plain }, path, workflow);
+  return strict({ ...out, ...plain }, path, owner);
 }
 
-/** Refuses anything not declared in `uses`, with a message that says so. */
-function strict<T extends object>(obj: T, path: string, workflow: string): T {
+/** Refuses anything not declared in `uses`, with a message that says so: in `owner`, `workflow "<name>"` or `operation "<id>"`. */
+function strict<T extends object>(obj: T, path: string, owner: string): T {
   return new Proxy(obj, {
     get(target, key, receiver) {
       if (typeof key === "symbol" || key === "then" || key in target) return Reflect.get(target, key, receiver);
-      throw new Error(`${path}.${key} is not available: add it to \`uses\` in workflow "${workflow}"`);
+      throw new Error(`${path}.${key} is not available: add it to \`uses\` in ${owner}`);
     },
   });
 }

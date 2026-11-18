@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
+import { jsonSchemaOf, opIdsOf, type Operation, type WorkflowDefinition } from "./define.ts";
 import { upFrom } from "./company-file.ts";
 import manifest from "../../package.json" with { type: "json" };
 
@@ -51,22 +51,27 @@ function installedDbosVersion(): string {
  * It is a hash of the app name, `RUNTIME_VERSION`, `STEP_LAYOUT`, the installed DBOS version,
  * and for each workflow its name, the source text of its `run` function, the ids of the
  * operations it uses and its input schema as JSON Schema: DBOS's own automatic versioning, over
- * the workflow code instead of the runtime's one registration wrapper. The hash cannot see
- * functions `run` calls that live elsewhere (their source is not reachable from the definition),
- * op schemas, drivers or the policy. DBOS's `DBOS__APPVERSION` environment variable names a
+ * the workflow code instead of the runtime's one registration wrapper. Each company operation
+ * (`defineOperation`) is hashed the same way, by its id, since a run replays its body too. The
+ * hash cannot see functions `run` calls that live elsewhere (their source is not reachable from
+ * the definition), op schemas, drivers or the policy. DBOS's `DBOS__APPVERSION` environment variable names a
  * version instead (a git commit, say), still prefixed with the app name.
  */
 export function computeVersion({
   appName,
   workflows: definitions,
+  operations = [],
 }: {
   /** The resolved config's `appName`. */
   appName: string;
   workflows: readonly WorkflowDefinition<any, any>[];
+  operations?: readonly Operation[];
 }): string {
   const named = process.env.DBOS__APPVERSION?.trim();
   if (named) return `${appName}@${named}`;
-  const workflows = definitions.map(codeOf).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const workflows = [...definitions, ...operations.map(({ id, run, uses, input }) => ({ name: id, run, uses, input }))]
+    .map(codeOf)
+    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return `${appName}@${sha256([appName, RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), ...workflows])}`;
 }
 
@@ -83,8 +88,8 @@ export function builtInCodeOf(builtIn: WorkflowDefinition<any, any>): string {
 
 const sha256 = (parts: unknown[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 
-/** What the hashes read of a workflow: its name, the source of its `run`, its operations and its input schema. */
-const codeOf = (wf: WorkflowDefinition<any, any>) =>
+/** What the hashes read of a workflow (or a company operation, named by its id): its name, the source of its `run`, its operations and its input schema. */
+const codeOf = (wf: Pick<WorkflowDefinition<any, any>, "name" | "run" | "uses" | "input">) =>
   [
     wf.name,
     wf.run.toString(),
@@ -94,7 +99,7 @@ const codeOf = (wf: WorkflowDefinition<any, any>) =>
   ] as const;
 
 /** The workflow's input schema as the hash sees it: its JSON Schema, or its text when zod can't convert it. */
-function inputSchemaOf(wf: WorkflowDefinition<any, any>): unknown {
+function inputSchemaOf(wf: Pick<WorkflowDefinition<any, any>, "input">): unknown {
   try {
     return jsonSchemaOf(wf.input);
   } catch {
