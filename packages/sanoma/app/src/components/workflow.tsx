@@ -69,7 +69,7 @@ export const WorkflowSections = memo(function WorkflowSections({ workflow }: { w
         ) : (
           <ItemGroup>
             {workflow.ops.map((id) => (
-              <OpItem key={id} id={id} op={ops.get(id)} />
+              <OpItem key={id} id={id} op={ops.get(id)} link />
             ))}
           </ItemGroup>
         )}
@@ -115,7 +115,8 @@ export const WorkflowSections = memo(function WorkflowSections({ workflow }: { w
 const kindName = (f: Field): string =>
   f.kind === "array" ? `list of ${kindName(f.item)}` : f.kind === "json" ? "JSON" : f.kind;
 
-function InputFields({ fields }: { fields: Field[] }) {
+/** A form's fields as a list, each with its kind, whether it is required, and what it says. */
+export function InputFields({ fields }: { fields: Field[] }) {
   return (
     <ItemGroup>
       {fields.map((field) => (

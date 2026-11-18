@@ -22,6 +22,7 @@ import { STAGED_FIRST } from "../../../components/grid/staged.tsx";
 import { RecordForm } from "../../../components/record-form.tsx";
 import { RecordHistory } from "../../../components/record-history.tsx";
 import {
+  callersOf,
   closeRecord,
   collectionNamed,
   configQuery,
@@ -30,7 +31,7 @@ import {
   historyQuery,
   listQueryOf,
   recordsQuery,
-  usedBy,
+  siteCallers,
 } from "../../../queries.ts";
 import { api } from "../../../site-api.ts";
 
@@ -66,22 +67,26 @@ export const Route = createFileRoute("/data/$name/")({
 /**
  * A collection: where it is declared, its records in a grid you edit in place, with Add record,
  * the record form beside it while a record is open (`?record=`, or `?new`; Space on a cell opens
- * its record), and the workflows that use it.
+ * its record), and the workflows, operations and sites' files that use it.
  */
 function CollectionPage() {
   const { name } = Route.useParams();
   const search = Route.useSearch();
   const select = useMemo(
-    () => (config: ConfigDescription) => ({
-      collection: collectionNamed(name)(config),
-      people: personsOf(config.resources).map((person) => person.id),
-      tables: config.collections.map((c) => c.name),
-      ...usedBy(name)(config),
-    }),
+    () => (config: ConfigDescription) => {
+      const collection = collectionNamed(name)(config);
+      return {
+        collection,
+        people: personsOf(config.resources).map((person) => person.id),
+        tables: config.collections.map((c) => c.name),
+        ...callersOf(config, collection?.ops ?? []),
+        sites: siteCallers(config, "collection", name),
+      };
+    },
     [name],
   );
   const {
-    data: { collection, people, tables, workflows, sites },
+    data: { collection, people, tables, workflows, operations, sites },
   } = useSuspenseQuery({ ...configQuery(), select });
   // The loader found it; a config that no longer has it reads as not found.
   if (!collection) throw notFound();
@@ -261,7 +266,7 @@ function CollectionPage() {
           )}
         </div>
       </section>
-      <UsedBy workflows={workflows} sites={sites} />
+      <UsedBy workflows={workflows} operations={operations} sites={sites} />
     </>
   );
 }

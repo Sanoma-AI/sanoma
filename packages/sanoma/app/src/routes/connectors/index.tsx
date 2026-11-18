@@ -3,15 +3,18 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { connectorTier, type CredentialStatus, credentialReady } from "sanoma/workflows/shared";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
+import { FunctionIcon } from "@phosphor-icons/react/dist/csr/Function";
 import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
 import { Suspense } from "react";
 import { z } from "zod";
+import { Badge } from "#/components/ui/badge.tsx";
 import { ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import type { AvailableConnector } from "../../api.ts";
 import {
   CrumbHeader,
+  effectBadge,
   ExternalLink,
   LinkItem,
   Nothing,
@@ -22,7 +25,15 @@ import {
   VendorLogo,
 } from "../../components/common.tsx";
 import { Logo } from "../../components/logo.tsx";
-import { availableConnectorsQuery, configQuery, connectorsOf, credentialsQuery } from "../../queries.ts";
+import {
+  availableConnectorsQuery,
+  callersOf,
+  companyOps,
+  configQuery,
+  connectorsOf,
+  credentialsQuery,
+  siteCallers,
+} from "../../queries.ts";
 import { SecretStorage } from "../../components/connections.tsx";
 
 export const Route = createFileRoute("/connectors/")({
@@ -35,12 +46,16 @@ export const Route = createFileRoute("/connectors/")({
   component: ConnectorsPage,
 });
 
-/** The installed connectors, one row each linking to its page; then the ones on npm, each with how to add it. */
+/**
+ * The company's own operations, when it has any, one row each linking to its page; the installed
+ * connectors, one row each linking to its page; then the ones on npm, each with how to add it.
+ */
 function ConnectorsPage() {
   return (
     <>
       <CrumbHeader />
       <SecretStorage />
+      <Yours />
       <Region title="Installed">
         <Installed />
       </Region>
@@ -50,6 +65,50 @@ function ConnectorsPage() {
         </Suspense>
       </Region>
     </>
+  );
+}
+
+/** The company's own operations, each with what it does, who may call it and how many call it. */
+const yours = (config: ConfigDescription) =>
+  companyOps(config).map((op) => {
+    const { workflows } = callersOf(config, [op.id]);
+    const pages = siteCallers(config, "op", op.id).length;
+    const callers = [plural(workflows.length, "workflow"), ...(pages ? [plural(pages, "page")] : [])];
+    return { ...op, callers: callers.join(" and ") };
+  });
+
+/** The company's own operations (`defineOperation`), above the connectors: none, no region. */
+function Yours() {
+  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: yours });
+  if (ops.length === 0) return null;
+  return (
+    <Region title="Yours">
+      <ItemGroup>
+        {ops.map((op) => (
+          <LinkItem key={op.id} variant="outline">
+            <Link to="/connectors/operations/$name" params={{ name: op.name }}>
+              <ItemMedia>
+                <FunctionIcon aria-hidden="true" className="size-6 text-muted-foreground" />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>
+                  {op.name}
+                  <code className="font-normal text-muted-foreground">{op.id}</code>
+                  <Badge className={effectBadge({ effect: op.effect })}>{op.effect}</Badge>
+                </ItemTitle>
+                <ItemDescription>
+                  {op.description ? `${op.description} · ` : ""}
+                  {op.direct ? "Pages and workflows" : "Workflows only"} · used by {op.callers}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <CaretRightIcon aria-hidden="true" className="size-4" />
+              </ItemActions>
+            </Link>
+          </LinkItem>
+        ))}
+      </ItemGroup>
+    </Region>
   );
 }
 

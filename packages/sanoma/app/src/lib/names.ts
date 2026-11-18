@@ -1,5 +1,10 @@
 // A person's or a company's name as the pages show and shorten it, the same on the sign-in pages
-// (server HTML) and in the app.
+// (server HTML) and in the app; and a company operation's.
+
+import { OPERATIONS_VENDOR } from "sanoma/workflows/shared";
+
+/** A company operation's name, as its page and the Connectors page show it: its id less `operations.` and `.run` (`quote`, `crm.score`). */
+export const operationName = (id: string) => id.slice(OPERATIONS_VENDOR.length + 1, -".run".length);
 
 /** Two initials of a name: its first two words' first letters, or a single word's first two. */
 export function initialsOf(name: string): string {

@@ -45,6 +45,7 @@ import { Route as SitesIndexRouteImport } from './routes/sites.index'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as WorkflowsNameRouteRouteImport } from './routes/workflows/$name/route'
 import { Route as ConnectVendorCallbackRouteImport } from './routes/connect/$vendor/callback'
+import { Route as ConnectorsOperationsNameRouteImport } from './routes/connectors/operations.$name'
 import { Route as DataNameIndexRouteImport } from './routes/data/$name/index'
 import { Route as DataNameImportRouteImport } from './routes/data/$name/import'
 import { Route as HostingSanomaCallbackRouteImport } from './routes/hosting/sanoma/callback'
@@ -234,6 +235,12 @@ const ConnectVendorCallbackRoute = ConnectVendorCallbackRouteImport.update({
   path: '/connect/$vendor/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ConnectorsOperationsNameRoute =
+  ConnectorsOperationsNameRouteImport.update({
+    id: '/operations/$name',
+    path: '/operations/$name',
+    getParentRoute: () => ConnectorsRouteRoute,
+  } as any)
 const DataNameIndexRoute = DataNameIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -312,6 +319,7 @@ export interface FileRoutesByFullPath {
   '/sites/': typeof SitesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
   '/connect/$vendor/callback': typeof ConnectVendorCallbackRoute
+  '/connectors/operations/$name': typeof ConnectorsOperationsNameRoute
   '/data/$name/import': typeof DataNameImportRoute
   '/hosting/sanoma/callback': typeof HostingSanomaCallbackRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
@@ -350,6 +358,7 @@ export interface FileRoutesByTo {
   '/sites': typeof SitesIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
   '/connect/$vendor/callback': typeof ConnectVendorCallbackRoute
+  '/connectors/operations/$name': typeof ConnectorsOperationsNameRoute
   '/data/$name/import': typeof DataNameImportRoute
   '/hosting/sanoma/callback': typeof HostingSanomaCallbackRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
@@ -397,6 +406,7 @@ export interface FileRoutesById {
   '/sites/': typeof SitesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
   '/connect/$vendor/callback': typeof ConnectVendorCallbackRoute
+  '/connectors/operations/$name': typeof ConnectorsOperationsNameRoute
   '/data/$name/import': typeof DataNameImportRoute
   '/hosting/sanoma/callback': typeof HostingSanomaCallbackRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
@@ -445,6 +455,7 @@ export interface FileRouteTypes {
     | '/sites/'
     | '/workflows/'
     | '/connect/$vendor/callback'
+    | '/connectors/operations/$name'
     | '/data/$name/import'
     | '/hosting/sanoma/callback'
     | '/setup/github/callback'
@@ -483,6 +494,7 @@ export interface FileRouteTypes {
     | '/sites'
     | '/workflows'
     | '/connect/$vendor/callback'
+    | '/connectors/operations/$name'
     | '/data/$name/import'
     | '/hosting/sanoma/callback'
     | '/setup/github/callback'
@@ -529,6 +541,7 @@ export interface FileRouteTypes {
     | '/sites/'
     | '/workflows/'
     | '/connect/$vendor/callback'
+    | '/connectors/operations/$name'
     | '/data/$name/import'
     | '/hosting/sanoma/callback'
     | '/setup/github/callback'
@@ -821,6 +834,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectVendorCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/connectors/operations/$name': {
+      id: '/connectors/operations/$name'
+      path: '/operations/$name'
+      fullPath: '/connectors/operations/$name'
+      preLoaderRoute: typeof ConnectorsOperationsNameRouteImport
+      parentRoute: typeof ConnectorsRouteRoute
+    }
     '/data/$name/': {
       id: '/data/$name/'
       path: '/'
@@ -911,11 +931,13 @@ const ChangesRouteRouteWithChildren = ChangesRouteRoute._addFileChildren(
 interface ConnectorsRouteRouteChildren {
   ConnectorsVendorRoute: typeof ConnectorsVendorRoute
   ConnectorsIndexRoute: typeof ConnectorsIndexRoute
+  ConnectorsOperationsNameRoute: typeof ConnectorsOperationsNameRoute
 }
 
 const ConnectorsRouteRouteChildren: ConnectorsRouteRouteChildren = {
   ConnectorsVendorRoute: ConnectorsVendorRoute,
   ConnectorsIndexRoute: ConnectorsIndexRoute,
+  ConnectorsOperationsNameRoute: ConnectorsOperationsNameRoute,
 }
 
 const ConnectorsRouteRouteWithChildren = ConnectorsRouteRoute._addFileChildren(
