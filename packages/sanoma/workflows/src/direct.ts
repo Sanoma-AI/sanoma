@@ -1,3 +1,4 @@
+import { SanomaError } from "./errors.ts";
 import { isOperation, type Op } from "./op.ts";
 import { isResourceOp } from "./resource.ts";
 import { APPS_LIST, DATA_VENDOR, OPERATIONS_VENDOR, STORE_MOVE_DIRECT } from "./shared.ts";
@@ -15,7 +16,7 @@ export const isDirect = (
   op: Pick<Op, "id" | "vendor" | "resource" | "effect">,
   types: ReadonlyMap<string, unknown>,
 ): boolean =>
-  (isOperation(op) && op.uses.every((u) => isDirect(u, types))) ||
+  (isOperation(op) && workflowOnlyUses(op, types).length === 0) ||
   op.vendor === DATA_VENDOR ||
   op.id === APPS_LIST ||
   op.id === "sanoma.run.inspect" ||
@@ -31,3 +32,32 @@ export const isDirect = (
   op.id === "sanoma.connection.test" ||
   STORE_MOVE_DIRECT.has(op.id) ||
   (op.effect === "read" && op.vendor !== "sanoma" && op.vendor !== OPERATIONS_VENDOR && !isResourceOp(op, types));
+
+/**
+ * What keeps an operation from a page: for a company operation, the operations it uses that may
+ * not be called directly (`isDirect`), in the order declared; none for another operation.
+ */
+export const workflowOnlyUses = (op: Pick<Op, "id">, types: ReadonlyMap<string, unknown>): Op[] =>
+  isOperation(op) ? op.uses.filter((u) => !isDirect(u, types)) : [];
+
+/**
+ * The end of what refuses a company operation a page, after its id, naming the operations it uses
+ * that keep it from one: the runtime's refusal (`notDirect`) and `sanoma check`'s (`readSites`).
+ */
+export const callsWorkflowOnly = (ids: readonly string[]) =>
+  `, since it calls ${ids.join(", ")}: start a workflow that uses it`;
+
+/**
+ * Why `id` may not be called directly, as `SanomaClient.call` and a page's transport refuse it
+ * (`invalid_input`): no operation has it, a company operation calls what keeps it from a page
+ * (`workflowOnlyUses`), or it is a workflow's to call.
+ */
+export function notDirect(id: string, op: Op | undefined, types: ReadonlyMap<string, unknown>): SanomaError {
+  const held = op ? workflowOnlyUses(op, types).map((u) => u.id) : [];
+  const why = !op
+    ? ": no connector or collection declares it"
+    : held.length > 0
+      ? callsWorkflowOnly(held)
+      : ": it is a workflow's to call: start one that uses it";
+  return new SanomaError("invalid_input", `${id} cannot be called directly${why}`, { op: id });
+}

@@ -371,7 +371,7 @@ describe("pageRuntime", () => {
       record: { status: "paid" },
     });
     await expect(transport({ name: "operations.notify.run", input: { to: "a@b.c" } })).rejects.toThrow(
-      /operations\.notify\.run cannot be called directly/,
+      "operations.notify.run cannot be called directly, since it calls resend.emails.send: start a workflow that uses it",
     );
     await expect(pageRuntime({ workflows: [], operations: [notify] })).rejects.toThrow(
       /Operation "operations\.notify\.run" uses resend\.emails\.send, but no fake/,

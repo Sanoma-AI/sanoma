@@ -10,6 +10,7 @@ import {
   defineConnectionRule,
   defineConnector,
   defineDriver,
+  defineOperation,
   defineWorkflow,
   encodeCredentials,
   memorySecretStore,
@@ -89,6 +90,32 @@ const computed = defineWorkflow({
     await ctx.mail.messages.list({}, { connection: { vendor: "mail", $connection: input.account } });
   },
 });
+/** An operation that reads with `sales`, and a workflow that reaches mail only through it. */
+const triage = defineOperation({
+  name: "triage",
+  input: z.object({}),
+  uses: [mail.messages.list],
+  run: async (ctx) => ctx.mail.messages.list({}, { connection: { vendor: "mail", $connection: "mail/sales" } }),
+});
+const throughOperation = defineWorkflow({
+  name: "through-operation",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [triage],
+  run: async (ctx) => {
+    await ctx.operations.triage.run({});
+  },
+});
+/** The same, from a file that writes no name it has, so its outline cannot be read. */
+const unread = defineWorkflow({
+  name: ["un", "read"].join(""),
+  trigger: "manual",
+  input: z.object({}),
+  uses: [triage],
+  run: async (ctx) => {
+    await ctx.operations.triage.run({});
+  },
+});
 const databaseUrl = testDatabaseUrl("app_connections");
 const pool = lazyDb(databaseUrl, "app-connections-tests");
 let app: AppContext;
@@ -98,7 +125,8 @@ beforeEach(async () => {
   store = memorySecretStore();
   const cfg = {
     databaseUrl,
-    workflows: [selected, defaulted, computed],
+    workflows: [selected, defaulted, computed, throughOperation, unread],
+    operations: [triage],
     connectors: [mail],
     connections: [support, sales],
     connectionRules: [personal],
@@ -286,13 +314,18 @@ describe("connection server boundary", () => {
       schema: { type: "object" },
     });
     expect(read).not.toHaveBeenCalled();
+    // A workflow that reaches mail through an operation: by the calls inside it, or possible when
+    // its own outline cannot be read.
     expect(result.cards[0]?.workflows.map(({ name, selection }) => ({ name, selection }))).toEqual([
       { name: "computed-account", selection: "possible" },
       { name: "default-account", selection: "default" },
+      { name: "unread", selection: "possible" },
     ]);
     expect(result.cards[1]?.workflows.map(({ name, selection }) => ({ name, selection }))).toEqual([
       { name: "computed-account", selection: "possible" },
       { name: "selected-account", selection: "selected" },
+      { name: "through-operation", selection: "selected" },
+      { name: "unread", selection: "possible" },
     ]);
   });
   it("verifies, reviews, saves, tests and disconnects through the same actor-scoped calls as the page", async () => {

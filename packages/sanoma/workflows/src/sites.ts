@@ -4,6 +4,7 @@ import { z } from "zod";
 import { childrenOf, keyName, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
+import { callsWorkflowOnly } from "./direct.ts";
 import { isOpPath, moduleSpecifier, stringValue, unwrap } from "./outline.ts";
 import { exportsOf, loadModules } from "./load.ts";
 import { APPS_DIR, appFolders, filesUnder, isDirectory, relPath, SITE_ENTRIES } from "./paths.ts";
@@ -122,10 +123,13 @@ export function readSites(
         : kind === "collection"
           ? collections.has(name)
           : ops.has(name);
+    const op = kind === "op" ? ops.get(name) : undefined;
+    // A company operation names what keeps it from a page, as its page in the app does.
+    const held = op?.ops?.filter((id) => ops.get(id)?.direct === false) ?? [];
     const problem = !found
       ? `calls ${KIND_NAMES[kind]} "${target}", which does not exist`
-      : kind === "op" && !ops.get(name)!.direct
-        ? `calls operation "${target}", which a page may not call directly: start a workflow that calls it`
+      : op && !op.direct
+        ? `calls operation "${target}", which a page may not call directly${held.length > 0 ? callsWorkflowOnly(held) : ": start a workflow that calls it"}`
         : undefined;
     return { call: { kind, target, via, ...at }, ...(problem && { problem }) };
   };

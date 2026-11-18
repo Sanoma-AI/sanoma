@@ -8,6 +8,7 @@ import { type AppGroup, AppGroupRow, AppTabs, appGroupsOf, pickGroup } from "../
 import { ButtonLink, CrumbHeader, Nothing, SiteLink } from "../../components/common.tsx";
 import { LinkRow } from "../../components/runs-table.tsx";
 import { useSites } from "#/lib/sites.ts";
+import { callersOf } from "../../lib/operations.ts";
 import { configQuery, AppSearch } from "../../queries.ts";
 
 export const Route = createFileRoute("/data/")({ validateSearch: AppSearch, component: DataPage });
@@ -21,20 +22,17 @@ interface Row {
 
 /**
  * The config's collections grouped by the folder that declares them (`appGroupsOf`), each row with
- * the workflows whose `uses` save to it (`data.<name>.save`, the built-ins left out) and the sites
- * whose calls name it.
+ * the workflows that save to it (`data.<name>.save`, `callersOf`: through a company operation too)
+ * and the sites whose calls name it.
  */
 function groupsOf(config: ConfigDescription): AppGroup<Row>[] {
-  const rowOf = (collection: CollectionEntry): Row => {
-    const save = `data.${collection.name}.save`;
-    return {
-      collection,
-      writtenBy: config.workflows.filter((wf) => !wf.builtin && wf.ops.includes(save)),
-      shownOn: config.sites.filter((site) =>
-        site.calls.some((call) => call.kind === "collection" && call.target === collection.name),
-      ),
-    };
-  };
+  const rowOf = (collection: CollectionEntry): Row => ({
+    collection,
+    writtenBy: callersOf(config, [`data.${collection.name}.save`]).workflows,
+    shownOn: config.sites.filter((site) =>
+      site.calls.some((call) => call.kind === "collection" && call.target === collection.name),
+    ),
+  });
   return appGroupsOf(config.apps, config.collections.map(rowOf), (row) => row.collection.app);
 }
 
