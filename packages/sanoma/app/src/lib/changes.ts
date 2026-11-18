@@ -43,6 +43,7 @@ const KINDS: { key: string; title: string; holds: (path: string) => boolean }[] 
   { key: "people", title: "People", holds: (path) => path.startsWith("resources/people") },
   { key: "resources", title: "Resources", holds: (path) => path.startsWith("resources/") },
   { key: "workflows", title: "Workflows", holds: (path) => /^(workflows|scenarios)\//.test(path) },
+  { key: "operations", title: "Operations", holds: (path) => path.startsWith("operations/") },
   { key: "sites", title: "Sites", holds: (path) => path.startsWith("sites/") },
 ];
 
@@ -54,7 +55,7 @@ function groupOf(path: string): string {
 
 /**
  * A change's files grouped by what they are: policies, people (`resources/people*`), resources,
- * workflows (with their scenarios), sites, then each app's (`apps/<name>/`, by name), then the
+ * workflows (with their scenarios), operations, sites, then each app's (`apps/<name>/`, by name), then the
  * rest; a group with no file left out, each group's files in the order given.
  */
 export function groupFiles(files: readonly string[]): FileGroup[] {
