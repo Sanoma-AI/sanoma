@@ -233,6 +233,7 @@ function copiedRoot(prefix: string): string {
  * same root, as the page calls them: the file's own worker stopped meanwhile, and started again after.
  */
 async function onWorkerOver(root: string, source: Source | undefined, work: (over: AppContext) => Promise<void>) {
+  await endWaitingRuns();
   await worker.stop();
   const copy = { ...config, root };
   const over = await startWorker(copy, { app: appSteps, ...(source && { source }) });
@@ -261,12 +262,37 @@ beforeAll(async () => {
 afterEach(() => npm.resetHandlers());
 
 afterAll(async () => {
-  npm.close();
-  await app?.close();
-  await Promise.all(clients.map((client) => client.close()));
-  await worker?.stop();
-  rmSync(appRoot, { recursive: true, force: true });
+  try {
+    if (ctx) await endWaitingRuns();
+  } finally {
+    npm.close();
+    await app?.close();
+    await Promise.all(clients.map((client) => client.close()));
+    await worker?.stop();
+    rmSync(appRoot, { recursive: true, force: true });
+  }
 });
+
+/**
+ * Ends every run waiting on an approval, withdrawn by its starter as `app` admits them, and waits
+ * until each has failed for it. A worker stopped with a run waiting leaves that run's wait in the
+ * process, to wake on the closed database up to DBOS's 10 s poll later and log then: during a later
+ * test, or after the file has ended when that stop was its last (#830).
+ */
+async function endWaitingRuns({ client } = ctx) {
+  const waiting = await client.runs({ status: "waiting", limit: RUNS_LIMIT.max });
+  await Promise.all(
+    waiting.map(async (run) => {
+      const pending = run.approvals.find((approval) => approval.status === "pending");
+      if (!pending || !run.startedBy) throw new Error(`run ${run.runId} waits on no approval its starter can withdraw`);
+      await client.withdraw(run.runId, pending.id, "the test file is done with it", { by: run.startedBy });
+      await waitFor(
+        () => client.run(run.runId),
+        (now) => now?.status === "failed",
+      );
+    }),
+  );
+}
 
 /** A machine route, as the wakeup's `/wake` is: it answers 204 with the query it was given. */
 const machineRoute: IngressRoute = {
@@ -2151,7 +2177,8 @@ describe("resources and drift", () => {
     expect(tabs(overview.html)).toEqual([
       { label: "All", href: "/workflows", count: 16, selected: true },
       { label: "Waiting on you", href: "/workflows?filter=waiting", count: 0, selected: false },
-      { label: "Failed last run", href: "/workflows?filter=failed", count: 0, selected: false },
+      // Announce's: its last run waited on an approval until the adopt test withdrew it (`endWaitingRuns`).
+      { label: "Failed last run", href: "/workflows?filter=failed", count: 1, selected: false },
       { label: "Built-in", href: "/workflows?filter=builtin", count: 15, selected: false },
       { label: "All runs", href: "/workflows?view=runs", count: undefined, selected: false },
     ]);
@@ -2307,12 +2334,16 @@ describe("an app configured otherwise", () => {
     otherCtx = await contextOf(otherConfig, hostedLogin);
   });
   afterAll(async () => {
+    // Its runs' starters (sso-user) are people of this app's root only, so it withdraws them itself.
+    if (otherCtx) await endWaitingRuns(otherCtx);
     await other?.close();
     rmSync(dir, { recursive: true, force: true });
   });
 
   it("boots with broken data files: lists the resources it could read, and the problems", async () => {
-    expect(warned).toEqual([
+    // This app's own boot warnings only: runs an earlier block left running when a runtime shut down can
+    // warn late, while this one starts (`did not write run.failed …`, `Workflow … was cancelled`).
+    expect(warned.filter((line) => line.startsWith("sanoma app:"))).toEqual([
       expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:28: /s),
     ]);
     const body = otherCtx.snapshot.description;
