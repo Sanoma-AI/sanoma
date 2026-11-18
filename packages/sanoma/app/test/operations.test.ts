@@ -4,14 +4,17 @@ import { useTestApp } from "sanoma/testing/harness";
 import {
   type AppStepContext,
   type Chat,
+  defineConnector,
+  defineDriver,
   defineOperation,
   memoryLedger,
   type Principal,
   resolveConfig,
   type SanomaConfig,
+  withSetup,
 } from "sanoma/workflows";
 import { describeConfig } from "sanoma/workflows/describe";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import fixture from "../../workflows/test/fixtures/company-apps/sanoma.config.ts";
 import { customers as crmCustomers } from "../../workflows/test/fixtures/company-apps/apps/crm/resources/data.ts";
@@ -30,17 +33,6 @@ import { ensureSanomaBuilt } from "../../test/fixture.ts";
 // root's `offer` uses): Yours on the Connectors page, an operation's page, the links to it from a
 // workflow, a collection and the Permissions grid, as the server renders them; and the operator
 // agent's instructions.
-
-// A company operation may be called directly once the page-call lane lets it: until then, `quote`
-// stands in for one, for the instructions alone (the app's server is its own bundle).
-vi.mock("sanoma/workflows", async (actual) => {
-  const workflows = await actual<typeof import("sanoma/workflows")>();
-  return {
-    ...workflows,
-    isDirect: (...args: Parameters<typeof workflows.isDirect>) =>
-      args[0].id === "operations.quote.run" || workflows.isDirect(...args),
-  };
-});
 
 const root = fileURLToPath(new URL("../../workflows/test/fixtures/company-apps/", import.meta.url));
 
@@ -69,9 +61,35 @@ const unread = defineOperation({
   run: async () => null,
 });
 
+/** A vendor's write, which only a workflow may call. */
+const acme = defineConnector("acme", {
+  customer: {
+    rename: {
+      effect: "write",
+      input: z.object({ id: z.string() }),
+      output: z.object({}),
+    },
+  },
+});
+
+/** An operation a page may not call, as it writes at a vendor: given to the app alone, with its connector. */
+const relabel = defineOperation({
+  name: "relabel",
+  input: z.object({ id: z.string() }),
+  uses: [acme.customer.rename],
+  run: async (ctx, { id }) => ctx.acme.customer.rename({ id }),
+});
+
 beforeAll(async () => {
   ensureSanomaBuilt();
-  app = await startApp({ ...testApp.config, operations: [quote, score, unread] }, { port: 0 });
+  app = await startApp(
+    {
+      ...testApp.config,
+      connectors: [withSetup(acme, { driver: () => defineDriver(acme, { customer: { rename: async () => ({}) } }) })],
+      operations: [quote, score, unread, relabel],
+    },
+    { port: 0 },
+  );
 }, 120_000);
 
 afterAll(async () => {
@@ -137,8 +155,8 @@ describe("the company's operations, in the operator agent's instructions", () =>
     const text = await instructions(step, { id: "ada", groups: [] } as Principal, { id: "chat-1" } as Chat);
     expect(text).toContain(
       "The company's own operations (operations/ and apps/<name>/operations/), each with its effect and what it calls:\n" +
-        "- operations.crm.score.run (read): calls data.crm.customers.get\n" +
         // A read that may be called directly is a lookup, as a connector's is.
+        "- operations.crm.score.run (read, a lookup): calls data.crm.customers.get\n" +
         "- operations.quote.run (read, a lookup): calls data.shop.customers.get",
     );
     expect(text).not.toMatch(/^- operations \(operations\):/m);
@@ -153,15 +171,21 @@ describe("the company's operations, in the app", () => {
     const yours = shown.match(/>Yours<[\s\S]*?(?=>Installed<|$)/)?.[0];
     expect(yours).toMatch(/href="\/connectors\/operations\/quote"[\s\S]*>quote<[\s\S]*operations\.quote\.run/);
     expect(yours).toMatch(/href="\/connectors\/operations\/crm\.score"[\s\S]*operations\.crm\.score\.run/);
-    expect(yours).toContain("What an order of some items costs a shop customer · Workflows only · used by 1 workflow");
+    expect(yours).toContain(
+      "What an order of some items costs a shop customer · Pages and workflows · used by 1 workflow",
+    );
+    expect(yours).toContain("Workflows only · used by 0 workflows");
   });
 
   it("shows an operation on its page: where it can run, what it takes, calls and is, and what uses it", async () => {
     const { status, shown } = await page("/connectors/operations/quote");
     expect(status).toBe(200);
     expect(shown).toMatch(/<code[^>]*>operations\.quote\.run<\/code>/);
-    expect(shown).toContain("Only workflows can call it.");
-    expect(shown).toMatch(/Who may call it is set in <a[^>]*href="\/permissions"[^>]*>Permissions<\/a>/);
+    expect(shown).toContain("Pages and workflows can call it.");
+    // Its own row among the operations called directly.
+    expect(shown).toMatch(
+      /Who may call it is set in <a[^>]*href="\/permissions#operations\.quote\.run"[^>]*>Permissions<\/a>/,
+    );
     // Takes: its input's fields.
     expect(shown).toMatch(/>Takes<[\s\S]*>id<[\s\S]*>items<[\s\S]*>Returns</);
     // Returns: nothing declared, as the operation gives no output schema.
@@ -175,9 +199,16 @@ describe("the company's operations, in the app", () => {
     expect(shown).toMatch(/>Used by<[\s\S]*href="\/workflows\/offer"/);
   });
 
+  it("says what keeps an operation from a page", async () => {
+    const { shown } = await page("/connectors/operations/relabel");
+    expect(shown).toMatch(/Only workflows can call it: it calls <span><code>acme\.customer\.rename<\/code><\/span>\./);
+    // No row of its own: it is under each workflow that uses it.
+    expect(shown).toMatch(/Who may call it is set in <a[^>]*href="\/permissions"[^>]*>Permissions<\/a>/);
+  });
+
   it("links an app's operation to its app's Permissions, and its file under the app's folder", async () => {
     const { shown } = await page("/connectors/operations/crm.score");
-    expect(shown).toMatch(/href="\/permissions\?app=crm"[^>]*>Permissions<\/a>/);
+    expect(shown).toMatch(/href="\/permissions\?app=crm#operations\.crm\.score\.run"[^>]*>Permissions<\/a>/);
     expect(shown).toMatch(/>Code <code[^>]*>apps\/crm\/operations\/score\.ts<\/code>/);
   });
 

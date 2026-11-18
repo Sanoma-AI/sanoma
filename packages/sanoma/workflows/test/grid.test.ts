@@ -270,6 +270,11 @@ describe("permissionsGrid", () => {
         ],
       },
     ]);
+    // Both may be called directly, so each has a row of its own too, its calls under it there.
+    expect(ids(grid.ops).filter((row) => typeof row !== "string")).toEqual([
+      { "operations.crm.score.run": ["data.crm.customers.get"] },
+      { "operations.quote.run": ["data.shop.customers.get"] },
+    ]);
     // Each row is asked as the run form asks it: the operation, then each call inside it.
     const offerEntry = apps.workflows.find((wf) => wf.name === "offer")!;
     expect(previewRequests(offerEntry, new Map(apps.ops.map((op) => [op.id, op]))).map((r) => r.action.id)).toEqual([
