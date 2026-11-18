@@ -499,8 +499,8 @@ async function refuseDeclared(run: Run, op: Op, input: unknown) {
  * is made on (a `connection:<id>` step; none for a company operation, which has no vendor), then
  * the policy (a `policy:<id>` step) and each hold's approval in turn. A deny, a rejection or a
  * withdrawal writes its failed records and throws. `within` names the company operation whose
- * body makes the call, for the policy. `records` and `writeFailures` make and write the call's
- * records, one per call it makes, numbered from `seq`.
+ * body makes the call, for the policy. `failed` and `succeeded` write the call's records once it
+ * has run, one per call it makes, numbered from `seq`.
  */
 async function admit(run: Run, op: Op, input: unknown, place: Placed, ref?: ConnectionRef, within?: string) {
   // Only change takes a change's steps; `resolveConfig` refuses any other workflow that uses one.
@@ -570,6 +570,26 @@ async function admit(run: Run, op: Op, input: unknown, place: Placed, ref?: Conn
   const writeFailures = async (outcome: (i: number) => Partial<LedgerBody>, err: unknown, at?: number) => {
     for (const record of records(outcome, at)) await writeFailure(run, record, err);
   };
+  /** The call, started at `started`, failed with `err`: its records written as failed, or skipped when the runtime was interrupted. */
+  const failed = async (err: unknown, started: number, extra: Partial<LedgerBody> = {}) => {
+    const outcome = () => ({ error: errorInfo(err), durationMs: Date.now() - started, ...extra });
+    if (isInfrastructureError(err, run.state)) {
+      for (const record of records(outcome, started))
+        skipped(record, `the call was interrupted (${errorMessage(err)})`);
+    } else await writeFailures(outcome, err, started);
+  };
+  /** The call succeeded: its records written, each with what `outcome` says of it. */
+  const succeeded = async (outcome: (i: number) => Partial<LedgerBody>, at: number) => {
+    try {
+      for (const record of records(outcome, at)) await write(run, record);
+    } catch (err) {
+      // The vendor (or a company operation's calls) acted, and nothing records it. A workflow that
+      // caught this and called again would repeat the side effect under a new key, so the run makes
+      // no further calls.
+      run.ended = true;
+      throw new Error(`${op.id} succeeded, but the ledger could not record it: ${errorMessage(err)}`, { cause: err });
+    }
+  };
 
   // Each hold is lifted in turn: once one is approved, the policy is asked again, with it.
   for (;;) {
@@ -608,7 +628,7 @@ async function admit(run: Run, op: Op, input: unknown, place: Placed, ref?: Conn
     decisions = await decideStep();
     decision = decisionOf(op, calls, decisions, run.state.collections);
   }
-  return { parsed, calls, seq, connection, records, writeFailures };
+  return { parsed, calls, seq, connection, failed, succeeded };
 }
 
 async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?: ConnectionRef, within?: string) {
@@ -623,7 +643,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
         : `No connector or fake for ${id} in this worker: no fake its connectors attach implements it`,
     );
   }
-  const { parsed, calls, seq, connection, records, writeFailures } = await admit(run, op, input, place, ref, within);
+  const { parsed, calls, seq, connection, failed, succeeded } = await admit(run, op, input, place, ref, within);
   const started = Date.now();
   // The try DBOS is on, as it passes it to the step. The last try's error is not retried, so
   // DBOS records and throws it as the vendor gave it, never wrapped with the others.
@@ -662,27 +682,15 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
   } catch (err) {
     // The step failed for good; on replay DBOS rethrows the recorded error, and these records
     // get the same ids. A success record would too, so a call has one op.called at most.
-    const failed = () => ({ error: errorInfo(err), durationMs: Date.now() - started, ...(attempt ? { attempt } : {}) });
-    if (isInfrastructureError(err, run.state)) {
-      for (const record of records(failed, started)) skipped(record, `the call was interrupted (${errorMessage(err)})`);
-    } else await writeFailures(failed, err, started);
+    await failed(err, started, attempt ? { attempt } : {});
     throw err;
   }
   const { output, at, durationMs } = result;
   const outputs = outputsOf(op, output);
-  try {
-    for (const record of records(
-      (i) => ({ output: recorded(calls[i]!.op, outputs[i], run.workflow), durationMs, attempt: result.attempt }),
-      at,
-    )) {
-      await write(run, record);
-    }
-  } catch (err) {
-    // The vendor acted, and nothing records it. A workflow that caught this and called again
-    // would repeat the side effect under a new key, so the run makes no further calls.
-    run.ended = true;
-    throw new Error(`${op.id} succeeded, but the ledger could not record it: ${errorMessage(err)}`, { cause: err });
-  }
+  await succeeded(
+    (i) => ({ output: recorded(calls[i]!.op, outputs[i], run.workflow), durationMs, attempt: result.attempt }),
+    at,
+  );
   return output;
 }
 
@@ -697,7 +705,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
 async function operationCall(run: Run, id: string, input: unknown, at: Placed): Promise<unknown> {
   const op = run.state.ops.get(id);
   if (!isOperation(op)) throw new Error(`No company operation ${id} in this worker`);
-  const { parsed, seq, records, writeFailures } = await serial(run, () => admit(run, op, input, at));
+  const { parsed, seq, failed, succeeded } = await serial(run, () => admit(run, op, input, at));
   const outline = run.state.outlines.get(op.id)!;
   const started = Date.now();
   let output: unknown;
@@ -708,20 +716,10 @@ async function operationCall(run: Run, id: string, input: unknown, at: Placed): 
     };
     output = op.output.parse(await op.run(ctxOf(op, run, runnerOf(run, place, { id: op.id, seq })), parsed));
   } catch (err) {
-    const failed = () => ({ error: errorInfo(err), durationMs: Date.now() - started });
-    if (isInfrastructureError(err, run.state)) {
-      for (const record of records(failed, started)) skipped(record, `the call was interrupted (${errorMessage(err)})`);
-    } else await writeFailures(failed, err, started);
+    await failed(err, started);
     throw err;
   }
-  try {
-    const done = () => ({ output: recorded(op, output, run.workflow), durationMs: Date.now() - started });
-    for (const record of records(done, started)) await write(run, record);
-  } catch (err) {
-    // The operation's calls are recorded, but not the operation: as for any call, the run makes no further calls.
-    run.ended = true;
-    throw new Error(`${op.id} succeeded, but the ledger could not record it: ${errorMessage(err)}`, { cause: err });
-  }
+  await succeeded(() => ({ output: recorded(op, output, run.workflow), durationMs: Date.now() - started }), started);
   return output;
 }
 

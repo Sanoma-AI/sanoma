@@ -160,12 +160,7 @@ function withOps(nodes: OutlineNode[], uses: readonly string[]): OutlineNode[] {
  * (`defineOperation`) is called with that has its `name` (a string, or a top-level `const` of the
  * file holding it) and a `run` function.
  */
-function runIn(
-  program: Node,
-  kind: "workflow" | "operation",
-  name: string,
-  consts: ReadonlyMap<string, string>,
-): Node | undefined {
+function runIn(program: Node, kind: DefinedKind, name: string, consts: ReadonlyMap<string, string>): Node | undefined {
   return workflowLiterals(program).find((literal) => literal.kind === kind && literalOf(literal.name, consts) === name)
     ?.run;
 }
@@ -196,7 +191,7 @@ const LABEL_TEXT = 40;
  * list's index. `outlineBody` leaves every path empty, since a node's place is known once the
  * list it is in is whole; the nodes are freshly built, so they are filled in place.
  */
-export function withPaths(nodes: OutlineNode[], prefix: string): OutlineNode[] {
+function withPaths(nodes: OutlineNode[], prefix: string): OutlineNode[] {
   nodes.forEach((node, i) => {
     node.path = `${prefix}${i}`;
     childLists(node).forEach((list, j) => withPaths(list, `${node.path}.${j}.`));
@@ -675,10 +670,13 @@ export function unwrap(node: Node): Node {
 }
 
 /** The functions a workflow or a company operation is defined with, by the kind each defines. */
-const DEFINERS: Readonly<Record<string, "workflow" | "operation">> = {
-  defineWorkflow: "workflow",
-  defineOperation: "operation",
-};
+const DEFINERS = new Map([
+  ["defineWorkflow", "workflow"],
+  ["defineOperation", "operation"],
+] as const);
+
+/** What a literal of `workflowLiterals` defines. */
+type DefinedKind = "workflow" | "operation";
 
 /**
  * Every workflow literal in a parsed file: the object literal `defineWorkflow({ name, …, run })`
@@ -687,14 +685,14 @@ const DEFINERS: Readonly<Record<string, "workflow" | "operation">> = {
  * by its kind and name, and the lint, which checks each `run`: an operation's body is held to a
  * workflow's rules.
  */
-export function workflowLiterals(program: Node): { kind: "workflow" | "operation"; name: Node; run: Node }[] {
-  const found: { kind: "workflow" | "operation"; name: Node; run: Node }[] = [];
+export function workflowLiterals(program: Node): { kind: DefinedKind; name: Node; run: Node }[] {
+  const found: { kind: DefinedKind; name: Node; run: Node }[] = [];
   const find = (node: Node) => {
     if (!node) return;
     const literal = unwrap(node.arguments?.[0]);
     const callee = unwrap(node.callee);
     const called = callee?.type === "MemberExpression" && !callee.computed ? callee.property.name : callee?.name;
-    const kind = node.type === "CallExpression" && Object.hasOwn(DEFINERS, called) ? DEFINERS[called] : undefined;
+    const kind = node.type === "CallExpression" ? DEFINERS.get(called) : undefined;
     if (kind && literal?.type === "ObjectExpression") {
       const value = (key: string) =>
         literal.properties.find(

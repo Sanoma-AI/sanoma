@@ -60,16 +60,16 @@ function installedDbosVersion(): string {
 export function computeVersion({
   appName,
   workflows: definitions,
-  operations = [],
+  operations,
 }: {
   /** The resolved config's `appName`. */
   appName: string;
   workflows: readonly WorkflowDefinition<any, any>[];
-  operations?: readonly Operation[];
+  operations: readonly Operation[];
 }): string {
   const named = process.env.DBOS__APPVERSION?.trim();
   if (named) return `${appName}@${named}`;
-  const workflows = [...definitions, ...operations.map(({ id, run, uses, input }) => ({ name: id, run, uses, input }))]
+  const workflows = [...definitions, ...operations.map((op) => ({ ...op, name: op.id }))]
     .map(codeOf)
     .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return `${appName}@${sha256([appName, RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), ...workflows])}`;

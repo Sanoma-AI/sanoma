@@ -1,5 +1,5 @@
 import type { HostRootFacts, RootSnapshot } from "sanoma/workflows";
-import type { ConfigDescription, SiteEntry } from "sanoma/workflows/describe";
+import type { ConfigDescription, Outline, SiteEntry } from "sanoma/workflows/describe";
 import { siteDir } from "sanoma/workflows/shared";
 import type { ScenariosResponse } from "./api.ts";
 import type { Published } from "./content-files.ts";
@@ -55,6 +55,13 @@ export const siteFileBroken = (site: SiteEntry) =>
 /** What the Worker serves of the public sites: each whose `site.ts` reads, with its login when it has one. */
 export const servedOnWorker = (site: SiteEntry) => site.public && !siteFileBroken(site);
 
+/** An entry without its source when its outline was read from its file. */
+const withoutSource = <E extends { outline?: Outline; source?: string }>(entry: E): E => {
+  if (entry.outline === undefined || !("file" in entry.outline)) return entry;
+  const { source: _, ...rest } = entry;
+  return rest as E;
+};
+
 /**
  * The description as the page gets it: without the source of a workflow (or a company operation)
  * read from its file, which is a whole file that `getSource` serves, one at a time. A workflow read
@@ -62,14 +69,6 @@ export const servedOnWorker = (site: SiteEntry) => site.public && !siteFileBroke
  */
 export const withoutSources = (description: ConfigDescription): ConfigDescription => ({
   ...description,
-  workflows: description.workflows.map((workflow) => {
-    if (!("file" in workflow.outline)) return workflow;
-    const { source: _, ...entry } = workflow;
-    return entry;
-  }),
-  ops: description.ops.map((op) => {
-    if (op.outline === undefined || !("file" in op.outline)) return op;
-    const { source: _, ...entry } = op;
-    return entry;
-  }),
+  workflows: description.workflows.map(withoutSource),
+  ops: description.ops.map(withoutSource),
 });

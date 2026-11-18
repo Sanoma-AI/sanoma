@@ -51,7 +51,7 @@ import { sourceKeyIds } from "./host.ts";
 // `sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
 export * from "./description.ts";
-export { outlineWorkflow, type Outline, type OutlineNode, type Span, withPaths } from "./outline.ts";
+export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 export { companyRootOf, configDirOf } from "./company-file.ts";
 export {
   admit,
@@ -160,16 +160,16 @@ export function liveDescription(config: SanomaConfig): () => ConfigDescription {
   let now = described();
   // The workflows and the company's operations as the config imported them, which the worker runs:
   // their outlines and sources from the first description, never a file edited since.
+  // The config is the same object each time, so its operations are the same ones, in place.
   const { workflows } = now.description;
-  const operations = now.description.ops.filter((op) => op.vendor === OPERATIONS_VENDOR);
+  const operations = new Map(
+    now.description.ops.filter((op) => op.vendor === OPERATIONS_VENDOR).map((op) => [op.id, op]),
+  );
   return () => {
     if (!fresh(now.stamps)) {
       now = described(now.description);
       now.description.workflows = workflows;
-      now.description.ops = [
-        ...now.description.ops.filter((op) => op.vendor !== OPERATIONS_VENDOR),
-        ...operations,
-      ].toSorted((a, b) => a.id.localeCompare(b.id));
+      now.description.ops = now.description.ops.map((op) => operations.get(op.id) ?? op);
     }
     return now.description;
   };

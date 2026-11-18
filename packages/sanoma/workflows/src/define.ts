@@ -1,7 +1,7 @@
 import type { ConnectionRef } from "./connection.ts";
 import type { WorkflowEntry } from "./description.ts";
 import { z } from "zod";
-import { isOp, isOperation, type Op } from "./op.ts";
+import { defineConnector, isOp, isOperation, type Op } from "./op.ts";
 import { appOfFile, callerFile } from "./company-file.ts";
 import { COLLECTION_NAME, type DATA_VENDOR, EFFECTS, OPERATIONS_VENDOR, qualified } from "./shared.ts";
 
@@ -362,7 +362,7 @@ export function defineOperation<const N extends string, const U extends readonly
   output?: z.ZodType<O>;
   uses: U;
   run: (ctx: Ctx<U>, input: z.output<S>) => Promise<O>;
-}): Operation<N, U, S, Awaited<O>> {
+}): Operation<N, U, S, O> {
   const where = `defineOperation("${String(def.name)}")`;
   if (typeof def.name !== "string" || !COLLECTION_NAME.test(def.name)) {
     throw new Error(`${where}: the name must be a lowercase letter, then letters and digits, such as "quote"`);
@@ -389,22 +389,23 @@ export function defineOperation<const N extends string, const U extends readonly
   }
   const app = appOfFile(file);
   const resource = qualified(app, def.name);
-  return Object.freeze({
-    kind: "op",
-    vendor: OPERATIONS_VENDOR,
-    resource,
-    name: "run",
-    id: `${OPERATIONS_VENDOR}.${resource}.run`,
-    effect: EFFECTS[Math.max(0, ...def.uses.map((u) => EFFECTS.indexOf(u.effect)))]!,
-    idempotent: def.uses.every((u) => u.idempotent),
-    ...(def.description !== undefined && { description: def.description }),
-    input: def.input,
-    output: def.output ?? z.unknown(),
-    uses: def.uses,
-    run: def.run,
-    file,
-    ...(app && { app }),
-  }) as unknown as Operation<N, U, S, Awaited<O>>;
+  const op = defineConnector(OPERATIONS_VENDOR, {
+    [resource]: {
+      run: {
+        effect: EFFECTS[Math.max(0, ...def.uses.map((u) => EFFECTS.indexOf(u.effect)))]!,
+        idempotent: def.uses.every((u) => u.idempotent),
+        description: def.description,
+        input: def.input,
+        output: def.output ?? z.unknown(),
+      },
+    },
+  })[resource]!.run!;
+  return Object.freeze({ ...op, uses: def.uses, run: def.run, file, ...(app && { app }) }) as unknown as Operation<
+    N,
+    U,
+    S,
+    O
+  >;
 }
 
 /**
