@@ -1,6 +1,9 @@
 // `sanoma/init`: the company template's files with a company's own declared in them, text in and
 // text out. `sanoma init` applies them to the files it copies, and a workflow or a site can apply
-// them to a repository's files (`github.repository.files`). No imports, so it runs anywhere.
+// them to a repository's files (`github.repository.files`). It imports only `sanoma/workflows/shared`,
+// plain values, so it runs anywhere.
+
+import { cloudHostnameOf } from "sanoma/workflows/shared";
 
 /** Who starts the company: the first person `resources/people.ts` declares. */
 export interface Creator {
@@ -43,5 +46,5 @@ const TEMPLATE_HOSTNAME = '"company.sanoma.work"';
 /** The infra file with the company's address, `<slug>.sanoma.work`, for the template's. */
 export function declareSlug(text: string, slug: string): string {
   if (!text.includes(TEMPLATE_HOSTNAME)) throw new Error(`the template's ${INFRA} names no ${TEMPLATE_HOSTNAME}`);
-  return text.replaceAll(TEMPLATE_HOSTNAME, () => JSON.stringify(`${slug}.sanoma.work`));
+  return text.replaceAll(TEMPLATE_HOSTNAME, () => JSON.stringify(cloudHostnameOf(slug)));
 }

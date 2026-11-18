@@ -77,7 +77,13 @@ try {
   made.database = store.id;
   console.log(`database: made for ${store.id} in ${store.state.region} after ${seconds(Date.now() - begun)}`);
 
-  const desiredHost = { hostname: `${SLUG}.sanoma.work`, source: SOURCE, ref: REF, revision: head() };
+  const desiredHost = {
+    hostname: `${SLUG}.sanoma.work`,
+    database: store.id,
+    source: SOURCE,
+    ref: REF,
+    revision: head(),
+  };
   const started = Date.now();
   const host = await op("host.create", { desired: desiredHost });
   made.host = host.id;

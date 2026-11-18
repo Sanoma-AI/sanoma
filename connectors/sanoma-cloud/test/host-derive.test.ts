@@ -9,10 +9,22 @@ describe("cloud.host", () => {
     expect(checkDerivedHost(host, { hostname: "acme.sanoma.work" }).filter((check) => !check.ok)).toEqual([]);
   });
 
-  it("takes its address at sanoma.work only, and no name", () => {
-    expect(host({ hostname: "acme.sanoma.work" }).desired).toEqual({ hostname: "acme.sanoma.work" });
-    expect(() => host({ hostname: "www.acme.com" })).toThrow(/sanoma\.work/);
-    expect(() => host({ hostname: "-acme.sanoma.work" })).toThrow(/sanoma\.work/);
-    expect(() => host({ name: "acme", hostname: "acme.sanoma.work" } as never)).toThrow(/name/);
+  it("takes its address at sanoma.work only, an address the Cloud gives, and no name", () => {
+    const database = "store";
+    expect(host({ hostname: "acme.sanoma.work", database }).desired).toEqual({
+      hostname: "acme.sanoma.work",
+      database,
+    });
+    for (const hostname of [
+      "www.acme.com",
+      "-acme.sanoma.work",
+      "ab.sanoma.work",
+      "a--b.sanoma.work",
+      "www.sanoma.work",
+    ]) {
+      expect(() => host({ hostname, database }), hostname).toThrow(/sanoma\.work/);
+    }
+    expect(host({ hostname: "www-acme.sanoma.work", database }).desired.hostname).toBe("www-acme.sanoma.work");
+    expect(() => host({ name: "acme", hostname: "acme.sanoma.work", database } as never)).toThrow(/name/);
   });
 });

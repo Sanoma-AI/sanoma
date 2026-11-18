@@ -213,6 +213,7 @@ describe("declareName, declareSlug and slugOf", () => {
     expect(slugOf("  Café & Co.  ", "dir")).toBe("cafe-co");
     expect(slugOf("Crème Brûlée Co", "dir")).toBe("creme-brulee-co");
     expect(slugOf("AB", "dir")).toBe("ab-company");
+    expect(slugOf("WWW", "dir")).toBe("www-company");
     expect(slugOf(undefined, "Acme Ops")).toBe("acme-ops");
     // A name in another script gives no slug: the directory's stands.
     expect(slugOf("Пекарня", "bakery")).toBe("bakery");

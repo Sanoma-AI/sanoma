@@ -31,10 +31,13 @@ export interface FakeCloudOptions extends FakeOptions {
   slug?: string;
 }
 
-/** The company as the fake Cloud keeps it: its id, its address now, and the parts it has. */
+/** The company as the fake Cloud keeps it: its id, its address now, its trial, and the parts it has. */
 export interface FakeCompany {
   id: string;
   slug: string;
+  name: string;
+  createdAt: string;
+  trialEndsAt: string;
   repository?: { owner: string; name: string; ref: string };
   database?: { id: string; region: string };
   host?: { revision: string };
@@ -43,13 +46,29 @@ export interface FakeCompany {
 export interface FakeCloudState extends Record<string, unknown> {
   /** Counts up, for ids made in order. */
   seq: number;
-  /** The token's company (one token, one company), once there is one. */
+  /** The token's company (one token, one company), once there is one, until it is closed. */
   company?: FakeCompany;
+  /** Each address a company of the fake took, its own or once its own, by slug: none is ever free again. */
+  addresses: Record<string, string>;
+  /** Set once the company closed: its token is revoked, and every call with it refused. */
+  revoked?: true;
 }
 
 /** A company's workflow refusing, as sanoma-ops's do: the run fails, which the api answers 422, and its call with it. */
 const fail = (workflow: string, message: string) =>
   new DriverError(`Sanoma Cloud: ${workflow}: ${message}`, { retryable: false, status: 422 });
+
+/** A company of the fake, made now for the token at `slug`, its trial 14 days. */
+function newCompany(id: string, slug: string, name = slug): FakeCompany {
+  const now = Date.now();
+  return {
+    id,
+    slug,
+    name,
+    createdAt: new Date(now).toISOString(),
+    trialEndsAt: new Date(now + 14 * 86_400_000).toISOString(),
+  };
+}
 
 /** The token's company `id`, or the workflow's refusal: a token acts on its own company alone. */
 function own(state: FakeCloudState, workflow: string, id: string): FakeCompany {
@@ -173,16 +192,18 @@ function address(start: StartRuntime) {
  * at `slug` when given, else made by the first sign-up by slug), its id `fake-company-<n>`, with
  * the parts `cloud-signup` made (a database `fake-db-<n>` in its region, `us-east` by default; a
  * host at its revision; a repository, `<owner>/<slug>`, in `owner`'s account), every part
- * healthy. `cloud-available` says a slug is the token's when it is the company's address, taken
- * when `taken` names it, else free; `cloud-invite` answers a made-up link on the host's address. A
+ * healthy. `cloud-available` says a slug is the token's when it is or was the open company's
+ * address, taken when `taken` names it or a closed company had it, else free; `cloud-invite`
+ * answers a made-up link on the host's address. A
  * host runs `start`'s runtime behind an address in this process that outlives it (the stand-in
  * for `<slug>.sanoma.work`, whatever the slug), which starts it on a request, again once it ended
- * on its own (`exited`); a deploy moves it to the new revision and the company to a new slug; a
- * close removes the part, the company staying the token's. `stop()` stops the host's runtime as
+ * on its own (`exited`); a deploy moves it to the new revision and the company to a new slug (the
+ * old one stays its own); a close removes the part, a database only once the host is gone, and the
+ * last part closes the company and revokes its token. `stop()` stops the host's runtime as
  * the platform may, the address kept; `running()` says whether one runs; `close()` (and `reset()`)
  * stops everything. It refuses what sanoma-ops's workflows refuse: a slug that is not one or is
  * taken, an id that is not the token's company's, a region the Cloud has not, a host with no
- * repository, a deploy of a company with no host.
+ * repository or database, a deploy of a company with no host, any call once its token is revoked.
  */
 export function fakeCloud(options: FakeCloudOptions = {}) {
   const start = options.start ?? stubRuntime;
@@ -193,23 +214,38 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
   const listed = (c: FakeCompany): Company => ({
     id: c.id,
     slug: c.slug,
+    name: c.name,
     url: site?.url ?? `https://${cloudHostnameOf(c.slug)}`,
     status: "running",
-    ...(c.host && { revision: c.host.revision, healthy: true }),
+    createdAt: c.createdAt,
+    trialEndsAt: c.trialEndsAt,
+    ...(c.host && { revision: c.host.revision }),
     ...(c.database && { database: { ...c.database, healthy: true } }),
     ...(c.repository && { repository: c.repository }),
   });
 
   const owner = options.owner ?? "sanoma-test";
   const taken = new Set(options.taken);
-  /** A new company's address, refused as `cloud-signup` and `cloud-deploy` refuse it. */
-  const free = (workflow: string, slug: string) => {
+  /** An address the company `id` takes (a new company's, or a rename's), refused as `cloud-signup` and `cloud-deploy` refuse it. */
+  const claim = (state: FakeCloudState, workflow: string, slug: string, id: string) => {
     if (!CLOUD_SLUG.test(slug)) throw fail(workflow, `${slug} is not a company's address`);
-    if (taken.has(slug)) throw fail(workflow, `${cloudHostnameOf(slug)} is taken: pick another address`);
+    const holder = state.addresses[slug];
+    if (taken.has(slug) || (holder !== undefined && holder !== id)) {
+      throw fail(workflow, `${cloudHostnameOf(slug)} is taken: pick another address`);
+    }
+    state.addresses[slug] = id;
     return slug;
   };
 
-  const api = (state: FakeCloudState): CloudApi => ({
+  /** Sanoma Cloud's api with the token: refused once its company closed, as a revoked token is. */
+  const api = (state: FakeCloudState): CloudApi => {
+    if (state.revoked) {
+      throw new DriverError("Sanoma Cloud: the Cloud token is revoked", { retryable: false, status: 401 });
+    }
+    return workflows(state);
+  };
+
+  const workflows = (state: FakeCloudState): CloudApi => ({
     async signup(input) {
       const { part, repository, ref, revision, region } = input;
       if (region && !(REGIONS as readonly string[]).includes(region)) {
@@ -223,12 +259,16 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
           throw fail("cloud-signup", `${cloudHostnameOf(input.slug)} is not this token's company`);
         }
         company = state.company;
-      } else company = state.company = { id: `fake-company-${++state.seq}`, slug: free("cloud-signup", input.slug) };
+      } else {
+        const id = `fake-company-${++state.seq}`;
+        company = state.company = newCompany(id, claim(state, "cloud-signup", input.slug, id), input.name);
+      }
       if (repository) company.repository = { ...repository, ref: ref ?? "main" };
       if (part === "repository") company.repository ??= { owner, name: company.slug, ref: "main" };
       else if (part === "database") company.database ??= { id: `fake-db-${++state.seq}`, region: region ?? "us-east" };
       else {
         if (!company.repository) throw fail("cloud-signup", "The host needs a repository: pass `repository`");
+        if (!company.database) throw fail("cloud-signup", "The host needs the company's database: make it first");
         const at = revision ?? company.host?.revision ?? "";
         company.host = { revision: at };
         await siteOf().run(at);
@@ -240,13 +280,16 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
     async deploy({ id, slug, revision }) {
       const company = own(state, "cloud-deploy", id);
       if (!company.host) throw fail("cloud-deploy", `Company "${id}" has no host: make it with cloud-signup`);
-      if (slug !== company.slug) company.slug = free("cloud-deploy", slug);
+      if (slug !== company.slug) company.slug = claim(state, "cloud-deploy", slug, id);
       company.host.revision = revision;
       return { id, revision, url: await siteOf().run(revision) };
     },
     available: async ({ slug }) => {
-      const yours = state.company?.slug === slug;
-      return { available: !yours && !taken.has(slug), yours };
+      const holder = state.addresses[slug];
+      return {
+        available: holder === undefined && !taken.has(slug),
+        yours: holder !== undefined && holder === state.company?.id,
+      };
     },
     async invite({ id, email }) {
       const company = own(state, "cloud-invite", id);
@@ -258,7 +301,17 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
       if (part === "host") {
         delete company.host;
         await site?.remove();
-      } else delete company.database;
+      } else {
+        if (company.host) {
+          throw fail("cloud-close", "Close the company's host before deleting its database, or close both together");
+        }
+        delete company.database;
+      }
+      // Its last part closes it: its token is revoked, and its addresses stay its own.
+      if (!company.host && !company.database) {
+        delete state.company;
+        state.revoked = true;
+      }
       return {};
     },
   });
@@ -268,7 +321,8 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
     {
       initial: (): FakeCloudState => ({
         seq: options.slug ? 1 : 0,
-        ...(options.slug && { company: { id: "fake-company-1", slug: options.slug } }),
+        addresses: options.slug ? { [options.slug]: "fake-company-1" } : {},
+        ...(options.slug && { company: newCompany("fake-company-1", options.slug) }),
       }),
       ops: (state) => cloudOperations(() => api(state)),
     },

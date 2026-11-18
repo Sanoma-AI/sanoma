@@ -1,6 +1,6 @@
 import { type CallContext, diffDeclared, DriverError, type PlanAction } from "sanoma/workflows";
 import { cloudHostnameOf, cloudSlugOf } from "sanoma/workflows/shared";
-import type { z } from "zod";
+import { z } from "zod";
 import { database, host, PORT, REGIONS, repositoryOf } from "./connector.ts";
 
 // The connector's operations over Sanoma Cloud's API (`CloudApi`, sanoma-ops's workflows):
@@ -27,20 +27,26 @@ export type SignupInput = ({ id: string; slug?: never } | { slug: string; id?: n
   region?: (typeof REGIONS)[number];
 };
 
-/** One company as `cloud-list` reads it: its id, its address, and the parts it has. */
-export interface Company {
-  id: string;
+/** One company as `cloud-list` answers it, the driver's check of the answer and the fake's shape: its id, its address, its trial, and the parts it has. */
+export const CompanyRow = z.object({
+  id: z.string().min(1),
   /** Its address now, `<slug>.sanoma.work`. */
-  slug: string;
-  url?: string;
+  slug: z.string().min(1),
+  /** Its display name. */
+  name: z.string(),
+  url: z.string(),
+  status: z.string(),
+  /** Why its last sign-up or close failed, while `status` is `failed`. */
+  reason: z.string().optional(),
+  /** When it was made and when its trial ends, ISO 8601. */
+  createdAt: z.string(),
+  trialEndsAt: z.string(),
   /** The commit its host runs: set while it has a host. */
-  revision?: string;
-  status?: string;
-  /** Whether its host runs, when the Cloud says. */
-  healthy?: boolean;
-  database?: { id: string; healthy?: boolean; region?: string };
-  repository?: { owner: string; name: string; ref?: string };
-}
+  revision: z.string().optional(),
+  database: z.object({ id: z.string(), healthy: z.boolean(), region: z.string().optional() }).optional(),
+  repository: z.object({ owner: z.string(), name: z.string(), ref: z.string() }).optional(),
+});
+export type Company = z.output<typeof CompanyRow>;
 
 /** Whether an address is free: `available` for anyone, or the token's account's own already (`yours`). */
 export interface Availability {
@@ -83,18 +89,19 @@ const hasDatabase = (c: Company | undefined): c is Company & { database: { id: s
 const hasHost = (c: Company | undefined): c is Company & { revision: string } =>
   typeof c?.revision === "string" && c.status !== "closed";
 
-/** A host's state, from its company. */
+/** A host's state, from its company: its database the company's own, bound by the same id. */
 function hostState(c: Company & { revision: string }): HostState {
   const hostname = cloudHostnameOf(c.slug);
   return {
     id: c.id,
     hostname,
+    database: c.id,
     source: c.repository ? `https://github.com/${c.repository.owner}/${c.repository.name}.git` : "",
     ref: c.repository?.ref ?? "main",
     revision: c.revision,
     port: PORT,
-    url: c.url ?? `https://${hostname}`,
-    healthy: c.healthy ?? c.status !== "failed",
+    url: c.url,
+    healthy: c.status !== "failed",
   };
 }
 
@@ -103,7 +110,7 @@ function databaseState(c: Company & { database: { id: string } }): DatabaseState
   return {
     id: c.id,
     ...(c.database.region && { region: c.database.region as DatabaseState["region"] }),
-    healthy: c.database.healthy ?? c.status !== "failed",
+    healthy: c.database.healthy,
   };
 }
 
@@ -113,8 +120,12 @@ function immutableChanged(type: Parameters<typeof diffDeclared>[0], state: State
   return type.fields.immutable.filter((f) => changed.has(f));
 }
 
-/** A plan's `expect` met, or a refusal: what apply was shown is what it changes. */
+/**
+ * A plan's `expect` met, or a refusal: what apply was shown is what it changes. A plan of `none`
+ * meets any: a retry of a change that went through finds it done.
+ */
 function expected(what: string, expect: Expect | undefined, fresh: Planned) {
+  if (fresh.action === "none") return;
   if (expect && (expect.action !== fresh.action || expect.replace.join() !== fresh.replace.join())) {
     throw refused(`${what}.update: the plan changed (${expect.action}, now ${fresh.action})`, "plan_changed");
   }
@@ -123,18 +134,34 @@ function expected(what: string, expect: Expect | undefined, fresh: Planned) {
 /** The company `id`, or undefined when the token holds none by it. */
 const company = async (cloud: CloudApi, id: string) => (await cloud.list({ id })).find((c) => c.id === id);
 
+/** The company the Cloud token is for (one token, one company), or undefined while it is for none; refused when it lists several. */
+async function heldCompany(cloud: CloudApi): Promise<Company | undefined> {
+  const held = await cloud.list({});
+  if (held.length > 1) {
+    throw refused(`the Cloud token lists ${held.length} companies, not its one: use a company's own token`, "not_one");
+  }
+  return held[0];
+}
+
 /**
- * The company the Cloud token is for (one token, one company): the one its database and host are
- * made for. Refused while it is for none, which signing in to Sanoma or the wizard makes.
+ * The company the Cloud token is for: the one its database and host are made for. Refused while it
+ * is for none, which signing in to Sanoma or the wizard makes.
  */
 async function tokenCompany(cloud: CloudApi): Promise<Company> {
-  const [held] = await cloud.list({});
+  const held = await heldCompany(cloud);
   if (held) return held;
   throw refused(
     "the Cloud token is for no company yet: sign up on www.sanoma.work, or go live from Hosting",
     "no_company",
   );
 }
+
+/** A refusal to bind `what` the wizard made, whose `fields` differ from the declaration: it cannot change in place. */
+const differs = (what: string, id: string, fields: string[]) =>
+  refused(
+    `${what}.create: the company ${id} has a ${what} already, whose ${fields.join(" and ")} differ from the declaration: declare its own, or close it first`,
+    "immutable",
+  );
 
 const readDatabase = async (cloud: CloudApi, id: string) => {
   const found = await company(cloud, id);
@@ -224,10 +251,13 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
       create: async ({ desired }: { desired: State }, call: CallContext) => {
         const cloud = api(call);
         const want = database.schema.parse(desired);
-        // The wizard made it with the company: bound now rather than made again.
         let found: Company | undefined = await tokenCompany(cloud);
         const { id } = found;
-        if (!hasDatabase(found)) {
+        if (hasDatabase(found)) {
+          // The wizard made it with the company: bound now rather than made again, if it is the one declared.
+          const changed = immutableChanged(database, databaseState(found), want);
+          if (changed.length) throw differs("database", id, changed);
+        } else {
           await cloud.signup({ id, part: "database", ...(want.region && { region: want.region }) });
           found = await company(cloud, id);
         }
@@ -262,10 +292,10 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
       repository: async ({ slug }: { slug: string }, call: CallContext) => {
         const cloud = api(call);
         // Made once: a retry, or a company the wizard made with its repository, reads the one there.
-        let [found] = await cloud.list({});
+        let found = await heldCompany(cloud);
         if (!found?.repository) {
           await cloud.signup(found ? { id: found.id, part: "repository" } : { slug, name: slug, part: "repository" });
-          [found] = await cloud.list({});
+          found = await heldCompany(cloud);
         }
         if (!found?.repository) {
           throw refused(`company.repository: the Cloud made no repository for ${found?.id ?? slug}`, "not_made");
@@ -287,8 +317,12 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
         const want = host.schema.parse(desired);
         let found: Company | undefined = await tokenCompany(cloud);
         const { id } = found;
-        // The wizard made it with the company: bound now rather than made again.
-        if (!hasHost(found)) {
+        if (hasHost(found)) {
+          // The wizard made it with the company: bound now rather than made again, if it runs the
+          // declared repository and branch (a deploy moves neither, and would rename the company).
+          const changed = immutableChanged(host, hostState(found), want);
+          if (changed.length) throw differs("host", id, changed);
+        } else {
           const repository = repositoryOf(want.source);
           if (!repository) {
             throw refused(`host.create: ${want.source} names no repository (owner and name)`, "no_repository");

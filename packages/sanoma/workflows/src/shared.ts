@@ -697,13 +697,18 @@ export const GO_LIVE_WORKFLOW = "go-live";
 export const GO_LIVE_HOST_WORKFLOW = "go-live-host";
 export const GO_LIVE_CLOUD_WORKFLOW = "go-live-cloud";
 
+/** Addresses under sanoma.work no company may take: Sanoma's own and the ones kept for it, as sanoma-ops keeps them. */
+const CLOUD_RESERVED = ["www", "app", "api", "mail", "admin", "docs", "status", "cloud", "internal"];
 /**
- * A company's slug at Sanoma Cloud, its address `<slug>.sanoma.work`, as sanoma-ops's sign-up
- * checks it: lower case letters, digits and dashes, a dash at neither end, one of them or 3 to 40.
+ * A company's slug at Sanoma Cloud, its address `<slug>.sanoma.work`, as sanoma-ops's sign-up and
+ * rename check it: 3 to 40 lower case letters, digits and single dashes, a dash at neither end, and
+ * none of `CLOUD_RESERVED` (each a whole slug, so the pattern holds inside `CLOUD_HOSTNAME` too).
  */
-export const CLOUD_SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
+export const CLOUD_SLUG = new RegExp(
+  `^(?!(?:${CLOUD_RESERVED.join("|")})(?![a-z0-9-]))(?![a-z0-9-]*--)[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$`,
+);
 /** `CLOUD_SLUG` in words. */
-export const CLOUD_SLUG_RULE = "lower case letters, digits and dashes, a dash at neither end: one of them, or 3 to 40";
+export const CLOUD_SLUG_RULE = `3 to 40 lower case letters, digits and single dashes, a dash at neither end, and not one Sanoma keeps (${CLOUD_RESERVED.join(", ")})`;
 /** A company's address at Sanoma Cloud, `<slug>.sanoma.work` (`CLOUD_SLUG`): its first group is the slug. */
 export const CLOUD_HOSTNAME = new RegExp(`^(${CLOUD_SLUG.source.slice(1, -1)})\\.sanoma\\.work$`);
 /** The address at Sanoma Cloud whose slug is `slug`. */

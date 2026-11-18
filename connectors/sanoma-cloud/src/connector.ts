@@ -101,6 +101,8 @@ const hostSchema = z.object({
     .string()
     .regex(CLOUD_HOSTNAME, `<slug>.sanoma.work, the slug ${CLOUD_SLUG_RULE}`)
     .describe("The company's address, `<slug>.sanoma.work` (the only kind for now): a change renames the company"),
+  // Optional to the schema alone: a write-only field, which apply leaves out of what it plans (`withoutWriteOnly`).
+  // The Cloud makes no host for a company without its database, and refuses one.
   database: z
     .string()
     .min(1)
@@ -143,7 +145,7 @@ const sourceKey = (state: Record<string, unknown>) => {
 };
 
 /**
- * `cloud.host({ hostname, database? })`: the company's host at Sanoma Cloud, a Worker and
+ * `cloud.host({ hostname, database })`: the company's host at Sanoma Cloud, a Worker and
  * container in Sanoma's Cloudflare account at its `hostname`, `<slug>.sanoma.work`, which meets
  * the `Host` contract: it ends with its process once its worker is idle and starts on the next
  * wake, its URL is public, and it wakes itself through its own Worker's alarm. It binds its own

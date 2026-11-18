@@ -85,23 +85,33 @@ const driver = cloudDriver({ timeoutMs: 5_000 });
 const op = (name: string, input: object, key?: string) =>
   driver.ops[name]!(input, call(`cloud.${name}`, key)) as Promise<any>;
 
-/** The token's company as `cloud-list` answers it, with a host at `revision` and a database. */
-const acme = (revision = "abc123") => ({
+/** A company `c1` as `cloud-list` answers it, at `slug` (`acme`), its trial on, with `parts`. */
+const row = ({ slug = "acme", ...parts }: Record<string, unknown> = {}) => ({
   id: "c1",
-  slug: "acme",
-  name: "acme",
-  url: "https://acme.sanoma.work",
-  status: "running",
-  revision,
-  database: { id: "proj-1", region: "us-east" },
-  repository: { owner: "acme", name: "acme-ops", ref: "main" },
+  slug,
+  name: "Acme",
+  url: `https://${slug}.sanoma.work`,
+  status: "creating",
+  createdAt: "2026-11-01T00:00:00.000Z",
+  trialEndsAt: "2026-11-15T00:00:00.000Z",
+  ...parts,
 });
+
+/** The token's company as `cloud-list` answers it, with a host at `revision` and a database. */
+const acme = (revision = "abc123") =>
+  row({
+    status: "running",
+    revision,
+    database: { id: "proj-1", healthy: true, region: "us-east" },
+    repository: { owner: "acme", name: "acme-ops", ref: "main" },
+  });
 
 /** The token's company before its host is made: its database, its repository, no revision. */
 const hostless = () => ({ ...acme(), status: "creating", revision: undefined });
 
 const declaredHost = {
   hostname: "acme.sanoma.work",
+  database: "c1",
   source: "https://github.com/acme/acme-ops.git",
   ref: "main",
   revision: "abc123",
@@ -123,6 +133,7 @@ describe("cloud's host through the workflows", () => {
       state: {
         id: "c1",
         hostname: "acme.sanoma.work",
+        database: "c1",
         source: "https://github.com/acme/acme-ops.git",
         ref: "main",
         revision: "abc123",
@@ -184,6 +195,20 @@ describe("cloud's host through the workflows", () => {
     expect(starts().filter(([name]) => name !== "cloudList.start")).toEqual([
       ["cloudDeploy.start", { id: "c1", slug: "acme", revision: "abc123" }],
     ]);
+  });
+
+  it("refuses to bind a host the wizard made from another repository or branch: a deploy would move it there", async () => {
+    workflows = { cloudList: () => ({ output: [acme()] }) };
+    for (const declared of [
+      { ...declaredHost, source: "https://github.com/acme/other.git" },
+      { ...declaredHost, ref: "release" },
+    ]) {
+      await expect(op("host.create", { desired: declared })).rejects.toMatchObject({
+        vendorCode: "immutable",
+        retryable: false,
+      });
+    }
+    expect(starts().filter(([name]) => name !== "cloudList.start")).toEqual([]);
   });
 
   it("moves a host made at the company's own address to the declared one, a rename", async () => {
@@ -251,6 +276,12 @@ describe("cloud's host through the workflows", () => {
       { id: "c1", slug: "acme-co", revision: "abc123" },
     ]);
     expect(await op("host.plan", { id: "c1", desired: renamed })).toMatchObject({ action: "none" });
+    // A retry of the update, once the rename went through: done, with no deploy again.
+    expect(await op("host.update", { id: "c1", desired: renamed, expect: plan })).toMatchObject({
+      id: "c1",
+      state: { hostname: "acme-co.sanoma.work" },
+    });
+    expect(sent.filter((s) => s.name === "cloudDeploy.start")).toHaveLength(1);
   });
 
   it("plans another ref or repository as a replace, which update refuses: a deploy moves only the revision and address", async () => {
@@ -312,20 +343,19 @@ describe("cloud's database through the workflows", () => {
     });
     // One list: the company it takes holds the database already.
     expect(starts()).toEqual([["cloudList.start", {}]]);
+    // Not one in another region than the declared: it cannot move.
+    await expect(op("database.create", { desired: { region: "eu-central" } })).rejects.toMatchObject({
+      vendorCode: "immutable",
+      message: expect.stringContaining("region"),
+    });
+    expect(starts().filter(([name]) => name !== "cloudList.start")).toEqual([]);
   });
 
   it("makes one for the token's company with cloud-signup by its id", async () => {
     let made = false;
     workflows = {
       cloudList: () => ({
-        output: [
-          {
-            id: "c1",
-            slug: "acme",
-            status: "creating",
-            ...(made && { database: { id: "proj-2", region: "eu-central" } }),
-          },
-        ],
+        output: [row(made ? { database: { id: "proj-2", healthy: true, region: "eu-central" } } : {})],
       }),
       cloudSignup: () => ((made = true), { output: { id: "c1", slug: "acme", database: { id: "proj-2" } } }),
     };
@@ -343,7 +373,7 @@ describe("cloud's database through the workflows", () => {
     await expect(op("database.plan", { desired: { region: "us-east" } })).rejects.toMatchObject({
       vendorCode: "no_company",
     });
-    workflows = { cloudList: () => ({ output: [{ id: "c1", slug: "acme", status: "creating" }] }) };
+    workflows = { cloudList: () => ({ output: [row()] }) };
     expect(await op("database.plan", { desired: { region: "us-east" } })).toMatchObject({
       action: "create",
       planned: { id: "c1", region: "us-east" },
@@ -394,9 +424,7 @@ describe("cloud's account operations through the workflows", () => {
     let made = false;
     workflows = {
       cloudList: () => ({
-        output: made
-          ? [{ id: "c1", slug: "acme", status: "creating", repository: { owner: "sanoma-work", name: "acme" } }]
-          : [],
+        output: made ? [row({ repository: { owner: "sanoma-work", name: "acme", ref: "main" } })] : [],
       }),
       cloudSignup: () => ((made = true), { output: {} }),
     };
@@ -416,14 +444,7 @@ describe("cloud's account operations through the workflows", () => {
     let made = false;
     workflows = {
       cloudList: () => ({
-        output: [
-          {
-            id: "c1",
-            slug: "acme",
-            status: "creating",
-            ...(made && { repository: { owner: "sanoma-work", name: "acme" } }),
-          },
-        ],
+        output: [row(made ? { repository: { owner: "sanoma-work", name: "acme", ref: "main" } } : {})],
       }),
       cloudSignup: () => ((made = true), { output: {} }),
     };
@@ -465,6 +486,15 @@ describe("cloud's driver errors", () => {
       status: 422,
       vendorCode: "driver_failed",
     });
+  });
+
+  it("refuses a cloud-list answer that is not its companies, and a token that lists several", async () => {
+    for (const output of [{ companies: [] }, null, [{ id: "c1" }]]) {
+      workflows = { cloudList: () => ({ output }) };
+      await expect(op("host.read", { id: "c1" })).rejects.toThrow("cloud-list: its answer is not what it should be");
+    }
+    workflows = { cloudList: () => ({ output: [acme(), { ...acme(), id: "c2" }] }) };
+    await expect(op("host.plan", { desired: declaredHost })).rejects.toMatchObject({ vendorCode: "not_one" });
   });
 
   it("fails a call the api refuses with its refusal, final", async () => {

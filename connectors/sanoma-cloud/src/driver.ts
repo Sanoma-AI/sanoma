@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { type CallContext, cloudRun, defineDriver, DriverError } from "sanoma/workflows";
 import { z } from "zod";
 import { cloudOps } from "./connector.ts";
-import { type CloudApi, cloudOperations, type Company } from "./operations.ts";
+import { type CloudApi, cloudOperations, CompanyRow } from "./operations.ts";
 
 export interface CloudDriverOptions {
   /** How long one request may take, in milliseconds. Default 30 000 (a result waits 20 s at most). */
@@ -44,6 +44,9 @@ async function tokenOf(call: CallContext): Promise<string> {
 /** `cloud-available`'s output. */
 const Available = z.object({ available: z.boolean(), yours: z.boolean() });
 
+/** `cloud-list`'s output: the companies, none when there is none. */
+const Listed = z.array(CompanyRow);
+
 /** `cloud-invite`'s output. */
 const Invited = z.object({ url: z.url({ protocol: /^https?$/ }) });
 
@@ -72,10 +75,7 @@ function workflowsApi(call: CallContext, options: CloudDriverOptions): CloudApi 
   return {
     signup: (input) => resume("cloud-signup", input),
     // A read: a retry may start another.
-    list: async (input) => {
-      const companies = await run("cloud-list", input);
-      return Array.isArray(companies) ? (companies as Company[]) : [];
-    },
+    list: async (input) => answered("cloud-list", Listed, await run("cloud-list", input)),
     deploy: (input) => resume("cloud-deploy", input),
     close: (input) => resume("cloud-close", input),
     // Reads, and a link minted again on each try.

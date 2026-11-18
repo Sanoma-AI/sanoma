@@ -5,7 +5,7 @@ import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { cloudSlugOf } from "sanoma/workflows/shared";
+import { CLOUD_SLUG_RULE, cloudSlugOf } from "sanoma/workflows/shared";
 import { Button } from "#/components/ui/button.tsx";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
@@ -133,7 +133,7 @@ export function ReadyToGoLive({ retry = false }: { retry?: boolean }) {
           </FieldDescription>
           <FieldError>
             {!valid
-              ? "Use lower case letters, digits and dashes, with no dash at either end: one of them, or 3 to 40."
+              ? `Use ${CLOUD_SLUG_RULE}.`
               : checked === "taken"
                 ? "Someone else has this address: choose another."
                 : check.error
