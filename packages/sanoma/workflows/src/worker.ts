@@ -53,7 +53,7 @@ import {
 import { type DatabasePreparation, isOperation } from "./op.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
-import { approverLabel, errorMessage, oneAtATime, RENEWAL_AGENT, WORKFLOW_ACTION } from "./shared.ts";
+import { APPLY_WORKFLOW, approverLabel, errorMessage, oneAtATime, RENEWAL_AGENT, WORKFLOW_ACTION } from "./shared.ts";
 import { renewWhenDue } from "./renewal.ts";
 
 export interface Worker {
@@ -551,8 +551,9 @@ async function recordAppsBehind(
 /**
  * Takes over the unfinished runs of other versions that wait across a deploy (`stampVersion`'s),
  * keeping each run's id, history and unread messages: those whose code is this worker's
- * (`builtInCodes`), and an apply queued and never started, whatever its code. An apply started on
- * other code is cancelled, since it would hold the apply queue's one place for good. Each carried
+ * (`builtInCodes`), and an apply queued and never started, whatever its code. Any other apply on
+ * other code is cancelled: started, it would hold the apply queue's one place for good, and held at
+ * its start, on the app's queue, its approval would wait for good. Each carried
  * PENDING run is queued again on its own queue (`resumeWorkflows`). Assumes one live worker per
  * database; a failure is warned about, and the worker starts. See README.md, Versions.
  */
@@ -574,7 +575,7 @@ async function carryBuiltInRuns(
     const carries = (r: (typeof theirs)[number]) =>
       r.attributes?.builtInCode === builtInCodes[r.workflowName] || (onApplyQueue(r) && r.status === "ENQUEUED");
     const carry = theirs.filter(carries);
-    const stranded = theirs.filter((r) => onApplyQueue(r) && !carries(r)).map((r) => r.workflowID);
+    const stranded = theirs.filter((r) => r.workflowName === APPLY_WORKFLOW && !carries(r)).map((r) => r.workflowID);
     if (stranded.length) {
       await DBOS.cancelWorkflows(stranded);
       warn(
@@ -737,8 +738,9 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
       }
       if (hold && queueFor(state, wf.name, { sandbox })) {
         // Held at its start, it waited off its queue (`queueFor`): approved, it runs as its child there.
-        const { runId, output: report, error } = await child(run, wf.name, wf.name, input);
-        if (error !== undefined) throw new Error(`${wf.name} did not finish in its run ${runId}: ${error}`);
+        const { runId, output: report, error, cause } = await child(run, wf.name, wf.name, input);
+        // It fails as its child did, with the child's own error and code.
+        if (error !== undefined) throw cause ?? new Error(`${wf.name} did not finish in its run ${runId}: ${error}`);
         output = report;
       } else {
         if (sandbox !== undefined) {
