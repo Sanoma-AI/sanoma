@@ -70,6 +70,9 @@ export const DRIFT_WORKFLOW = "drift";
  */
 export const APPLY_WORKFLOW = "apply";
 
+/** The built-in plan workflow's name: what apply would do with the same input, changing nothing. */
+export const PLAN_WORKFLOW = "plan";
+
 /**
  * The vendor of the collections' operations, `data.<collection>.<op>`: a collection's `get`,
  * `list`, `save` and `delete`. No connector may take it.
@@ -814,10 +817,11 @@ export const IMPORT_WORKFLOW = "import";
 /** The `recv` topic a turn's run is told on (`ChatTell`): a stop, a sign-in code, its own turn's end. */
 export const CHAT_TOPIC = "chat:tell";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, reshape, login-code, follow, chat, import, connect, migrate-store and the app's actions. */
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, plan, call, change, reshape, login-code, follow, chat, import, connect, migrate-store and the app's actions. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
+  PLAN_WORKFLOW,
   CALL_WORKFLOW,
   CHANGE_WORKFLOW,
   RESHAPE_WORKFLOW,

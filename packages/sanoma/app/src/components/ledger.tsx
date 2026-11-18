@@ -7,7 +7,9 @@ import { memo, type ReactNode } from "react";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { utcText } from "#/lib/time.ts";
 import { type RunCheck, SEALED_SHOWN, starterName } from "../api.ts";
+import { asApplyPlan } from "../lib/apply-plan.ts";
 import { configQuery, opsById } from "../queries.ts";
+import { ApplyPlanView } from "./apply-plan.tsx";
 import {
   ALONE,
   DecisionBadge,
@@ -256,10 +258,13 @@ export const LedgerRow = memo(function LedgerRow({
         </p>
       );
       break;
-    case "run.finished":
+    case "run.finished": {
       kind = "finished";
-      body = <Expandable label="Output" value={record.output} />;
+      // A plan's output (the plan workflow's) as apply's approval shows it.
+      const plan = asApplyPlan(record.output);
+      body = plan ? <ApplyPlanView plan={plan} /> : <Expandable label="Output" value={record.output} />;
       break;
+    }
     case "run.failed":
       kind = "failed";
       body = <ErrorText error={record.error} />;

@@ -24,8 +24,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { type ApplyDeclared, applyWorkflow } from "./apply.ts";
-import { applySteps } from "./apply-steps.ts";
+import { type ApplyDeclared, applyWorkflow, planWorkflow } from "./apply.ts";
+import { applySteps, declaredStep } from "./apply-steps.ts";
 import { callWorkflow } from "./call-workflow.ts";
 import { changeDriver, changeOps, reservedFor } from "./change.ts";
 import { appRunner } from "./app-steps.ts";
@@ -100,6 +100,7 @@ import {
   LOGIN_CODE_WORKFLOW,
   RESHAPE_WORKFLOW,
   OPERATIONS_VENDOR,
+  PLAN_WORKFLOW,
   errorMessage,
   routerHostnameTaken,
 } from "./shared.ts";
@@ -363,7 +364,7 @@ export interface ResolvedConfig {
   dataStore?: LazyDb;
   /**
    * By name; each checked against `ops` and `drivers`. The config's, the built-ins `drift`
-   * (`DRIFT_WORKFLOW`) and `apply` (`APPLY_WORKFLOW`) when its connectors declare resource types,
+   * (`DRIFT_WORKFLOW`), `apply` (`APPLY_WORKFLOW`) and `plan` (`PLAN_WORKFLOW`) when its connectors declare resource types,
    * and `call` (`CALL_WORKFLOW`) when an operation may be called directly (`isDirect`).
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
@@ -631,7 +632,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   }
   // The agents' router, whose hostname a host that derives attaches (`deriveHosts`).
   const router = config.router === undefined ? undefined : checkRouter(config.router, collections);
-  // Built-in: checking the resources the data files declare against their vendors, and applying them.
+  // Built-in: checking the resources the data files declare against their vendors, planning what applying them would do, and applying them.
   const read = (options: ReadOptions = {}) =>
     readDeclared(root, connectors, declarable, types, connections, {
       ...options,
@@ -647,6 +648,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       driftWorkflow(types, ops, drivers, () => DBOS.runStep(read, { name: "drift:data-files" })),
     );
     names.set(APPLY_WORKFLOW, applyWorkflow(types, ops, drivers, applySteps(appName, root, read)));
+    names.set(PLAN_WORKFLOW, planWorkflow(types, ops, drivers, declaredStep(appName, read, PLAN_WORKFLOW)));
   }
   // Built-in, in every config: the life of a change, which deploys to the declared hosts after its merge.
   // The declared hosts (and sandboxes), as the files say them: nothing derived, nothing minted.
