@@ -24,7 +24,8 @@ type Schema = Record<string, unknown>;
  * `.sanoma/api.ts` for a description: one record type per collection, and `CompanyApi` (not `Api`,
  * which inside `declare module "sanoma/site"` is the module's own), one member per
  * workflow (`apiNameOf`), per vendor of the operations a person may call directly (`OpEntry.direct`,
- * by resource) and `data` for the collections (an app's under its name), each with its JSDoc; then `Register`'s
+ * by resource, an app's company operations under its name: `operations`) and `data` for the
+ * collections (an app's under its name), each with its JSDoc; then `Register`'s
  * augmentation. Pure: the same description gives the same text. A workflow whose api name another
  * has, `describeConfig`'s problem on its entry, is left out, and its problem is in `problems`.
  */
@@ -40,10 +41,19 @@ export function generateApi(description: ConfigDescription): { source: string; p
   const direct = description.ops.filter((op) => op.direct && op.vendor !== DATA_VENDOR);
   for (const [vendor, ops] of Map.groupBy(direct, (op) => op.vendor)) {
     const title = description.vendors[vendor]?.title ?? vendor;
-    const resources = [...Map.groupBy(ops, (op) => op.resource)].map(([resource, own]) =>
-      member(undefined, resource, block(own.map(opMember))),
-    );
-    members.push(member(`${title}: the operations a person may call directly.`, vendor, block(resources)));
+    // An app's (a company operation's in `apps/<app>/operations/`, `crm.score`) under its app, as `data`'s: `api.operations.crm.score`.
+    const byApp = Map.groupBy(ops, (op) => (op.resource.includes(".") ? op.resource.split(".")[0]! : undefined));
+    const resources = (own: OpEntry[]) =>
+      [...Map.groupBy(own, (op) => op.resource)].map(([resource, those]) =>
+        member(undefined, resource.slice(resource.indexOf(".") + 1), block(those.map(opMember))),
+      );
+    const nested = [
+      ...resources(byApp.get(undefined) ?? []),
+      ...[...byApp]
+        .filter(([app]) => app !== undefined)
+        .map(([app, own]) => member(`The ${app} app's operations.`, app!, block(resources(own)))),
+    ];
+    members.push(member(`${title}: the operations a person may call directly.`, vendor, block(nested)));
   }
   if (description.collections.length) {
     // The root's by name, then each app's under its name: `api.data.crm.contacts`.

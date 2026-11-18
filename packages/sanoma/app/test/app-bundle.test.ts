@@ -824,6 +824,29 @@ export const Route = createFileRoute("/sites/hello/spawn")({ loader: () => run()
     });
   }, 300_000);
 
+  it("refuses a company operation's file importing what the Worker does not have: it runs the body for a page", async () => {
+    const { repo, config } = company();
+    write(
+      join(repo, "operations", "spawn.ts"),
+      `import { defineOperation, z } from "sanoma";
+import { execFile } from "node:child_process";
+
+export default defineOperation({
+  name: "spawn",
+  input: z.object({}),
+  uses: [],
+  run: async () => new Promise((done) => execFile("true", () => done("ran"))),
+});
+`,
+    );
+    const refused = await buildAppBundle(repo, { config }).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+    expect(refused).toBeInstanceOf(NodeOnlyImport);
+    expect(refused).toMatchObject({ file: "operations/spawn.ts", symbol: "execFile", module: "node:child_process" });
+  }, 300_000);
+
   it("refuses a company file that throws as the Worker evaluates it, naming the file and line", async () => {
     const { repo, config } = company();
     // Node has the file; the Worker, whose files are its modules, does not.

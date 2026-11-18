@@ -166,6 +166,17 @@ describe("lintWorkflow", () => {
     );
   });
 
+  it("refuses sanoma/invoices/pdf in an operation, which may answer a page on the Worker, and allows it in a workflow", () => {
+    const pdf = `import { renderInvoice } from "sanoma/invoices/pdf";`;
+    const refused = [
+      'import "sanoma/invoices/pdf" is not allowed in a workflow: an operation may answer a page on the Worker, which has no PDF renderer: render it in a workflow',
+    ];
+    expect(messages(pdf, "/repo/operations/invoice.ts")).toEqual(refused);
+    expect(messages(pdf, "/repo/apps/crm/operations/invoice.ts")).toEqual(refused);
+    expect(messages(pdf, "/repo/workflows/invoice.ts")).toEqual([]);
+    expect(messages(`import { calculateInvoice } from "sanoma/invoices";`, "/repo/operations/invoice.ts")).toEqual([]);
+  });
+
   it("takes the tree from the kind's folder at the root or an app's, not from a subfolder named as the other kind", () => {
     // workflows/operations/ is part of workflows/: a file beside it, the company's operations, an app's.
     expect(messages(`import { x } from "../helper.ts";`, "/repo/workflows/operations/send.ts")).toEqual([]);

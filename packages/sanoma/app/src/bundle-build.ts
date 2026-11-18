@@ -210,14 +210,16 @@ async function bundlePlugins(
     { ...companyFiles(root), applyToEnvironment: ssr },
     { ...optional(), applyToEnvironment: ssr },
     {
-      // A site's file or the app's own importing what the Worker lacks, refused by file and symbol.
+      // A site's file, a company operation's (whose body the Worker runs for a page) or the app's
+      // own importing what the Worker lacks, refused by file and symbol.
       name: "sanoma:node-only",
       applyToEnvironment: ssr,
       transform(code, id) {
         const file = id.split("?")[0]!;
-        const site =
-          companyFile(file, root) && /^(apps\/[^/]+\/)?sites\//.test(relative(root, file).split(sep).join("/"));
-        const own = site || file.startsWith(`${src}${sep}`);
+        const company =
+          companyFile(file, root) &&
+          /^(apps\/[^/]+\/)?(sites|operations)\//.test(relative(root, file).split(sep).join("/"));
+        const own = company || file.startsWith(`${src}${sep}`);
         if (!own || !/\.[cm]?[jt]sx?$/.test(file) || !/\bimport\b/.test(code)) return;
         for (const statement of this.parse(code, { lang: file.endsWith("x") ? "tsx" : "ts" }).body as unknown as {
           type: string;

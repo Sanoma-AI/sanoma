@@ -8,6 +8,7 @@ import {
   ANONYMOUS_PRINCIPAL,
   defineConnector,
   defineDriver,
+  defineOperation,
   defineWorkflow,
   DriverError,
   type Principal,
@@ -104,8 +105,29 @@ const refuse = defineWorkflow({
   run: async (ctx, { id }) => ctx.acme.customer.close({ id }),
 });
 
+/** A lead and what acme calls it: a company operation a page may call. */
+const lookup = defineOperation({
+  name: "lookup",
+  input: z.object({ company: z.string() }),
+  uses: [outbound.get, acme.customer.get],
+  run: async (ctx, { company }) => {
+    const found = await ctx.data.outbound.get({ key: company });
+    const customer = await ctx.acme.customer.get({ id: company });
+    return { stage: found?.record.stage ?? null, name: customer.name };
+  },
+});
+
+/** A customer renamed: a company operation that writes at a vendor, a workflow's step only. */
+const relabel = defineOperation({
+  name: "relabel",
+  input: z.object({ id: z.string() }),
+  uses: [acme.customer.rename],
+  run: async (ctx, { id }) => ctx.acme.customer.rename({ id, name: "B" }),
+});
+
 const config: SanomaConfig = {
   workflows: [outboundNext, refuse],
+  operations: [lookup, relabel],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
   root,
@@ -182,6 +204,16 @@ describe("callFn", () => {
       body: { id: "c1", name: "Acme Ltd" },
     });
     expect(await call({ name: "acme.customer.rename", input: { id: "c1", name: "B" } })).toMatchObject({
+      status: 400,
+      body: { code: "invalid_input", error: expect.stringMatching(/cannot be called directly/) },
+    });
+  });
+
+  it("calls a company operation a page may, as the person asking, and refuses one that writes at a vendor", async () => {
+    expect(
+      await call({ name: "operations.lookup.run", input: { company: "Nobody" }, id: crypto.randomUUID() }),
+    ).toEqual({ body: { stage: null, name: "Acme Ltd" } });
+    expect(await call({ name: "operations.relabel.run", input: { id: "c1" } })).toMatchObject({
       status: 400,
       body: { code: "invalid_input", error: expect.stringMatching(/cannot be called directly/) },
     });
@@ -298,6 +330,12 @@ describe("POST /api/call", () => {
       status: 200,
       body: expect.any(String),
     });
+  });
+
+  it("calls a company operation over plain JSON, as callFn does", async () => {
+    expect(
+      await post({ name: "operations.lookup.run", input: { company: "Nobody" }, id: crypto.randomUUID() }),
+    ).toEqual({ status: 200, body: { stage: null, name: "Acme Ltd" } });
   });
 
   it("answers a failed run's result 422 with its failure, so a client neither retries it nor loses why", async () => {

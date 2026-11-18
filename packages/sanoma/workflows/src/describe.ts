@@ -545,7 +545,7 @@ export function routerWarnings(
 
 /**
  * A site's `api` names each workflow `apiNameOf(name)` beside the vendors' operations and the
- * collections (`api.data`), and `operations` is kept for the company's operations, so a workflow
+ * collections (`api.data`) and the company's operations (`api.operations`), so a workflow
  * whose name comes out as another's, a vendor's id, `data` or `operations` is a problem, at 1:1 of
  * its file. A built-in is never the one renamed.
  */

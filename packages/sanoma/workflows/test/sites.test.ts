@@ -4,8 +4,19 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig, siteContentPages, siteIcons, siteLocales } from "../src/describe.ts";
-import { defineConnector, defineWorkflow, type SanomaConfig, withSetup } from "../src/index.ts";
+import {
+  defineConnector,
+  defineDriver,
+  defineOperation,
+  defineWorkflow,
+  type SanomaConfig,
+  withSetup,
+} from "../src/index.ts";
 import { leads } from "../../app/test/fixtures/company-sites/resources/data.ts";
+import score from "./fixtures/company-apps/apps/crm/operations/score.ts";
+import { customers as crmCustomers } from "./fixtures/company-apps/apps/crm/resources/data.ts";
+import { customers as shopCustomers } from "./fixtures/company-apps/apps/shop/resources/data.ts";
+import quote from "./fixtures/company-apps/operations/quote.ts";
 import { tree } from "./tree.ts";
 
 // What a company's sites call, read from their source (`readSites`) as `describeConfig` reads it:
@@ -41,6 +52,14 @@ const acme = defineConnector("acme", {
       target: ({ id }: { id: string }) => `customer/${id}`,
     },
   },
+});
+
+/** A rename at acme: a company operation a page may not call, which writes at a vendor. */
+const relabel = defineOperation({
+  name: "relabel",
+  input: z.object({ id: z.string() }),
+  uses: [acme.customer.rename],
+  run: async (ctx, { id }) => ctx.acme.customer.rename({ id }),
 });
 
 /** A vendor with a login half and no operations. */
@@ -325,6 +344,44 @@ describe("readSites", () => {
         warnings: [],
       },
       { name: "quiet", pages: [{ path: "/sites/quiet" }], calls: [], problems: [], warnings: [] },
+    ]);
+  });
+
+  it("reads a call of a company operation, an app's by four names, and makes a problem of one a page may not call", () => {
+    const root = tree(
+      "operations",
+      calling(
+        "ops",
+        ['title: "Ops"'],
+        [
+          "api.operations.quote.run({ id: 'c1', items: 2 })",
+          "api.operations.crm.score.run({ email: 'a@b.test' })",
+          "api.operations.relabel.run({ id: 'c1' })",
+        ],
+      ),
+    );
+    const [ops] = describeConfig(
+      config(root, {
+        connectors: [
+          withSetup(acme, {
+            driver: () => defineDriver(acme, { customer: { get: async (i) => i, rename: async (i) => i } }),
+          }),
+        ],
+        collections: [leads, crmCustomers, shopCustomers],
+        operations: [quote, score, relabel],
+      }),
+    ).sites;
+    expect(ops!.calls.map((c) => [c.kind, c.target, c.line])).toEqual([
+      ["op", "operations.quote.run", 7],
+      ["op", "operations.crm.score.run", 8],
+      ["op", "operations.relabel.run", 9],
+    ]);
+    expect(ops!.problems).toEqual([
+      pageProblem(
+        "ops",
+        9,
+        'calls operation "operations.relabel.run", which a page may not call directly: start a workflow that calls it',
+      ),
     ]);
   });
 
