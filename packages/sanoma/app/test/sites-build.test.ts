@@ -763,6 +763,46 @@ describe("a company's app with its sites", () => {
     expect((await at(startRun, "hello.localhost", { method: "POST", headers: SAME_ORIGIN })).status).toBe(404);
   });
 
+  it("answers POST /api/call on a public host as the api token it carries, else as the site's visitor, in JSON", async () => {
+    const client = await SanomaClient.connect(config);
+    try {
+      const minted = await client.tokens.mint({ subject: "visitor:cloud:caller", groups: ["visitors"] });
+      const revoked = await client.tokens.mint({ subject: "visitor:cloud:gone", groups: ["visitors"] });
+      await client.tokens.revoke({ id: revoked.id });
+      const origin = `http://hello.localhost:${new URL(app.url).port}`;
+      /** `POST /api/call` on hello's host with `headers`: its status, type and JSON. */
+      const call = async (headers: Record<string, string>) => {
+        const res = await at("/api/call", "hello.localhost", {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify({ name: "hello.start", input: { who: "Ada" } }),
+        });
+        return { status: res.status, type: res.headers["content-type"], body: JSON.parse(res.body) as unknown };
+      };
+      const json = expect.stringMatching(/^application\/json/);
+      // The token's own call, decided for it: a visitor, whom no permit names (anonymous may start hello).
+      expect(await call({ authorization: `Bearer ${minted.token}` })).toEqual({
+        status: 403,
+        type: json,
+        body: expect.objectContaining({
+          code: "policy_denied",
+          error: `workflow:hello was denied by policy: ${VISITOR_DENIED}`,
+        }),
+      });
+      for (const token of ["sca_unknown", revoked.token]) {
+        expect(await call({ authorization: `Bearer ${token}` })).toMatchObject({ status: 401, type: json });
+      }
+      // No token: checked for CSRF as a page's request, then the site's visitor, here anonymous.
+      expect(await call({})).toMatchObject({ status: 403, type: json, body: { error: expect.any(String) } });
+      const started = await call({ origin });
+      expect(started).toMatchObject({ status: 200, type: json, body: { runId: expect.any(String) } });
+      const { runId } = started.body as { runId: string };
+      expect((await client.run(runId))?.startedBy).toEqual({ id: "anonymous" });
+    } finally {
+      await client.close();
+    }
+  });
+
   it("sends a GET or HEAD for /sites/<name>/… on the site's own host to its path there, the query kept", async () => {
     for (const [path, location] of [
       ["/sites/hello/posts/hello?ref=app&x=1", "/posts/hello?ref=app&x=1"],

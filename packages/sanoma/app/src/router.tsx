@@ -6,11 +6,14 @@ import { routeTree } from "#/routeTree.gen.ts";
 import { sitePath } from "./site-path.ts";
 import { pageHost } from "./site-url.ts";
 
-/** `/…` on the site's host ↔ `/sites/<site>/…` in the route tree: the site's routes at the root of its host. */
+/**
+ * `/…` on the site's host ↔ `/sites/<site>/…` in the route tree: the site's routes at the root of its
+ * host. All but `/api/call`, the site's `api` over plain JSON, which stays the app's own route there.
+ */
 function siteRewrite(site: string) {
   return {
     input: ({ url }: { url: URL }) => {
-      url.pathname = `/sites/${site}${url.pathname}`;
+      if (url.pathname !== "/api/call") url.pathname = `/sites/${site}${url.pathname}`;
       return url;
     },
     output: ({ url }: { url: URL }) => {
