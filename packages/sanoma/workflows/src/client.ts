@@ -478,7 +478,7 @@ export class SanomaClient {
     const handle = await this.dbos
       .enqueue(
         {
-          queueName: queueFor(this.config, workflow, sandbox) ?? this.config.queueName,
+          queueName: queueFor(this.config, workflow, args) ?? this.config.queueName,
           workflowName: workflow,
           workflowID: runId,
           applicationName: this.config.appName,

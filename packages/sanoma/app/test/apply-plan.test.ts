@@ -6,6 +6,7 @@ import { testDatabaseUrl, waitFor } from "sanoma/testing";
 import { defineConfig, memoryLedger, SanomaClient, startWorker, type Worker } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
+import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { asApplyPlan, exportName, plannedRows, rebindWords, shortId, STEP_GROUPS } from "../src/lib/apply-plan.ts";
 import { PLAN } from "./fixtures/apply-plan.ts";
@@ -140,6 +141,17 @@ describe("the change view in the app", () => {
     expect(run.status).toBe(200);
     expect(run.text).toContain('data-slot="apply-plan"');
     expect(run.text).toContain("No longer declared (2)");
+  });
+
+  it("starts a plan with no input, as `sanoma call plan` sends it: every field of its input is optional", async () => {
+    const res = await fetch(new URL("/api/call", app.url), {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: new URL(app.url).origin, [ACTOR_HEADER]: "tester" },
+      body: JSON.stringify({ name: "plan", id: crypto.randomUUID() }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    expect(asApplyPlan(await client.result(runId))).toBeDefined();
   });
 
   it("shows each resource's binding, the orphaned ones, and Apply", async () => {

@@ -21,8 +21,9 @@ export const RUNTIME_VERSION: string = manifest.version;
  * 4: a sleep for a duration reads DBOS's clock for its start (2026-10-25).
  * 5: a scheduled run admits its starter and asks the policy in two steps before the body (2026-10-25).
  * 6: pin a named connection before policy and recheck its binding before use (2026-10-29).
+ * 7: a start held off its workflow's queue runs as its child once approved (2026-11-18).
  */
-export const STEP_LAYOUT = 6;
+export const STEP_LAYOUT = 7;
 
 let dbosVersion: string | undefined;
 

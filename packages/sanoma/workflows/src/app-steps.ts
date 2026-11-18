@@ -34,15 +34,16 @@ export function appStepsOf(run: Run, missing: string): WorkerApp {
 /**
  * Starts a run of the built-in `name` as a child of this one, with the id `<run>:<suffix>` (so a
  * replay finds it), as the run's own actor, and waits for its output, counted as a wait for
- * another run: undefined and the error's message when it failed, or was cancelled (a worker on a
- * new version cancels an apply started on other code, `carryBuiltInRuns`).
+ * another run: undefined and the error's message when it failed (the error itself, as DBOS read it
+ * back, its `cause`), or was cancelled (a worker on a new version cancels an apply on other code,
+ * `carryBuiltInRuns`).
  */
 export async function child(
   run: Run,
   name: string,
   suffix: string,
   input: unknown,
-): Promise<{ runId: string; output?: unknown; error?: string }> {
+): Promise<{ runId: string; output?: unknown; error?: string; cause?: unknown }> {
   const runId = `${run.id}:${suffix}`;
   const handle = await run.state.startRun(name, runId, {
     input,
@@ -56,7 +57,7 @@ export async function child(
     if (causes(err).some((e) => e instanceof DBOSErrors.DBOSAwaitedWorkflowCancelledError))
       return { runId, error: "it was cancelled: the worker restarted on a new version before it ended" };
     if (isRunControlError(err)) throw err;
-    return { runId, error: errorMessage(err) };
+    return { runId, error: errorMessage(err), cause: err };
   }
 }
 

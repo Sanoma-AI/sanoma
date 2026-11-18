@@ -807,7 +807,7 @@ export async function callApi(
   switch (method) {
     case "start": {
       const options = { startedBy: actor, ...(id === undefined ? {} : { runId: id }) };
-      return { runId: await client.start(workflow, input, options) };
+      return { runId: await client.start(workflow, input === undefined ? {} : input, options) };
     }
     case "result": {
       const { runId, waitMs = RESULT_WAIT_MS } = read(ResultRef);

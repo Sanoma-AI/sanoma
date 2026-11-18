@@ -28,7 +28,7 @@ One rule is the runtime's own: once the company's policy allows it, a declared a
 permit (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflow:apply", resource);
 ```
 
-A `permit` is allowed only for visitors and agents, so for a person "the policy allows it" means no `forbid` refuses or holds it; one for agents only lifts this rule, and lets no visitor or api token in, whatever its groups. A deny throws `policy_denied` and starts nothing; a hold starts the run, which waits on the approval (`op: "workflow:<name>"`, no `opSeq`) before its body runs, and fails if it is rejected.
+A `permit` is allowed only for visitors and agents, so for a person "the policy allows it" means no `forbid` refuses or holds it; one for agents only lifts this rule, and lets no visitor or api token in, whatever its groups. A deny throws `policy_denied` and starts nothing; a hold starts the run, which waits on the approval (`op: "workflow:<name>"`, no `opSeq`) before its body runs, and fails if it is rejected. A held apply waits off the apply queue, so it keeps no other apply waiting: once approved, it runs as its child, `<runId>:apply`, on the queue, and its run's result is the child's report ([Apply](/workflows/resources/#apply)).
 
 ## Sending a decision
 

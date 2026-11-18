@@ -23,27 +23,46 @@ import {
 import { PLAN_WORKFLOW } from "../src/shared.ts";
 import { fakeMail, mailDataFile } from "./fakes/mail.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
-import { freshDatabase, pending, rootWith, setBuiltInCode, testhostInfra, waitFor } from "./harness.ts";
+import { failure, freshDatabase, pending, rootWith, setBuiltInCode, testhostInfra, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. One live apply at a time on a database: a second waits on the
 // apply queue, named by `applyAhead`, whoever starts it (a person, or a change's deploy); a sandbox
-// apply does not wait; a worker on a new version carries the old one's applies of its own code and
+// apply does not wait, nor one held at its start (an agent's, waiting for admin): approved, it runs as
+// its child on the queue; a worker on a new version carries the old one's applies of its own code and
 // those queued, in their places, and cancels one started on other code, so the queue's one place is free again.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const alice: Principal = { id: "alice" };
 const careful: Principal = { id: "careful" };
+const wary: Principal = { id: "wary" };
+const strict: Principal = { id: "strict" };
+const bot: Principal = { id: "bot", onBehalfOf: "alice" };
 // Every change of careful's waits for the lead: an apply of theirs waits at its plan's approval.
+// Every apply of wary's waits for the lead at its start, as an agent's waits for admin; strict's at both.
 const POLICY = `@hold("lead")
-forbid (principal == Sanoma::Principal::"careful", action in Sanoma::Action::"effect:write", resource);
+forbid (principal, action in Sanoma::Action::"effect:write", resource)
+when { [Sanoma::Principal::"careful", Sanoma::Principal::"strict"].contains(principal) };
+
+@hold("lead")
+forbid (principal, action == Sanoma::Action::"workflow:apply", resource)
+when { [Sanoma::Principal::"wary", Sanoma::Principal::"strict"].contains(principal) };
 `;
 const PEOPLE = `import { sanoma } from "sanoma/resources";
 
 export const alice = sanoma.person({ id: "alice" });
 export const careful = sanoma.person({ id: "careful" });
 export const lead = sanoma.person({ id: "lead" });
+export const wary = sanoma.person({ id: "wary" });
+export const strict = sanoma.person({ id: "strict" });
+export const bot = sanoma.agent({ id: "bot" });
+export const admin = sanoma.group({ name: "admin", members: [lead] });
 `;
 const sending = "resources/mail.ts#sending";
+/** An apply's results once another has created `sending`: it creates `dns` alone. */
+const written = [
+  expect.objectContaining({ id: sending, status: "done", action: "none" }),
+  expect.objectContaining({ id: "resources/mail.ts#dns", status: "done", action: "create" }),
+];
 
 /**
  * `fakeMail` behind a gate: while `hold` holds it, every operation waits, and `most` counts the
@@ -169,6 +188,82 @@ describe("one apply at a time", () => {
       expect.objectContaining({ id: sending, status: "done" }),
     ]);
     await client.applyReport(behind);
+  });
+
+  it("runs a person's apply while an agent's waits for admin at its start, then the agent's as its child on the queue", async () => {
+    const held = await client.apply({}, { startedBy: bot });
+    await waitFor(pending(() => client, held));
+    // Waiting for admin, it is off the apply queue, and no apply waits for it.
+    expect(await row(held)).toMatchObject({ status: "PENDING", queueName: resolved.queueName });
+    const first = await client.apply({ only: [sending] }, { startedBy: alice });
+    expect(await client.applyAhead(first)).toBeUndefined();
+    expect((await client.applyReport(first)).results).toEqual([
+      expect.objectContaining({ id: sending, status: "done", action: "create" }),
+    ]);
+
+    gated.hold();
+    await client.decide(held, { decision: "approve", by: { id: "lead" } });
+    const applying = `${held}:apply`;
+    await waitFor(() => gated.inFlight() === 1);
+    expect(await row(applying)).toMatchObject({ status: "PENDING", queueName: resolved.applyQueueName });
+    // An apply after it waits for the child, never for the run that started it.
+    const behind = await client.apply({}, { startedBy: alice });
+    expect(await stillQueued(behind)).toBe(true);
+    expect(await client.applyAhead(behind)).toMatchObject({ runId: applying });
+    expect(gated.most()).toBe(1);
+    gated.open();
+
+    // The outer run's reads are the apply's: its report, its result and its ledger's last record.
+    const report = await client.applyReport(held);
+    expect(report.results).toEqual(written);
+    expect(report).toEqual(await client.applyReport(applying));
+    expect(await client.result(held)).toEqual(report);
+    expect((await client.ledger(held)).at(-1)).toMatchObject({
+      type: "run.finished",
+      output: { results: report.results },
+    });
+    expect(await client.run(held)).toMatchObject({ status: "finished" });
+    await client.applyReport(behind);
+    expect(gated.most()).toBe(1);
+  });
+
+  it("runs nothing of an agent's apply its admin rejects", async () => {
+    const held = await client.apply({}, { startedBy: bot });
+    await waitFor(pending(() => client, held));
+    await client.decide(held, { decision: "reject", by: { id: "lead" } });
+    expect(await failure(client.applyReport(held))).toMatchObject({ code: "approval_rejected" });
+    expect(await row(`${held}:apply`)).toBeUndefined();
+    expect(gated.most()).toBe(0);
+  });
+
+  it("keeps a person's apply the company holds at its start off the queue too", async () => {
+    const held = await client.apply({}, { startedBy: wary });
+    await waitFor(pending(() => client, held));
+    expect(await row(held)).toMatchObject({ status: "PENDING", queueName: resolved.queueName });
+    const first = await client.apply({ only: [sending] }, { startedBy: alice });
+    await client.applyReport(first);
+    await client.decide(held, { decision: "approve", by: { id: "lead" } });
+    expect((await client.applyReport(held)).results).toEqual(written);
+    expect(await row(`${held}:apply`)).toMatchObject({ status: "SUCCESS", queueName: resolved.applyQueueName });
+  });
+
+  it("fails a held apply with its child's own error: a rejection of its plan, code and message as an unheld apply's", async () => {
+    const unheld = await client.apply({ only: [sending] }, { startedBy: careful });
+    await waitFor(pending(() => client, unheld));
+    await client.decide(unheld, { decision: "reject", by: { id: "lead" } });
+    const { message } = (await failure(client.result(unheld))) as Error;
+
+    const held = await client.apply({ only: [sending] }, { startedBy: strict });
+    await waitFor(pending(() => client, held));
+    await client.decide(held, { decision: "approve", by: { id: "lead" } });
+    const applying = `${held}:apply`;
+    await waitFor(pending(() => client, applying));
+    await client.decide(applying, { decision: "reject", by: { id: "lead" } });
+    expect(await failure(client.result(held))).toMatchObject({ code: "approval_rejected", message });
+    expect((await client.ledger(held)).at(-1)).toMatchObject({
+      type: "run.failed",
+      error: { code: "approval_rejected", message },
+    });
   });
 
   it("runs a sandbox apply while a live one holds the queue: it calls fakes, not the hosts", async () => {
@@ -349,5 +444,24 @@ describe("one apply at a time across a deploy", () => {
     // The queue's one place is free: the apply queued behind, carried, runs.
     expect(await row(behind)).toMatchObject({ applicationVersion: two.version });
     expect((await client.applyReport(behind)).plan.steps.map((s) => s.action)).toEqual(["none"]);
+  });
+
+  it("cancels an apply held at its start on other code at a new version's start, so its approval waits no more", async () => {
+    const old = await start(v1);
+    const held = await client.apply({}, { startedBy: bot });
+    await waitFor(pending(() => client, held));
+    expect(await row(held)).toMatchObject({ queueName: one.queueName });
+    await stop(old);
+    await setBuiltInCode(databaseUrl, held, "other");
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await start(v2);
+    expect(warn.mock.calls.map(([m]) => String(m))).toContain(
+      `sanoma: cancelled 1 apply run(s) started on other code, which no worker would run: ${held}. Apply again.`,
+    );
+    expect(await client.run(held)).toMatchObject({ status: "cancelled" });
+    expect(await failure(client.decide(held, { decision: "approve", by: { id: "lead" } }))).toMatchObject({
+      code: "run_ended",
+    });
   });
 });
