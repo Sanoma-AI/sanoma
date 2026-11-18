@@ -27,7 +27,8 @@ export interface SandboxOutputs {
 /**
  * A resource type's `sandbox`: the fields its boxes' choices are in, by dotted path into its
  * declared fields, and how its state reads. The vendor's own facts (its region, its type of
- * machine) are fields of the resource, never read from the environment.
+ * machine) are fields of the resource, never read from the environment. A choice the vendor makes
+ * itself names no field (Sanoma Cloud's image and size), and its backend's own is used.
  */
 export interface SandboxSpec {
   capabilities: SandboxCapabilities;
@@ -37,9 +38,9 @@ export interface SandboxSpec {
      * which the agents and their installs run, or its backend puts them there at `open`. It may
      * carry coding agents installed (`IMAGE_AGENTS`), as Sanoma's box image does.
      */
-    image: string;
+    image?: string;
     /** A box's size, in vCPUs: its memory follows the vendor's shapes. */
-    size: string;
+    size?: string;
   };
   outputs: (state: Record<string, unknown>) => SandboxOutputs;
 }
@@ -119,8 +120,8 @@ export type SandboxContext = Pick<LoginContext, "secrets"> & { declared: Record<
 
 /**
  * Throws what is wrong with a resource type's `sandbox`: a type apply cannot change (not
- * `writable`), a capability that is not a boolean, an input that names no field, `outputs` that
- * is not a function.
+ * `writable`), a capability that is not a boolean, an input given that names no field, `outputs`
+ * that is not a function.
  */
 export function checkSandbox(
   what: string,
@@ -135,7 +136,9 @@ export function checkSandbox(
   }
   for (const input of ["image", "size"] as const) {
     const path: unknown = sandbox.inputs?.[input];
-    if (typeof path !== "string" || !hasPath(type.schema, path)) problems.push(`${input} names no field (${path})`);
+    if (path !== undefined && (typeof path !== "string" || !hasPath(type.schema, path))) {
+      problems.push(`${input} names no field (${path})`);
+    }
   }
   if (typeof sandbox.outputs !== "function") problems.push("outputs must be a function of the state");
   if (problems.length) throw new Error(`${what}: its sandbox: ${problems.join("; ")}`);

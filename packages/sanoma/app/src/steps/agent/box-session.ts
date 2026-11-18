@@ -1,4 +1,5 @@
-import { dirname, relative, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 import {
   harnessSessionDataDirectoryPath,
   harnessStateDirectoryPath,
@@ -14,9 +15,10 @@ import {
   valueAt,
 } from "sanoma/workflows";
 import { errorMessage } from "sanoma/workflows/shared";
-import { DECLARE_BOX } from "../../api.ts";
+import { declareBox, INFRA } from "../../api.ts";
 import { errorParts, localBox, noKeyText } from "../../lib/chat.ts";
 import { placeOf } from "../../loopback.ts";
+import { accountOf } from "../../server/go-live.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { boxTurn, carryIn, checkFailed, checkIn } from "./carrier.ts";
 import { agentHome, boxName, inCheckout, type RealPaths, realIn, under, within } from "./checkout.ts";
@@ -50,10 +52,16 @@ export interface BoxSessionOptions {
 export const OWN_AGENTS_DIR = ".acp";
 
 /**
- * What a coding agent's turn is told on a live instance that declares no sandbox: what to declare,
- * and Agent37's connector page for its key (`noKeyText`).
+ * What a coding agent's turn is told on a live instance that declares no sandbox: what to declare
+ * (`declareBox`), with Agent37's connector page for its key (`noKeyText`); on Sanoma Cloud
+ * (`cloud`), the Cloud's box, which needs no key.
  */
-export const NO_BOX = noKeyText("agent37", DECLARE_BOX);
+export const noBox = (cloud: boolean) => (cloud ? declareBox(true) : noKeyText("agent37", declareBox(false)));
+
+/** Whether `infra.ts` declares the company's host on Sanoma Cloud (`accountOf`, a host that binds its own bootstrap). */
+const onCloud = async (resolved: ResolvedConfig) =>
+  resolved.root !== undefined &&
+  accountOf({ resolved }, await readFile(join(resolved.root, INFRA), "utf8").catch(() => "")) !== undefined;
 
 /**
  * The hosts a box of `resolved`'s may reach (`SandboxBackend.open`'s `hosts`): the package registry
@@ -73,7 +81,7 @@ export const boxHosts = ({ agents }: Pick<ResolvedConfig, "agents">): string[] =
  * reaching only `boxHosts`. The declared sandbox's (`sandboxes()`), through its connector's backend
  * given its fields, with the image and size it declares; else, on one person's own computer (the
  * loopback login, `step.loopbackLogin`, on a database of this computer's, `placeOf`), the local
- * backend's, which enforces no hosts; otherwise none: refused with `NO_BOX`, so that no agent runs
+ * backend's, which enforces no hosts; otherwise none: refused with `noBox`, so that no agent runs
  * inside a live instance, nor as the app's user on a server people sign in to.
  */
 export async function personBox(
@@ -87,7 +95,9 @@ export async function personBox(
     const make = resolved.sandboxBackends.get(declared.vendor);
     const { inputs } = resolved.types.get(`${declared.vendor}.${declared.type}`)!.sandbox!;
     if (!make) throw new Error(`${declared.id}: the ${declared.vendor} connector attaches no sandbox backend`);
-    const [image, size] = [valueAt(declared.desired, inputs.image), valueAt(declared.desired, inputs.size)];
+    // A choice whose field the type names none of is its vendor's.
+    const at = (path?: string) => (path === undefined ? undefined : valueAt(declared.desired, path));
+    const [image, size] = [at(inputs.image), at(inputs.size)];
     return {
       name,
       open: async () =>
@@ -100,7 +110,7 @@ export async function personBox(
         }),
     };
   }
-  if (!localBox(placeOf(resolved.databaseUrl), step.loopbackLogin)) throw new Error(NO_BOX);
+  if (!localBox(placeOf(resolved.databaseUrl), step.loopbackLogin)) throw new Error(noBox(await onCloud(resolved)));
   // This machine is the local box's image and size.
   return { name, open: () => localBackend(agentHome(step, "boxes")).open({ name, hosts }) };
 }
@@ -109,7 +119,7 @@ export async function personBox(
  * `sanoma check` on the draft `id` in the box of the person `step` is run by (`personBox`), once
  * that box is free: the draft carried into its clone (`carryIn`), then checked there (`checkIn`),
  * never on this instance. Publish's (`AppSteps.check`) and our loop's `run_checks`; a coding
- * agent's turn checks in the box it already has. No box (`NO_BOX`), or one that fails, is a
+ * agent's turn checks in the box it already has. No box (`noBox`), or one that fails, is a
  * result of one problem saying why. `step.signal` stops it.
  */
 export async function checkDraft(
@@ -130,7 +140,7 @@ export async function checkDraft(
     );
   } catch (err) {
     // Its text alone: a check's problems are plain text, where a chat message would link the
-    // connector page `NO_BOX` names.
+    // connector page `noBox` names.
     return checkFailed(errorParts(errorMessage(err)).text);
   }
 }

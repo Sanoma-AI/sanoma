@@ -6,7 +6,8 @@ import { database, host, PORT, REGIONS, repositoryOf } from "./connector.ts";
 // The connector's operations over Sanoma Cloud's API (`CloudApi`, sanoma-ops's workflows):
 // the driver's starts them over the public api, the fake's answers from its state. Both go
 // through `cloudOperations`, so they plan, adopt and refuse alike. The company is the token's
-// (one token, one company), named by its id in every call but a new company's sign-up.
+// (one token, one company), named by its id in every call but a new company's sign-up and the
+// boxes', which the Cloud finds by the token alone.
 
 /**
  * What `cloud-signup` takes: a part made for the company `id`, or, with `slug` instead, for a new
@@ -54,6 +55,18 @@ export interface Availability {
   yours: boolean;
 }
 
+/** A short-lived link to one port of a box: it reaches the port with no credential until `expiresAt` (ISO 8601). */
+export interface BoxLink {
+  url: string;
+  expiresAt: string;
+}
+
+/** A box `cloud-box-open` opened: its instance, a link to its runner's port, and the runner protocol it speaks. */
+export interface OpenedBox extends BoxLink {
+  id: string;
+  protocol: number;
+}
+
 /** Sanoma Cloud's API: sanoma-ops's workflows, each a run's output. Each call fails with a `DriverError`. */
 export interface CloudApi {
   /** Its answer is not read: `create` reads the part from `list`, as `read` will. */
@@ -67,6 +80,17 @@ export interface CloudApi {
   available(input: { slug: string }): Promise<Availability>;
   /** `cloud-invite`: a one-use link that signs the account's own `email` in on the company's host. */
   invite(input: { id: string; email: string }): Promise<{ url: string }>;
+  /**
+   * `cloud-box-open`: the token's company's box `name`, found or made, woken, Sanoma's runner
+   * started in it, reaching only `hosts`; a link to the runner's port.
+   */
+  boxOpen(input: { name: string; hosts: readonly string[] }): Promise<OpenedBox>;
+  /** `cloud-box-expose`: a link to another `port` of the company's box `name`. */
+  boxExpose(input: { name: string; port: number }): Promise<BoxLink>;
+  /** `cloud-box-stop`: the company's box `name` put to sleep, its files and memory kept. */
+  boxStop(input: { name: string }): Promise<unknown>;
+  /** `cloud-box-discard`: the company's box `name` deleted, with what was kept of it. */
+  boxDiscard(input: { name: string }): Promise<unknown>;
 }
 
 /** The driver's own refusal, before or instead of a call: never retried. */
@@ -156,6 +180,9 @@ async function tokenCompany(cloud: CloudApi): Promise<Company> {
   );
 }
 
+/** The boxes' state, from their company: they are the company's, bound by its id. */
+const sandboxState = (c: Company) => ({ id: c.id, healthy: c.status !== "failed" });
+
 /** A refusal to bind `what` the wizard made, whose `fields` differ from the declaration: it cannot change in place. */
 const differs = (what: string, id: string, fields: string[]) =>
   refused(
@@ -216,6 +243,14 @@ const planHost = async (
   return { action: moved ? "update" : "none", planned, unknown: renamed ? ["url"] : [], replace: [], state };
 };
 
+/** The boxes of the company `id`, while it is open: gone once it is closed, which discards them. */
+const readSandbox = async (cloud: CloudApi, id: string) => {
+  const found = await company(cloud, id);
+  return found && found.status !== "closed"
+    ? { id, gone: false, state: sandboxState(found) }
+    : { id, gone: true as const };
+};
+
 /** Without the plan's own fields: what a `plan` operation answers. */
 function answer(planned: Planned & { state?: unknown }): Planned {
   const { state: _, ...out } = planned;
@@ -236,12 +271,20 @@ async function deployed(cloud: CloudApi, id: string, now: HostState, hostname: s
 
 /**
  * The connector's operations over the API `api(call)` gives for each call: the database type's
- * (`database.*`, with `storeUrl`), the host type's (`host.*`), and the account's (`company.*`):
- * whether an address is free, the company's repository made, a sign-in link on its host.
+ * (`database.*`, with `storeUrl`), the host type's (`host.*`), the sandbox type's (`sandbox.*`, a
+ * declaration bound to the company, whose boxes `cloudBackend` opens), and the account's
+ * (`company.*`): whether an address is free, the company's repository made, a sign-in link on its
+ * host.
  */
 export function cloudOperations(api: (call: CallContext) => CloudApi) {
   const databaseRead = async ({ id }: { id: string }, call: CallContext) => readDatabase(api(call), id);
   const hostRead = async ({ id }: { id: string }, call: CallContext) => readHost(api(call), id);
+  const sandboxRead = async ({ id }: { id: string }, call: CallContext) => readSandbox(api(call), id);
+  /** Binds the declaration to the token's company, whose boxes the Cloud opens as people need them: nothing is made. */
+  const sandboxBind = async (_: unknown, call: CallContext) => {
+    const found = await tokenCompany(api(call));
+    return { id: found.id, state: sandboxState(found) };
+  };
   return {
     database: {
       import: databaseRead,
@@ -286,6 +329,21 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
         stored: false as const,
         reason: "Sanoma Cloud binds the database's URL to the company's host itself",
       }),
+    },
+    sandbox: {
+      import: sandboxRead,
+      read: sandboxRead,
+      plan: async ({ id, desired }: { id?: string; desired?: State }, call: CallContext): Promise<Planned> => {
+        if (!desired) return { action: id === undefined ? "none" : "delete", ...NONE };
+        const state = id === undefined ? undefined : (await readSandbox(api(call), id)).state;
+        if (state) return { action: "none", planned: state, ...NONE };
+        const { id: made } = await tokenCompany(api(call));
+        return { action: "create", planned: { id: made, healthy: null }, unknown: ["healthy"], replace: [] };
+      },
+      create: sandboxBind,
+      update: sandboxBind,
+      // The boxes stay until the company closes, which discards them; each is discarded on its own too (`SandboxBackend.discard`).
+      delete: async ({ id }: { id: string }) => ({ id, gone: true as const }),
     },
     company: {
       available: (input: { slug: string }, call: CallContext) => api(call).available(input),

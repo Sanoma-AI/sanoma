@@ -1,14 +1,15 @@
 # connectors/sanoma-cloud/src
 
-Source of `@sanoma-ai/connector-sanoma-cloud`: the database and host types, the driver over sanoma-ops's workflows and an in-memory fake.
+Source of `@sanoma-ai/connector-sanoma-cloud`: the database, host and sandbox types, the boxes' backend, the driver over sanoma-ops's workflows and an in-memory fake.
 
 ## Contents
 
-| Path                             | What it is                                                                                                                                                                                             |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`connector.ts`](connector.ts)   | `database` (the `Database` contract) and `host` (the `Host` contract, binding its own bootstrap, naming its `account`'s operations), `REGIONS`, the slug rule, and `cloudOps` with the `company` group |
-| [`operations.ts`](operations.ts) | `CloudApi` (the workflows) and `cloudOperations`: read, plan, adopt, deploy (a rename too) and refuse, and the account's (`company.*`), shared by the driver and the fake                              |
-| [`driver.ts`](driver.ts)         | `cloudDriver`: each workflow started and its result read over `POST /api/call`, with `SANOMA_CLOUD_TOKEN` as a bearer, and the error mapping                                                           |
-| [`fake.ts`](fake.ts)             | `fakeCloud`: the token's one in-memory company, a host's runtime behind an address that starts it on a request                                                                                         |
-| [`resources.ts`](resources.ts)   | The `./resources` entry: `cloud.database` and `cloud.host`, the constructors a data file declares them with                                                                                            |
-| [`index.ts`](index.ts)           | The package root: `cloud` with its driver and fake attached (`withSetup`), and `REGIONS`                                                                                                               |
+| Path                             | What it is                                                                                                                                                                                                                                                          |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`connector.ts`](connector.ts)   | `database` (the `Database` contract), `host` (the `Host` contract, binding its own bootstrap, naming its `account`'s operations) and `sandbox` (the `Sandbox` contract, naming no image or size), `REGIONS`, the slug rule, and `cloudOps` with the `company` group |
+| [`operations.ts`](operations.ts) | `CloudApi` (the workflows, the boxes' among them) and `cloudOperations`: read, plan, adopt, deploy (a rename too) and refuse, the sandbox declaration bound to the company, and the account's (`company.*`), shared by the driver and the fake                      |
+| [`backend.ts`](backend.ts)       | `cloudBackend`: the `Sandbox` backend over `CloudApi`'s `cloud-box-*` workflows, a runner of another protocol refused, the box driven over its link (`runnerBox`)                                                                                                   |
+| [`driver.ts`](driver.ts)         | `workflowsApi` (each workflow started and its result read over `POST /api/call`, with `SANOMA_CLOUD_TOKEN` as a bearer, and the error mapping) and `cloudDriver` over it                                                                                            |
+| [`fake.ts`](fake.ts)             | `fakeCloud`: the token's one in-memory company, a host's runtime behind an address that starts it on a request, its agent boxes with Sanoma's runner on this machine (`sandbox()`), `BOX_LIMITS` and `BOXES_BUSY`                                                   |
+| [`resources.ts`](resources.ts)   | The `./resources` entry: `cloud.database`, `cloud.host` and `cloud.sandbox`, the constructors a data file declares them with                                                                                                                                        |
+| [`index.ts`](index.ts)           | The package root: `cloud` with its driver, fake and sandbox backend attached (`withSetup`), and `REGIONS`                                                                                                                                                           |

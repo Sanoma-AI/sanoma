@@ -43,7 +43,7 @@ import { DRIFT_TONE } from "#/lib/tone.ts";
 import {
   type AppConfig,
   type CompanyState,
-  DECLARE_BOX,
+  declareBox,
   errorBodyOf,
   type GoLiveRun,
   INFRA,
@@ -280,6 +280,7 @@ function Hosting({
   children: ReactNode;
 }) {
   const { resource: selected, edit, own } = Route.useSearch();
+  const { data: company } = useQuery(companyStateQuery({ force: true }));
   const slots = useMemo(() => slotsOf(config), [config]);
   const results = useMemo(() => new Map(report?.resources.map((r) => [r.id, r])), [report]);
   const rows = useMemo(() => {
@@ -300,7 +301,7 @@ function Hosting({
       <CrumbHeader action={action} />
       {children}
       <StatePanel own={own === true} />
-      {boxless(config) && <Notice>{DECLARE_BOX}.</Notice>}
+      {boxless(config) && <Notice>{declareBox(company?.declared === "cloud")}.</Notice>}
       {slots.filled.length > 0 && (
         <div className="grid gap-(--gap-region) md:grid-cols-2 2xl:grid-cols-4">
           {slots.filled.map(({ title, capability, resource }) => (

@@ -8,15 +8,15 @@ import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { type ReactNode, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ActorContext } from "../src/actor.ts";
-import { DECLARE_BOX } from "../src/api.ts";
+import { declareBox } from "../src/api.ts";
 import { stepLabel, type ToolPart } from "../src/components/shell/chat-parts.tsx";
 import { ChatColumn } from "../src/components/shell/chat.tsx";
 import { Composer } from "../src/components/shell/composer.tsx";
 import { ConnectAgent } from "../src/components/shell/connect-agent.tsx";
 import sanoma from "../src/icon-small.svg?url";
 import { Thread } from "../src/components/shell/thread.tsx";
-import type { AppConfig } from "../src/api.ts";
-import { chatModelQuery, chatQuery, chatsQuery, configQuery } from "../src/queries.ts";
+import type { AppConfig, CompanyState } from "../src/api.ts";
+import { chatModelQuery, chatQuery, chatsQuery, companyStateQuery, configQuery } from "../src/queries.ts";
 import { type ChatMessage, engineName, engineOf, enginesHere, enginesOf } from "../src/lib/chat.ts";
 
 // The chat's thread on a scripted conversation (`createChat`) through the real `useChat`: no model,
@@ -466,9 +466,17 @@ describe("Connect your agent", () => {
 
   it("says, live with no box declared, what to declare in place of the Claude plan's sign-in", async () => {
     draw(() => <ConnectAgent onChoose={choose} />, config("live", false));
-    expect(await screen.findByText(`${DECLARE_BOX}.`)).toBeTruthy();
+    expect(await screen.findByText(`${declareBox(false)}.`)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Sign in with Claude" })).toBeNull();
     expect(screen.queryByText(/Other agents/)).toBeNull();
+  });
+
+  it("says, on Sanoma Cloud with no box declared, to declare the Cloud's box", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } } });
+    queryClient.setQueryData(companyStateQuery().queryKey, { declared: "cloud" } as CompanyState);
+    draw(() => <ConnectAgent onChoose={choose} />, config("live", false), queryClient);
+    expect(await screen.findByText(`${declareBox(true)}.`)).toBeTruthy();
+    expect(screen.queryByText(/AGENT37_API_KEY/)).toBeNull();
   });
 });
 

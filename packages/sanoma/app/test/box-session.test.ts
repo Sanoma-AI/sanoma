@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { github } from "@sanoma-ai/connector-github";
+import { cloud } from "@sanoma-ai/connector-sanoma-cloud";
 import { pi } from "@sanoma-ai/connector-pi";
 import { waitFor } from "sanoma/testing";
 import { checkSandbox, fakeSandbox } from "sanoma/testing/sandbox";
@@ -20,7 +21,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { placeOf } from "../src/loopback.ts";
 import { acpEngine } from "../src/steps/agent/acp.ts";
-import { boxHosts, boxSession, checkDraft, homeOf, NO_BOX, personBox } from "../src/steps/agent/box-session.ts";
+import { boxHosts, boxSession, checkDraft, homeOf, noBox, personBox } from "../src/steps/agent/box-session.ts";
 import { boxName } from "../src/steps/agent/checkout.ts";
 import { harnessEngine } from "../src/steps/agent/harness.ts";
 import { freePort, localBackend } from "../src/steps/agent/local-box.ts";
@@ -287,7 +288,7 @@ describe("personBox", () => {
     expect(placeOf(resolved.databaseUrl)).toBe("this-computer");
     const draft = { root: base, draft: () => undefined, diff: () => undefined } as unknown as Source;
     const step = { resolved, by, client: undefined as never, source: draft, loopbackLogin: false };
-    await expect(personBox(step)).rejects.toThrow(NO_BOX);
+    await expect(personBox(step)).rejects.toThrow(noBox(false));
     expect(await checkDraft(step, { id: "d1" })).toMatchObject({
       ok: false,
       problems: [expect.stringContaining("one people sign in to")],
@@ -298,10 +299,10 @@ describe("personBox", () => {
     // Pi's and Copilot's connectors, which give the engines their agents.
     const resolved = resolveConfig({ workflows: [], connectors: [pi, github], root: company(), databaseUrl: LIVE });
     const live = { resolved, by, client: undefined as never, loopbackLogin: true };
-    await expect(personBox(live)).rejects.toThrow(NO_BOX);
+    await expect(personBox(live)).rejects.toThrow(noBox(false));
     const declare =
       "Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: declare one in resources/sanoma/infra.ts (`export const box = agent37.instance({})`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY";
-    expect(NO_BOX).toBe(`${declare} [connector:agent37]`);
+    expect(noBox(false)).toBe(`${declare} [connector:agent37]`);
     // Publish's check and run_checks: a result the cards show, never run here.
     expect(await checkDraft(live, { id: "d1" })).toEqual({
       ok: false,
@@ -315,10 +316,44 @@ describe("personBox", () => {
       for (const stream of [harnessEngine("pi")(turn), acpEngine("copilot")(turn)]) {
         const errors: string[] = [];
         for await (const chunk of stream) if (chunk.type === "error") errors.push(chunk.errorText);
-        expect(errors).toEqual([NO_BOX]);
+        expect(errors).toEqual([noBox(false)]);
       }
     } finally {
       error.mockRestore();
     }
+  });
+
+  it("says, on a live Sanoma Cloud company that declares none, to declare the Cloud's box, which needs no key", async () => {
+    const onCloud = company({
+      "resources/sanoma/infra.ts":
+        'import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";\nexport const store = cloud.database({});\nexport const host = cloud.host({ hostname: "acme.sanoma.work", database: store });\n',
+    });
+    const resolved = resolveConfig({ workflows: [], connectors: [cloud], root: onCloud, databaseUrl: LIVE });
+    const live = { resolved, by, client: undefined as never, loopbackLogin: false };
+    await expect(personBox(live)).rejects.toThrow(noBox(true));
+    expect(noBox(true)).toBe(
+      "Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: declare Sanoma Cloud's in resources/sanoma/infra.ts (`export const box = cloud.sandbox({})`): Sanoma Cloud runs it, with nothing to set",
+    );
+  });
+
+  it("opens Sanoma Cloud's box through its backend when the company declares it, with no image or size of its own", async () => {
+    const declaring = company({
+      "resources/sanoma/infra.ts":
+        'import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";\nexport const box = cloud.sandbox({});\n',
+    });
+    const opened: unknown[] = [];
+    const connector = withSetup(cloud, {
+      sandbox: () => ({
+        open: async (opts) => {
+          opened.push(opts);
+          return box;
+        },
+        discard: async () => {},
+      }),
+    });
+    const resolved = resolveConfig({ workflows: [], connectors: [connector], root: declaring, databaseUrl: LIVE });
+    const chosen = await personBox({ resolved, by, client: undefined as never, loopbackLogin: false });
+    expect(await chosen.open()).toBe(box);
+    expect(opened).toEqual([{ name: boxName("acme", "ada"), hosts: [REGISTRY] }]);
   });
 });

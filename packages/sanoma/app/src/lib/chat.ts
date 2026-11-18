@@ -109,7 +109,7 @@ export const localBox = (place: Place, loopbackLogin: boolean) => place !== "liv
 
 /**
  * Whether an instance with no local box (`localBox`) declares no box for the coding agents, which
- * run in one there (`DECLARE_BOX`): no resource whose type meets the `sandbox` contract.
+ * run in one there (`declareBox`): no resource whose type meets the `sandbox` contract.
  */
 export const boxless = (config: Pick<AppConfig, "place" | "loopbackLogin" | "resources" | "resourceTypes">) =>
   !localBox(config.place, config.loopbackLogin) &&
