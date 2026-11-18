@@ -21,3 +21,4 @@ pnpm-debug.log*
 
 # the connector reference, written by scripts/reference.ts before each dev and build
 src/data/reference.json
+.wrangler
