@@ -82,7 +82,7 @@ export default defineConfig({
 - `hostname` is the one host the router answers on, over HTTPS. Its issuer is `https://<hostname>` and its agent surface `https://<hostname>/mcp`.
 - `companies.collection` names one of this instance's [collections](/workflows/collections/). A record's key is the company's id (letters, digits, `-` and `_`), and its `url` field (another field with `companies.url`) is that company's base URL: an `https` origin with no path, user or query, such as `https://acme.sanoma.example`. Plain `http` is taken only for this machine (`localhost`, `127.x.x.x`, `::1`). A record with any other URL is not routed to.
 - `companies.live` is optional: only records whose `field` is `is` (or one of a list) are routed to. Without it, every record with a URL is.
-- `SANOMA_ROUTER_SECRET`, in the app's environment, is the router's master secret: 32 visible ASCII characters or more. It is sent to no one. Each company gets its own secret, derived from the master and the company's id ([below](#each-companys-secret)). Without it the router forwards nothing and its routes answer 503; one that is shorter, or holds a space or a character outside ASCII, stops `sanoma serve` at its start (on a Worker it is logged and no router is served).
+- `SANOMA_ROUTER_SECRET`, in the app's environment, is the router's master secret: 32 visible ASCII characters or more. On a `cloudflare.host`, apply binds it from the stored secret of that name ([below](#on-cloudflare)). It is sent to no one. Each company gets its own secret, derived from the master and the company's id ([below](#each-companys-secret)). Without it the router forwards nothing and its routes answer 503; one that is shorter, or holds a space or a character outside ASCII, stops `sanoma serve` at its start (on a Worker it is logged and no router is served).
 
 `sanoma check` refuses a `router` whose hostname is no hostname, whose collection the company does not have, or whose fields the collection lacks. The router reads the list on each request, through the app's own client, with no policy asked and nothing recorded (`SanomaClient.routedCompany`, which answers only a company's URL and whether it is routed to): it is the runtime's own read, not a person's. A company is found by its exact id, never by a host a request names, so the router contacts no address outside the list.
 
@@ -90,7 +90,7 @@ Whoever may write the companies collection controls where each company's agent t
 
 The router's hostname is its own: `sanoma serve` refuses to start when it is `SANOMA_HOSTNAME` or a public site's domain (`SANOMA_DOMAINS`); a Worker logs it and serves no router.
 
-On the router's hostname the app serves these routes and nothing else (any other path is a 404, `/healthz` and the sign-in among them), ahead of every login. On the Worker, the hostname is one more host it answers beside `SANOMA_HOSTNAME` and the sites' domains.
+On the router's hostname the app serves these routes and nothing else (any other path is a 404, `/healthz` and the sign-in among them), ahead of every login. On the Worker, the hostname is one more host it answers beside `SANOMA_HOSTNAME` and the sites' domains, and a `cloudflare.host` attaches it ([below](#on-cloudflare)).
 
 | Route                                           | What it answers                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -125,6 +125,8 @@ SANOMA_COMPANY=acme                             # this company's id in the route
 SANOMA_ROUTER_SECRET=…                          # this company's own secret at the router
 ```
 
+On a `cloudflare.host`, declare them as `agents` instead ([below](#on-cloudflare)).
+
 That company then:
 
 - signs tokens as the router (`iss` is `https://mcp.acme.example`, `aud` its `/mcp`), and names itself in each access token (`sanoma_company`);
@@ -136,4 +138,32 @@ That company then:
 
 What the tag does not do: it is not a credential. Anyone can write a token that names any company, and the router will send it there, where that company's sign-in refuses it. The router stops nothing a company would not stop itself.
 
-Not verified yet: no real Claude client has completed a sign-in that starts at the router's host and continues on a company's. The tests drive the whole flow with their own client, on Node and (for discovery and one `/mcp` call) on workerd. The Cloudflare host does not bind the router's variables or attach the router's hostname yet, so on a Worker they are set by hand.
+### On Cloudflare
+
+A [`cloudflare.host`](/hosting/hosts/) sets both sides up; nothing is set on the Worker by hand.
+
+A company behind a router declares `agents` on its host:
+
+```ts
+// resources/sanoma/infra.ts
+import { cloudflare } from "@sanoma-ai/connector-cloudflare/resources";
+import { secret } from "sanoma/resources";
+
+export const host = cloudflare.host({
+  name: "acme",
+  database: store,
+  agents: {
+    url: "https://mcp.acme.example/mcp", // SANOMA_AGENT_URL
+    company: "acme", // SANOMA_COMPANY
+    secret: secret("ROUTER_SECRET_ACME"), // the name that holds this company's own secret
+  },
+});
+```
+
+Apply writes the three bindings on the Worker's next upload. `secret` names a stored secret and is never the value: store this company's own secret under that name, or bind the name to a variable where apply runs (`secrets: { bindings: { ROUTER_SECRET_ACME: { env: "ACME_ROUTER_SECRET" } } }`). The name is your own, not one that starts with `SANOMA_`. `sanoma check` refuses a `url` that is not a router's `/mcp` and a `company` that is no id; apply refuses a stored secret no router could send, before it changes anything, and never shows it. Plans, states and the ledger hold the URL and the company, and the secret's name only.
+
+The instance that serves the router declares nothing more: its config's `router.hostname` is enough. Apply attaches that hostname to the Worker as a custom domain, beside the app's `hostname` and the sites' domains, and binds the master secret from the secret stored as `SANOMA_ROUTER_SECRET` (or bound, `SANOMA_ROUTER_SECRET: { env: "SANOMA_ROUTER_SECRET" }`). With no value under that name the Worker is deployed without it and the router's routes answer 503. `sanoma check` reports a router's hostname that is the host's own `hostname` or a site's domain.
+
+Take `agents` out of the data file, or `router` out of the config, and the next apply uploads the Worker without the bindings and detaches the router's hostname. A host with `agents` in a company whose config has a `router` is a problem in `sanoma check`: the one variable cannot hold both secrets. A container that is running keeps the environment it started with, so after changing `agents` alone, or a secret's value, advance the host's `configurationRevision`. The connector's [README](https://github.com/Sanoma-AI/sanoma/blob/main/connectors/cloudflare/README.md#the-agents-router) has the requests and the refusals.
+
+Not verified yet: no real Claude client has completed a sign-in that starts at the router's host and continues on a company's. The tests drive the whole flow with their own client, on Node and (for discovery and one `/mcp` call) on workerd. The Cloudflare host's bindings and the router's hostname are tested on its fake and on replies written from Cloudflare's API reference, not on a live account.
