@@ -19,6 +19,8 @@ const connectors = JSON.parse(readFileSync(new URL("./src/data/reference.json", 
 // source (scripts/reference.ts).
 export default defineConfig({
   site: "https://docs.sanoma.work",
+  // A page loads when its link is hovered, so moving between pages is near instant.
+  prefetch: { prefetchAll: true, defaultStrategy: "hover" },
   // The website's type, by Astro's fonts (docs.astro.build/en/guides/fonts): downloaded from
   // Fontsource at build, served from /_astro/fonts, and written into each page by
   // src/components/Head.astro.
