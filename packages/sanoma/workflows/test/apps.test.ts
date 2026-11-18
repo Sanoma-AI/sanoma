@@ -182,8 +182,8 @@ describe("apps", () => {
     // The company's operations, each with its app, its code and its outline, as a workflow's.
     const operations = description.ops.filter((op) => op.vendor === "operations");
     expect(operations.map(({ id, app, ops, problems, direct }) => ({ id, app, ops, problems, direct }))).toEqual([
-      { id: "operations.crm.score.run", app: "crm", ops: ["data.crm.customers.get"], problems: [], direct: false },
-      { id: "operations.quote.run", app: undefined, ops: ["data.shop.customers.get"], problems: [], direct: false },
+      { id: "operations.crm.score.run", app: "crm", ops: ["data.crm.customers.get"], problems: [], direct: true },
+      { id: "operations.quote.run", app: undefined, ops: ["data.shop.customers.get"], problems: [], direct: true },
     ]);
     expect(operations[1]!.outline).toMatchObject({ nodes: [{ kind: "op", id: "data.shop.customers.get" }] });
     expect(operations[1]!.source).toContain("defineOperation");

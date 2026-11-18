@@ -47,9 +47,10 @@ export interface CtxRunner {
   op(op: Op, input: unknown, at: Placed, connection?: ConnectionRef): Promise<unknown>;
   /** The run's clock. */
   now(): Promise<number>;
-  approval(title: string, request: ApprovalRequest, at: Placed): Promise<ApprovalResult>;
-  sleep(request: unknown, at: Placed): Promise<void>;
-  all(members: unknown, at: Placed): Promise<unknown[]>;
+  /** A workflow's members alone: a company operation's `uses` never names them. */
+  approval?(title: string, request: ApprovalRequest, at: Placed): Promise<ApprovalResult>;
+  sleep?(request: unknown, at: Placed): Promise<void>;
+  all?(members: unknown, at: Placed): Promise<unknown[]>;
 }
 
 /** The step's name the outline gives a call's node: none for a computed op without one, or an approval's title that is no literal. */
@@ -99,7 +100,7 @@ export function ctxOf(
     members.approval = placed(
       "approval",
       (title: string) => title,
-      (at, title, req) => runner.approval(title, req, at),
+      (at, title, req) => runner.approval!(title, req, at),
     );
   }
   if (uses.includes("sleep")) {
@@ -107,14 +108,14 @@ export function ctxOf(
     members.sleep = placed(
       "sleep",
       (_req, options?: StepOptions) => options?.name ?? DEFAULT_SLEEP_NAME,
-      (at, req) => runner.sleep(req, at),
+      (at, req) => runner.sleep!(req, at),
     );
   }
   if (uses.includes("all"))
     members.all = placed(
       "all",
       () => "all",
-      (at, list) => runner.all(list, at),
+      (at, list) => runner.all!(list, at),
     );
   const owner = isOperation(wf) ? `operation "${wf.id}"` : `workflow "${wf.name}"`;
   return guarded(members, "ctx", owner, { startedBy: startedByOf(run.actor) });

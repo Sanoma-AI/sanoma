@@ -2,7 +2,7 @@ import { connectionRefSchema, type ConnectionRef } from "./connection.ts";
 import { z } from "zod";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { isDirect } from "./direct.ts";
-import type { Op } from "./op.ts";
+import { isOperation, type Op } from "./op.ts";
 import type { CALL_WORKFLOW } from "./shared.ts";
 
 export { CALL_WORKFLOW } from "./shared.ts";
@@ -20,7 +20,7 @@ export const CallInput = z.object({ op: z.string(), input: z.unknown(), connecti
 
 /**
  * The call workflow for a config: it `uses` every operation that may be called directly and has
- * a driver; `resolveConfig` adds it when there is one. A run calls `input.op` with `input.input`,
+ * a driver, or is a company operation, whose body runs in the run; `resolveConfig` adds it when there is one. A run calls `input.op` with `input.input`,
  * and returns its output; inside it the call is made as the person who started the run, so a
  * collection's save records them as `updatedBy`.
  */
@@ -30,7 +30,7 @@ export function callWorkflow(
   types: ReadonlyMap<string, unknown>,
 ): WorkflowDefinition<readonly Op[], typeof CallInput> {
   const uses = [...ops.values()]
-    .filter((op) => isDirect(op, types) && drivers.has(op.id))
+    .filter((op) => isDirect(op, types) && (drivers.has(op.id) || isOperation(op)))
     .toSorted((a, b) => a.id.localeCompare(b.id));
   return defineWorkflow({
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
@@ -41,7 +41,7 @@ export function callWorkflow(
     uses,
     // `ctx` refuses an operation that is not in `uses`: one that may not be called directly, or has no driver.
     run: async (ctx, input) => {
-      // Four segments for an app's collection: `data.<app>.<collection>.<op>`.
+      // Four segments for an app's collection, `data.<app>.<collection>.<op>`, or company operation, `operations.<app>.<name>.run`.
       const [vendor = "", a = "", b = "", c] = input.op.split(".");
       return c === undefined
         ? ctx[vendor]![a]![b]!(input.input, { connection: input.connection })

@@ -1,8 +1,11 @@
 import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { ghost } from "@sanoma-ai/connector-ghost";
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineOperation, defineWorkflow, errorCode, type LedgerRecord } from "../src/index.ts";
+import score from "./fixtures/company-apps/apps/crm/operations/score.ts";
+import { customers as crmCustomers } from "./fixtures/company-apps/apps/crm/resources/data.ts";
 import { failure, pending, rootWith, types, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
@@ -231,5 +234,46 @@ describe("a company operation in a run", () => {
       "run.finished",
     ]);
     expect(records.find((r) => r.type === "approval.requested")).toMatchObject({ within: 1 });
+  });
+});
+
+// An app's operation, `operations.crm.score.run`: four names, which the built-in call workflow reaches.
+const appRoot = rootWith({
+  "policies/policy.cedar": `@hold("lead")
+forbid (principal, action == Sanoma::Action::"operations.crm.score.run", resource);
+`,
+  "resources/people.ts": `import { sanoma } from "sanoma/resources";
+
+export const alice = sanoma.person({ id: "alice" });
+export const lead = sanoma.person({ id: "lead" });
+`,
+});
+
+describe("a company operation called directly and held", () => {
+  const app = useApp("operations-direct", () => ({
+    workflows: [],
+    operations: [score],
+    collections: [crmCustomers],
+    root: appRoot,
+  }));
+  const c = () => app.client;
+
+  it("is made by a run of call once approved, an app's operation by its four names", async () => {
+    const id = randomUUID();
+    const runId = `call:alice:${id}`;
+    const call = () => c().call("operations.crm.score.run", { email: "ada@acme.test" }, { actor: "alice", id });
+    expect(await failure(call())).toMatchObject({ code: "approval_pending", data: { runId } });
+    await waitFor(pending(c, runId));
+    await c().decide(runId, { decision: "approve", by: { id: "lead" } });
+    expect(await c().result(runId)).toEqual({ score: 0 });
+    expect(types(await c().ledger(runId))).toEqual([
+      "run.started",
+      "op.called operations.crm.score.run",
+      "approval.requested",
+      "approval.decided",
+      "op.called data.crm.customers.get",
+      "run.finished",
+    ]);
+    expect(await call()).toEqual({ score: 0 });
   });
 });

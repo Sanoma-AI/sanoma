@@ -14,6 +14,7 @@ import {
   CALL_WORKFLOW,
   defineConnector,
   defineDriver,
+  defineOperation,
   defineWorkflow,
   isDirect,
   resolveConfig,
@@ -22,11 +23,14 @@ import {
   withSetup,
 } from "../src/index.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
+import { VISITOR_DENIED } from "../src/policy.ts";
+import { ANONYMOUS_PRINCIPAL, visitorPrincipal } from "../src/shared.ts";
 import { failure, rootWith, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. Operations called directly (`SanomaClient.call`): a read checked
 // and not recorded, a write recorded with its record in one transaction, a hold made a run of the
-// built-in `call` workflow, and `latest`.
+// built-in `call` workflow, `latest`, and a company operation's body, each call inside it a direct
+// call of its own, as the person or a visitor.
 
 const rename = {
   effect: "write",
@@ -55,7 +59,46 @@ const acmeDriver = defineDriver(acme, {
   },
 });
 
-/** Allows, but denies a lead `lost` and holds one `won` for `lead`. */
+/** A lead and what acme calls its company: a company operation that reads. */
+const lookup = defineOperation({
+  name: "lookup",
+  input: z.object({ company: z.string() }),
+  uses: [outbound.get, acme.customer.get],
+  run: async (ctx, { company }) => {
+    const found = await ctx.data.outbound.get({ key: company });
+    const customer = await ctx.acme.customer.get({ id: company });
+    return { stage: found?.record.stage ?? null, name: customer.name };
+  },
+});
+
+/** Two leads saved, the second at `stage`: a company operation that writes, over a collection. */
+const pair = defineOperation({
+  name: "pair",
+  input: z.object({ first: z.string(), second: z.string(), stage: z.enum(["researched", "meeting", "won", "lost"]) }),
+  uses: [outbound.save],
+  run: async (ctx, { first, second, stage }) => {
+    const a = await ctx.data.outbound.save({
+      record: { company: first, contact: "ada@first.test", stage: "researched", owner: "ada" },
+    });
+    const b = await ctx.data.outbound.save({
+      record: { company: second, contact: "ada@second.test", stage, owner: "ada" },
+    });
+    return { saved: [a.key, b.key] };
+  },
+});
+
+/** A rename at acme: a company operation that writes at a vendor, a workflow's step only. */
+const relabel = defineOperation({
+  name: "relabel",
+  input: z.object({ id: z.string() }),
+  uses: [acme.customer.rename],
+  run: async (ctx, { id }) => ctx.acme.customer.rename({ id, name: "Acme Two" }),
+});
+
+/**
+ * Allows, but denies a lead `lost` and holds one `won` for `lead`, and holds a pair that ends at a
+ * `meeting`; lets `anonymous` look a lead up, and holds its read of the customer `Held` for `lead`.
+ */
 const root = rootWith({
   "policies/policy.cedar": `@reason("leads are not lost")
 forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
@@ -64,6 +107,16 @@ when { context.input.record.stage == "lost" };
 @hold("lead")
 forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
 when { context.input.record.stage == "won" };
+
+@hold("lead")
+forbid (principal, action == Sanoma::Action::"operations.pair.run", resource)
+when { context.input.stage == "meeting" };
+
+permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"operations.lookup.run", resource);
+
+@hold("lead")
+forbid (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"acme.customer.get", resource)
+when { context.input.id == "Held" };
 `,
   "resources/people.ts": `import { sanoma } from "sanoma/resources";
 
@@ -76,6 +129,7 @@ const config: SanomaConfig = {
   workflows: [],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
+  operations: [lookup, pair, relabel],
   root,
 };
 const lead = (company: string, stage = "researched") => ({
@@ -105,14 +159,12 @@ describe("isDirect", () => {
       true,
     ],
     ["a resource type's read", { id: "acme.widget.get", vendor: "acme", resource: "widget", effect: "read" }, false],
-    // A workflow's step only, for now: a page does not call one.
-    [
-      "a company operation's read",
-      { id: "operations.quote.run", vendor: "operations", resource: "quote", effect: "read" },
-      false,
-    ],
   ] as const)("is %s: %o", (_, op, direct) => {
     expect(isDirect(op, types)).toBe(direct);
+  });
+
+  it("is a company operation's whose every used operation is, and not one that writes at a vendor", () => {
+    expect([lookup, pair, relabel].map((op) => isDirect(op, types))).toEqual([true, true, false]);
   });
 });
 
@@ -152,6 +204,14 @@ describe("a direct call", () => {
       .where(eq(data.collection, "outbound"))
       .orderBy(asc(data.key));
   const dbos = () => (client as unknown as { dbos: DBOSClient }).dbos;
+  /** The run's records, as a company operation's tests read them. */
+  const calls = async () =>
+    (await records()).map((r) => ({
+      id: r.id,
+      op: (r as { op: string }).op,
+      within: (r as { within?: number }).within,
+      error: (r as { error?: { code?: string } }).error?.code,
+    }));
 
   it("reads as the person under the policy, records nothing, and never reaches DBOS", async () => {
     await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "seed" });
@@ -519,7 +579,12 @@ describe("a direct call", () => {
 
   it("refuses a resource type's operation and the runtime's own", async () => {
     const host = fakeHost(async () => ({ url: "http://localhost", stop: async () => undefined }));
-    const hosted = await SanomaClient.connect({ ...config, connectors: [host.connector], databaseUrl });
+    const hosted = await SanomaClient.connect({
+      ...config,
+      connectors: [host.connector],
+      operations: [],
+      databaseUrl,
+    });
     try {
       for (const op of ["testhost.app.read", "testhost.app.import", "sanoma.source.resolve"]) {
         expect(await failure(hosted.call(op, {}, { actor: ada }))).toMatchObject({
@@ -529,6 +594,193 @@ describe("a direct call", () => {
       }
     } finally {
       await hosted.close();
+    }
+  });
+
+  describe("of a company operation", () => {
+    it("runs a read's body, each call inside decided as the person, and records nothing", async () => {
+      await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "seed" });
+      expect(await client.call("operations.lookup.run", { company: "Acme" }, { actor: ada, id: "l1" })).toEqual({
+        stage: "researched",
+        name: "Acme Ltd",
+      });
+      expect((await records()).map((r) => r.id)).toEqual(["direct:ada:seed:op.called:0"]);
+    });
+
+    it("records a write at seq 0 after its body, each write inside after it, within it, and answers its id again", async () => {
+      const input = { first: "Acme", second: "Beta", stage: "researched" };
+      expect(await client.call("operations.pair.run", input, { actor: ada, id: "p1" })).toEqual({
+        saved: ["Acme", "Beta"],
+      });
+      expect(await calls()).toEqual([
+        { id: "direct:ada:p1:op.called:0", op: "operations.pair.run", within: undefined, error: undefined },
+        { id: "direct:ada:p1:op.called:1", op: "data.outbound.save", within: 0, error: undefined },
+        { id: "direct:ada:p1:op.called:2", op: "data.outbound.save", within: 0, error: undefined },
+      ]);
+      expect((await records())[0]).toMatchObject({
+        runId: "direct:ada:p1",
+        seq: 0,
+        workflow: "call",
+        effect: "write",
+        input,
+        decision: { kind: "allow" },
+        output: { saved: ["Acme", "Beta"] },
+      });
+      expect((await rows()).map((r) => [r.key, r.updatedBy])).toEqual([
+        ["Acme", "ada"],
+        ["Beta", "ada"],
+      ]);
+      // The same id answers what was recorded, and another input with it is refused.
+      expect(await client.call("operations.pair.run", input, { actor: ada, id: "p1" })).toEqual({
+        saved: ["Acme", "Beta"],
+      });
+      expect(await records()).toHaveLength(3);
+      expect(
+        await failure(client.call("operations.pair.run", { ...input, second: "Gamma" }, { actor: ada, id: "p1" })),
+      ).toMatchObject({ code: "invalid_input", data: { differs: ["input"] } });
+    });
+
+    it("makes again a write cut short, each write inside answered by its record, not made twice", async () => {
+      const input = { first: "Acme", second: "Beta", stage: "researched" };
+      await client.call("operations.pair.run", input, { actor: ada, id: "p2" });
+      // As if cut before its own record, the second lead removed since.
+      await db.delete(ledger).where(eq(ledger.id, "direct:ada:p2:op.called:0"));
+      await db.delete(data).where(eq(data.key, "Beta"));
+      expect(await client.call("operations.pair.run", input, { actor: ada, id: "p2" })).toEqual({
+        saved: ["Acme", "Beta"],
+      });
+      expect((await rows()).map((r) => r.key)).toEqual(["Acme"]);
+      expect((await calls()).map((c) => c.id)).toEqual([
+        "direct:ada:p2:op.called:0",
+        "direct:ada:p2:op.called:1",
+        "direct:ada:p2:op.called:2",
+      ]);
+    });
+
+    it("holds the whole operation when a call inside is held: a run of call makes it once approved", async () => {
+      const held = randomUUID();
+      const input = { first: "Acme", second: "Beta", stage: "won" };
+      const runId = `call:ada:${held}`;
+      expect(await failure(client.call("operations.pair.run", input, { actor: ada, id: held }))).toMatchObject({
+        code: "approval_pending",
+        data: { runId, workflow: CALL_WORKFLOW, op: "operations.pair.run" },
+      });
+      // The write before the hold stands; the operation records nothing while it waits.
+      expect((await rows()).map((r) => r.key)).toEqual(["Acme"]);
+      expect(await calls()).toEqual([
+        { id: `direct:ada:${held}:op.called:1`, op: "data.outbound.save", within: 0, error: undefined },
+      ]);
+      await waitFor(async () => (await client.approvals(runId)).some((a) => a.status === "pending"));
+      expect(await client.approvals(runId)).toMatchObject([
+        { requestedBy: "policy", op: "data.outbound.save", approver: "lead", status: "pending" },
+      ]);
+      expect((await client.run(runId))?.startedBy).toEqual(ada);
+      await client.decide(runId, { decision: "approve", by: { id: "lead" } });
+      expect(await client.result(runId)).toEqual({ saved: ["Acme", "Beta"] });
+      expect((await rows()).map((r) => [r.key, r.record.stage, r.updatedBy])).toEqual([
+        ["Acme", "researched", "ada"],
+        ["Beta", "won", "ada"],
+      ]);
+      // Asked again once its run has ended: what the run returned.
+      expect(await client.call("operations.pair.run", input, { actor: ada, id: held })).toEqual({
+        saved: ["Acme", "Beta"],
+      });
+    });
+
+    it("holds the operation itself as a run of call, before any call inside", async () => {
+      const held = randomUUID();
+      const input = { first: "Acme", second: "Beta", stage: "meeting" };
+      const runId = `call:ada:${held}`;
+      expect(await failure(client.call("operations.pair.run", input, { actor: ada, id: held }))).toMatchObject({
+        code: "approval_pending",
+        data: { runId, op: "operations.pair.run" },
+      });
+      expect(await rows()).toEqual([]);
+      await waitFor(async () => (await client.approvals(runId)).some((a) => a.status === "pending"));
+      expect(await client.approvals(runId)).toMatchObject([{ op: "operations.pair.run", approver: "lead" }]);
+      await client.decide(runId, { decision: "approve", by: { id: "lead" } });
+      expect(await client.result(runId)).toEqual({ saved: ["Acme", "Beta"] });
+      expect((await rows()).map((r) => r.key)).toEqual(["Acme", "Beta"]);
+    });
+
+    it("fails on a call inside the policy denies, the earlier write standing and the operation recorded as failed", async () => {
+      const input = { first: "Acme", second: "Beta", stage: "lost" };
+      expect(await failure(client.call("operations.pair.run", input, { actor: ada, id: "p3" }))).toMatchObject({
+        code: "policy_denied",
+        data: { op: "data.outbound.save" },
+      });
+      expect((await rows()).map((r) => r.key)).toEqual(["Acme"]);
+      expect(await calls()).toEqual([
+        { id: "direct:ada:p3:op.called:0", op: "operations.pair.run", within: undefined, error: "policy_denied" },
+        { id: "direct:ada:p3:op.called:1", op: "data.outbound.save", within: 0, error: undefined },
+      ]);
+    });
+
+    it("lets a visitor in only by a permit naming the operation, its calls inside decided as a run's", async () => {
+      const anonymous = ANONYMOUS_PRINCIPAL;
+      await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "seed" });
+      // No permit names the get or the customer's read: inside the operation, they are allowed.
+      expect(await client.call("operations.lookup.run", { company: "Acme" }, { actor: anonymous })).toEqual({
+        stage: "researched",
+        name: "Acme Ltd",
+      });
+      // Called directly, each is refused, as is an operation no permit names, and another visitor's call.
+      const denied = { code: "policy_denied", message: expect.stringContaining(VISITOR_DENIED) };
+      expect(await failure(client.call("data.outbound.get", { key: "Acme" }, { actor: anonymous }))).toMatchObject(
+        denied,
+      );
+      expect(await failure(client.call("acme.customer.get", { id: "Acme" }, { actor: anonymous }))).toMatchObject(
+        denied,
+      );
+      const input = { first: "Acme", second: "Beta", stage: "researched" };
+      expect(await failure(client.call("operations.pair.run", input, { actor: anonymous }))).toMatchObject(denied);
+      expect(
+        await failure(
+          client.call("operations.lookup.run", { company: "Acme" }, { actor: visitorPrincipal("auth0", "u1") }),
+        ),
+      ).toMatchObject(denied);
+      expect(await rows()).toHaveLength(1);
+    });
+
+    it("holds a visitor's operation whose call inside a forbid holds, as a run of call", async () => {
+      const held = randomUUID();
+      const runId = `call:anonymous:${held}`;
+      const pending = await failure(
+        client.call("operations.lookup.run", { company: "Held" }, { actor: ANONYMOUS_PRINCIPAL, id: held }),
+      );
+      expect(pending).toMatchObject({ code: "approval_pending", data: { runId, op: "operations.lookup.run" } });
+      await waitFor(async () => (await client.approvals(runId)).some((a) => a.status === "pending"));
+      expect(await client.approvals(runId)).toMatchObject([{ op: "acme.customer.get", approver: "lead" }]);
+      await client.decide(runId, { decision: "approve", by: { id: "lead" } });
+      expect(await client.result(runId)).toEqual({ stage: null, name: "Acme Ltd" });
+    });
+
+    it("refuses one that writes at a vendor, a workflow's step only", async () => {
+      expect(await failure(client.call("operations.relabel.run", { id: "c1" }, { actor: ada }))).toMatchObject({
+        code: "invalid_input",
+        message: expect.stringContaining("operations.relabel.run cannot be called directly"),
+      });
+    });
+  });
+
+  it("refuses a visitor every company operation under allowAll, which permits none", async () => {
+    const open = rootWith({
+      "resources/people.ts": `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada" });
+`,
+    });
+    const allowing = await SanomaClient.connect({ ...config, root: open, databaseUrl });
+    try {
+      expect(
+        await failure(allowing.call("operations.lookup.run", { company: "Acme" }, { actor: ANONYMOUS_PRINCIPAL })),
+      ).toMatchObject({ code: "policy_denied", message: expect.stringContaining(VISITOR_DENIED) });
+      expect(await allowing.call("operations.lookup.run", { company: "Acme" }, { actor: ada })).toEqual({
+        stage: null,
+        name: "Acme Ltd",
+      });
+    } finally {
+      await allowing.close();
     }
   });
 
@@ -550,6 +802,8 @@ describe("the built-in call workflow in a config", () => {
       "data.outbound.list",
       "data.outbound.save",
       "data.outbound.saveMany",
+      "operations.lookup.run",
+      "operations.pair.run",
       "sanoma.apps.list",
       "sanoma.connection.activate",
       "sanoma.connection.authorize",
@@ -567,11 +821,12 @@ describe("the built-in call workflow in a config", () => {
     ]);
     expect(description.ops.filter((op) => op.direct).map((op) => op.id)).toEqual(entry?.ops);
     expect(description.ops.find((op) => op.id === "acme.customer.rename")).toMatchObject({ direct: false });
+    expect(description.ops.find((op) => op.id === "operations.relabel.run")).toMatchObject({ direct: false });
   });
 
   it("is in every config, for the runtime's listing of apps, and no workflow of the config may be named call", () => {
     const writes = defineConnector("acme", { customer: { rename } });
-    const none = { ...config, connectors: [writes], collections: [] };
+    const none = { ...config, connectors: [writes], collections: [], operations: [] };
     expect(
       resolveConfig(none)
         .workflows.get(CALL_WORKFLOW)

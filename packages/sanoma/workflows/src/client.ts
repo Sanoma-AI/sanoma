@@ -28,7 +28,7 @@ import {
   withdrawalRefusal,
 } from "./approvals.ts";
 import { beforeOf, decideCall, decideStart, decisionOf, deniedKeys, startHoldOf } from "./call.ts";
-import { type Call, callsOf, inputOf, opCalled, outputsOf, recorded } from "./ctx.ts";
+import { type Call, callsOf, ctxOf, type CtxRunner, inputOf, opCalled, outputsOf, recordOf, recorded } from "./ctx.ts";
 import { type Chats, chatStore } from "./chats.ts";
 import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection-driver.ts";
@@ -45,7 +45,7 @@ import {
   spendInviteRequest,
 } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
-import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
+import { type ApprovalState, type Operation, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
 import {
   ADMIN,
@@ -79,7 +79,7 @@ import {
   type OwnedLedger,
   ownedLedger,
 } from "./ledger.ts";
-import type { CallContext, Driver, Op, SignInMethod } from "./op.ts";
+import { type CallContext, type Driver, isOperation, type Op, type SignInMethod } from "./op.ts";
 import { allowAll, type RecordedDecision } from "./policy.ts";
 import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
@@ -499,17 +499,20 @@ export class SanomaClient {
 
   /**
    * Calls an operation directly, outside a run, as `actor`: one that may be (`isDirect`), a
-   * collection's or a vendor's read, never a vendor's write, the runtime's own or a resource
-   * type's (`invalid_input`, as is an unknown id or input its schema refuses). The policy decides
-   * it as the person, in a run `direct:<actor>:<id>` of the workflow `call` with no approvals. A
-   * deny throws `policy_denied` and writes nothing. An allowed call runs the driver once, without
-   * DBOS and without a retry (a driver's failure is `driver_failed`). A read returns its output
-   * and records nothing. A write is recorded as one `op.called` per call it makes (`callsOf`, seq
-   * from 0) in that run, and with the default ledger in one transaction with what it saves, so
-   * both are written or neither;
+   * collection's or a vendor's read, or a company operation whose every used operation may be;
+   * never a vendor's write, the runtime's own or a resource type's (`invalid_input`, as is an
+   * unknown id or input its schema refuses). The policy decides it as the person, in a run
+   * `direct:<actor>:<id>` of the workflow `call` with no approvals. A deny throws `policy_denied`
+   * and writes nothing. An allowed call runs the driver once, without DBOS and without a retry (a
+   * driver's failure is `driver_failed`). A read returns its output and records nothing. A write is
+   * recorded as one `op.called` per call it makes (`callsOf`, seq from 0) in that run, and with the
+   * default ledger in one transaction with what it saves, so both are written or neither;
    * a write with the same id and input returns the output recorded. When the policy asks for an
    * approval, the call becomes run `call:<actor>:<id>` of the built-in `call` workflow, started
    * as the person, which makes it once approved, and this throws `approval_pending` with its id.
+   * A company operation runs its body here (`directOperation`), each call it makes a direct call
+   * of its own in the same run. It has no account of its own, so a `connection` given it is
+   * dropped, as in a run.
    */
   async call(opId: string, input: unknown, options: CallOptions): Promise<unknown> {
     const actor = await this.admitted(
@@ -517,57 +520,99 @@ export class SanomaClient {
     );
     const id =
       parseOrThrow(z.string().min(1).optional(), options.id, "`id` must be a non-empty string") ?? randomUUID();
-    const { ops, types, drivers, policy } = this.config;
+    const { ops, types } = this.config;
     const op = ops.get(opId);
     if (!op || !isDirect(op, types)) {
       const why = op ? "it is a workflow's to call: start one that uses it" : "no connector or collection declares it";
       throw new SanomaError("invalid_input", `${opId} cannot be called directly: ${why}`, { op: opId });
     }
-    const fn = drivers.get(op.id);
-    if (!fn) throw new SanomaError("invalid_input", `${op.id} has no driver: the connector package must attach one`);
     const parsed = inputOf(op, input);
-    const connection = await this.config.connections.select(op.vendor, options.connection, actor.id);
+    const connection = isOperation(op)
+      ? undefined
+      : await this.config.connections.select(op.vendor, options.connection, actor.id);
     const selected = connection && {
       $connection: connection.id,
       vendor: connection.vendor,
       revision: connection.revision,
     };
-    const runId = `direct:${actor.id}:${id}`;
-    const heldId = heldCallRunId(actor.id, id);
     const held: RunArgs = { input: { op: op.id, input, ...(selected && { connection: selected }) }, startedBy: actor };
+    return this.direct(op, parsed, actor, {
+      runId: `direct:${actor.id}:${id}`,
+      held,
+      heldId: heldCallRunId(actor.id, id),
+      given: options.id !== undefined,
+      connection,
+    });
+  }
+
+  /**
+   * One direct call (`call`), or a call a company operation's body makes (`within`, the
+   * operation's id, which the policy sees where a run's workflow is): its records numbered from
+   * `seq` in the run `runId`, its reads keyed from `key`. `held` and `heldId` are the run of `call`
+   * a hold starts: the outer call's, so a hold inside an operation holds the whole operation.
+   * `given` says the caller gave the id, which only then can have been used.
+   */
+  private async direct(
+    op: Op,
+    parsed: unknown,
+    actor: Principal,
+    call: {
+      runId: string;
+      seq?: number;
+      key?: string;
+      held: RunArgs;
+      heldId: string;
+      given: boolean;
+      connection: ConnectionSnapshot | undefined;
+      within?: string;
+    },
+  ): Promise<unknown> {
+    const { runId, seq = 0, key = runId, held, heldId, given, connection, within } = call;
+    const { ops, drivers, policy, collections } = this.config;
+    const fn = drivers.get(op.id);
+    if (!fn && !isOperation(op)) {
+      throw new SanomaError("invalid_input", `${op.id} has no driver: the connector package must attach one`);
+    }
     // The calls this one makes (a batch's entries), each decided and recorded on its own.
     const calls = callsOf(op, parsed, ops);
     const write = op.effect !== "read";
     // Only an id the caller gave can have been used: a write made, or held, with it settles it.
     // One made and partly recorded is made again, as a retry (the store keeps the records it has).
+    // A company operation's held run answers it, a read one's too; a call inside one, its operation's.
     let attempt = 1;
-    if (write && options.id !== undefined) {
-      const made = await this.recordedCall(runId, op, calls, actor, connection);
+    if (given) {
+      const made = write
+        ? await this.recordedCall(runId, op, calls, actor, connection, within === undefined ? undefined : seq)
+        : undefined;
       if (made && "partial" in made) attempt = 2;
-      else {
-        const first = made ?? (await this.heldCall(op.id, heldId, held));
+      else if (made) return made.output;
+      else if (within === undefined && (write || isOperation(op))) {
+        const first = await this.heldCall(op.id, heldId, held);
         if (first) return first.output;
       }
     }
-    const run = { id: runId, workflow: CALL_WORKFLOW, approvals: [] };
+    const run = { id: runId, workflow: within ?? CALL_WORKFLOW, approvals: [] };
     const decisions: RecordedDecision[] = [];
     for (const [i, c] of calls.entries()) {
-      const before = await beforeOf(policy, c.op, c.input, this.config.collections, (get, key) =>
-        drivers.get(get)?.({ key }, this.readContext(get, runId, actor.id, `${runId}:before${i ? `:${i}` : ""}`)),
+      const before = await beforeOf(policy, c.op, c.input, collections, (get, read) =>
+        drivers.get(get)?.({ key: read }, this.readContext(get, runId, actor.id, `${key}:before${i ? `:${i}` : ""}`)),
       );
       decisions.push(decideCall(policy, c.op, c.input, actor, run, { ...before, ...(connection && { connection }) }));
     }
-    const decision = decisionOf(op, calls, decisions, this.config.collections);
+    const decision = decisionOf(op, calls, decisions, collections);
     if (decision.kind === "deny") {
-      throw new PolicyDeniedError(op.id, decision.reason, deniedKeys(op, calls, decisions, this.config.collections));
+      throw new PolicyDeniedError(op.id, decision.reason, deniedKeys(op, calls, decisions, collections));
     }
     if (decision.kind === "approve") {
       await this.start(CALL_WORKFLOW, held.input, { startedBy: actor, runId: heldId });
+      // Held inside an operation: the run makes the whole operation once approved.
+      if (within !== undefined) throw new ApprovalPendingError(within, heldId);
       // A read held before, whose run has ended since, answers with that run's result.
       return (await this.heldCall(op.id, heldId, held))!.output;
     }
+    if (isOperation(op)) return this.directOperation(op, parsed, actor, { runId, held, heldId, given, decision });
     const context: CallContext = {
-      idempotencyKey: runId,
+      idempotencyKey: key,
       runId,
       opId: op.id,
       attempt,
@@ -577,15 +622,75 @@ export class SanomaClient {
       ...(connection && { connection }),
     };
     await this.config.connections.assertCurrent(connection, actor.id);
-    if (!write) return outputOf(op, () => fn(parsed, context));
-    return this.directWrite({ op, fn, parsed, calls, actor, decisions, context });
+    if (!write) return outputOf(op, () => fn!(parsed, context));
+    return this.directWrite({ op, fn: fn!, parsed, calls, actor, decisions, context, seq, within });
+  }
+
+  /**
+   * A company operation's body, called directly once the policy let it (`direct`): on a `ctx`
+   * over its `uses` whose every call is a direct call of the same principal in the same run,
+   * numbered from 1, decided with the operation named where a run's workflow is, and held as the
+   * whole operation. One that writes is recorded at seq 0 after its body, with its output or its
+   * error (none while a call inside waits on an approval); a write inside made before a deny or a
+   * hold stands. A read records nothing.
+   */
+  private async directOperation(
+    op: Operation,
+    parsed: unknown,
+    actor: Principal,
+    call: { runId: string; held: RunArgs; heldId: string; given: boolean; decision: RecordedDecision },
+  ): Promise<unknown> {
+    const { runId, held, heldId, given, decision } = call;
+    let next = 1;
+    const runner: CtxRunner = {
+      place: () => undefined,
+      now: async () => Date.now(),
+      op: async (used, input, _at, ref) => {
+        // The config's declaration, never the operation's copy: its effect, schemas and driver.
+        const inner = this.config.ops.get(used.id)!;
+        const p = inputOf(inner, input);
+        const seq = next;
+        next += callsOf(inner, p, this.config.ops).length;
+        const connection = await this.config.connections.select(inner.vendor, ref, actor.id);
+        return this.direct(inner, p, actor, {
+          runId,
+          seq,
+          key: `${runId}:${seq}`,
+          held,
+          heldId,
+          given,
+          connection,
+          within: op.id,
+        });
+      },
+    };
+    const at = Date.now();
+    const record = (outcome: { output: unknown } | { error: ErrorInfo }) =>
+      this.audit.store.append(
+        recordOf(
+          { id: runId, workflow: CALL_WORKFLOW, actor },
+          this.config.appName,
+          { ...opCalled({ op, input: parsed }), decision, ...outcome, durationMs: Date.now() - at },
+          { seq: 0, at },
+        ),
+      );
+    const write = op.effect !== "read";
+    let output: unknown;
+    try {
+      output = await outputOf(op, () => op.run(ctxOf(op, { id: runId, actor }, runner), parsed));
+    } catch (err) {
+      if (write && errorCode(err) !== "approval_pending") await record({ error: errorInfo(err) });
+      throw err;
+    }
+    if (write) await record({ output: recorded(op, output) });
+    return output;
   }
 
   /**
    * A direct write, made once and recorded once: with the default ledger, a collection's write
    * and its records in one transaction on the database both are in, so both are kept or neither;
    * otherwise the driver's call, then the records in the config's ledger. A write is recorded as
-   * one `op.called` per call it makes (`callsOf`: one, or a batch's entries), numbered from 0.
+   * one `op.called` per call it makes (`callsOf`: one, or a batch's entries), numbered from `seq`.
    * The first records of the call's id stand: a write that finds one already there (two calls
    * with one id at once) is undone, and answers as `recordedCall` does.
    */
@@ -597,8 +702,10 @@ export class SanomaClient {
     actor: Principal;
     decisions: readonly RecordedDecision[];
     context: CallContext;
+    seq: number;
+    within: string | undefined;
   }): Promise<unknown> {
-    const { op, parsed, calls, actor, decisions, context } = call;
+    const { op, parsed, calls, actor, decisions, context, seq, within } = call;
     const { runId } = context;
     const { dataStore, collections, ledger } = this.config;
     // A connection op that calls the provider (Test's verify, a renewal, a revocation; each may wait
@@ -610,22 +717,23 @@ export class SanomaClient {
         ? dataStore
         : undefined;
     const at = Date.now();
+    // A call inside a company operation is within its call, at seq 0.
     const records = (outcome: (i: number) => { output: unknown } | { error: ErrorInfo }): LedgerRecord[] =>
-      calls.map((c, i) => ({
-        v: 1,
-        app: this.config.appName,
-        id: `${runId}:op.called:${i}`,
-        runId,
-        seq: i,
-        at,
-        actor,
-        workflow: CALL_WORKFLOW,
-        ...opCalled(c),
-        decision: decisions[i]!,
-        ...(context.connection && { connection: context.connection }),
-        ...outcome(i),
-        durationMs: Date.now() - at,
-      }));
+      calls.map((c, i) =>
+        recordOf(
+          { id: runId, workflow: CALL_WORKFLOW, actor },
+          this.config.appName,
+          {
+            ...opCalled(c),
+            ...(within !== undefined && { within: 0 }),
+            decision: decisions[i]!,
+            ...(context.connection && { connection: context.connection }),
+            ...outcome(i),
+            durationMs: Date.now() - at,
+          },
+          { seq: seq + i, at },
+        ),
+      );
     const made = (result: unknown) => {
       const outputs = outputsOf(op, result);
       return records((i) => ({ output: recorded(calls[i]!.op, outputs[i]) }));
@@ -661,7 +769,14 @@ export class SanomaClient {
       });
     } catch (err) {
       if (!is(err, TransactionRollbackError)) throw err;
-      const first = await this.recordedCall(runId, op, calls, actor, context.connection);
+      const first = await this.recordedCall(
+        runId,
+        op,
+        calls,
+        actor,
+        context.connection,
+        within === undefined ? undefined : seq,
+      );
       if (!first || "partial" in first) throw err;
       return first.output;
     }
@@ -672,16 +787,25 @@ export class SanomaClient {
    * entries' records): refused (`invalid_input`) when another actor made it (another id, or the
    * same agent for another person), or it was of another operation or input, its
    * failure again (`driver_failed`) when it failed, and `partial` when fewer records than its
-   * calls are there (a batch's, appended one by one outside a transaction, cut short).
+   * calls are there (a batch's, appended one by one outside a transaction, cut short). Its
+   * records are the run's but those within a company operation's call, or for a call inside one
+   * (`within`, its first `seq`), those within it from that `seq`, one per call.
    */
   private async recordedCall(
     runId: string,
     op: Op,
     calls: readonly Call[],
     actor: Principal,
-    connection?: ConnectionSnapshot,
+    connection: ConnectionSnapshot | undefined,
+    within?: number,
   ): Promise<{ output: unknown } | { partial: true } | undefined> {
-    const made = (await this.audit.store.read(runId)).filter((r) => r.type === "op.called");
+    const made = (await this.audit.store.read(runId))
+      .filter((r) => r.type === "op.called")
+      .filter((r) =>
+        within === undefined
+          ? r.within === undefined
+          : r.within !== undefined && r.seq >= within && r.seq < within + calls.length,
+      );
     if (!made.length) return undefined;
     const same = (what: (record: (typeof made)[number], call: Call) => boolean) =>
       made.length <= calls.length && made.every((r, i) => what(r, calls[i]!));
