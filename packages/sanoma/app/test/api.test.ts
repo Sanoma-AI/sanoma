@@ -67,7 +67,7 @@ const acmeDriver = defineDriver(acme, {
 
 // The outbound fixture, copied to a root of its own: its collection, and its workflow, which imports
 // it from there, with its people and a policy that allows, but denies a lead `lost` and holds one
-// `won` for `lead`, and lets visitors start the workflow.
+// `won` for `lead`, and lets visitors start the workflow and call the operation `lookup`.
 const root = mkdtempSync(join(tmpdir(), "sanoma-api-"));
 cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
 writeFileSync(
@@ -91,6 +91,8 @@ forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
 when { context.input.record.stage == "won" };
 
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:outbound-next", resource);
+
+permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"operations.lookup.run", resource);
 `,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -117,6 +119,14 @@ const lookup = defineOperation({
   },
 });
 
+/** A lead's stage: a company operation a page may call, which no permit names for a visitor. */
+const peek = defineOperation({
+  name: "peek",
+  input: z.object({ company: z.string() }),
+  uses: [outbound.get],
+  run: async (ctx, { company }) => ({ stage: (await ctx.data.outbound.get({ key: company }))?.record.stage ?? null }),
+});
+
 /** A customer renamed: a company operation that writes at a vendor, a workflow's step only. */
 const relabel = defineOperation({
   name: "relabel",
@@ -127,7 +137,7 @@ const relabel = defineOperation({
 
 const config: SanomaConfig = {
   workflows: [outboundNext, refuse],
-  operations: [lookup, relabel],
+  operations: [lookup, peek, relabel],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
   root,
@@ -516,6 +526,22 @@ describe("callFn for a visitor", () => {
       status: 403,
       body: { code: "policy_denied" },
     });
+  });
+
+  it("calls a company operation only when a permit names it, its calls inside needing none of their own, and never those calls directly", async () => {
+    const denied = { status: 403, body: { code: "policy_denied" } };
+    // No permit names `peek`, nor `lookup` for anonymous, who is in no group.
+    expect(await visit({ name: "operations.peek.run", input: { company: "Nobody" } }, visitor)).toMatchObject(denied);
+    expect(
+      await visit({ name: "operations.lookup.run", input: { company: "Nobody" } }, ANONYMOUS_PRINCIPAL),
+    ).toMatchObject(denied);
+    // One names `lookup` for the visitors: its reads of the collection and of acme are allowed inside it.
+    expect(await visit({ name: "operations.lookup.run", input: { company: "Nobody" } }, visitor)).toEqual({
+      body: { stage: null, name: "Acme Ltd" },
+    });
+    // The same reads, called directly, are still refused.
+    expect(await visit({ name: "data.outbound.get", input: { key: "Nobody" } }, visitor)).toMatchObject(denied);
+    expect(await visit({ name: "acme.customer.get", input: { id: "Nobody" } }, visitor)).toMatchObject(denied);
   });
 
   it("starts none of the app's own actions on the repository, nor does an api token, whatever its groups", async () => {

@@ -9,7 +9,14 @@ import { createRequire, SourceMap, type SourceMapPayload } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { declarationFiles, filesUnder, type SanomaConfig, timeMatcherFile, vendorInfo } from "sanoma/workflows";
+import {
+  declarationFiles,
+  filesUnder,
+  relPath,
+  type SanomaConfig,
+  timeMatcherFile,
+  vendorInfo,
+} from "sanoma/workflows";
 import { domainsText } from "sanoma/workflows/shared";
 import MagicString from "magic-string";
 import type { InlineConfig, Plugin, PluginOption, Rollup } from "vite";
@@ -216,9 +223,7 @@ async function bundlePlugins(
       applyToEnvironment: ssr,
       transform(code, id) {
         const file = id.split("?")[0]!;
-        const company =
-          companyFile(file, root) &&
-          /^(apps\/[^/]+\/)?(sites|operations)\//.test(relative(root, file).split(sep).join("/"));
+        const company = companyFile(file, root) && /^(apps\/[^/]+\/)?(sites|operations)\//.test(relPath(root, file));
         const own = company || file.startsWith(`${src}${sep}`);
         if (!own || !/\.[cm]?[jt]sx?$/.test(file) || !/\bimport\b/.test(code)) return;
         for (const statement of this.parse(code, { lang: file.endsWith("x") ? "tsx" : "ts" }).body as unknown as {

@@ -250,148 +250,138 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
    * How the run's `ctx` members are made in the page: on the world's fakes, at once, but a sleep,
    * which waits; none once the run has ended, and none settling once `dropped` has aborted.
    */
-  const runnerOf = (run: PageRun, seeded: Seeded, dropped: AbortSignal): CtxRunner => {
-    const runner: CtxRunner = {
-      place: () => {
-        if (isEnded(run.status)) {
-          throw new SanomaError("run_ended", `run ${run.id} has ended; a call made after it was not`, {
-            runId: run.id,
-          });
-        }
-        return undefined;
-      },
-      async op(op, input, at) {
-        if (dropped.aborted) return halted();
-        const parsed = inputOf(op, input);
-        // Recorded as a worker records it: one `op.called` per call it makes (a batch's entries).
-        const calls = callsOf(op, parsed, ops);
-        const seq = run.seq;
-        run.seq += calls.length;
-        const begun = Date.now();
-        const records = (outcome: (i: number) => Partial<LedgerBody>) =>
-          calls.forEach((c, i) =>
-            write(
-              run,
-              {
-                ...opCalled(c, run.workflow),
-                ...at,
-                decision: { kind: "allow" },
-                attempt: 1,
-                durationMs: Date.now() - begun,
-                ...outcome(i),
-              } as LedgerBody,
-              { seq: seq + i },
-            ),
-          );
-        let output: unknown;
-        try {
-          // A company operation's body on this runner, each call it makes recorded within it.
-          output = isOperation(op)
-            ? op.output.parse(
-                await op.run(
-                  ctxOf(op, run, {
-                    ...runner,
-                    op: (inner, i, place, c) => runner.op(inner, i, { ...place, within: seq }, c),
-                  }),
-                  parsed,
-                ),
-              )
-            : await callFake(seeded, op, parsed, {
-                idempotencyKey: `${run.id}:${seq}`,
-                runId: run.id,
-                opId: op.id,
-                attempt: 1,
-                principal: run.actor,
-                by: `run:${run.id}`,
-              });
-        } catch (err) {
-          records(() => ({ error: errorInfo(err) }));
-          throw err;
-        }
-        const outputs = outputsOf(op, output);
-        records((i) => ({ output: recorded(calls[i]!.op, outputs[i], run.workflow) }));
-        return output;
-      },
-      now: async () => Date.now(),
-      async approval(title, req, at) {
-        if (dropped.aborted) return halted();
-        const checked = checkApproval(title, req);
-        const state: ApprovalState = {
-          id: `approval-${run.approvals.length + 1}`,
-          title,
-          approver: checked.approver,
-          ...(checked.links && { links: checked.links }),
-          ...(checked.details !== undefined && { details: checked.details }),
-          requestedBy: "workflow",
-          covers: checked.covers,
-          status: "pending",
-          requestedAt: Date.now(),
-          refused: [],
-        };
-        run.approvals.push(state);
-        write(
-          run,
-          {
-            type: "approval.requested",
-            approval: state.id,
-            ...at,
-            title,
-            approver: state.approver,
-            requestedBy: "workflow",
-            covers: state.covers,
-          },
-          { key: state.id },
+  const runnerOf = (run: PageRun, seeded: Seeded, dropped: AbortSignal): CtxRunner => ({
+    place: () => {
+      if (isEnded(run.status)) {
+        throw new SanomaError("run_ended", `run ${run.id} has ended; a call made after it was not`, { runId: run.id });
+      }
+      return undefined;
+    },
+    async op(op, input, at) {
+      if (dropped.aborted) return halted();
+      const parsed = inputOf(op, input);
+      // Recorded as a worker records it: one `op.called` per call it makes (a batch's entries).
+      const calls = callsOf(op, parsed, ops);
+      const seq = run.seq;
+      run.seq += calls.length;
+      const begun = Date.now();
+      const records = (outcome: (i: number) => Partial<LedgerBody>) =>
+        calls.forEach((c, i) =>
+          write(
+            run,
+            {
+              ...opCalled(c, run.workflow),
+              ...at,
+              decision: { kind: "allow" },
+              attempt: 1,
+              durationMs: Date.now() - begun,
+              ...outcome(i),
+            } as LedgerBody,
+            { seq: seq + i },
+          ),
         );
-        run.status = "waiting";
-        const decision = await decide(state);
-        if (decision !== "approve" && decision !== "reject") {
-          throw new SanomaError("invalid_input", `decide answered ${String(decision)}, not "approve" or "reject"`, {
-            approval: state.id,
+      let output: unknown;
+      try {
+        if (isOperation(op)) {
+          // A company operation's body on a runner of this run, each call it makes recorded within it.
+          const inner = runnerOf(run, seeded, dropped);
+          const within: CtxRunner = { ...inner, op: (o, i, place, c) => inner.op(o, i, { ...place, within: seq }, c) };
+          output = op.output.parse(await op.run(ctxOf(op, run, within), parsed));
+        } else
+          output = await callFake(seeded, op, parsed, {
+            idempotencyKey: `${run.id}:${seq}`,
+            runId: run.id,
+            opId: op.id,
+            attempt: 1,
+            principal: run.actor,
+            by: `run:${run.id}`,
           });
+      } catch (err) {
+        records(() => ({ error: errorInfo(err) }));
+        throw err;
+      }
+      const outputs = outputsOf(op, output);
+      records((i) => ({ output: recorded(calls[i]!.op, outputs[i], run.workflow) }));
+      return output;
+    },
+    now: async () => Date.now(),
+    async approval(title, req, at) {
+      if (dropped.aborted) return halted();
+      const checked = checkApproval(title, req);
+      const state: ApprovalState = {
+        id: `approval-${run.approvals.length + 1}`,
+        title,
+        approver: checked.approver,
+        ...(checked.links && { links: checked.links }),
+        ...(checked.details !== undefined && { details: checked.details }),
+        requestedBy: "workflow",
+        covers: checked.covers,
+        status: "pending",
+        requestedAt: Date.now(),
+        refused: [],
+      };
+      run.approvals.push(state);
+      write(
+        run,
+        {
+          type: "approval.requested",
+          approval: state.id,
+          ...at,
+          title,
+          approver: state.approver,
+          requestedBy: "workflow",
+          covers: state.covers,
+        },
+        { key: state.id },
+      );
+      run.status = "waiting";
+      const decision = await decide(state);
+      if (decision !== "approve" && decision !== "reject") {
+        throw new SanomaError("invalid_input", `decide answered ${String(decision)}, not "approve" or "reject"`, {
+          approval: state.id,
+        });
+      }
+      run.status = "running";
+      // The approver decides: the person named, or for a group, the group's name.
+      const by = typeof state.approver === "string" ? state.approver : state.approver.group;
+      const decidedAt = Date.now();
+      Object.assign(state, { status: decision === "approve" ? "approved" : "rejected", decidedBy: by, decidedAt });
+      write(run, { type: "approval.decided", approval: state.id, decision, by }, { key: state.id });
+      if (decision === "reject") throw new RejectedError(title, { id: by }, undefined, state.id);
+      return { approvedBy: by, at: decidedAt };
+    },
+    async sleep(raw, at) {
+      if (dropped.aborted) return halted();
+      // One start for the record and the end, as a worker's: `until` is its `at` plus the duration.
+      const begun = Date.now();
+      const until = untilOf(checkSleep(raw), begun);
+      write(run, { type: "sleep.started", ...at, until }, { at: begun });
+      await waitUntil(until, dropped);
+    },
+    async all(list, at) {
+      if (dropped.aborted) return halted();
+      // Nested, or two at once: either way the members' records would not read as one fan-out.
+      if (run.group) {
+        throw new SanomaError(
+          "invalid_input",
+          "a ctx.all is already running: await it before the next, and call none inside one",
+          { group: run.group.id },
+        );
+      }
+      const members = parseOrThrow(AllMembers, list, "ctx.all");
+      const id = `all:${run.seq}`;
+      const outputs: unknown[] = [];
+      try {
+        for (const [index, member] of members.entries()) {
+          run.group = { id, index, size: members.length, ...(at.node && { node: at.node }) };
+          outputs.push(await member());
         }
-        run.status = "running";
-        // The approver decides: the person named, or for a group, the group's name.
-        const by = typeof state.approver === "string" ? state.approver : state.approver.group;
-        const decidedAt = Date.now();
-        Object.assign(state, { status: decision === "approve" ? "approved" : "rejected", decidedBy: by, decidedAt });
-        write(run, { type: "approval.decided", approval: state.id, decision, by }, { key: state.id });
-        if (decision === "reject") throw new RejectedError(title, { id: by }, undefined, state.id);
-        return { approvedBy: by, at: decidedAt };
-      },
-      async sleep(raw, at) {
-        if (dropped.aborted) return halted();
-        // One start for the record and the end, as a worker's: `until` is its `at` plus the duration.
-        const begun = Date.now();
-        const until = untilOf(checkSleep(raw), begun);
-        write(run, { type: "sleep.started", ...at, until }, { at: begun });
-        await waitUntil(until, dropped);
-      },
-      async all(list, at) {
-        if (dropped.aborted) return halted();
-        // Nested, or two at once: either way the members' records would not read as one fan-out.
-        if (run.group) {
-          throw new SanomaError(
-            "invalid_input",
-            "a ctx.all is already running: await it before the next, and call none inside one",
-            { group: run.group.id },
-          );
-        }
-        const members = parseOrThrow(AllMembers, list, "ctx.all");
-        const id = `all:${run.seq}`;
-        const outputs: unknown[] = [];
-        try {
-          for (const [index, member] of members.entries()) {
-            run.group = { id, index, size: members.length, ...(at.node && { node: at.node }) };
-            outputs.push(await member());
-          }
-        } finally {
-          delete run.group;
-        }
-        return outputs;
-      },
-    };
-    return runner;
-  };
+      } finally {
+        delete run.group;
+      }
+      return outputs;
+    },
+  });
 
   /** Starts a run of the workflow, or answers the run the id already names. */
   const start = (wf: WorkflowDefinition<any, any>, input: unknown, id = `page:${++started}`): string => {

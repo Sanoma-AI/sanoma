@@ -118,11 +118,12 @@ export function demoPlan<
   for (const site of sites) {
     for (const call of site.calls) {
       const where = `${call.file}:${call.line}`;
-      if (call.kind === "op" && vendorOf(call.target) === OPERATIONS_VENDOR) {
+      if (call.kind === "op") {
         const op = operations.find((o) => o.id === call.target);
-        if (op) called.add(op);
+        if (vendorOf(call.target) !== OPERATIONS_VENDOR) use(call.target, where);
+        else if (op) called.add(op);
         else reasons.push(`${where}: calls ${call.target}, which no file of operations/ defines`);
-      } else if (call.kind === "op") use(call.target, where);
+      }
       if (call.kind === "collection" && !collections.has(call.target))
         reasons.push(
           `${where}: reads ${call.target}, a collection no data file under resources/ exports, which a demo bundles its collections from`,

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { childrenOf, keyName, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
-import { moduleSpecifier, stringValue, unwrap } from "./outline.ts";
+import { isOpPath, moduleSpecifier, stringValue, unwrap } from "./outline.ts";
 import { exportsOf, loadModules } from "./load.ts";
 import { APPS_DIR, appFolders, filesUnder, isDirectory, relPath, SITE_ENTRIES } from "./paths.ts";
 import { isObject } from "./resource.ts";
@@ -20,7 +20,6 @@ import {
   entryOpsOf,
   isBatch,
   LOCALE,
-  OPERATIONS_VENDOR,
   SITE_NAME,
   siteKey,
   VISITORS,
@@ -513,8 +512,7 @@ function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" |
       ? { kind: "collection", name: path.slice(1, -1).join("."), method: path.at(-1) }
       : undefined;
   // `api.<vendor>.<resource>.<op>`, or an app's company operation, `api.operations.<app>.<name>.run`.
-  if (path.length === 3 || (path.length === 4 && first === OPERATIONS_VENDOR))
-    return { kind: "op", name: path.join(".") };
+  if (isOpPath(path)) return { kind: "op", name: path.join(".") };
   if (path.length > 2) return undefined;
   return { kind: "workflow", name: first, ...(second !== undefined && { method: second }) };
 }

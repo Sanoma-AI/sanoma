@@ -42,10 +42,10 @@ export function generateApi(description: ConfigDescription): { source: string; p
   for (const [vendor, ops] of Map.groupBy(direct, (op) => op.vendor)) {
     const title = description.vendors[vendor]?.title ?? vendor;
     // An app's (a company operation's in `apps/<app>/operations/`, `crm.score`) under its app, as `data`'s: `api.operations.crm.score`.
-    const byApp = Map.groupBy(ops, (op) => (op.resource.includes(".") ? op.resource.split(".")[0]! : undefined));
+    const byApp = Map.groupBy(ops, (op) => op.app);
     const resources = (own: OpEntry[]) =>
       [...Map.groupBy(own, (op) => op.resource)].map(([resource, those]) =>
-        member(undefined, resource.slice(resource.indexOf(".") + 1), block(those.map(opMember))),
+        member(undefined, writtenName({ ...those[0]!, name: resource }), block(those.map(opMember))),
       );
     const nested = [
       ...resources(byApp.get(undefined) ?? []),

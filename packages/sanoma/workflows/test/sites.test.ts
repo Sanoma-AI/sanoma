@@ -54,6 +54,11 @@ const acme = defineConnector("acme", {
   },
 });
 
+/** acme with a driver, which a company operation's `uses` need. */
+const acmeDriven = withSetup(acme, {
+  driver: () => defineDriver(acme, { customer: { get: async (i) => i, rename: async (i) => i } }),
+});
+
 /** A rename at acme: a company operation a page may not call, which writes at a vendor. */
 const relabel = defineOperation({
   name: "relabel",
@@ -362,11 +367,7 @@ describe("readSites", () => {
     );
     const [ops] = describeConfig(
       config(root, {
-        connectors: [
-          withSetup(acme, {
-            driver: () => defineDriver(acme, { customer: { get: async (i) => i, rename: async (i) => i } }),
-          }),
-        ],
+        connectors: [acmeDriven],
         collections: [leads, crmCustomers, shopCustomers],
         operations: [quote, score, relabel],
       }),
@@ -1030,6 +1031,37 @@ describe("readSites", () => {
     writeFileSync(join(root, "policies/typo.cedar"), "permit (principal, action, resource)\n");
     expect(describeConfig(configured).policy.problems).not.toEqual([]);
     expect(problems()).toEqual({ desk: [], members: [], www: readsAndBuiltIns });
+  });
+
+  it("makes a problem of a public site's call of a company operation no permit lets a visitor make, and none once one names it", () => {
+    const lookup = defineOperation({
+      name: "lookup",
+      input: z.object({ id: z.string() }),
+      uses: [acme.customer.get],
+      run: async (ctx, { id }) => ctx.acme.customer.get({ id }),
+    });
+    const root = tree("visitor-operations", {
+      "policies/visitors.cedar":
+        'permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"workflow:hello", resource);\n',
+      ...calling("www", ["public: true"], ["api.operations.lookup.run({ id: 'c1' })"]),
+    });
+    const configured = config(root, { connectors: [acmeDriven], operations: [lookup] });
+    const permit =
+      'permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"operations.lookup.run", resource);';
+    expect(describeConfig(configured).sites[0]!.problems).toEqual([
+      pageProblem(
+        "www",
+        7,
+        'a visitor\'s call to operation "operations.lookup.run" is refused: no permit in policies/ names anonymous for operations.lookup.run. ' +
+          `Add: ${permit}`,
+      ),
+    ]);
+    // The operation's permit alone: the read inside it needs none of its own. (A policy with problems
+    // would silence the check too, so it must have none.)
+    writeFileSync(join(root, "policies/lookup.cedar"), `${permit}\n`);
+    const described = describeConfig(configured);
+    expect(described.policy.problems).toBeUndefined();
+    expect(described.sites[0]!.problems).toEqual([]);
   });
 
   it("reads api.sanoma.describe as the runtime's description, none of the company's calls, refused only on a public site", () => {

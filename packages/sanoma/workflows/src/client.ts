@@ -283,6 +283,22 @@ export interface CallOptions {
   id?: string;
 }
 
+/** A direct call as `SanomaClient.call` was asked it, which every call inside a company operation shares. */
+interface DirectCall {
+  runId: string;
+  /** The run of `call` a hold starts, and its id. */
+  held: RunArgs;
+  heldId: string;
+  /** The caller gave the call's id. */
+  given: boolean;
+}
+
+/** A call inside a company operation: the operation's id, and the call's first `seq` in the run. */
+interface Within {
+  op: string;
+  seq: number;
+}
+
 /** A credential-free review shown before the user saves a connection. */
 export interface ConnectionReview extends ConnectionSetup {
   authorization: string;
@@ -536,38 +552,33 @@ export class SanomaClient {
       revision: connection.revision,
     };
     const held: RunArgs = { input: { op: op.id, input, ...(selected && { connection: selected }) }, startedBy: actor };
-    return this.direct(op, parsed, actor, {
+    const outer = {
       runId: `direct:${actor.id}:${id}`,
       held,
       heldId: heldCallRunId(actor.id, id),
       given: options.id !== undefined,
-      connection,
-    });
+    };
+    return this.direct(op, parsed, actor, outer, connection);
   }
 
   /**
-   * One direct call (`call`), or a call a company operation's body makes (`within`, the
-   * operation's id, which the policy sees where a run's workflow is): its records numbered from
-   * `seq` in the run `runId`, its reads keyed from `key`. `held` and `heldId` are the run of `call`
-   * a hold starts: the outer call's, so a hold inside an operation holds the whole operation.
-   * `given` says the caller gave the id, which only then can have been used.
+   * One direct call (`call`), or a call a company operation's body makes (`within`: the
+   * operation's id, which the policy sees where a run's workflow is, and the call's first `seq`):
+   * in the outer call's run `runId`, its records numbered from 0 and its reads keyed by `runId`, or
+   * inside an operation from `within.seq`, keyed `<runId>:<seq>`. `held` and `heldId` are the run
+   * of `call` a hold starts: the outer call's, so a hold inside an operation holds the whole
+   * operation. `given` says the caller gave the id, which only then can have been used.
    */
   private async direct(
     op: Op,
     parsed: unknown,
     actor: Principal,
-    call: {
-      runId: string;
-      seq?: number;
-      key?: string;
-      held: RunArgs;
-      heldId: string;
-      given: boolean;
-      connection: ConnectionSnapshot | undefined;
-      within?: string;
-    },
+    outer: DirectCall,
+    connection: ConnectionSnapshot | undefined,
+    within?: Within,
   ): Promise<unknown> {
-    const { runId, seq = 0, key = runId, held, heldId, given, connection, within } = call;
+    const { runId, held, heldId, given } = outer;
+    const key = within ? `${runId}:${within.seq}` : runId;
     const { ops, drivers, policy, collections } = this.config;
     const fn = drivers.get(op.id);
     if (!fn && !isOperation(op)) {
@@ -581,17 +592,15 @@ export class SanomaClient {
     // A company operation's held run answers it, a read one's too; a call inside one, its operation's.
     let attempt = 1;
     if (given) {
-      const made = write
-        ? await this.recordedCall(runId, op, calls, actor, connection, within === undefined ? undefined : seq)
-        : undefined;
+      const made = write ? await this.recordedCall(runId, op, calls, actor, connection, within?.seq) : undefined;
       if (made && "partial" in made) attempt = 2;
       else if (made) return made.output;
-      else if (within === undefined && (write || isOperation(op))) {
+      else if (!within && (write || isOperation(op))) {
         const first = await this.heldCall(op.id, heldId, held);
         if (first) return first.output;
       }
     }
-    const run = { id: runId, workflow: within ?? CALL_WORKFLOW, approvals: [] };
+    const run = { id: runId, workflow: within?.op ?? CALL_WORKFLOW, approvals: [] };
     const decisions: RecordedDecision[] = [];
     for (const [i, c] of calls.entries()) {
       const before = await beforeOf(policy, c.op, c.input, collections, (get, read) =>
@@ -606,11 +615,11 @@ export class SanomaClient {
     if (decision.kind === "approve") {
       await this.start(CALL_WORKFLOW, held.input, { startedBy: actor, runId: heldId });
       // Held inside an operation: the run makes the whole operation once approved.
-      if (within !== undefined) throw new ApprovalPendingError(within, heldId);
+      if (within) throw new ApprovalPendingError(within.op, heldId);
       // A read held before, whose run has ended since, answers with that run's result.
       return (await this.heldCall(op.id, heldId, held))!.output;
     }
-    if (isOperation(op)) return this.directOperation(op, parsed, actor, { runId, held, heldId, given, decision });
+    if (isOperation(op)) return this.directOperation(op, parsed, actor, outer, decision);
     const context: CallContext = {
       idempotencyKey: key,
       runId,
@@ -623,7 +632,7 @@ export class SanomaClient {
     };
     await this.config.connections.assertCurrent(connection, actor.id);
     if (!write) return outputOf(op, () => fn!(parsed, context));
-    return this.directWrite({ op, fn: fn!, parsed, calls, actor, decisions, context, seq, within });
+    return this.directWrite({ op, fn: fn!, parsed, calls, actor, decisions, context, within });
   }
 
   /**
@@ -638,9 +647,10 @@ export class SanomaClient {
     op: Operation,
     parsed: unknown,
     actor: Principal,
-    call: { runId: string; held: RunArgs; heldId: string; given: boolean; decision: RecordedDecision },
+    outer: DirectCall,
+    decision: RecordedDecision,
   ): Promise<unknown> {
-    const { runId, held, heldId, given, decision } = call;
+    const { runId } = outer;
     let next = 1;
     const runner: CtxRunner = {
       place: () => undefined,
@@ -652,16 +662,7 @@ export class SanomaClient {
         const seq = next;
         next += callsOf(inner, p, this.config.ops).length;
         const connection = await this.config.connections.select(inner.vendor, ref, actor.id);
-        return this.direct(inner, p, actor, {
-          runId,
-          seq,
-          key: `${runId}:${seq}`,
-          held,
-          heldId,
-          given,
-          connection,
-          within: op.id,
-        });
+        return this.direct(inner, p, actor, outer, connection, { op: op.id, seq });
       },
     };
     const at = Date.now();
@@ -690,7 +691,8 @@ export class SanomaClient {
    * A direct write, made once and recorded once: with the default ledger, a collection's write
    * and its records in one transaction on the database both are in, so both are kept or neither;
    * otherwise the driver's call, then the records in the config's ledger. A write is recorded as
-   * one `op.called` per call it makes (`callsOf`: one, or a batch's entries), numbered from `seq`.
+   * one `op.called` per call it makes (`callsOf`: one, or a batch's entries), numbered from 0 (from
+   * `within.seq` inside a company operation).
    * The first records of the call's id stand: a write that finds one already there (two calls
    * with one id at once) is undone, and answers as `recordedCall` does.
    */
@@ -702,10 +704,9 @@ export class SanomaClient {
     actor: Principal;
     decisions: readonly RecordedDecision[];
     context: CallContext;
-    seq: number;
-    within: string | undefined;
+    within: Within | undefined;
   }): Promise<unknown> {
-    const { op, parsed, calls, actor, decisions, context, seq, within } = call;
+    const { op, parsed, calls, actor, decisions, context, within } = call;
     const { runId } = context;
     const { dataStore, collections, ledger } = this.config;
     // A connection op that calls the provider (Test's verify, a renewal, a revocation; each may wait
@@ -725,13 +726,13 @@ export class SanomaClient {
           this.config.appName,
           {
             ...opCalled(c),
-            ...(within !== undefined && { within: 0 }),
+            ...(within && { within: 0 }),
             decision: decisions[i]!,
             ...(context.connection && { connection: context.connection }),
             ...outcome(i),
             durationMs: Date.now() - at,
           },
-          { seq: seq + i, at },
+          { seq: (within?.seq ?? 0) + i, at },
         ),
       );
     const made = (result: unknown) => {
@@ -769,14 +770,7 @@ export class SanomaClient {
       });
     } catch (err) {
       if (!is(err, TransactionRollbackError)) throw err;
-      const first = await this.recordedCall(
-        runId,
-        op,
-        calls,
-        actor,
-        context.connection,
-        within === undefined ? undefined : seq,
-      );
+      const first = await this.recordedCall(runId, op, calls, actor, context.connection, within?.seq);
       if (!first || "partial" in first) throw err;
       return first.output;
     }
@@ -789,7 +783,7 @@ export class SanomaClient {
    * failure again (`driver_failed`) when it failed, and `partial` when fewer records than its
    * calls are there (a batch's, appended one by one outside a transaction, cut short). Its
    * records are the run's but those within a company operation's call, or for a call inside one
-   * (`within`, its first `seq`), those within it from that `seq`, one per call.
+   * (`from`, its first `seq`), those within it from that `seq`, one per call.
    */
   private async recordedCall(
     runId: string,
@@ -797,14 +791,14 @@ export class SanomaClient {
     calls: readonly Call[],
     actor: Principal,
     connection: ConnectionSnapshot | undefined,
-    within?: number,
+    from?: number,
   ): Promise<{ output: unknown } | { partial: true } | undefined> {
     const made = (await this.audit.store.read(runId))
       .filter((r) => r.type === "op.called")
       .filter((r) =>
-        within === undefined
+        from === undefined
           ? r.within === undefined
-          : r.within !== undefined && r.seq >= within && r.seq < within + calls.length,
+          : r.within !== undefined && r.seq >= from && r.seq < from + calls.length,
       );
     if (!made.length) return undefined;
     const same = (what: (record: (typeof made)[number], call: Call) => boolean) =>

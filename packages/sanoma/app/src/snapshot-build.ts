@@ -3,7 +3,7 @@
 // it read changed (`liveSnapshot`). Reading the files, git and the network happens here, never in
 // a request.
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import {
   defaultBranch,
   errorMessage,
@@ -12,6 +12,7 @@ import {
   isOperation,
   kindDirs,
   readRootSnapshot,
+  relPath,
   type ResolvedConfig,
   resolveConfig,
   type SanomaConfig,
@@ -201,10 +202,7 @@ async function repositoryOf(resolved: ResolvedConfig, source: Source | undefined
   const workflows = Object.fromEntries(
     [...resolved.workflows.values()]
       .filter((wf) => !BUILT_IN_WORKFLOWS.has(wf.name))
-      .map((wf) => [
-        wf.name,
-        [wf, ...wf.uses.filter(isOperation)].map(({ file }) => relative(source.root, file).split(sep).join("/")),
-      ]),
+      .map((wf) => [wf.name, [wf, ...wf.uses.filter(isOperation)].map(({ file }) => relPath(source.root, file))]),
   );
   return { ...(remote && { remote: withoutCredentials(remote) }), workflows };
 }
