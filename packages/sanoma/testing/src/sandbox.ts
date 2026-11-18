@@ -32,8 +32,9 @@ export interface SandboxUnderTest {
   capabilities: SandboxCapabilities;
   /** The box the kit opens, and discards at its end. Default `sanoma-kit`. */
   name?: string;
-  image: string;
-  size: number;
+  /** What it opens the box from and with, when the type names them (`SandboxSpec.inputs`): left out, the backend's own. */
+  image?: string;
+  size?: number;
   /** What its boxes may reach (`open`'s `hosts`). Default the package registry alone. */
   hosts?: readonly string[];
   /** How long a check waits. Default 60 s. */

@@ -12,9 +12,9 @@ import {
   ItemMedia,
   ItemTitle,
 } from "#/components/ui/item.tsx";
-import { DECLARE_BOX } from "../../api.ts";
+import { declareBox } from "../../api.ts";
 import { boxless, enginesHere, enginesOf, MODEL_CONNECTOR } from "../../lib/chat.ts";
-import { configQuery } from "../../queries.ts";
+import { companyStateQuery, configQuery } from "../../queries.ts";
 import { ButtonLink } from "../kit.tsx";
 import { EngineMark } from "./engine-mark.tsx";
 
@@ -26,8 +26,18 @@ const CLAUDE = "claude-code";
 const CODEX = "codex";
 
 /**
+ * What a live instance that declares no box says to declare (`declareBox`), once the company's
+ * state says where it runs (Sanoma Cloud's box, else Agent37's): nothing while it is not known.
+ * Hosting's notice (`force`, as Hosting reads the state) and the Claude plan's card.
+ */
+export function useDeclareBox({ force = false } = {}): string | undefined {
+  const { data: company } = useQuery(companyStateQuery({ force }));
+  return company && `${declareBox(company.declared === "cloud")}.`;
+}
+
+/**
  * The cards, each with its agent's mark: Your Claude plan (its sign-in starts at once; on a live
- * instance that declares no box, what to declare instead, `DECLARE_BOX`), Your ChatGPT plan
+ * instance that declares no box, what to declare instead, `declareBox`), Your ChatGPT plan
  * through Codex (on a live instance, where OpenAI's plan sign-in does not reach, an OpenAI API key,
  * which is not offered yet), an API key on the model's connector page (`vendor`'s, else the
  * Anthropic connector to add), and More agents, the rest the chat can open on here
@@ -37,6 +47,7 @@ const CODEX = "codex";
  */
 export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: (engine: string) => void }) {
   const { data: config } = useQuery(configQuery());
+  const declare = useDeclareBox();
   const live = config?.place === "live";
   const noBox = config !== undefined && boxless(config);
   // The own plans the chat can open on here; with no box, Claude's still has its card, saying what to declare.
@@ -64,7 +75,7 @@ export function ConnectAgent({ vendor, onChoose }: { vendor?: string; onChoose: 
                 Your Claude plan <Badge variant="secondary">Recommended</Badge>
               </ItemTitle>
               <ItemDescription>
-                {noBox ? `${DECLARE_BOX}.` : "Pro or Max. Sign in once in your browser; nothing extra to pay."}
+                {noBox ? declare : "Pro or Max. Sign in once in your browser; nothing extra to pay."}
               </ItemDescription>
             </ItemContent>
             {!noBox && (

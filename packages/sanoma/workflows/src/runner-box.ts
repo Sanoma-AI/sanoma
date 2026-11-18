@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   FILE,
@@ -72,20 +73,27 @@ interface Connection {
 /** How long the runner's WebSocket may take to open, in ms. */
 const OPEN_MS = 30_000;
 
+/** How long `stop` waits for the runner to kill what runs in the box, in ms, before the vendor's `sleep`. */
+const STOP_MS = 30_000;
+
 /**
  * The box `id` whose runner is at `url` (`http(s)://`, the WebSocket's upgrade sent with
- * `headers`): its commands, files and `stop` (which kills every command in it and closes the
- * connection). Connects at the first call, and again at the next call after a drop or a `stop`.
- * How its ports are reached is the vendor's, so the backend adds `expose`.
+ * `headers`): its commands, files and `stop`, which kills every command in it and closes the
+ * connection, then puts the box to sleep (`sleep`, the vendor's). A runner that cannot be reached,
+ * or does not answer in `STOP_MS`, kills nothing, and the sleep goes ahead. Connects at the first
+ * call, and again at the next call after a drop or a `stop`. How its ports are reached is the
+ * vendor's, so the backend adds `expose`.
  */
 export function runnerBox({
   url,
   headers,
   id,
+  sleep,
 }: {
   url: string;
   headers?: Record<string, string>;
   id: string;
+  sleep?: () => Promise<unknown>;
 }): Omit<Box, "expose"> {
   const where = `the runner at ${new URL(url).host}`;
   let current: Promise<Connection> | undefined;
@@ -211,13 +219,15 @@ export function runnerBox({
     async stop() {
       // This connection, not one a call opens meanwhile after a drop.
       const closing = connect();
-      try {
-        await ask({ op: "stop" });
-      } finally {
-        // The next call opens a new connection, not this closing one.
-        if (current === closing) current = undefined;
-        (await closing.catch(() => undefined))?.ws.close();
-      }
+      const killed = ask({ op: "stop" })
+        .catch(() => undefined)
+        .finally(async () => {
+          // The next call opens a new connection, not this closing one.
+          if (current === closing) current = undefined;
+          (await closing.catch(() => undefined))?.ws.close();
+        });
+      await Promise.race([killed, delay(STOP_MS, undefined, { ref: false })]);
+      await sleep?.();
     },
   };
 }

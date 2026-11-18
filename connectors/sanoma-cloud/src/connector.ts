@@ -10,13 +10,14 @@ import { CLOUD_HOSTNAME, CLOUD_SLUG, CLOUD_SLUG_RULE } from "sanoma/workflows/sh
 import { z } from "zod";
 
 /*
- * Sanoma Cloud: the company's database and host in Sanoma's own accounts, a vendor the company's
- * repository declares like any other. Its API is sanoma-ops's workflows (`cloud-signup`,
- * `cloud-list`, `cloud-deploy`, `cloud-close`, and for going live from a computer
- * `cloud-available` and `cloud-invite`), started over the public api of www.sanoma.work with the
- * company's Cloud token; the schemas are a cut of their fields, by hand. The company is the
- * token's (one token, one company), an id that never changes, which the lockfile binds the
- * database and the host to; its address is the host's `hostname`, which a deploy can change.
+ * Sanoma Cloud: the company's database, host and agent boxes in Sanoma's own accounts, a vendor
+ * the company's repository declares like any other. Its API is sanoma-ops's workflows
+ * (`cloud-signup`, `cloud-list`, `cloud-deploy`, `cloud-close`, for going live from a computer
+ * `cloud-available` and `cloud-invite`, and for the boxes `cloud-box-open`, `-expose`, `-stop` and
+ * `-discard`), started over the public api of www.sanoma.work with the company's Cloud token; the
+ * schemas are a cut of their fields, by hand. The company is the token's (one token, one
+ * company), an id that never changes, which the lockfile binds the database, the host and the
+ * boxes to; its address is the host's `hostname`, which a deploy can change.
  */
 
 /**
@@ -183,6 +184,33 @@ export const host = defineResource({
   },
 });
 
+const sandboxSchema = z.object({
+  id: companyId,
+  healthy: z.boolean().nullish().describe("Whether the Cloud says the company is open"),
+});
+
+/**
+ * `cloud.sandbox({})`: the company's agent boxes at Sanoma Cloud, which meets the `Sandbox`
+ * contract: one Agent37 instance per box in Sanoma's account, which the Cloud makes, wakes and puts
+ * to sleep (`backend.ts`), its files and memory kept across a stop and its ports reached through a
+ * short-lived link. The declaration decides nothing: the Cloud chooses each box's image and size,
+ * and the company's limits. It has no name: the Cloud token is for one company, and the boxes are
+ * that company's. Its binding is the company's id.
+ */
+export const sandbox = defineResource({
+  vendor: "cloud",
+  type: "sandbox",
+  title: "Agent boxes",
+  schema: sandboxSchema,
+  fields: { immutable: [], vendorOwned: ["id", "healthy"], writeOnly: [] },
+  writable: true,
+  sandbox: {
+    capabilities: { snapshot: true, pause: true, port: true },
+    inputs: {},
+    outputs: (state) => ({ id: String(state.id), healthy: state.healthy === true }),
+  },
+});
+
 /** `database.storeUrl`, in the database type's own group beside its resource operations. */
 const storeUrlSpec = {
   storeUrl: {
@@ -253,13 +281,14 @@ const companySpecs = {
   },
 } satisfies Record<string, OpSpec>;
 
-const types = defineConnector("cloud", { database, host }, vendorInfo(import.meta.url));
+const types = defineConnector("cloud", { database, host, sandbox }, vendorInfo(import.meta.url));
 const store = defineConnector("cloud", { database: storeUrlSpec, company: companySpecs });
 
-/** The connector's specs: both types' operations, `storeUrl` in the database's group, and the account's. */
+/** The connector's specs: the types' operations, `storeUrl` in the database's group, and the account's. */
 type CloudSpecs = {
   database: (typeof database)["ops"] & typeof storeUrlSpec;
   host: (typeof host)["ops"];
+  sandbox: (typeof sandbox)["ops"];
   company: typeof companySpecs;
 };
 
@@ -274,5 +303,5 @@ export const cloudOps = {
   company: store.company,
 } as unknown as Connector<"cloud", CloudSpecs>;
 
-/** The connector's type: both types, with `database.storeUrl`. */
+/** The connector's type: the database, host and sandbox types, with `database.storeUrl`. */
 export type CloudOps = typeof cloudOps;
