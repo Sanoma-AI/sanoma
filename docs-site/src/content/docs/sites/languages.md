@@ -43,6 +43,8 @@ function Blog() {
 }
 ```
 
+## How languages work
+
 - **URLs.** `params.locale` is the URL's language, `undefined` in the default's. A `Link` keeps the page's language (the router carries `locale` over); `params={{ locale: "fr" }}` names another. A language the site lacks, and the default's own prefix (`/en/…`), are not found. A page outside `{-$locale}` has one URL, in the default language.
 - **Strings.** `defineMessages(site, { <locale>: { … } })` takes every language of the site, each with exactly the default's keys and types, so a key or a language missing or extra fails `sanoma check`; a string with values in it is a function of them, its parameters typed in each language. `useMessages(messages)` gives the strings of the page on screen, `messages.get(params.locale)` those of a language in a loader or a `head`.
 - **The page.** On the site's own host, `<html lang>` is the page's language (`useLocale()` gives it, for `Intl`'s formats, on either host; the app's host keeps `en`, its chrome's), and each page under `{-$locale}` in more than one language links to itself in each, `<link rel="alternate" hreflang>` with absolute URLs at `siteOrigin()` (the site's domain when it has one), and to its default as `x-default` when it is in that; the [sitemap](/sites/public-sites/) lists it once per language with the same alternates. A page is in every language, but a content page (one the sitemap lists per entry) only in those its entry is in, as its loader reads it: a post with no translation shows its original under each prefix, and a translation alone (`only.fr.md`, no `only.md`) is in French only.
@@ -57,6 +59,8 @@ export function Switcher() {
   ));
 }
 ```
+
+## Related and later
 
 - **Content:** a post's translation is `<slug>.<locale>.md` ([Content](/sites/content/)).
 - **In the app:** the Sites page lists a site's languages, its default first.
