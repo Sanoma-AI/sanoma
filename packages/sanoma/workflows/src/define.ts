@@ -314,6 +314,8 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
   /** Every operation and built-in the workflow may call. `ctx` is built from this list and nothing else. */
   readonly uses: U;
   readonly run: (ctx: Ctx<U>, input: z.output<S>) => Promise<unknown>;
+  /** Only the runtime starts it, through the client's own methods; a company workflow may not set it. */
+  readonly internal?: true;
   /**
    * The file that defined it, absolute. Set by defineWorkflow from its call site: the outline is
    * read from it, the worker holds each run to that outline, and the app shows it as the code view.
@@ -323,6 +325,10 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
 
 /** The ids of the operations a workflow or a company operation `uses`, in the order declared. */
 export const opIdsOf = (wf: Pick<WorkflowDefinition, "uses">): string[] => wf.uses.filter(isOp).map((op) => op.id);
+
+/** Whether a workflow only reads: it uses at least one operation, and nothing but operations of effect `read`. */
+export const readOnly = (wf: Pick<WorkflowDefinition, "uses">): boolean =>
+  wf.uses.length > 0 && wf.uses.every((use) => isOp(use) && use.effect === "read");
 
 /**
  * A company operation: the company's own server logic in a file of `operations/` (`defineOperation`),

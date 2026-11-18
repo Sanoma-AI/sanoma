@@ -620,6 +620,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     if (BUILT_IN_WORKFLOWS.has(wf.name)) {
       throw new Error(`A workflow is named "${wf.name}", the name of a built-in workflow; name it otherwise`);
     }
+    if (wf.internal) throw new Error(`Workflow "${wf.name}" is internal, as only the runtime's own are; leave it out`);
     checkUses(`Workflow "${wf.name}"`, wf.uses, ops, drivers);
     checkSchedule(wf);
     const other = names.get(wf.name);

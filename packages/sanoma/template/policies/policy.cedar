@@ -4,7 +4,9 @@
 // decided here. Write against .sanoma/schema.cedarschema, which `sanoma check` writes: the
 // actions (each operation's id, in its effect's group, and `workflow:<name>`), the groups
 // resources/people.ts declares, and each operation's input as `context.input`.
-// A `permit` is only for a public site's visitors: its principal `in Sanoma::Group::"visitors"` or `== Sanoma::Principal::"anonymous"`.
+// A `permit` is for a public site's visitors (its principal `in Sanoma::Group::"visitors"` or
+// `== Sanoma::Principal::"anonymous"`), or for agents (`in Sanoma::Group::"agents"`): an agent's start
+// of a built-in that changes something, such as apply, waits for admin unless a permit for agents allows it.
 
 // Sending or publishing waits for someone in admin, unless someone in admin asked for it, or it
 // is a sign-in code the runtime's agent `login` sends (the built-in `login-code` workflow).

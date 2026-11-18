@@ -12,7 +12,6 @@ import { ANONYMOUS_PRINCIPAL, siteDir, visitorPrincipal } from "sanoma/workflows
 import type { AdmittingLogin } from "../context.ts";
 import { secretValues } from "../server/secrets.ts";
 import { loginKey } from "./keys.ts";
-import { sendLoginCode } from "./staff.ts";
 
 // A public site's front door: on the site's own host it stands where the staff login stands on
 // the app's, and never reads the staff login's cookie or header.
@@ -47,7 +46,7 @@ export async function siteLogin(
     key: loginKey(login!),
     secrets: secretValues(client),
     origins,
-    ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
+    ...(resolved.login && { sendCode: (email, code) => client.sendLoginCode(email, code) }),
     social,
   });
 }

@@ -105,9 +105,11 @@ describe("a chat turn, on a worker with the app's steps", () => {
     );
     expect(errorCode(after)).toBe("invalid_input");
     // Bob's start of Alice's chat, and a visitor's.
-    expect(errorCode(await failure(app.client.startTurn(input, { startedBy: "bob" })))).toBe("invalid_input");
-    const visitor = await failure(app.client.startTurn(input, { startedBy: visitorPrincipal("auth0", "u1") }));
-    expect(errorCode(visitor)).toBe("policy_denied");
+    for (const startedBy of ["bob", visitorPrincipal("auth0", "u1")]) {
+      expect(errorCode(await failure(app.client.startTurn(input, { startedBy }))), JSON.stringify(startedBy)).toBe(
+        "invalid_input",
+      );
+    }
     expect(await app.client.turn("rules")).toBeUndefined();
   });
 

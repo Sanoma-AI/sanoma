@@ -61,7 +61,8 @@ function WorkflowPage() {
     <>
       <CrumbHeader
         action={
-          workflow && (
+          workflow &&
+          !workflow.internal && (
             <ButtonLink size="sm">
               <Link
                 from={Route.fullPath}

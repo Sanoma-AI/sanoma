@@ -103,7 +103,7 @@ describe("staffLogin", () => {
   /** The runtime's table of spent invite-request nonces, as the client keeps it. */
   const nonces = new Set<string>();
   const client = {
-    start: vi.fn<(...args: unknown[]) => Promise<string>>(async () => "run-1"),
+    sendLoginCode: vi.fn<(email: string, code: string) => Promise<void>>(async () => {}),
     recordSignIn: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
     recordInvite: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
     lastInvite: vi.fn<(...args: unknown[]) => Promise<{ by: string } | undefined>>(async () => ({ by: "ada" })),
@@ -181,11 +181,7 @@ describe("staffLogin", () => {
     expect(login.signOut).toBe("/auth/better-auth/sign-out");
 
     await context.sendCode!("ada@acme.test", "123456");
-    expect(client.start).toHaveBeenCalledWith(
-      "login-code",
-      { to: "ada@acme.test", code: expect.not.stringContaining("123456") },
-      { startedBy: "login" },
-    );
+    expect(client.sendLoginCode).toHaveBeenCalledWith("ada@acme.test", "123456");
     await context.staff!.record("code", { email: "ada@acme.test" });
     expect(client.recordSignIn).toHaveBeenCalledWith("ada", "code");
   });

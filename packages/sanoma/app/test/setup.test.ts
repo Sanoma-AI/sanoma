@@ -12,6 +12,7 @@ import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 import { testDatabaseUrl, withFake } from "sanoma/testing";
 import { fakeHost } from "sanoma/testing/host";
 import {
+  dbosClient,
   defineConfig,
   defineConnector,
   defineResource,
@@ -828,11 +829,16 @@ describe("a sign-in code's run", () => {
     const runs = await SanomaClient.connect(sending);
     try {
       const sealed = sealLoginCode("alice@acme.test", "246810");
-      const runId = await runs.start(
-        LOGIN_CODE_WORKFLOW,
-        { to: "alice@acme.test", code: sealed },
-        { startedBy: LOGIN_AGENT },
-      );
+      // Enqueued with a code sealed here, so the page can be held to it: login-code is internal, which no start makes.
+      const { queueName, appName } = resolveConfig(sending);
+      const raw = await dbosClient(sending.databaseUrl!, appName);
+      const runId = await raw
+        .enqueue(
+          { queueName, workflowName: LOGIN_CODE_WORKFLOW, applicationName: appName },
+          { input: { to: "alice@acme.test", code: sealed }, startedBy: { id: LOGIN_AGENT } },
+        )
+        .then((handle) => handle.workflowID)
+        .finally(() => raw.destroy());
       await runs.result(runId);
       const page = await html(`/workflows/${LOGIN_CODE_WORKFLOW}/runs/${runId}`, started.url);
       expect(page).toContain(`Started by ${LOGIN_AGENT}`);

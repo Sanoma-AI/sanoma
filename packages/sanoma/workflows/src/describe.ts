@@ -6,7 +6,15 @@ import { readPolicyFiles } from "./cedar.ts";
 import { recordSchemaOf } from "./collection.ts";
 import { decideCall } from "./call.ts";
 import { connectorsOf, type ResolvedConfig, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
-import { type Builtin, jsonSchemaOf, type Operation, opIdsOf, type Use, type WorkflowDefinition } from "./define.ts";
+import {
+  type Builtin,
+  jsonSchemaOf,
+  type Operation,
+  opIdsOf,
+  readOnly,
+  type Use,
+  type WorkflowDefinition,
+} from "./define.ts";
 import {
   CAPABILITIES,
   type CollectionEntry,
@@ -288,6 +296,8 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       title: wf.title,
       trigger: wf.trigger,
       ...(builtin && { builtin: true as const }),
+      ...(wf.internal && { internal: true as const }),
+      ...(readOnly(wf) && { readOnly: true as const }),
       input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
       ops: opIdsOf(wf),
       builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),

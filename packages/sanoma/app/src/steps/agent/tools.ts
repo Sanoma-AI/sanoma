@@ -25,7 +25,6 @@ import {
   lookupOutput,
   runCatalog,
   runOutput,
-  startDrift,
   stillHeld,
 } from "../../server/catalog.ts";
 import { type CallHost, noRun, RESULT_WAIT_MS } from "../../server/core.ts";
@@ -304,7 +303,7 @@ const spec = <N extends CatalogName>(name: N) => {
  * (`chatAgentActing`), so the policy is asked as it and as them and the ledger records both. A
  * tool that takes an idempotency id is given `catalogCallId` of the chat, the turn's message
  * (`turn.message`) and the tool call, one call per tool call. A held lookup, or a start
- * (`start_run`, `drift`) whose run waits for an approval, shows the held output
+ * (`start_run`) whose run waits for an approval, shows the held output
  * (`{ held: { runId } }`, the chat's approval card) at once and waits up to `heldMs` for the
  * decision; past it, it answers that it waits, for whom, with the run's id (`StillHeld`, which
  * `settle` replaces with the run's state once it is decided). A started run that is not held is
@@ -367,27 +366,6 @@ export function catalogTools(
     if (!run) throw noRun(runId);
     return run;
   };
-  /**
-   * A started run watched for `startMs` (`RESULT_WAIT_MS` at most, and when not given), until it
-   * ends or waits for an approval; one that waits shows the held output, then is waited for up to
-   * `heldMs` for the decision, and once it is decided up to `DECIDED_WAIT_MS` more for its end.
-   * Its answer is the run's, as it then stands (`runOutput`): finished with its output, failed with
-   * its error, still running, or still held.
-   */
-  async function* watched(
-    runId: string,
-    signal: AbortSignal | undefined,
-    startMs = RESULT_WAIT_MS,
-  ): AsyncGenerator<RunOutput, RunOutput> {
-    const started = await settled(runId, Math.min(startMs, RESULT_WAIT_MS), signal);
-    if (started.status !== "waiting") return runOutput(client, started);
-    yield { held: { runId } } satisfies HeldOutput;
-    const decided = await poll(runId, Date.now() + heldMs, (r) => r.status !== "waiting", signal);
-    if (!decided) throw noRun(runId);
-    if (decided.status === "waiting" || isEnded(decided.status)) return runOutput(client, decided);
-    return runOutput(client, await settled(runId, DECIDED_WAIT_MS, signal));
-  }
-
   return {
     describe: tool({ ...spec("describe"), execute: (args) => call("describe", args, {}) }),
     lookup: tool({
@@ -419,19 +397,24 @@ export function catalogTools(
       ...spec("wait_run"),
       execute: (args, { abortSignal }) => call("wait_run", args, { signal: abortSignal }),
     }),
-    drift: tool({
-      ...spec("drift"),
-      async *execute({ waitMs }, { toolCallId, abortSignal }): AsyncGenerator<RunOutput> {
-        // Started without waiting, then watched as a start is: a drift the policy holds shows at once.
-        const { runId } = await startDrift(host(), actor(), idOf(toolCallId));
-        yield yield* watched(runId, abortSignal, waitMs);
-      },
-    }),
     start_run: tool({
       ...spec("start_run"),
       async *execute(args, { toolCallId, abortSignal }): AsyncGenerator<RunOutput> {
         const { runId } = (await call("start_run", args, { toolCallId })) as { runId: string };
-        yield yield* watched(runId, abortSignal);
+        // Watched until it ends or waits for an approval; one that waits shows the held output, is
+        // waited for up to `heldMs` for the decision, and once decided up to `DECIDED_WAIT_MS` more.
+        let run = await settled(runId, RESULT_WAIT_MS, abortSignal);
+        if (run.status === "waiting") {
+          yield { held: { runId } } satisfies HeldOutput;
+          const decided = await poll(runId, Date.now() + heldMs, (r) => r.status !== "waiting", abortSignal);
+          if (!decided) throw noRun(runId);
+          // Still held, or ended: answered as it stands.
+          run =
+            decided.status === "waiting" || isEnded(decided.status)
+              ? decided
+              : await settled(runId, DECIDED_WAIT_MS, abortSignal);
+        }
+        yield await runOutput(client, run);
       },
     }),
   };

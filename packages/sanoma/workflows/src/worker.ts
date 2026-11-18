@@ -709,10 +709,9 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
       const action = `${WORKFLOW_ACTION}${wf.name}`;
       /** The policy's answer to this start, in a step; a deny fails the run. */
       const decide = async () => {
-        const decision = await DBOS.runStep(
-          async () => decideStart(state.policy, wf.name, parsed, startedBy, run.approvals),
-          { name: `policy:${action}` },
-        );
+        const decision = await DBOS.runStep(async () => decideStart(state, wf, parsed, startedBy, run.approvals), {
+          name: `policy:${action}`,
+        });
         if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
         return decision;
       };

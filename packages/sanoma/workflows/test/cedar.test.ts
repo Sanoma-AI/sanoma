@@ -161,6 +161,11 @@ const approved = (approver: ApprovalState["approver"], by: string): ApprovalStat
   refused: [],
 });
 
+/** The runtime's rule on an agent's start of a built-in that changes something, with no person in admin. */
+const noAdmin = (workflow: string) =>
+  `workflow:${workflow} was denied by policy: An agent's start of ${workflow} waits for a person in the group ` +
+  '"admin", and no data file puts one in it: add one in resources/people.ts, or permit agents to start it in policies/';
+
 describe("schemaOf", () => {
   it("has the declared groups, agents and visitors, every operation in its effect's group and every workflow in start", () => {
     expect(text).toContain('entity Group enum ["agents", "finance", "sales", "visitors"];');
@@ -532,11 +537,32 @@ permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"
       },
     ]);
     expect(validatePolicies(resolved, policies, people).map((p) => [p.line, p.message])).toEqual([
-      [1, expect.stringContaining("a permit is allowed only for visitors")],
-      [2, expect.stringContaining("a permit is allowed only for visitors")],
+      [1, expect.stringContaining("a permit is allowed only for visitors or agents")],
+      [2, expect.stringContaining("a permit is allowed only for visitors or agents")],
       [3, '@hold("visitors") names no declared group or person, nor "on-behalf-of"'],
       [4, "a permit holds nothing: write the @hold on a forbid"],
     ]);
+  });
+
+  it("permits agents too, only to lift the runtime's rule on an agent: never a visitor's way in", () => {
+    const { policies } = loadPolicies([
+      {
+        file: "policies/agents.cedar",
+        text: `@id("agents-refund")
+permit (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflow:refund", resource);
+`,
+      },
+    ]);
+    expect(policies.map((p) => p.scope)).toEqual(["agents"]);
+    expect(validatePolicies(resolved, policies, people)).toEqual([]);
+    const agents = cedarPolicy(resolved, policies, people);
+    // An api token whose groups name agents is still a visitor: no permit for agents lets it in.
+    const token = { id: "token:t1", groups: ["agents"] };
+    expect(agents.start(token, "refund", { amount: 1 })).toEqual({ kind: "deny", reason: VISITOR_DENIED });
+    expect(agents.permitsAgent?.({ id: "refund-bot", groups: ["sales", "agents"] }, "refund", { amount: 1 })).toBe(
+      true,
+    );
+    expect(agents.permitsAgent?.({ id: "bo", groups: [] }, "refund", { amount: 1 })).toBe(false);
   });
 
   it("refuses a visitor's start and direct call no permit names, and anonymous's", () => {
@@ -1172,12 +1198,11 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
       code: "policy_denied",
       message: "workflow:drift was denied by policy: Agents do not check drift here",
     });
-    // No other built-in but call, before any policy.
+    // A built-in that changes something waits for admin, whom no file declares here.
     const runId = randomUUID();
     expect(await failure(app.client.start("go-live-host", {}, { startedBy: chatForAda, runId }))).toMatchObject({
       code: "policy_denied",
-      message:
-        "workflow:go-live-host was denied by policy: an agent starts none of the runtime's own workflows but drift",
+      message: noAdmin("go-live-host"),
     });
     expect(await app.client.run(runId)).toBeUndefined();
     // What a forbid refuses the person, it refuses the chat acting for them; another person's chat starts it.
@@ -1216,8 +1241,7 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
     const runId = randomUUID();
     expect(await failure(app.client.start("go-live-host", {}, { startedBy: claudeForAda, runId }))).toMatchObject({
       code: "policy_denied",
-      message:
-        "workflow:go-live-host was denied by policy: an agent starts none of the runtime's own workflows but drift",
+      message: noAdmin("go-live-host"),
     });
     expect(await app.client.run(runId)).toBeUndefined();
     // The person's forbid reaches it, and the agents' hold waits for the person, who may approve it.
@@ -1240,21 +1264,21 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
     });
   });
 
-  it("refuses an agent's drift a forbid on workflow:drift names, and not a person's or a runtime agent's", async () => {
-    expect(await failure(app.client.drift({ startedBy: forAda }))).toMatchObject({
-      code: "policy_denied",
-      message: "workflow:drift was denied by policy: Agents do not check drift here",
-    });
-    // A person's start of a built-in is not asked, as before; nor is the runtime's agents', though in agents.
-    for (const startedBy of ["ada", "host-check"]) {
-      const runId = await app.client.drift({ startedBy });
-      expect((await app.client.driftReport(runId)).resources, startedBy).toEqual([
-        expect.objectContaining({ id: "resources/hooks.ts#deploys" }),
-      ]);
+  it("refuses an agent's drift a forbid on workflow:drift names, and not a person's", async () => {
+    // The forbid names the agents group: the runtime's own agents are in it too, asked as any starter is.
+    for (const startedBy of [forAda, "host-check"]) {
+      expect(await failure(app.client.drift({ startedBy })), JSON.stringify(startedBy)).toMatchObject({
+        code: "policy_denied",
+        message: "workflow:drift was denied by policy: Agents do not check drift here",
+      });
     }
+    const runId = await app.client.drift({ startedBy: "ada" });
+    expect((await app.client.driftReport(runId)).resources).toEqual([
+      expect.objectContaining({ id: "resources/hooks.ts#deploys" }),
+    ]);
   });
 
-  it("refuses an agent every other built-in but call, before any policy", async () => {
+  it("refuses an agent's start of a built-in that changes something while no admin group is declared", async () => {
     for (const [workflow, input] of [
       ["go-live-host", {}],
       ["adopt", { runId: "r1", id: "resources/hooks.ts#deploys", paths: ["name"] }],
@@ -1262,7 +1286,7 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
       const runId = randomUUID();
       expect(await failure(app.client.start(workflow, input, { startedBy: forAda, runId })), workflow).toMatchObject({
         code: "policy_denied",
-        message: `workflow:${workflow} was denied by policy: an agent starts none of the runtime's own workflows but drift`,
+        message: noAdmin(workflow),
       });
       expect(await app.client.run(runId)).toBeUndefined();
     }

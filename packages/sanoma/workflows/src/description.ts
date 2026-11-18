@@ -237,6 +237,10 @@ export const WorkflowEntrySchema = z.strictObject({
    * starts like any other.
    */
   builtin: z.literal(true).optional(),
+  /** Set for a workflow only the runtime starts (`WorkflowDefinition.internal`): a start of it from outside is refused. */
+  internal: z.literal(true).optional(),
+  /** Set for a workflow that only reads (`readOnly`): it uses operations, every one a read. */
+  readOnly: z.literal(true).optional(),
   /** The input, as JSON Schema (draft 2020-12), from the zod schema. */
   input: JsonSchema,
   /** Operation ids the workflow may call, in the order declared. */

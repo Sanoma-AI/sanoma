@@ -264,7 +264,10 @@ describe("on a worker given the app's steps", () => {
     const err = await failure(
       app.client.start(SAVE_DRAFT_WORKFLOW, { id: "d1", title: "Welcome" }, { startedBy: "alice" }),
     );
-    expect(err).toMatchObject({ code: "invalid_input", message: expect.stringContaining("saveDraft") });
+    expect(err).toMatchObject({
+      code: "invalid_input",
+      message: "save-draft is internal: only Sanoma itself starts it",
+    });
     const refused = await app.client.saveDraft({ id: "d1", title: "Refused" }, { startedBy: "alice" });
     expect(refused).toBe("save:d1");
     await expect(app.client.result(refused)).rejects.toThrow("No draft of yours is d1");

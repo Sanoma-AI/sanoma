@@ -43,6 +43,7 @@ export function loginCodeWorkflow(
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "login-code" satisfies typeof LOGIN_CODE_WORKFLOW,
     title: "Send a sign-in code",
+    internal: true,
     trigger: "manual",
     input: LoginCodeInput,
     uses: [sender],

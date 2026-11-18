@@ -3,7 +3,7 @@ import { resolveConfig, type SanomaConfig } from "./config.ts";
 import type { Principal } from "./define.ts";
 import { type LedgerRecord, memoryLedger } from "./ledger.ts";
 import { type Check, check, drive, loadScenarios, type Scenario, type Scope } from "./scenario.ts";
-import { errorMessage } from "./shared.ts";
+import { CALL_WORKFLOW, errorMessage } from "./shared.ts";
 import { startWorker } from "./worker.ts";
 import { memorySecretStore } from "./secret-store.ts";
 
@@ -37,10 +37,12 @@ export async function runScenario(
   scenario: Scenario,
   { client, scope, startedBy = "scenarios", timeoutMs }: RunScenarioOptions,
 ): Promise<{ runId: string; run: RunSummary; ledger: LedgerRecord[]; checks: Check[] }> {
-  const runId = await client.start(scenario.workflow, scenario.input, {
-    startedBy: scenario.startedBy ?? startedBy,
-    sandbox: scenario.name,
-  });
+  const options = { startedBy: scenario.startedBy ?? startedBy, sandbox: scenario.name };
+  // A scenario of `call` makes a direct call in its run, as a held one does (`startCall`).
+  const runId =
+    scenario.workflow === CALL_WORKFLOW
+      ? await client.startCall(scenario.input, options)
+      : await client.start(scenario.workflow, scenario.input, options);
   const run = await drive(client, runId, scenario, { timeoutMs });
   const ledger = await client.ledger(runId);
   return { runId, run, ledger, checks: await check(scope, scenario, ledger) };

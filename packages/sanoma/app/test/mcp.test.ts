@@ -17,7 +17,7 @@ import {
   withSetup,
 } from "sanoma/workflows";
 import { defineFake } from "sanoma/workflows/fake";
-import { AGENT_BUILT_IN_REFUSAL, BUILT_IN_WORKFLOWS } from "sanoma/workflows/shared";
+import { BUILT_IN_WORKFLOWS } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { customers as crmCustomers } from "../../workflows/test/fixtures/company-apps/apps/crm/resources/data.ts";
@@ -29,7 +29,7 @@ import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { CATALOG } from "../src/server/catalog.ts";
-import { actorOf, agentDescription, callApi } from "../src/server/core.ts";
+import { actorOf, agentDescription, callApi, RESULT_WAIT_MS } from "../src/server/core.ts";
 import { postMcp } from "../src/server/mcp.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 
@@ -94,6 +94,7 @@ writeFileSync(
 export const ada = sanoma.person({ id: "ada" });
 export const lead = sanoma.person({ id: "lead" });
 export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code" });
+export const admin = sanoma.group({ name: "admin", members: [ada] });
 `,
 );
 writeFileSync(
@@ -237,11 +238,11 @@ async function tool(name: string, args: Record<string, unknown> = {}, asked: Ask
 const fieldsOf = (entries: object[], allowed: string[]) =>
   expect(allowed).toEqual(expect.arrayContaining(entries.flatMap((entry) => Object.keys(entry))));
 
-const TOOLS = ["describe", "drift", "get_run", "lookup", "start_run", "wait_run"];
+const TOOLS = ["describe", "get_run", "lookup", "start_run", "wait_run"];
 
 describe("tools/list", () => {
   for (const era of ["modern", "legacy"] as const) {
-    it(`lists the six tools to a ${era === "modern" ? "2026-07-28" : "2025-era"} client, each titled, the start the one write`, async () => {
+    it(`lists the five tools to a ${era === "modern" ? "2026-07-28" : "2025-era"} client, each titled, the start the one write`, async () => {
       const { status, body } = await mcp("tools/list", {}, { era });
       expect(status).toBe(200);
       const tools = body.result.tools as { name: string; title?: string; description?: string; annotations?: any }[];
@@ -258,7 +259,6 @@ describe("tools/list", () => {
       const described = (name: string) => tools.find((t) => t.name === name)!.description;
       expect(described("lookup")).toContain("the error names the held run, which wait_run reads");
       expect(described("lookup")).toContain("Retried with the same id and input, a held lookup is the same held run");
-      expect(described("drift")).toContain("Retried with the same id, it is the same run");
       expect(described("start_run")).toContain("Retried with the same id, workflow and input");
       expect(described("start_run")).toContain("Answers the run's id, for get_run and wait_run");
     });
@@ -297,13 +297,25 @@ describe("the describe tool", () => {
       title: "Greet a customer",
       trigger: "manual",
       input: expect.objectContaining({ properties: { id: { type: "string" } } }),
+      // It calls only a read.
+      readOnly: true,
     });
-    // Only the company's own: no workflow of the runtime's, which start_run does not start.
-    expect(described.workflows.map((wf: { name: string }) => wf.name).toSorted()).toEqual([
-      "crm.follow-up",
-      "greet-customer",
-    ]);
-    expect(described.workflows.filter((wf: { name: string }) => BUILT_IN_WORKFLOWS.has(wf.name))).toEqual([]);
+    // The runtime's too, which start_run starts as it does the company's, but none it keeps to itself.
+    const names = described.workflows.map((wf: { name: string }) => wf.name);
+    expect(names).toEqual(expect.arrayContaining(["crm.follow-up", "greet-customer", "apply", "drift"]));
+    for (const internal of ["call", "change", "save-draft", "reshape", "chat", "follow"]) {
+      expect(names, internal).not.toContain(internal);
+    }
+    expect(described.workflows.find((wf: { name: string }) => wf.name === "drift")).toMatchObject({
+      builtin: true,
+      readOnly: true,
+    });
+    expect(described.workflows.find((wf: { name: string }) => wf.name === "apply")).toEqual(
+      expect.not.objectContaining({ readOnly: true }),
+    );
+    for (const wf of described.workflows as { name: string; builtin?: true }[]) {
+      expect(wf.builtin === true, wf.name).toBe(BUILT_IN_WORKFLOWS.has(wf.name));
+    }
     const ops = described.ops.map((op: { id: string }) => op.id);
     expect(ops).toEqual(expect.arrayContaining(["acme.customer.get", "data.outbound.list"]));
     // A write a workflow calls is not called directly, so it is not listed; a company operation is by what it uses.
@@ -334,7 +346,7 @@ describe("the describe tool", () => {
     }
     expect(text).not.toContain(root);
     // Each entry has these fields alone: no file, source, outline or declaration (an input schema may name any field).
-    fieldsOf(described.workflows, ["name", "apiName", "title", "trigger", "input"]);
+    fieldsOf(described.workflows, ["name", "apiName", "title", "trigger", "input", "builtin", "readOnly"]);
     fieldsOf(described.ops, ["id", "effect", "description", "input", "output"]);
     fieldsOf(described.collections, ["name", "title", "key", "fields", "ops"]);
   });
@@ -371,7 +383,7 @@ describe("lookup", () => {
     }
   });
 
-  it("answers a held lookup with its run, which get_run reads and wait_run says is still running", async () => {
+  it("answers a held lookup with its run, which get_run reads and wait_run says is held", async () => {
     const held = await tool("lookup", { op: "acme.customer.get", input: { id: "held" } });
     expect(held.isError).toBe(true);
     expect(held.structuredContent).toMatchObject({ code: "approval_pending", status: 409, runId: expect.any(String) });
@@ -381,9 +393,12 @@ describe("lookup", () => {
       workflow: "call",
       startedBy: { id: "ada" },
     });
-    const waited = await tool("wait_run", { runId, waitMs: 0 });
+    const waited = await waitFor(
+      () => tool("wait_run", { runId, waitMs: 0 }),
+      (answer) => answer.structuredContent.status !== "running",
+    );
     expect(waited.isError).toBeFalsy();
-    expect(waited.structuredContent).toEqual({ runId, status: "running" });
+    expect(waited.structuredContent).toEqual({ runId, status: "waiting for approval", waitsFor: ["lead"] });
   });
 
   it("files one approval for a held lookup retried with its id", async () => {
@@ -431,17 +446,24 @@ describe("start_run, get_run and wait_run", () => {
     expect((await start({ id: "c4" })).structuredContent).toMatchObject({ code: "invalid_input" });
   });
 
-  it("refuses the runtime's own workflows, however written, a workflow the config does not have and a bad input", async () => {
-    for (const workflow of ["apply", "drift", "call", "go-live", "goLive", "login-code", "loginCode"]) {
+  it("refuses an internal workflow by either name, whose runs still read, a workflow the config does not have and a bad input", async () => {
+    for (const [workflow, name] of [
+      ["call", "call"],
+      ["save-draft", "save-draft"],
+      ["saveDraft", "save-draft"],
+      ["change", "change"],
+      ["reshape", "reshape"],
+      ["follow", "follow"],
+    ]) {
       expect((await tool("start_run", { workflow })).structuredContent, workflow).toMatchObject({
         code: "invalid_input",
-        error: expect.stringMatching(/runtime's own workflows are not started here.*drift tool/),
+        error: `${name} is internal: only Sanoma itself starts it`,
       });
     }
     for (const workflow of ["nothing", "Call", " drift", "drift.start", "greetCustomer.start"]) {
       expect((await tool("start_run", { workflow })).structuredContent, workflow).toMatchObject({
         code: "invalid_input",
-        error: expect.stringMatching(/^No workflow .* to start/),
+        error: expect.stringMatching(/is neither an operation nor a workflow/),
       });
     }
     expect((await tool("start_run", { workflow: "greet-customer", input: {} })).structuredContent).toMatchObject({
@@ -458,12 +480,11 @@ describe("start_run, get_run and wait_run", () => {
   });
 });
 
-describe("drift", () => {
+describe("drift through start_run", () => {
   it("starts the built-in drift as the person asking, and answers its report once it ends", async () => {
-    const started = await tool("drift", { waitMs: 0 });
-    expect(started.isError).toBeFalsy();
+    const started = await tool("start_run", { workflow: "drift" });
+    expect(started.isError, JSON.stringify(started.structuredContent)).toBeFalsy();
     const { runId } = started.structuredContent;
-    expect(started.structuredContent).toMatchObject({ runId: expect.any(String), status: expect.any(String) });
     const done = await waitFor(
       async () => (await tool("wait_run", { runId })).structuredContent,
       (answer: any) => answer.status === "finished",
@@ -477,24 +498,8 @@ describe("drift", () => {
 
   it("makes one drift run when retried with its id", async () => {
     const id = crypto.randomUUID();
-    expect((await tool("drift", { waitMs: 0, id })).structuredContent).toMatchObject({ runId: id });
-    expect((await tool("drift", { waitMs: 0, id })).structuredContent).toMatchObject({ runId: id });
-  });
-
-  it("says plainly that a company declaring no resources has nothing to check", async () => {
-    const app = appContext();
-    const workflows = snapshot.description.workflows.filter((wf) => wf.name !== "drift");
-    const bare: AppContext = { ...app, snapshot: { ...snapshot, description: { ...snapshot.description, workflows } } };
-    const request = new Request("http://127.0.0.1/mcp", {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "drift", arguments: {} } }),
-    });
-    const res = await postMcp(request, { app: bare, actor: async () => ({ id: "ada" }) });
-    expect((await messageOf(res)).result).toMatchObject({
-      isError: true,
-      structuredContent: { code: "invalid_input", error: expect.stringMatching(/declares no resources/) },
-    });
+    expect((await tool("start_run", { workflow: "drift", id })).structuredContent).toEqual({ runId: id });
+    expect((await tool("start_run", { workflow: "drift", id })).structuredContent).toEqual({ runId: id });
   });
 });
 
@@ -516,8 +521,8 @@ describe("a declared agent acting for the person, named in x-sanoma-agent", () =
     expect(ledger.map((r) => r.actor)).toEqual(ledger.map(() => startedBy));
   });
 
-  it("starts drift as the agent for the person, the policy asked", async () => {
-    const { runId } = (await tool("drift", { waitMs: 0 }, { agent })).structuredContent;
+  it("starts drift as the agent for the person, the policy asked, and holds nothing: it only reads", async () => {
+    const { runId } = (await tool("start_run", { workflow: "drift" }, { agent })).structuredContent;
     await waitFor(
       async () => (await tool("wait_run", { runId }, { agent })).structuredContent,
       (answer: any) => answer.status === "finished",
@@ -600,12 +605,36 @@ describe("a declared agent acting for the person, named in x-sanoma-agent", () =
     expect((await mcp("tools/list", {}, { app: hosted, as: { id: "ada" } })).status).toBe(200);
   });
 
-  it("refuses an agent any other of the runtime's own workflows through callApi too", async () => {
-    // In the client's words.
-    await expect(callApi(appContext(), startedBy, { name: "goLiveHost.start", input: {} })).rejects.toMatchObject({
-      code: "policy_denied",
-      message: `goLiveHost.start was denied by policy: ${AGENT_BUILT_IN_REFUSAL}`,
+  it("holds the agent's apply for admin, which wait_run says, and runs it once an admin approves", async () => {
+    const { runId } = (await tool("start_run", { workflow: "apply", input: {} }, { agent })).structuredContent;
+    const held = await waitFor(
+      async () => (await tool("wait_run", { runId, waitMs: 0 }, { agent })).structuredContent,
+      (answer: any) => answer.status !== "running",
+    );
+    expect(held).toEqual({ runId, status: "waiting for approval", waitsFor: ["group admin"] });
+    // Asked again with the full wait, it answers at once: the wait would end only on a decision.
+    const asked = Date.now();
+    expect((await tool("wait_run", { runId }, { agent })).structuredContent).toEqual(held);
+    expect(Date.now() - asked).toBeLessThan(RESULT_WAIT_MS / 2);
+    await testApp.client.decide(runId, { decision: "approve", by: { id: "ada" } });
+    const ended = await waitFor(
+      async () => (await tool("get_run", { runId }, { agent })).structuredContent,
+      (run: any) => run.status === "finished" || run.status === "failed",
+    );
+    expect(ended).toMatchObject({
+      workflow: "apply",
+      startedBy,
+      approvals: [expect.objectContaining({ status: "approved" })],
     });
+  });
+
+  it("refuses an internal workflow through callApi too, in the client's words", async () => {
+    for (const actor of [startedBy, { id: "ada" }]) {
+      await expect(callApi(appContext(), actor, { name: "saveDraft.start", input: {} })).rejects.toMatchObject({
+        code: "invalid_input",
+        message: "save-draft is internal: only Sanoma itself starts it",
+      });
+    }
   });
 });
 

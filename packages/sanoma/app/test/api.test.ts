@@ -435,7 +435,7 @@ describe("POST /api/call as a declared agent, named in x-sanoma-agent", () => {
     expect((await testApp.client.run(own))?.startedBy).toMatchObject({ id: "ada" });
   });
 
-  it("refuses an id that is no declared agent, and an agent any built-in but its own", async () => {
+  it("refuses an id that is no declared agent, and an agent an internal workflow", async () => {
     for (const named of ["nobody", "lead"]) {
       expect(
         await post({ name: "data.outbound.list" }, "ada", { headers: { [AGENT_HEADER]: named } }),
@@ -445,9 +445,9 @@ describe("POST /api/call as a declared agent, named in x-sanoma-agent", () => {
         body: { code: "not_admitted" },
       });
     }
-    expect(await post({ name: "goLive", input: {} }, "ada", { headers: agent })).toMatchObject({
-      status: 403,
-      body: { code: "policy_denied" },
+    expect(await post({ name: "saveDraft", input: {} }, "ada", { headers: agent })).toMatchObject({
+      status: 400,
+      body: { code: "invalid_input", error: "save-draft is internal: only Sanoma itself starts it" },
     });
   });
 

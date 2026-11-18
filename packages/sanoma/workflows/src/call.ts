@@ -18,7 +18,14 @@ import {
   targetOf,
   untilOf,
 } from "./ctx.ts";
-import { AllMembers, type ApprovalState, type Principal, type WorkflowDefinition } from "./define.ts";
+import {
+  AllMembers,
+  type ApprovalState,
+  type Approver,
+  type Principal,
+  readOnly,
+  type WorkflowDefinition,
+} from "./define.ts";
 import {
   causes,
   errorCode,
@@ -33,20 +40,36 @@ import type { Collection } from "./collection.ts";
 import { currentGroup, entry, type LedgerBody, skipped, write, writeFailure } from "./ledger.ts";
 import { type CallContext, isOperation, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
-import { allowAll, type Decision, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
+import {
+  allowAll,
+  approve,
+  approvedFor,
+  type Decision,
+  deny,
+  type Policy,
+  type PolicyCall,
+  policyOpOf,
+  type RecordedDecision,
+} from "./policy.ts";
 import type { Run, StartHold, WorkerState, WorkflowOutline } from "./run.ts";
 import { reservedFor, runtimeHold } from "./change.ts";
 import { isChangeOp } from "./resource.ts";
 import { readPeople } from "./resources.ts";
+import type { ResolvedConfig } from "./config.ts";
 import {
+  ADMIN,
   APPLY_WORKFLOW,
   approverLabel,
+  BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
   CHANGE_MERGE,
   DATA_VENDOR,
   errorMessage,
   fitsOp,
   isBatch,
+  isDeclaredAgent,
+  personsOf,
+  principalOf,
   problemLine,
   type Saved,
   WORKFLOW_ACTION,
@@ -403,16 +426,52 @@ export function decideCall(
 
 /**
  * Asks the policy whether `actor` may start a run of `workflow` with `input` (`Policy.start`, the
- * action `workflow:<name>`), as `SanomaClient.start` does before it queues one.
+ * action `workflow:<name>`), then, when it allows, the runtime's own rule (`agentHold`): as
+ * `SanomaClient.start` does before it queues one, and the worker before the run's body.
  */
 export function decideStart(
-  policy: Policy,
-  workflow: string,
+  config: Pick<ResolvedConfig, "policy" | "root">,
+  workflow: WorkflowDefinition,
   input: unknown,
   actor: Principal,
   approvals: readonly ApprovalState[] = [],
 ) {
-  return ask(policy, `${WORKFLOW_ACTION}${workflow}`, () => policy.start(actor, workflow, input, approvals));
+  const { policy } = config;
+  return ask(policy, `${WORKFLOW_ACTION}${workflow.name}`, () => {
+    const decision = policy.start(actor, workflow.name, input, approvals);
+    return decision.kind === "allow" ? (agentHold(config, workflow, input, actor, approvals) ?? decision) : decision;
+  });
+}
+
+/** The runtime rule's id, as a hold's `reasons` name it. */
+const AGENTS_WAIT_FOR_ADMIN = "sanoma:agents-wait-for-admin";
+
+/**
+ * The runtime's own rule on a start the company's policy allowed, under `allowAll` too: a declared
+ * agent's (`isDeclaredAgent`) start of a built-in that is not read-only (`readOnly`) waits for an
+ * approval by `admin`, denied while no person is in it, unless a company `permit` for agents lets
+ * it (`Policy.permitsAgent`). Undefined for any other start, which the company's policy alone decides.
+ */
+function agentHold(
+  { policy, root }: Pick<ResolvedConfig, "policy" | "root">,
+  workflow: WorkflowDefinition,
+  input: unknown,
+  actor: Principal,
+  approvals: readonly ApprovalState[],
+): Decision | undefined {
+  if (!isDeclaredAgent(actor) || !BUILT_IN_WORKFLOWS.has(workflow.name) || readOnly(workflow)) return undefined;
+  if (policy.permitsAgent?.(actor, workflow.name, input)) return undefined;
+  const { people } = readPeople(root);
+  if (!personsOf(people).some(({ id }) => principalOf(id, people)?.groups?.includes(ADMIN))) {
+    return deny(
+      `An agent's start of ${workflow.name} waits for a person in the group "${ADMIN}", and no data file puts ` +
+        `one in it: add one in resources/people.ts, or permit agents to start it in policies/`,
+      [AGENTS_WAIT_FOR_ADMIN],
+    );
+  }
+  const approver: Approver = { group: ADMIN };
+  if (approvedFor(approvals, `${WORKFLOW_ACTION}${workflow.name}`, approver)) return undefined;
+  return approve(approver, { title: `An agent's ${workflow.name} waits for admin`, reasons: [AGENTS_WAIT_FOR_ADMIN] });
 }
 
 /** The approval a start's `approve` answer waits on: whom it asks, its title, and the rules that held it. */

@@ -7,7 +7,6 @@ import {
   errorMessage,
   INVITE_SECONDS,
   LOGIN_AGENT,
-  LOGIN_CODE_WORKFLOW,
   LOGIN_PAGE,
   type LoginContext,
   NO_AGENT_ADDRESS,
@@ -20,7 +19,6 @@ import {
   principalOf,
   requestOrigin,
   sameOrigin,
-  sealLoginCode,
   type SocialClients,
 } from "sanoma/workflows";
 import { admit } from "sanoma/workflows/describe";
@@ -186,7 +184,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}, addre
           key: loginKey("staff"),
           secrets: secretValues(client),
           origins: [],
-          ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
+          ...(resolved.login && { sendCode: (email, code) => client.sendLoginCode(email, code) }),
           staff: {
             admits: async (identity) => (await admitted(identity)) !== undefined,
             social,
@@ -412,15 +410,6 @@ const declaredBy = async (current: () => AppSnapshot | Promise<AppSnapshot>) => 
 /** What a request has read of the company's files so far: the people, once it asked. */
 interface Reading {
   people?: Promise<AppSnapshot["people"]>;
-}
-
-/**
- * Mails a sign-in code, as a run of the built-in `login-code` workflow started by the runtime's
- * agent `login`, the code sealed (`sealLoginCode`): under the policy and in the ledger like any
- * send. What the staff login and every visitor login send their codes with.
- */
-export async function sendLoginCode(client: AppContext["client"], email: string, code: string): Promise<void> {
-  await client.start(LOGIN_CODE_WORKFLOW, { to: email, code: sealLoginCode(email, code) }, { startedBy: LOGIN_AGENT });
 }
 
 /**

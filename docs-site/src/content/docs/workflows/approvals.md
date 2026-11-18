@@ -19,7 +19,16 @@ A policy hold's approval also carries the held call: its `op`, its parsed `input
 
 ## Deciding a run's start
 
-The policy decides a run's start too, as the action `workflow:<name>` with the input as its context, before `client.start` queues it (the built-ins, `call`, `apply`, `drift` and the app's actions among them, are not asked; their calls are, and a visitor starts none but `call`). A declared agent (one a data file declares, in `agents`, not one of the runtime's own but `sanoma-chat`, which these rules bind too) starts none of the built-ins but `call` and `drift` (`AGENT_BUILT_INS`), refused `policy_denied` before any policy, and its start of `drift` is asked as a company workflow's, twice when it acts for someone (see [People](/policies/people/)): a `forbid` or a `@hold` on `Sanoma::Action::"workflow:drift"` for `Sanoma::Group::"agents"` refuses or holds the agent, never a person, whose start of a built-in is not asked, nor the runtime's agents but `sanoma-chat`. A company policy cannot `permit` the `agents` group, so "the policy allows it" means no `forbid` refuses or holds it. A deny throws `policy_denied` and starts nothing; a hold starts the run, which waits on the approval (`op: "workflow:<name>"`, no `opSeq`) before its body runs, and fails if it is rejected.
+The policy decides every run's start too, the runtime's workflows' as the company's, as the action `workflow:<name>` with the input as its context, before `client.start` queues it, twice when an agent acts for someone (see [People](/policies/people/)). A visitor starts none of the runtime's workflows. The internal workflows (`call`, `chat`, `change`, `connect`, `follow`, `login-code`, `reshape`, `save-draft`) are started by Sanoma alone, never through `client.start`: a start of one is `invalid_input`, whatever the policy says, and their runs read as any other's.
+
+One rule is the runtime's own: once the company's policy allows it, a declared agent's start of one of the runtime's workflows that does not only read (`apply`, say; `drift` and `plan` only read) waits for an approval by the group `admin`, with the reason `sanoma:agents-wait-for-admin`. A company `@hold` on the same start comes first. While no person is in the group `admin` (none declared, an empty one, or one of agents alone), the start is refused, saying so. A company lifts the rule with a `permit` for agents that the start satisfies:
+
+```cedar
+@id("agents-apply")
+permit (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflow:apply", resource);
+```
+
+A `permit` is allowed only for visitors and agents, so for a person "the policy allows it" means no `forbid` refuses or holds it; one for agents only lifts this rule, and lets no visitor or api token in, whatever its groups. A deny throws `policy_denied` and starts nothing; a hold starts the run, which waits on the approval (`op: "workflow:<name>"`, no `opSeq`) before its body runs, and fails if it is rejected.
 
 ## Sending a decision
 

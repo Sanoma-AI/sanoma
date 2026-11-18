@@ -50,6 +50,8 @@ describe("apps", () => {
       undefined,
     ]);
     expect(apiNameOf(followUp.name)).toBe("crmFollowUp");
+    // An api name is its own: start_run takes a workflow by either.
+    for (const name of ["crmFollowUp", "greetCustomer", "drift"]) expect(apiNameOf(name)).toBe(name);
     // An operation in an app's folder is named with it: `operations.crm.score.run`.
     expect([quote.id, quote.app, score.id, score.app]).toEqual([
       "operations.quote.run",

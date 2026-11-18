@@ -240,8 +240,7 @@ describe("sandbox runs", () => {
   });
 
   it("refuses connection mutations in a direct sandbox call without fake account state", async () => {
-    const run = await c().start(
-      "call",
+    const run = await c().startCall(
       {
         op: "sanoma.connection.create",
         input: { rule: "mail", account: "alice", scopes: [] },
@@ -252,6 +251,15 @@ describe("sandbox runs", () => {
     expect(errorCode(err)).toBe("invalid_input");
     expect((err as Error).message).toContain("no fake for sanoma.connection.create");
     expect(types(await ledger(run))).toEqual(["run.started", "run.failed"]);
+  });
+
+  it("refuses a scenario of an internal workflow but call, as any start of one from outside", async () => {
+    const direct = await scenario("Apps listed directly");
+    const draft = { ...direct, workflow: "save-draft", input: {} };
+    expect(await failure(runScenario(draft, { client: c(), scope: scope() }))).toMatchObject({
+      code: "invalid_input",
+      message: "save-draft is internal: only Sanoma itself starts it",
+    });
   });
 
   it("refuses a workflow that uses an operation with no fake, and parses the input before seeding", async () => {

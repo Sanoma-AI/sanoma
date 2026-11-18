@@ -21,14 +21,11 @@ import {
   SanomaError,
 } from "sanoma/workflows";
 import {
-  AGENT_BUILT_IN_REFUSAL,
-  AGENT_BUILT_INS,
   apiNameOf,
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
   DESCRIBE_CALL,
   RUN_READS,
-  isDeclaredAgent,
   isVisitor,
   flatten,
   LOGIN_CODE_WORKFLOW,
@@ -191,12 +188,16 @@ export const appConfig = (app: AppContext): AppConfig => ({
 export interface AgentDescription {
   /** The company's name as people read it. */
   name: string;
-  /** The company's own workflows (none of the runtime's): started by `name`, or `apiName` through `callApi`. */
+  /** Every workflow but the internal ones: started by `name`, or `apiName` through `callApi`. */
   workflows: {
     name: string;
     apiName: string;
     title?: string;
     trigger: ConfigDescription["workflows"][number]["trigger"];
+    /** One of the runtime's own. */
+    builtin?: true;
+    /** It only reads (`readOnly`). */
+    readOnly?: true;
     input: Record<string, unknown>;
   }[];
   /** The operations that may be called directly (`OpEntry.direct`), outside a run: a lookup is one whose effect is read. */
@@ -218,22 +219,24 @@ export interface AgentDescription {
 }
 
 /**
- * The snapshot's description narrowed for an agent (`DESCRIBE_CALL`): each of the company's own
- * workflows' name, api name, title, trigger and input; each direct operation's contract; each
- * collection's fields. One projection for `/mcp` and a site or script alike. Left out on purpose:
- * the runtime's own workflows (`builtin`: an agent starts none; drift is `/mcp`'s own tool), the
- * policy and its text, files and source, the resources' desired values, secret bindings,
- * connections, sites and the database's host.
+ * The snapshot's description narrowed for an agent (`DESCRIBE_CALL`): each workflow's name, api
+ * name, title, trigger and input, and whether it is the runtime's own and only reads; each direct
+ * operation's contract; each collection's fields. One projection for `/mcp` and a site or script
+ * alike. Left out on purpose: the internal workflows (`internal`, which no one starts), the policy
+ * and its text, files and source, the resources' desired values, secret bindings, connections,
+ * sites and the database's host.
  */
 export const agentDescription = (description: ConfigDescription): AgentDescription => ({
   name: description.name,
   workflows: description.workflows
-    .filter((wf) => !wf.builtin)
+    .filter((wf) => !wf.internal)
     .map((wf) => ({
       name: wf.name,
       apiName: apiNameOf(wf.name),
       ...(wf.title !== undefined && { title: wf.title }),
       trigger: wf.trigger,
+      ...(wf.builtin && { builtin: true as const }),
+      ...(wf.readOnly && { readOnly: true as const }),
       input: wf.input,
     })),
   ops: description.ops
@@ -419,8 +422,11 @@ export async function startRun(
       const known = all.length ? `; the scenarios are ${all.map((s) => `"${s.name}"`).join(", ")}` : "; there are none";
       throw noSuch("scenario", `No scenario named "${body.scenario}"${known}${notLoaded(errors)}`);
     }
+    const options = { startedBy: actor, sandbox: scenario.name };
     return {
-      runId: await client.start(workflow, scenario.input, { startedBy: actor, sandbox: scenario.name }),
+      runId: await (workflow.name === CALL_WORKFLOW
+        ? client.startCall(scenario.input, options)
+        : client.start(workflow, scenario.input, options)),
       workflow: scenario.workflow,
     };
   }
@@ -767,9 +773,9 @@ export type CallHost = Pick<AppContext, "client" | "resolved"> & { snapshot: Pic
  * `sanoma.describe` (`DESCRIBE_CALL`, a name of the runtime's vendor, so none of the company's)
  * answers `agentDescription`. Anything else is `invalid_input`. A visitor (`isVisitor`) calls no
  * built-in workflow, reads no description and reads only the result of a run it started: its other
- * reads are `policy_denied`. A declared agent (`isDeclaredAgent`) starts no built-in workflow but
- * those in `AGENT_BUILT_INS` (`policy_denied`), as the client refuses it too. `signal`, when
- * given, ends `.result`'s wait early, with its reason (a chat turn's stop).
+ * reads are `policy_denied`. Every other start is the client's (`SanomaClient.start`: an internal
+ * workflow refused, the policy asked). `signal`, when given, ends `.result`'s wait early, with its
+ * reason (a chat turn's stop).
  */
 export async function callApi(
   app: CallHost,
@@ -792,16 +798,6 @@ export async function callApi(
   const visitor = isVisitor(actor);
   if (!entry || (visitor && entry.builtin)) throw notCallable(name);
   const workflow = entry.name;
-  // As `SanomaClient.start` refuses it: a declared agent starts no built-in but `call` and those it may.
-  if (
-    method === "start" &&
-    entry.builtin &&
-    workflow !== CALL_WORKFLOW &&
-    isDeclaredAgent(actor) &&
-    !AGENT_BUILT_INS.has(workflow)
-  ) {
-    throw new PolicyDeniedError(name, AGENT_BUILT_IN_REFUSAL);
-  }
   if (visitor && method !== "start" && method !== "result") {
     throw new PolicyDeniedError(name, "a visitor reads only the result of a run it started");
   }

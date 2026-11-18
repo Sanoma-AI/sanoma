@@ -220,7 +220,7 @@ export async function postSignInCode(request: Request, context: ActorContext): P
  * became of it; while the run waits the part stays as it was. In the last reply, as a stop or a
  * restart cut it short, text and reasoning are done, and a tool call with no result failed as
  * interrupted, unless it is one of the agent catalog's that leaves a run (`callRunId`: `start_run`,
- * `drift`, a held `lookup`) and its run is there, found by the call's idempotency id
+ * a held `lookup`) and its run is there, found by the call's idempotency id
  * (`catalogCallId`): then the part answers from it, so the model is not led to start it again. The
  * id is of the message whose turn wrote the reply, which the reply records (`turnOf`, written by
  * `persist`); a reply stored before it was recorded falls back to `turn` (a resumed turn gives its
@@ -291,7 +291,7 @@ const answered = (part: ToolPart, output: RunOutput | LookupOutput, preliminary 
  * A catalog tool's part answered from its run `run`, just read: the run a held part names, or the
  * one a call a restart cut short left. A lookup's held call: held until it ended, then its result
  * (`lookupOutput`), or its failure as the tool's error, as the tool itself throws it. A start's
- * run (`start_run`, `drift`): held while it waits for an approval, then where it stands
+ * run (`start_run`): held while it waits for an approval, then where it stands
  * (`runOutput`), a failed one too. A part held already stays the same object while its run waits.
  */
 async function fromRun(client: SanomaClient, part: ToolPart, run: RunSummary): Promise<Part> {

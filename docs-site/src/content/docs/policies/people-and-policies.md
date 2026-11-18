@@ -33,7 +33,7 @@ Only a declared person signs in to the app (on this machine by picking their nam
 
 ## What a policy decides
 
-Everything is allowed unless a `forbid` refuses it: one with `@hold` waits for that group's or person's approval, one without is denied with its `@reason`. A visitor of a public site, in the group `visitors` (or `anonymous`, when nobody is signed in), is the exception: it may start a run or call an operation directly only where a `permit` names it, the one `permit` a policy file may hold (`permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:signup", resource);`), and inside a run it started its calls are allowed as anyone's, the forbids still holding.
+Everything is allowed unless a `forbid` refuses it: one with `@hold` waits for that group's or person's approval, one without is denied with its `@reason`. A visitor of a public site, in the group `visitors` (or `anonymous`, when nobody is signed in), is the exception: it may start a run or call an operation directly only where a `permit` names it (`permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:signup", resource);`; the one other `permit` a policy file may hold is for agents), and inside a run it started its calls are allowed as anyone's, the forbids still holding.
 
 ## Writing and testing policies
 

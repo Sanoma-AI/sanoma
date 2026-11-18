@@ -48,12 +48,20 @@ describe("the login-code workflow", () => {
     login: { sender: v.connectors.find((c) => c[VENDOR].id === "resend")!.emails!.send!, from: FROM },
   }));
 
-  it("mails the code as the login agent, and the ledger never shows it", async () => {
-    const runId = await app.client.start(
-      LOGIN_CODE_WORKFLOW,
-      { to: "alice@example.com", code: sealLoginCode("alice@example.com", "123456") },
-      { startedBy: LOGIN_AGENT },
+  /** A run of login-code with `input`, enqueued as the client's `sendLoginCode` would, with an input it does not make. */
+  const enqueued = async (input: { to: string; code: string }) => {
+    const { queueName, appName } = resolveConfig(app.config);
+    const handle = await app.raw.enqueue(
+      { queueName, workflowName: LOGIN_CODE_WORKFLOW, applicationName: appName },
+      { input, startedBy: { id: LOGIN_AGENT } },
     );
+    return handle.workflowID;
+  };
+
+  it("mails the code as the login agent, and the ledger never shows it", async () => {
+    await app.client.sendLoginCode("alice@example.com", "123456");
+    const { runId } = (await app.client.runs({ workflow: LOGIN_CODE_WORKFLOW, limit: 1 }))[0]!;
+    expect((await app.client.run(runId))?.startedBy).toMatchObject({ id: LOGIN_AGENT });
     await app.client.result(runId);
     const [mail] = app.vendors.calls.filter((c) => c.op === "resend.emails.send");
     expect(mail!.input).toMatchObject({
@@ -68,26 +76,24 @@ describe("the login-code workflow", () => {
   });
 
   it("refuses a code it did not seal", async () => {
-    const runId = await app.client.start(
-      LOGIN_CODE_WORKFLOW,
-      { to: "alice@example.com", code: "not-sealed" },
-      { startedBy: LOGIN_AGENT },
-    );
+    const runId = await enqueued({ to: "alice@example.com", code: "not-sealed" });
     await expect(app.client.result(runId)).rejects.toThrow(/not one this deployment sealed/);
     // Another's code, copied from their run's input, mails nobody else.
-    const copied = await app.client.start(
-      LOGIN_CODE_WORKFLOW,
-      { to: "mallory@example.com", code: sealLoginCode("alice@example.com", "123456") },
-      { startedBy: LOGIN_AGENT },
-    );
+    const copied = await enqueued({ to: "mallory@example.com", code: sealLoginCode("alice@example.com", "123456") });
     await expect(app.client.result(copied)).rejects.toThrow(/not one this deployment sealed for mallory@example.com/);
     expect(app.ops()).toEqual([]);
   });
 
-  it("is refused to a visitor", async () => {
-    await expect(
-      app.client.start(LOGIN_CODE_WORKFLOW, { to: "x@example.com", code: "x" }, { startedBy: "anonymous" }),
-    ).rejects.toThrow(/runtime's own workflows/);
+  it("is internal: a start of it is refused, the login agent's and a visitor's too", async () => {
+    for (const startedBy of [LOGIN_AGENT, "alice", "anonymous"]) {
+      await expect(
+        app.client.start(LOGIN_CODE_WORKFLOW, { to: "x@example.com", code: "x" }, { startedBy }),
+        startedBy,
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        message: "login-code is internal: only Sanoma itself starts it",
+      });
+    }
   });
 
   it("records sign-ins and invites outside any run", async () => {

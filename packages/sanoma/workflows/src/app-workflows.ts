@@ -418,6 +418,7 @@ export function appWorkflows(
     defineWorkflow({
       name: "save-draft" satisfies typeof SAVE_DRAFT_WORKFLOW,
       title: "Save a draft",
+      internal: true,
       trigger: "manual",
       input: SaveDraftInput,
       uses: [],

@@ -80,13 +80,11 @@ import {
   ownedLedger,
 } from "./ledger.ts";
 import { type CallContext, type Driver, isOperation, type Op, type SignInMethod } from "./op.ts";
-import { allowAll, type RecordedDecision } from "./policy.ts";
+import type { RecordedDecision } from "./policy.ts";
 import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
 import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
 import {
-  AGENT_BUILT_IN_REFUSAL,
-  AGENT_BUILT_INS,
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
   CHANGE_EVENT,
@@ -101,7 +99,6 @@ import {
   chatRunId,
   chatRunPrefix,
   DATA_VENDOR,
-  DRAFT_ID,
   draftRunOf,
   ENDED_STATUSES,
   errorMessage,
@@ -109,11 +106,12 @@ import {
   heldCallRunId,
   HOST_CHECK_AGENT,
   isBatch,
-  isDeclaredAgent,
   isEnded,
   isToken,
   isVisitor,
   LIST_LIMIT,
+  LOGIN_AGENT,
+  LOGIN_CODE_WORKFLOW,
   refusalOf,
   type RunStatus,
   RESHAPE_WORKFLOW,
@@ -122,12 +120,19 @@ import {
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
+import { CallInput } from "./call-workflow.ts";
 import { RemoteEventSchema } from "./follow-workflow.ts";
 import { SaveDraftInput, type SaveDraftOutput } from "./app-workflows.ts";
-import type { ChatTell, ChatTurnInput } from "./chat-workflow.ts";
-import { sealChatCode } from "./seal.ts";
+import { type ChatTell, ChatTurnInput } from "./chat-workflow.ts";
+import { sealChatCode, sealLoginCode } from "./seal.ts";
 import type { RunChecks } from "./scenario.ts";
 import type { RemoteEvent } from "./source.ts";
+
+/** Why a start's `startedBy` is refused. */
+const STARTED_BY = '`startedBy` must be a principal, such as "alice" or { id: "alice" }';
+
+/** Why a visitor's start of a built-in is refused: the app's own actions on the repository are staff's. */
+const VISITOR_BUILT_IN = "A visitor may not start the runtime's own workflows";
 
 /** A principal, or its id alone. */
 const PrincipalOrId = z.union([
@@ -386,32 +391,20 @@ export class SanomaClient {
   }
 
   /**
-   * Checks the input against the workflow's schema, then queues a run for the worker. The run
+   * Checks the input against the workflow's schema, asks the policy (`startHold`), then queues a
+   * run for the worker. The run
    * gets the input as sent, not as the schema parsed it: the worker parses it once, so a schema
    * with a `.transform` or a default sees the caller's value, and `run.started` records it.
    * `workflow` is a definition, or the name of one in the config's `workflows`. The run is queued
-   * for the client's `appVersion` when it has one.
+   * for the client's `appVersion` when it has one. An internal workflow (`WorkflowDefinition.internal`)
+   * is refused (`invalid_input`): only the client's own methods start one.
    */
   async start<S extends z.ZodType>(
     workflow: WorkflowDefinition<any, S> | string,
     input: z.input<S>,
     options: StartOptions,
   ): Promise<string> {
-    const given: Principal = parseOrThrow(
-      PrincipalOrId,
-      options?.startedBy,
-      '`startedBy` must be a principal, such as "alice" or { id: "alice" }',
-    );
-    const sandbox = parseOrThrow(
-      z.string().min(1).optional(),
-      options?.sandbox,
-      "`sandbox` must be the name of a scenario in the config's `scenarios/`",
-    );
-    // A sandbox run's api token acts for the subject given (a scenario's `an api token … is acting`): it has no row.
-    const startedBy = await this.withSubject(
-      await this.admitted(given),
-      sandbox === undefined ? undefined : given.subject,
-    );
+    const { startedBy, sandbox } = await this.starter(options);
     if (typeof workflow === "string") {
       const named = this.config.workflows.get(workflow);
       if (!named) {
@@ -423,30 +416,70 @@ export class SanomaClient {
       }
       workflow = named;
     }
+    if (workflow.internal) {
+      throw new SanomaError("invalid_input", `${workflow.name} is internal: only Sanoma itself starts it`, {
+        workflow: workflow.name,
+      });
+    }
     // The policy decides the start on the input as parsed, its defaults filled, as the Cedar schema types it.
     const parsed = parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
     const { runId } = options;
-    const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
-    const own = OWN_STARTS[workflow.name];
-    if (own && !(await own.admits(parsed, startedBy, runId, this))) {
-      const refused = `A run of ${workflow.name} is started with ${own.by}, which names its run`;
-      throw new SanomaError("invalid_input", refused, { runId });
-    }
-    const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
+    const hold = await this.startHold(workflow, parsed, startedBy, runId);
+    return this.queue(
+      workflow.name,
+      { input, startedBy, ...(sandbox !== undefined && { sandbox }), ...(hold && { hold }) },
+      runId,
+    );
+  }
+
+  /**
+   * Starts a run of the built-in `call`, which makes the direct call `input` names (`CallInput`)
+   * as `options.startedBy`, asking no policy at its start: the policy decides the call in it as a
+   * direct one. A held direct call's run (`call`), and a scenario's `call` (`runScenario`).
+   */
+  async startCall(input: unknown, options: StartOptions): Promise<string> {
+    const { startedBy, sandbox } = await this.starter(options);
+    parseOrThrow(CallInput, input, `The input does not match ${CALL_WORKFLOW}'s schema`);
+    return this.queue(CALL_WORKFLOW, { input, startedBy, ...(sandbox !== undefined && { sandbox }) }, options.runId);
+  }
+
+  /** Who starts a run (`options.startedBy`) admitted, an api token with its subject (`withSubject`), and its `sandbox`. */
+  private async starter(options: StartOptions): Promise<{ startedBy: Principal; sandbox: string | undefined }> {
+    const given: Principal = parseOrThrow(PrincipalOrId, options?.startedBy, STARTED_BY);
+    const sandbox = parseOrThrow(
+      z.string().min(1).optional(),
+      options?.sandbox,
+      "`sandbox` must be the name of a scenario in the config's `scenarios/`",
+    );
+    // A sandbox run's api token acts for the subject given (a scenario's `an api token … is acting`): it has no row.
+    const startedBy = await this.withSubject(
+      await this.admitted(given),
+      sandbox === undefined ? undefined : given.subject,
+    );
+    return { startedBy, sandbox };
+  }
+
+  /**
+   * Queues a run of `workflow` with `args` for the worker, as `runId` when given, asking no policy:
+   * `start`'s, once the policy has, `startCall`'s, and the client's own methods' (a run on a draft,
+   * a follow, a chat turn, an OAuth exchange, a sign-in code), each of which names its run.
+   */
+  private async queue(workflow: string, args: RunArgs, runId: string | undefined): Promise<string> {
+    const { startedBy, sandbox } = args;
     // Kept on the run's status row too, so a listing tells sandbox runs apart without its input,
     // and says whom an agent's run is for (DBOS keeps the principal's id and groups itself); a
     // built-in run's code, so a worker on another version with the same takes it over.
     const attributes = {
       sandbox,
       onBehalfOf: startedBy.onBehalfOf,
-      builtInCode: this.config.builtInCodes[workflow.name],
+      builtInCode: this.config.builtInCodes[workflow],
     };
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
       .enqueue(
         {
-          queueName: queueFor(this.config, workflow.name, sandbox) ?? this.config.queueName,
-          workflowName: workflow.name,
+          queueName: queueFor(this.config, workflow, sandbox) ?? this.config.queueName,
+          workflowName: workflow,
           workflowID: runId,
           applicationName: this.config.appName,
           ...(this.options.appVersion !== undefined && { appVersion: this.options.appVersion }),
@@ -460,7 +493,7 @@ export class SanomaClient {
         if (runId !== undefined && err instanceof DBOSErrors.DBOSConflictingWorkflowError) {
           throw new SanomaError(
             "invalid_input",
-            `Run ${runId} already exists as another workflow than ${workflow.name}; use another run id`,
+            `Run ${runId} already exists as another workflow than ${workflow}; use another run id`,
             { runId, differs: ["workflow"] },
             { cause: err },
           );
@@ -475,42 +508,27 @@ export class SanomaClient {
   }
 
   /**
-   * The policy's answer to starting a run of `workflow` as `startedBy` (`decideStart`), for a
-   * workflow of the config's own: a deny throws `policy_denied`; a hold is what the run waits on
-   * before its body. A run `runId` names already is returned as it is, whatever the policy says now, but to a visitor.
-   * A visitor (`isVisitor`, an api token's principal too) starts no built-in but `call`, whose calls
-   * the policy decides as direct ones: the app's own actions on the repository (`app-workflows.ts`)
-   * are staff's, as their server functions were, which no site's host answered. A declared agent
-   * (`isDeclaredAgent`, not one of the runtime's own) starts none but `call` and those in
-   * `AGENT_BUILT_INS`, whose start the policy decides as a company workflow's; a person's start of
-   * a built-in, and the runtime's agents', are not asked.
+   * The policy's answer to starting a run of `workflow` as `startedBy` (`decideStart`, the
+   * runtime's rule on agents with it): a deny throws `policy_denied`; a hold is what the run waits
+   * on before its body. A run `runId` names already is returned as it is, whatever the policy says
+   * now, but to a visitor. A visitor (`isVisitor`, an api token's principal too) starts no
+   * built-in: the app's own actions on the repository (`app-workflows.ts`) are staff's.
    */
   private async startHold(
-    workflow: string,
+    workflow: WorkflowDefinition,
     input: unknown,
     startedBy: Principal,
     runId: string | undefined,
   ): Promise<StartHold | undefined> {
-    const { policy } = this.config;
+    const action = `${WORKFLOW_ACTION}${workflow.name}`;
     const visitor = isVisitor(startedBy);
-    const builtIn = BUILT_IN_WORKFLOWS.has(workflow);
-    if (visitor && builtIn && workflow !== CALL_WORKFLOW) {
-      throw new PolicyDeniedError(
-        `${WORKFLOW_ACTION}${workflow}`,
-        "A visitor may not start the runtime's own workflows",
-      );
-    }
-    const agent = builtIn && workflow !== CALL_WORKFLOW && isDeclaredAgent(startedBy);
-    if (agent && !AGENT_BUILT_INS.has(workflow)) {
-      throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, AGENT_BUILT_IN_REFUSAL);
-    }
-    if ((builtIn && !agent) || (policy === allowAll && !visitor)) return undefined;
+    if (visitor && BUILT_IN_WORKFLOWS.has(workflow.name)) throw new PolicyDeniedError(action, VISITOR_BUILT_IN);
     // A visitor's start is decided whatever run its id names: a visitor shares an id (`anonymous`) with others.
     if (!visitor && runId !== undefined && (await this.row(runId))) return undefined;
-    const decision = decideStart(policy, workflow, input, startedBy);
+    const decision = decideStart(this.config, workflow, input, startedBy);
     if (decision.kind === "allow") return undefined;
-    if (decision.kind === "deny") throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, decision.reason);
-    return startHoldOf(workflow, decision);
+    if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
+    return startHoldOf(workflow.name, decision);
   }
 
   /**
@@ -613,7 +631,7 @@ export class SanomaClient {
       throw new PolicyDeniedError(op.id, decision.reason, deniedKeys(op, calls, decisions, collections));
     }
     if (decision.kind === "approve") {
-      await this.start(CALL_WORKFLOW, held.input, { startedBy: actor, runId: heldId });
+      await this.startCall(held.input, { startedBy: actor, runId: heldId });
       // Held inside an operation: the run makes the whole operation once approved.
       if (within) throw new ApprovalPendingError(within.op, heldId);
       // A read held before, whose run has ended since, answers with that run's result.
@@ -1235,7 +1253,9 @@ export class SanomaClient {
     if (open) return open.workflowID;
     const first = `${DRAFT_RUNS[workflow].prefix}:${id}`;
     const runId = runs.length ? `${first}~${runs.length + 1}` : first;
-    return this.start(this.config.workflows.get(workflow)!, input, { ...options, runId });
+    const startedBy = await this.admitted(parseOrThrow(PrincipalOrId, options?.startedBy, STARTED_BY));
+    if (isVisitor(startedBy)) throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, VISITOR_BUILT_IN);
+    return this.queue(workflow, { input, startedBy }, runId);
   }
 
   /**
@@ -1336,7 +1356,22 @@ export class SanomaClient {
    */
   async follow(event: RemoteEvent): Promise<string> {
     const parsed = parseOrThrow(RemoteEventSchema, event, "Not an event of a host's webhook");
-    return this.start(FOLLOW_WORKFLOW, parsed, { startedBy: HOST_CHECK_AGENT, runId: followRunId(parsed) });
+    const startedBy = await this.admitted({ id: HOST_CHECK_AGENT });
+    return this.queue(FOLLOW_WORKFLOW, { input: parsed, startedBy }, followRunId(parsed));
+  }
+
+  /**
+   * Mails `code`, a sign-in code for `email`, as a run of the built-in `login-code` workflow started
+   * by the runtime's agent `login`, the code sealed (`sealLoginCode`): under the policy and in the
+   * ledger like any send. What the staff login and every visitor login send their codes with.
+   */
+  async sendLoginCode(email: string, code: string): Promise<void> {
+    const startedBy = await this.admitted({ id: LOGIN_AGENT });
+    await this.queue(
+      LOGIN_CODE_WORKFLOW,
+      { input: { to: email, code: sealLoginCode(email, code) }, startedBy },
+      undefined,
+    );
   }
 
   /**
@@ -1346,15 +1381,18 @@ export class SanomaClient {
    * waits for; that turn, when it has not ended, is told to stop. The worker runs the turn and
    * writes its reply (`chats.chunks`, then the transcript). Its run id.
    */
-  async startTurn(input: Omit<ChatTurnInput, "after">, options: StartOptions): Promise<string> {
+  async startTurn(given: Omit<ChatTurnInput, "after">, options: StartOptions): Promise<string> {
+    const input = parseOrThrow(ChatTurnInput.omit({ after: true }), given, "Not a chat's turn");
+    const startedBy = await this.admitted(parseOrThrow(PrincipalOrId, options?.startedBy, STARTED_BY));
+    if ((await this.chats.get(input.chat))?.person !== startedBy.id) {
+      throw new SanomaError("invalid_input", `No chat ${input.chat} of ${startedBy.id}'s`, { chat: input.chat });
+    }
     const runId = chatRunId(input.chat, input.message);
     // The latest other than this one, which a start told again finds first.
     const before = (await this.turns(input.chat, 2)).find((row) => row.workflowID !== runId);
-    await this.start(CHAT_WORKFLOW, { ...input, ...(before && { after: before.workflowID }) } satisfies ChatTurnInput, {
-      ...options,
-      runId,
-    });
-    // Once the new turn stands, which refused anyone but the chat's person.
+    const turn: ChatTurnInput = { ...input, ...(before && { after: before.workflowID }) };
+    await this.queue(CHAT_WORKFLOW, { input: turn, startedBy }, runId);
+    // Once the new turn stands.
     if (before && !isEnded(runStatus(before.status, []))) {
       await this.dbos.send(before.workflowID, { kind: "stop" } satisfies ChatTell, CHAT_TOPIC);
     }
@@ -1800,6 +1838,7 @@ export class SanomaClient {
     options: { actor: Principal | string },
   ): Promise<{ connection: string; runId: string }> {
     const actor = await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    if (isVisitor(actor)) throw new PolicyDeniedError(`${WORKFLOW_ACTION}${CONNECT_WORKFLOW}`, VISITOR_BUILT_IN);
     const { attempts, catalog } = this.config.connections;
     const received = await attempts.receive(attempt, actor.id, params, async (row) => {
       if (
@@ -1813,11 +1852,8 @@ export class SanomaClient {
     });
     const runId = connectRunId(attempt);
     try {
-      await this.start(
-        CONNECT_WORKFLOW,
-        { target: received.target, requestId: received.requestId, attempt },
-        { startedBy: actor, runId },
-      );
+      const input = { target: received.target, requestId: received.requestId, attempt };
+      await this.queue(CONNECT_WORKFLOW, { input, startedBy: actor }, runId);
     } catch (error) {
       // No run will take the sealed code: end the attempt, so its page says so and drops the code.
       await attempts.settle(attempt, actor.id, "unavailable");
@@ -2151,54 +2187,6 @@ const DRAFT_RUNS = {
   [SAVE_DRAFT_WORKFLOW]: draftRun("save"),
   [RESHAPE_WORKFLOW]: draftRun("reshape"),
 } as const;
-
-/** Whether a start of `workflow` is `startOnDraft`'s: under a run id of the draft its input names. */
-function admitsDraftRun(workflow: keyof typeof DRAFT_RUNS) {
-  return ({ id }: { id: string }, _by: Principal, runId: string | undefined) =>
-    runId !== undefined && DRAFT_RUNS[workflow].idOf(runId) === id;
-}
-
-/**
- * The built-ins only one of the client's methods starts, by name: that method (`by`), and whether
- * a start is its own (`admits`), which `start` asks once the policy has (a visitor is denied
- * first), refusing any other: a change, a save or a Try again of a change's records under the id
- * `openChange`, `saveDraft` or `reshapeChange` names; a
- * follow as `host-check` under its event's id; a chat turn under its chat's and message's id, after
- * a turn of the same chat, as the chat's person.
- */
-const OWN_STARTS: Record<
-  string,
-  {
-    by: string;
-    admits(
-      input: any,
-      startedBy: Principal,
-      runId: string | undefined,
-      client: SanomaClient,
-    ): boolean | Promise<boolean>;
-  }
-> = {
-  [CHANGE_WORKFLOW]: { by: "openChange", admits: admitsDraftRun(CHANGE_WORKFLOW) },
-  [SAVE_DRAFT_WORKFLOW]: { by: "saveDraft", admits: admitsDraftRun(SAVE_DRAFT_WORKFLOW) },
-  [RESHAPE_WORKFLOW]: { by: "reshapeChange", admits: admitsDraftRun(RESHAPE_WORKFLOW) },
-  [FOLLOW_WORKFLOW]: {
-    by: "follow",
-    admits: (event: RemoteEvent, by, runId) => runId === followRunId(event) && by.id === HOST_CHECK_AGENT,
-  },
-  // The callback's: the attempt's own run. The exchange takes the attempt only as the person who started it.
-  [CONNECT_WORKFLOW]: {
-    by: "receiveConnection",
-    admits: ({ attempt }: { attempt: string }, _by, runId) => runId === connectRunId(attempt),
-  },
-  [CHAT_WORKFLOW]: {
-    by: "startTurn",
-    admits: async ({ chat, message, after }: ChatTurnInput, by, runId, client) =>
-      runId === chatRunId(chat, message) &&
-      (after === undefined ||
-        (after.startsWith(chatRunPrefix(chat)) && DRAFT_ID.test(after.slice(chatRunPrefix(chat).length)))) &&
-      (await client.chats.get(chat))?.person === by.id,
-  },
-};
 
 /**
  * A follow's run id (`SanomaClient.follow`): `follow:` and the SHA-256 of the event as its schema
