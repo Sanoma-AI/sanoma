@@ -16,8 +16,9 @@ import { RUNNER_HEALTH, RUNNER_PORT } from "sanoma/workflows";
 // left running, as a fresh boot would; a sleep keeps it. The edge (`fetch`, and `WebSocket` for an
 // upgrade) answers `/health` itself, on every port, as Agent37's does, and asks every other request
 // for a signed link's token (`a37_token`, for its one port until it expires), which it strips before
-// it forwards the request. A request to the edge that carries the account key anywhere is refused
-// and recorded (`keyed`): the connector sends the key to the API alone, and each test file fails a
+// it forwards the request. A request to the edge that carries the account key anywhere, and an API
+// request whose body carries it (an exec's command, a create's metadata), are refused and recorded
+// (`keyed`): the key goes in the API's `Authorization` header alone, and each test file fails a
 // test that sent one (`keyless`). `answer` puts a
 // reply ahead of the next request.
 
@@ -213,20 +214,23 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     return problem(404, "not_found");
   }
 
-  /** The box-bound requests that carried the account key: none should. */
+  /** Where the account key went that a box could read it: none should. */
   const keyed: string[] = [];
-  /** Whether a request to an instance's port carries the account key anywhere: recorded when it does. */
-  function carriesKey(url: URL, headers: Headers): boolean {
-    const carries = [url.href, ...headers.values()].some((value) => value.includes(KEY));
-    if (carries) keyed.push(`${url.origin}${url.pathname}`);
+  /** Whether any of `values` carries the account key: recorded as `where` when one does. */
+  function carriesKey(where: string, values: Iterable<string>): boolean {
+    const carries = [...values].some((value) => value.includes(KEY));
+    if (carries) keyed.push(where);
     return carries;
   }
+  /** Whether a request to an instance's port carries the account key anywhere: its URL or a header. */
+  const toBoxWithKey = (url: URL, headers: Headers) =>
+    carriesKey(`${url.origin}${url.pathname}`, [url.href, ...headers.values()]);
   /**
    * The edge's check of a request to an instance's port (`http:` or, for an upgrade, `ws:`): the
    * URL it is forwarded to, its token taken out, or undefined when it is refused.
    */
   function admit(url: URL, headers: Headers): URL | undefined {
-    if (carriesKey(url, headers)) return undefined;
+    if (toBoxWithKey(url, headers)) return undefined;
     const signed = tokens.get(url.searchParams.get("a37_token") ?? "");
     const origin = url.origin.replace(/^ws/, "http");
     if (!signed || signed.origin !== origin || Date.now() >= signed.expires) return undefined;
@@ -242,7 +246,7 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     if (url.host !== "api.agent37.com") {
       // The edge's: it answers `/health` itself.
       if (url.pathname === "/health")
-        return carriesKey(url, request.headers) ? unauthorized() : json(200, { ok: true });
+        return toBoxWithKey(url, request.headers) ? unauthorized() : json(200, { ok: true });
       const to = admit(url, request.headers);
       return to ? realFetch(new Request(to, request)) : unauthorized();
     }
@@ -251,6 +255,8 @@ printf '#!/bin/sh\\necho 12.18.0\\n' > "$3/pnpm" && chmod +x "$3/pnpm"
     const body = text ? JSON.parse(text) : undefined;
     sent.push({ method: request.method, path, ...(body && { body }) });
     if (request.headers.get("authorization") !== `Bearer ${KEY}`) return problem(401, "invalid_api_key");
+    // A body the box would read (an exec's command, a create's metadata, its name) never carries the key.
+    if (carriesKey(`${request.method} ${path}`, [text])) return problem(400, "invalid_request");
     return api(request.method, path, body);
   };
   /** The edge for a WebSocket's upgrade (Node's, which takes `headers`): a refused one fails to connect. */

@@ -33,15 +33,15 @@ export async function runnerScript(): Promise<Uint8Array> {
 }
 
 /**
- * What the runner at `url` (asked with `headers`) answers at `RUNNER_HEALTH`, or undefined when nothing
- * answers as a runner: a backend starts one then, and replaces one of another `protocol`. The path
- * goes before the URL's query, which may carry its credential (a signed link's token).
+ * What the runner at `url` answers at `RUNNER_HEALTH`, or undefined when nothing answers as a
+ * runner: a backend starts one then, and replaces one of another `protocol`. The path goes before
+ * the URL's query, which may carry its credential (a signed link's token).
  */
-export async function runnerHealth(url: string, headers?: Record<string, string>): Promise<RunnerHealth | undefined> {
+export async function runnerHealth(url: string): Promise<RunnerHealth | undefined> {
   try {
     const at = new URL(url);
     at.pathname = `${at.pathname.replace(/\/$/, "")}${RUNNER_HEALTH}`;
-    const res = await fetch(at, { headers, signal: AbortSignal.timeout(5_000) });
+    const res = await fetch(at, { signal: AbortSignal.timeout(5_000) });
     const health = res.ok ? ((await res.json()) as Partial<RunnerHealth> | null) : null;
     return typeof health?.protocol === "number" && typeof health.pid === "number"
       ? { protocol: health.protocol, pid: health.pid }
@@ -77,59 +77,63 @@ const OPEN_MS = 30_000;
 const STOP_MS = 30_000;
 
 /**
- * The box `id` whose runner is at `url` (`http(s)://`, the WebSocket's upgrade sent with
- * `headers`): its commands, files and `stop`, which kills every command in it and closes the
- * connection, then puts the box to sleep (`sleep`, the vendor's). A runner that cannot be reached,
- * or does not answer in `STOP_MS`, kills nothing, and the sleep goes ahead. Connects at the first
- * call, and again at the next call after a drop or a `stop`. How its ports are reached is the
- * vendor's, so the backend adds `expose`.
+ * The box `id` whose runner is at what `url` answers (`http(s)://`, asked at each connect, so a
+ * vendor whose link expires hands a new one): its commands, files and `stop`, which kills every
+ * command in it and closes the connection, then puts the box to sleep (`sleep`, the vendor's). A
+ * runner that cannot be reached, or does not answer in `STOP_MS`, kills nothing, and the sleep goes
+ * ahead. Connects at the first call, and again at the next call after a drop or a `stop`. How its
+ * ports are reached is the vendor's, so the backend adds `expose`.
  */
 export function runnerBox({
   url,
-  headers,
   id,
   sleep,
 }: {
-  url: string;
-  headers?: Record<string, string>;
+  url: () => Promise<string>;
   id: string;
   sleep?: () => Promise<unknown>;
 }): Omit<Box, "expose"> {
-  const where = `the runner at ${new URL(url).host}`;
+  const where = `the runner in ${id}`;
   let current: Promise<Connection> | undefined;
   let last = 0;
 
   const connect = () => (current ??= open());
   function open(): Promise<Connection> {
-    const opening = new Promise<Connection>((resolve, reject) => {
-      // Node's WebSocket (undici) takes `headers` beside the standard's protocols.
-      const ws = new WebSocket(url.replace(/^http/, "ws"), { headers } as unknown as string[]);
-      ws.binaryType = "arraybuffer";
-      const connection: Connection = { ws, waiting: new Map() };
-      const late = setTimeout(() => ws.close(), OPEN_MS);
-      ws.addEventListener("open", () => {
-        clearTimeout(late);
-        resolve(connection);
-      });
-      ws.addEventListener("message", ({ data }: { data: string | ArrayBuffer }) => {
-        try {
-          if (typeof data !== "string") {
-            const { id: of, stream, bytes } = unframe(new Uint8Array(data));
-            return connection.waiting.get(of)?.bytes(stream, bytes);
-          }
-          const answer = JSON.parse(data) as RunnerAnswer;
-          if (answer.id !== undefined) connection.waiting.get(answer.id)?.answer(answer);
-        } catch {
-          // A frame that is not the protocol's (another runner's) is dropped.
-        }
-      });
-      ws.addEventListener("close", ({ code, reason }) => {
-        clearTimeout(late);
-        if (current === opening) current = undefined;
-        reject(new Error(`${where} closed the connection (${reason || code})`));
-        for (const waiter of connection.waiting.values()) waiter.lost();
-        connection.waiting.clear();
-      });
+    const opening: Promise<Connection> = url().then(
+      (at) =>
+        new Promise<Connection>((resolve, reject) => {
+          const ws = new WebSocket(at.replace(/^http/, "ws"));
+          ws.binaryType = "arraybuffer";
+          const connection: Connection = { ws, waiting: new Map() };
+          const late = setTimeout(() => ws.close(), OPEN_MS);
+          ws.addEventListener("open", () => {
+            clearTimeout(late);
+            resolve(connection);
+          });
+          ws.addEventListener("message", ({ data }: { data: string | ArrayBuffer }) => {
+            try {
+              if (typeof data !== "string") {
+                const { id: of, stream, bytes } = unframe(new Uint8Array(data));
+                return connection.waiting.get(of)?.bytes(stream, bytes);
+              }
+              const answer = JSON.parse(data) as RunnerAnswer;
+              if (answer.id !== undefined) connection.waiting.get(answer.id)?.answer(answer);
+            } catch {
+              // A frame that is not the protocol's (another runner's) is dropped.
+            }
+          });
+          ws.addEventListener("close", ({ code, reason }) => {
+            clearTimeout(late);
+            if (current === opening) current = undefined;
+            reject(new Error(`${where} closed the connection (${reason || code})`));
+            for (const waiter of connection.waiting.values()) waiter.lost();
+            connection.waiting.clear();
+          });
+        }),
+    );
+    // A URL that could not be had leaves the next call to ask for one again.
+    void opening.catch(() => {
+      if (current === opening) current = undefined;
     });
     return opening;
   }

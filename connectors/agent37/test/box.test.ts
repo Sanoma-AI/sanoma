@@ -71,7 +71,7 @@ describe("box operations", () => {
     const elsewhere = new URL(opened.url);
     elsewhere.port = new URL(vendor.edge(opened.id, 3000)).port;
     expect(await bare(elsewhere.href)).toBe(401);
-    const { run, stop } = runnerBox({ url: opened.url, id: opened.id });
+    const { run, stop } = runnerBox({ url: async () => opened.url, id: opened.id });
     const ran = await run("echo over the link");
     expect(await new Response(ran.stdout).text()).toBe("over the link\n");
     await stop();
@@ -179,12 +179,24 @@ describe("box operations", () => {
     expect(vendor.instances.size).toBe(0);
   });
 
-  it("has the edge refuse and record a request to a box that carries the account key, over fetch or a WebSocket", async () => {
+  it("refuses and records the account key sent to a box, over fetch, a WebSocket or an exec's command", async () => {
     const at = vendor.edge("anybox", 3000);
     expect(await fetch(`${at}/health`, { headers: { "X-Agent37-Key": KEY } }).then((res) => res.status)).toBe(401);
     const ws = new WebSocket(at.replace(/^http/, "ws"), { headers: { "X-Agent37-Key": KEY } } as unknown as string[]);
     await new Promise((closed) => ws.addEventListener("close", closed));
-    expect(vendor.keyed.splice(0)).toEqual([`${at}/health`, `${at.replace(/^http/, "ws")}/`]);
+    const id = (await call("box.open", { name: "sanoma-keyed", group: "keyed", ttl: 60 })).id;
+    const exec = await fetch(`https://api.agent37.com/v1/instances/${id}/exec`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ command: `echo ${KEY}` }),
+    });
+    expect(exec.status).toBe(400);
+    expect(vendor.keyed.splice(0)).toEqual([
+      `${at}/health`,
+      `${at.replace(/^http/, "ws")}/`,
+      `POST /instances/${id}/exec`,
+    ]);
+    await call("box.discard", { name: "sanoma-keyed" });
   });
 
   it("takes a box's name or a group to discard, not both, and keeps its links out of the ledger", () => {

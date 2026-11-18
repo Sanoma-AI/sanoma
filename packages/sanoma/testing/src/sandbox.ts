@@ -145,9 +145,9 @@ export async function checkSandbox(s: SandboxUnderTest): Promise<SandboxCheck[]>
           `node -e "require('node:http').createServer((q, s) => s.end('${token}')).listen(${port})"`,
         );
         try {
-          const { url, headers } = await at.expose(port);
+          const { url } = await at.expose(port);
           const answer = () =>
-            fetch(url, { headers, signal: AbortSignal.timeout(5_000) }).then(
+            fetch(url, { signal: AbortSignal.timeout(5_000) }).then(
               (res) => res.text(),
               () => "",
             );

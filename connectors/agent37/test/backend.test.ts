@@ -103,13 +103,16 @@ describe("agent37Backend", () => {
     expect(exposed).toEqual({ url: expect.stringContaining("a37_token=") });
     expect(new URL(exposed.url).origin).toBe(new URL(vendor.edge(box.id, 3000)).origin);
     await box.stop();
-    // The links were minted with the key, at the API: the runner's, which the open and the turn share,
-    // and the port's. The edge refuses a request to a box that carries the key, so the runner answered
-    // over the links alone: its health checks and its WebSocket.
-    expect(vendor.sent.filter((s) => s.path === `/instances/${box.id}/signed-url`).map((s) => s.body?.port)).toEqual([
-      RUNNER_PORT,
-      3000,
-    ]);
+    // Connected again after the stop closed the connection: over a link of its own.
+    const again = await box.run("echo again");
+    expect(await new Response(again.stdout).text()).toBe("again\n");
+    await box.stop();
+    // The links were minted with the key, at the API: the runner's, which the open and the first
+    // connect share, the port's, and the runner's again for the next connect. The edge refuses a
+    // request to a box that carries the key, so the runner answered over the links alone.
+    const minted = vendor.sent.filter((s) => s.path === `/instances/${box.id}/signed-url`);
+    expect(minted.map((s) => s.body?.port)).toEqual([RUNNER_PORT, 3000, RUNNER_PORT]);
+    expect(minted.map((s) => s.body?.ttl_seconds)).toEqual([3600, 86_400, 3600]);
     expect(vendor.keyed).toEqual([]);
     await backend.discard({ name: "sanoma-keyless" });
   });

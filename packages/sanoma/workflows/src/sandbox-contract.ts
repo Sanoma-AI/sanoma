@@ -88,8 +88,8 @@ export interface Box {
   read(path: string): Promise<Uint8Array | null>;
   /** Writes a file, its directories made. */
   write(path: string, bytes: Uint8Array, opts?: { mode?: number }): Promise<void>;
-  /** Where its `port` is reached from outside it, with the headers that reach it. */
-  expose(port: number): Promise<{ url: string; headers?: Record<string, string> }>;
+  /** Where its `port` is reached from outside it: a URL that carries any credential it needs. */
+  expose(port: number): Promise<{ url: string }>;
   /** Stops it and every process in it; the next `open` of its name finds what it kept. */
   stop(): Promise<void>;
 }

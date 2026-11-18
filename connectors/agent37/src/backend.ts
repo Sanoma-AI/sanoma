@@ -64,10 +64,17 @@ export function labelOf(name: string): string {
 }
 
 /**
- * How long the links a box's turn reaches its runner and ports over last, in seconds: a day, so a
- * long turn can still reconnect. Agent37 cannot revoke one sooner; it stays in this process.
+ * How long a link to a box's runner lasts, in seconds: an hour. `runnerBox` asks for another at
+ * each connect, so a turn that outlives one reconnects over a new one. Agent37 cannot revoke a link
+ * sooner; it stays in this process.
  */
-const TURN_LINK_S = 24 * 60 * 60;
+const RUNNER_LINK_S = 60 * 60;
+
+/**
+ * How long a link to another port of a box (`expose`) lasts, in seconds: a day, since a coding
+ * agent's harness reconnects to its bridge over the link it was given.
+ */
+const PORT_LINK_S = 24 * 60 * 60;
 
 export interface Agent37BackendOptions {
   /** How long `open` waits for a box, and `stop` for its sleep. Default 3 minutes. */
@@ -92,17 +99,18 @@ export function agent37Backend(
       const key = await keyOf();
       const api = agent37Api(key);
       const want = wanted(declared, { image, size });
-      const { id, url } = await openInstance(api, key, { name, want, network: hosts, ttl: TURN_LINK_S, budgetMs });
-      const { stop, ...box } = runnerBox({ url, id });
+      const opened = await openInstance(api, key, { name, want, network: hosts, ttl: RUNNER_LINK_S, budgetMs });
+      const { id } = opened;
+      // The first connect takes the open's link while it has a minute left; any other mints its own.
+      let first: typeof opened | undefined = opened;
+      const runnerUrl = async () => {
+        const kept = first && Date.parse(first.expiresAt) - Date.now() > 60_000 ? first.url : undefined;
+        first = undefined;
+        return kept ?? (await api.signedUrl(id, RUNNER_PORT, RUNNER_LINK_S)).url;
+      };
       return {
-        ...box,
-        expose: async (port) => ({ url: (await api.signedUrl(id, port, TURN_LINK_S)).url }),
-        async stop() {
-          // What runs in it is killed first, which a sleep would keep; a runner that cannot be
-          // reached, or does not answer in time, kills nothing, and the sleep goes ahead.
-          await Promise.race([stop().catch(() => undefined), delay(STOP_MS)]);
-          await asleep(api, id, Date.now() + budgetMs);
-        },
+        ...runnerBox({ url: runnerUrl, id, sleep: () => asleep(api, id, Date.now() + budgetMs) }),
+        expose: async (port) => ({ url: (await api.signedUrl(id, port, PORT_LINK_S)).url }),
       };
     },
     async discard({ name }) {
@@ -253,9 +261,6 @@ command -v pnpm >/dev/null && exit 0
 mkdir -p ~/.local/bin
 corepack enable --install-directory ~/.local/bin pnpm
 pnpm --version >/dev/null`;
-
-/** How long `stop` waits for the runner to kill what runs in the box, in ms. */
-const STOP_MS = 30_000;
 
 /** Where the runner is kept in a box, under the home of the image's user, and its log. */
 const RUNNER = ".sanoma/runner.cjs";
