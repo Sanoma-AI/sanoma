@@ -2,7 +2,7 @@ import { resend } from "@sanoma-ai/connector-resend";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { collection } from "../src/collection.ts";
-import { defineWorkflow, errorCode } from "../src/index.ts";
+import { defineOperation, defineWorkflow, errorCode } from "../src/index.ts";
 import { type PageRuntime, type PageRuntimeOptions, pageRuntime } from "../src/page-run.ts";
 import type { World } from "../src/scenario.ts";
 
@@ -39,6 +39,38 @@ const chase = defineWorkflow({
     await ctx.data.invoices.save({ record: { ...found.record, status: "overdue" } });
     return { waitedMs: remindedAt - sentAt };
   },
+});
+
+/** Marks an invoice paid: a company operation that reads and writes the invoices, which a page may call. */
+const settle = defineOperation({
+  name: "settle",
+  input: z.object({ number: z.string() }),
+  uses: [invoices.get, invoices.save],
+  run: async (ctx, { number }) => {
+    const found = await ctx.data.invoices.get({ key: number });
+    const saved = await ctx.data.invoices.save({
+      record: { number, customer: found?.record.customer ?? "nobody", status: "paid" },
+    });
+    return { status: saved.record.status };
+  },
+});
+
+/** Emails the customer: a company operation that sends, a workflow's step only. */
+const notify = defineOperation({
+  name: "notify",
+  input: z.object({ to: z.string() }),
+  uses: [resend.emails.send],
+  run: async (ctx, { to }) =>
+    ctx.resend.emails.send({ to, from: "Acme <billing@acme.example>", subject: "Paid", text: "Thank you." }),
+});
+
+/** `settle` as a workflow's step. */
+const settleIt = defineWorkflow({
+  name: "settle-it",
+  trigger: "manual",
+  input: z.object({ number: z.string() }),
+  uses: [settle],
+  run: async (ctx, input) => ctx.operations.settle.run(input),
 });
 
 const world: World = {
@@ -306,6 +338,43 @@ describe("pageRuntime", () => {
     );
     await expect(pageRuntime({ workflows: [chase], collections: [invoices] })).rejects.toThrow(
       /uses resend\.emails\.send, but no fake/,
+    );
+  });
+
+  it("runs a company operation a workflow uses inside its run, each call it makes recorded within it", async () => {
+    const { transport } = await pageRuntime({ workflows: [settleIt], collections: [invoices], world });
+    const { runId } = (await transport({ name: "settleIt", input: { number: "INV-1" } })) as { runId: string };
+    expect(await transport({ name: "settleIt.result", input: { runId } })).toEqual({ status: "paid" });
+    const records = (await transport({ name: "settleIt.ledger", input: { runId } })) as (Read & {
+      seq: number;
+      within?: number;
+    })[];
+    expect(records.map((r) => [r.type, r.op, r.seq, r.within])).toEqual([
+      ["run.started", undefined, 0, undefined],
+      ["op.called", "operations.settle.run", 1, undefined],
+      ["op.called", "data.invoices.get", 2, 1],
+      ["op.called", "data.invoices.save", 3, 1],
+      ["run.finished", undefined, 4, undefined],
+    ]);
+  });
+
+  it("calls a company operation directly, its calls on the fakes, and refuses one a page may not call", async () => {
+    const { transport } = await pageRuntime({
+      workflows: [],
+      operations: [settle, notify],
+      collections: [invoices],
+      connectors: [resend],
+      world,
+    });
+    expect(await transport({ name: "operations.settle.run", input: { number: "INV-1" } })).toEqual({ status: "paid" });
+    expect(await transport({ name: "data.invoices.get", input: { key: "INV-1" } })).toMatchObject({
+      record: { status: "paid" },
+    });
+    await expect(transport({ name: "operations.notify.run", input: { to: "a@b.c" } })).rejects.toThrow(
+      /operations\.notify\.run cannot be called directly/,
+    );
+    await expect(pageRuntime({ workflows: [], operations: [notify] })).rejects.toThrow(
+      /Operation "operations\.notify\.run" uses resend\.emails\.send, but no fake/,
     );
   });
 
