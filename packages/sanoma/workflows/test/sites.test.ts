@@ -4,8 +4,19 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig, siteContentPages, siteIcons, siteLocales } from "../src/describe.ts";
-import { defineConnector, defineWorkflow, type SanomaConfig, withSetup } from "../src/index.ts";
+import {
+  defineConnector,
+  defineDriver,
+  defineOperation,
+  defineWorkflow,
+  type SanomaConfig,
+  withSetup,
+} from "../src/index.ts";
 import { leads } from "../../app/test/fixtures/company-sites/resources/data.ts";
+import score from "./fixtures/company-apps/apps/crm/operations/score.ts";
+import { customers as crmCustomers } from "./fixtures/company-apps/apps/crm/resources/data.ts";
+import { customers as shopCustomers } from "./fixtures/company-apps/apps/shop/resources/data.ts";
+import quote from "./fixtures/company-apps/operations/quote.ts";
 import { tree } from "./tree.ts";
 
 // What a company's sites call, read from their source (`readSites`) as `describeConfig` reads it:
@@ -41,6 +52,19 @@ const acme = defineConnector("acme", {
       target: ({ id }: { id: string }) => `customer/${id}`,
     },
   },
+});
+
+/** acme with a driver, which a company operation's `uses` need. */
+const acmeDriven = withSetup(acme, {
+  driver: () => defineDriver(acme, { customer: { get: async (i) => i, rename: async (i) => i } }),
+});
+
+/** A rename at acme: a company operation a page may not call, which writes at a vendor. */
+const relabel = defineOperation({
+  name: "relabel",
+  input: z.object({ id: z.string() }),
+  uses: [acme.customer.rename],
+  run: async (ctx, { id }) => ctx.acme.customer.rename({ id }),
 });
 
 /** A vendor with a login half and no operations. */
@@ -325,6 +349,40 @@ describe("readSites", () => {
         warnings: [],
       },
       { name: "quiet", pages: [{ path: "/sites/quiet" }], calls: [], problems: [], warnings: [] },
+    ]);
+  });
+
+  it("reads a call of a company operation, an app's by four names, and makes a problem of one a page may not call", () => {
+    const root = tree(
+      "operations",
+      calling(
+        "ops",
+        ['title: "Ops"'],
+        [
+          "api.operations.quote.run({ id: 'c1', items: 2 })",
+          "api.operations.crm.score.run({ email: 'a@b.test' })",
+          "api.operations.relabel.run({ id: 'c1' })",
+        ],
+      ),
+    );
+    const [ops] = describeConfig(
+      config(root, {
+        connectors: [acmeDriven],
+        collections: [leads, crmCustomers, shopCustomers],
+        operations: [quote, score, relabel],
+      }),
+    ).sites;
+    expect(ops!.calls.map((c) => [c.kind, c.target, c.line])).toEqual([
+      ["op", "operations.quote.run", 7],
+      ["op", "operations.crm.score.run", 8],
+      ["op", "operations.relabel.run", 9],
+    ]);
+    expect(ops!.problems).toEqual([
+      pageProblem(
+        "ops",
+        9,
+        'calls operation "operations.relabel.run", which a page may not call directly: start a workflow that calls it',
+      ),
     ]);
   });
 
@@ -973,6 +1031,37 @@ describe("readSites", () => {
     writeFileSync(join(root, "policies/typo.cedar"), "permit (principal, action, resource)\n");
     expect(describeConfig(configured).policy.problems).not.toEqual([]);
     expect(problems()).toEqual({ desk: [], members: [], www: readsAndBuiltIns });
+  });
+
+  it("makes a problem of a public site's call of a company operation no permit lets a visitor make, and none once one names it", () => {
+    const lookup = defineOperation({
+      name: "lookup",
+      input: z.object({ id: z.string() }),
+      uses: [acme.customer.get],
+      run: async (ctx, { id }) => ctx.acme.customer.get({ id }),
+    });
+    const root = tree("visitor-operations", {
+      "policies/visitors.cedar":
+        'permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"workflow:hello", resource);\n',
+      ...calling("www", ["public: true"], ["api.operations.lookup.run({ id: 'c1' })"]),
+    });
+    const configured = config(root, { connectors: [acmeDriven], operations: [lookup] });
+    const permit =
+      'permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"operations.lookup.run", resource);';
+    expect(describeConfig(configured).sites[0]!.problems).toEqual([
+      pageProblem(
+        "www",
+        7,
+        'a visitor\'s call to operation "operations.lookup.run" is refused: no permit in policies/ names anonymous for operations.lookup.run. ' +
+          `Add: ${permit}`,
+      ),
+    ]);
+    // The operation's permit alone: the read inside it needs none of its own. (A policy with problems
+    // would silence the check too, so it must have none.)
+    writeFileSync(join(root, "policies/lookup.cedar"), `${permit}\n`);
+    const described = describeConfig(configured);
+    expect(described.policy.problems).toBeUndefined();
+    expect(described.sites[0]!.problems).toEqual([]);
   });
 
   it("reads api.sanoma.describe as the runtime's description, none of the company's calls, refused only on a public site", () => {

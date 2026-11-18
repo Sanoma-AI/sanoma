@@ -9,7 +9,14 @@ import { createRequire, SourceMap, type SourceMapPayload } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { declarationFiles, filesUnder, type SanomaConfig, timeMatcherFile, vendorInfo } from "sanoma/workflows";
+import {
+  declarationFiles,
+  filesUnder,
+  relPath,
+  type SanomaConfig,
+  timeMatcherFile,
+  vendorInfo,
+} from "sanoma/workflows";
 import { domainsText } from "sanoma/workflows/shared";
 import MagicString from "magic-string";
 import type { InlineConfig, Plugin, PluginOption, Rollup } from "vite";
@@ -210,14 +217,14 @@ async function bundlePlugins(
     { ...companyFiles(root), applyToEnvironment: ssr },
     { ...optional(), applyToEnvironment: ssr },
     {
-      // A site's file or the app's own importing what the Worker lacks, refused by file and symbol.
+      // A site's file, a company operation's (whose body the Worker runs for a page) or the app's
+      // own importing what the Worker lacks, refused by file and symbol.
       name: "sanoma:node-only",
       applyToEnvironment: ssr,
       transform(code, id) {
         const file = id.split("?")[0]!;
-        const site =
-          companyFile(file, root) && /^(apps\/[^/]+\/)?sites\//.test(relative(root, file).split(sep).join("/"));
-        const own = site || file.startsWith(`${src}${sep}`);
+        const company = companyFile(file, root) && /^(apps\/[^/]+\/)?(sites|operations)\//.test(relPath(root, file));
+        const own = company || file.startsWith(`${src}${sep}`);
         if (!own || !/\.[cm]?[jt]sx?$/.test(file) || !/\bimport\b/.test(code)) return;
         for (const statement of this.parse(code, { lang: file.endsWith("x") ? "tsx" : "ts" }).body as unknown as {
           type: string;

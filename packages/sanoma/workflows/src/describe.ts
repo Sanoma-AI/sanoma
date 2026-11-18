@@ -24,7 +24,7 @@ import { fresh, stampOf, stampsOf } from "./load.ts";
 import { LOCKFILE } from "./lockfile.ts";
 import { isOperation, VENDOR, type VendorInfo } from "./op.ts";
 import { outlineWithSource } from "./outline.ts";
-import { APPS_DIR, kindDirs } from "./paths.ts";
+import { APPS_DIR, kindDirs, relPath } from "./paths.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 import { type Resource, resourceTypesOf, valueAt } from "./resource.ts";
 import { type DeclaredResource, inAppPeople, loadDataFiles, type ResourceProblem } from "./resources.ts";
@@ -358,7 +358,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     problems: [
       ...dataFiles.problems,
       ...appProblems,
-      ...appClashes(apps, collections, sites),
+      ...appClashes(resolved.root, apps, collections, sites, [...resolved.ops.values()].filter(isOperation)),
       ...domainProblems(
         dataFiles.resources,
         resources,
@@ -428,13 +428,16 @@ const appClash = (kind: string, name: string, file: string): ResourceProblem => 
 });
 
 /**
- * A collection or site at the root named as an app is: `api.data.<app>` and `/sites/<app>/` are
- * the app's, so the root's would take its place.
+ * A collection, site or company operation at the root named as an app is: `api.data.<app>`,
+ * `/sites/<app>/` and `api.operations.<app>` are the app's, so the root's would take its place.
+ * There are apps only under a root.
  */
 function appClashes(
+  root: string | undefined,
   apps: readonly AppEntry[],
   collections: readonly CollectionEntry[],
   sites: readonly SiteEntry[],
+  operations: readonly Operation[],
 ): ResourceProblem[] {
   const names = new Set(apps.map((app) => app.name));
   return [
@@ -444,6 +447,9 @@ function appClashes(
     ...sites
       .filter((site) => site.app === undefined && names.has(site.name))
       .map((site) => appClash("site", site.name, `sites/${site.name}`)),
+    ...operations
+      .filter((op) => op.app === undefined && names.has(op.resource))
+      .map((op) => appClash("operation", op.resource, relPath(root!, op.file))),
   ];
 }
 
@@ -545,7 +551,7 @@ export function routerWarnings(
 
 /**
  * A site's `api` names each workflow `apiNameOf(name)` beside the vendors' operations and the
- * collections (`api.data`), and `operations` is kept for the company's operations, so a workflow
+ * collections (`api.data`) and the company's operations (`api.operations`), so a workflow
  * whose name comes out as another's, a vendor's id, `data` or `operations` is a problem, at 1:1 of
  * its file. A built-in is never the one renamed.
  */

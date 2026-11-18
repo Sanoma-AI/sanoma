@@ -7,6 +7,7 @@ import { useTestApp } from "sanoma/testing/harness";
 import {
   defineConnector,
   defineDriver,
+  defineOperation,
   defineResource,
   defineWorkflow,
   type Principal,
@@ -121,9 +122,26 @@ const greet = defineWorkflow({
   run: async (ctx, { id }) => (await ctx.acme.customer.get({ id })).name,
 });
 
+/** A customer's name, read: a company operation an agent may look up, as a page may call it. */
+const customerName = defineOperation({
+  name: "named",
+  input: z.object({ id: z.string() }),
+  uses: [acme.customer.get],
+  run: async (ctx, { id }) => ({ name: (await ctx.acme.customer.get({ id })).name }),
+});
+
+/** A customer renamed: a company operation that writes at a vendor, a workflow's step only. */
+const relabel = defineOperation({
+  name: "relabel",
+  input: z.object({ id: z.string() }),
+  uses: [acme.customer.rename],
+  run: async (ctx, { id }) => ctx.acme.customer.rename({ id, name: "B" }),
+});
+
 // With an app's workflow (`crm.follow-up`, from the company-apps fixture), named with its app.
 const config: SanomaConfig = {
   workflows: [greet, followUp],
+  operations: [customerName, relabel],
   connectors: [withSetup(acme, { driver: () => acmeDriver }), withFake(hooks, hooksFake)],
   collections: [outbound, crmCustomers],
   root,
@@ -288,8 +306,10 @@ describe("the describe tool", () => {
     expect(described.workflows.filter((wf: { name: string }) => BUILT_IN_WORKFLOWS.has(wf.name))).toEqual([]);
     const ops = described.ops.map((op: { id: string }) => op.id);
     expect(ops).toEqual(expect.arrayContaining(["acme.customer.get", "data.outbound.list"]));
-    // A write a workflow calls is not called directly, so it is not listed.
+    // A write a workflow calls is not called directly, so it is not listed; a company operation is by what it uses.
     expect(ops).not.toContain("acme.customer.rename");
+    expect(ops).toContain("operations.named.run");
+    expect(ops).not.toContain("operations.relabel.run");
     expect(described.ops.find((op: { id: string }) => op.id === "acme.customer.get")).toEqual({
       id: "acme.customer.get",
       effect: "read",
@@ -334,10 +354,13 @@ describe("lookup", () => {
     });
     const listed = await tool("lookup", { op: "data.outbound.list" });
     expect(listed.isError).toBeFalsy();
+    expect((await tool("lookup", { op: "operations.named.run", input: { id: "c1" } })).structuredContent).toEqual({
+      name: "Acme Ltd",
+    });
   });
 
   it("refuses what is not a lookup: a write, and an operation the config does not have", async () => {
-    for (const op of ["acme.customer.rename", "acme.customer.nothing"]) {
+    for (const op of ["acme.customer.rename", "acme.customer.nothing", "operations.relabel.run"]) {
       const refused = await tool("lookup", { op, input: { id: "c1", name: "B" } });
       expect(refused.isError, op).toBe(true);
       expect(refused.structuredContent, op).toMatchObject({

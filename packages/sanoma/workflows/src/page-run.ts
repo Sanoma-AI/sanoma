@@ -15,13 +15,29 @@ import {
   recorded,
   untilOf,
 } from "./ctx.ts";
-import { AllMembers, type ApprovalState, opIdsOf, type Principal, type WorkflowDefinition } from "./define.ts";
+import {
+  AllMembers,
+  type ApprovalState,
+  opIdsOf,
+  type Operation,
+  type Principal,
+  type WorkflowDefinition,
+} from "./define.ts";
 import { isDirect } from "./direct.ts";
 import { errorInfo, parseOrThrow, RejectedError, SanomaError } from "./errors.ts";
 import type { Fake } from "./fake.ts";
 import { applyGivens, refuseUnfaked } from "./givens.ts";
 import type { LedgerBody, LedgerGroup, LedgerRecord } from "./ledger.ts";
-import { type CallContext, type Connector, type DriverFn, indexConnectors, makersOf, type Op } from "./op.ts";
+import {
+  type CallContext,
+  type Connector,
+  type DriverFn,
+  indexConnectors,
+  isOp,
+  isOperation,
+  makersOf,
+  type Op,
+} from "./op.ts";
 import { resourceTypesOf } from "./resource.ts";
 import type { World } from "./scenario.ts";
 import { memorySecrets, type Secrets } from "./secret.ts";
@@ -53,6 +69,11 @@ export interface PageRuntimeOptions {
   collections?: readonly Collection[];
   /** The connectors the workflows call, as their packages export them: each one's fake (`withSetup`'s `fake`) stands in for its vendor. */
   connectors?: readonly Connector<any, any>[];
+  /**
+   * The company's operations a page calls directly (`api.operations.<name>.run`), each run on the
+   * fakes; a workflow's run needs none given: it runs those it uses.
+   */
+  operations?: readonly Operation<string, any>[];
   /** The world every run starts from (`loadWorld`): its `Given` steps applied to the fakes at the start and on `reset`. */
   world?: World;
   /** Who starts every run and makes every call: `anonymous` unless given. */
@@ -161,8 +182,10 @@ const waitUntil = (until: number, signal: AbortSignal) =>
  * run's end, its output or its failure, or `run_running` once `waitMs` has passed; `.latest`, `.runs` (`{ limit? }`, 20 unless given), `.approvals` and
  * `.ledger` (`{ runId }`, the run's records in order: its run card) read the runs. Each
  * approval is decided at once (`decide`), and `ctx.sleep` waits its time, as a worker's does: the
- * run rests at its `sleep.started`, `running`, until a timer of the page's wakes it. Refuses a
- * workflow that uses an operation no fake implements, and a world its fakes cannot take.
+ * run rests at its `sleep.started`, `running`, until a timer of the page's wakes it. A company
+ * operation runs its body, in a run on the run's runner (its calls recorded within it), called
+ * directly with each of its calls on its fake. Refuses a workflow or an operation that uses an
+ * operation no fake implements (a company operation's by what it uses), and a world its fakes cannot take.
  */
 export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRuntime> {
   const {
@@ -171,9 +194,11 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
     connectors = [],
     world = { name: "world", given: [] },
     actor = ANONYMOUS_PRINCIPAL,
+    operations = [],
   } = options;
   const decide = options.decide ?? (() => "approve");
   const ops = indexConnectors([...connectors, ...(collections.length ? [collectionsConnector(collections)] : [])]);
+  for (const op of operations) ops.set(op.id, op);
   const types = resourceTypesOf(connectors);
   const makers = makersOf(connectors, "fake") as Map<string, () => Fake<unknown>>;
   if (collections.length) makers.set(DATA_VENDOR, () => collectionsFake(collections));
@@ -199,11 +224,16 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
   };
 
   let current = await make();
-  for (const wf of workflows) {
-    refuseUnfaked(opIdsOf(wf), current.drivers, (missing, why) => `Workflow "${wf.name}" uses ${missing}, but ${why}`, {
-      workflow: wf.name,
-    });
-  }
+  // A company operation has no fake: what it uses does.
+  const unfaked = (owner: string, uses: readonly unknown[], data: Record<string, unknown>) =>
+    refuseUnfaked(
+      uses.filter(isOp).flatMap((op) => (isOperation(op) ? opIdsOf(op) : [op.id])),
+      current.drivers,
+      (missing, why) => `${owner} uses ${missing}, but ${why}`,
+      data,
+    );
+  for (const wf of workflows) unfaked(`Workflow "${wf.name}"`, wf.uses, { workflow: wf.name });
+  for (const op of operations) unfaked(`Operation "${op.id}"`, op.uses, { op: op.id });
   let runs = new Map<string, PageRun>();
   let started = 0;
   /** Aborted to drop the runs started under it (`stop`, `reset`): each sleep's timer cleared, each call after halted. */
@@ -252,14 +282,20 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
         );
       let output: unknown;
       try {
-        output = await callFake(seeded, op, parsed, {
-          idempotencyKey: `${run.id}:${seq}`,
-          runId: run.id,
-          opId: op.id,
-          attempt: 1,
-          principal: run.actor,
-          by: `run:${run.id}`,
-        });
+        if (isOperation(op)) {
+          // A company operation's body on a runner of this run, each call it makes recorded within it.
+          const inner = runnerOf(run, seeded, dropped);
+          const within: CtxRunner = { ...inner, op: (o, i, place, c) => inner.op(o, i, { ...place, within: seq }, c) };
+          output = op.output.parse(await op.run(ctxOf(op, run, within), parsed));
+        } else
+          output = await callFake(seeded, op, parsed, {
+            idempotencyKey: `${run.id}:${seq}`,
+            runId: run.id,
+            opId: op.id,
+            attempt: 1,
+            principal: run.actor,
+            by: `run:${run.id}`,
+          });
       } catch (err) {
         records(() => ({ error: errorInfo(err) }));
         throw err;
@@ -441,14 +477,25 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
           );
         }
         const runId = `direct:${actor.id}:${id ?? `page:${++started}`}`;
-        return callFake(current, op, inputOf(op, input ?? {}), {
-          idempotencyKey: runId,
-          runId,
-          opId: op.id,
-          attempt: 1,
-          principal: actor,
-          by: actor.id,
-        });
+        const seeded = current;
+        let calls = 0;
+        const fake = (called: Op, given: unknown, key: string) =>
+          callFake(seeded, called, inputOf(called, given), {
+            idempotencyKey: key,
+            runId,
+            opId: called.id,
+            attempt: 1,
+            principal: actor,
+            by: actor.id,
+          });
+        if (!isOperation(op)) return fake(op, input ?? {}, runId);
+        // A company operation: its body, each call it makes on its fake, as the app makes each a direct call.
+        const runner: CtxRunner = {
+          place: () => undefined,
+          now: async () => Date.now(),
+          op: (inner, given) => fake(inner, given, `${runId}:${++calls}`),
+        };
+        return op.output.parse(await op.run(ctxOf(op, { id: runId, actor }, runner), inputOf(op, input ?? {})));
       }
       const [api = "", method = "start", ...rest] = name.split(".");
       const wf = rest.length ? undefined : byApi.get(api);

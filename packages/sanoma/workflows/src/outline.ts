@@ -628,11 +628,11 @@ function switchArms(node: Node): Node[] {
 }
 
 /**
- * Whether a path on `ctx` is an operation's: `<vendor>.<resource>.<op>`, or an app's collection's,
+ * Whether a path on `ctx` (or a site's `api`) is an operation's: `<vendor>.<resource>.<op>`, or an app's collection's,
  * `data.<app>.<collection>.<op>`, or an app's company operation's, `operations.<app>.<name>.run` (a
  * computed vendor may be any).
  */
-const isOpPath = (members: readonly string[]): boolean =>
+export const isOpPath = (members: readonly string[]): boolean =>
   members.length === 3 || (members.length === 4 && [DATA_VENDOR, OPERATIONS_VENDOR, "*"].includes(members[0]!));
 
 /** The member names from `ctx` to the callee, `*` for a computed one, when the callee is on `ctx`. */

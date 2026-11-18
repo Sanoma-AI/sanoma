@@ -13,6 +13,8 @@ import {
   filesUnder,
   isCollection,
   isOp,
+  isOperation,
+  type Operation,
   relPath,
   resolveConfig,
   type SanomaConfig,
@@ -22,7 +24,7 @@ import {
 import type { Collection } from "sanoma/data";
 import type { World } from "sanoma/workflows/scenario";
 import type { SiteEntry } from "sanoma/workflows/describe";
-import { apiNameOf, DATA_VENDOR } from "sanoma/workflows/shared";
+import { apiNameOf, DATA_VENDOR, OPERATIONS_VENDOR } from "sanoma/workflows/shared";
 import type { Plugin, PluginOption } from "vite";
 import type { AppConfig } from "./api.ts";
 import {
@@ -47,12 +49,17 @@ const WORLD = "scenarios/world.feature";
 const vendorOf = (op: string) => op.split(".")[0]!;
 
 /** What a demo is planned from: the config's sites (their calls), workflows, connectors with their fakes, and the world. */
-export interface DemoInput<W extends Pick<WorkflowDefinition, "name" | "file" | "uses">> {
+export interface DemoInput<
+  W extends Pick<WorkflowDefinition, "name" | "file" | "uses">,
+  O extends Pick<Operation<string, any>, "id" | "file" | "uses">,
+> {
   root: string;
   /** The config's file, absolute: a workflow defined there is in no file of its own. */
   configFile: string;
   sites: readonly Pick<SiteEntry, "name" | "calls">[];
   workflows: readonly W[];
+  /** The company's operations, which a site may call directly. */
+  operations: readonly O[];
   connectors: readonly Connector<any, any>[];
   /** The vendors whose connector attaches a fake (`ResolvedConfig.fakes`). */
   fakes: ReadonlySet<string>;
@@ -61,9 +68,13 @@ export interface DemoInput<W extends Pick<WorkflowDefinition, "name" | "file" | 
   world?: World;
 }
 
-/** What a demo bundles: the workflows the sites call, and the connectors those, the sites and the world use. */
-export interface DemoPlan<W> {
+/**
+ * What a demo bundles: the workflows the sites call, the company operations they call directly,
+ * and the connectors those, the sites and the world use.
+ */
+export interface DemoPlan<W, O> {
   workflows: W[];
+  operations: O[];
   connectors: { connector: Connector<any, any>; package: string }[];
 }
 
@@ -80,18 +91,21 @@ export class DemoRefused extends Error {
 
 /**
  * The demo's plan: every workflow a site calls (by `RunForm` or `api`), each from a file of its
- * own, and every vendor those workflows, the sites' direct calls and the world's Givens use, each
- * by a connector from a package with a fake. Refuses (`DemoRefused`) a workflow defined in the
+ * own, every company operation a site calls directly, and every vendor those, the sites' other
+ * direct calls and the world's Givens use (a company operation's, by what it uses), each by a
+ * connector from a package with a fake. Refuses (`DemoRefused`) a workflow defined in the
  * config, a collection a site reads from no data file, an operation of `sanoma` (the repository's and the app's, which a page has none of), a
  * vendor with no connector, no fake, or no package to import it from in the page.
  */
-export function demoPlan<W extends Pick<WorkflowDefinition, "name" | "file" | "uses">>(
-  input: DemoInput<W>,
-): DemoPlan<W> {
-  const { root, configFile, sites, workflows, connectors, fakes, collections, world } = input;
+export function demoPlan<
+  W extends Pick<WorkflowDefinition, "name" | "file" | "uses">,
+  O extends Pick<Operation<string, any>, "id" | "file" | "uses">,
+>(input: DemoInput<W, O>): DemoPlan<W, O> {
+  const { root, configFile, sites, workflows, operations, connectors, fakes, collections, world } = input;
   const from = (file: string) => relPath(root, file);
   const reasons: string[] = [];
   const bundled = new Set<W>();
+  const called = new Set<O>();
   /** Each vendor used, and where first. */
   const vendors = new Map<string, string>();
   const use = (op: string, where: string) => {
@@ -104,7 +118,12 @@ export function demoPlan<W extends Pick<WorkflowDefinition, "name" | "file" | "u
   for (const site of sites) {
     for (const call of site.calls) {
       const where = `${call.file}:${call.line}`;
-      if (call.kind === "op") use(call.target, where);
+      if (call.kind === "op") {
+        const op = operations.find((o) => o.id === call.target);
+        if (vendorOf(call.target) !== OPERATIONS_VENDOR) use(call.target, where);
+        else if (op) called.add(op);
+        else reasons.push(`${where}: calls ${call.target}, which no file of operations/ defines`);
+      }
       if (call.kind === "collection" && !collections.has(call.target))
         reasons.push(
           `${where}: reads ${call.target}, a collection no data file under resources/ exports, which a demo bundles its collections from`,
@@ -121,12 +140,15 @@ export function demoPlan<W extends Pick<WorkflowDefinition, "name" | "file" | "u
       else bundled.add(wf);
     }
   }
-  for (const wf of bundled) for (const op of wf.uses.filter(isOp)) use(op.id, from(wf.file));
+  // A company operation's vendors are those it uses, named from its file.
+  for (const wf of bundled) for (const op of wf.uses.filter(isOp)) if (!isOperation(op)) use(op.id, from(wf.file));
+  const reached = [...called, ...[...bundled].flatMap((wf) => wf.uses.filter(isOperation))];
+  for (const op of reached) for (const inner of op.uses) use(inner.id, from(op.file));
   for (const given of world?.given ?? []) {
     if ("op" in given) use(given.op, WORLD);
     else useVendor(given.vendor, WORLD);
   }
-  const planned: DemoPlan<W>["connectors"] = [];
+  const planned: DemoPlan<W, O>["connectors"] = [];
   for (const [vendor, where] of vendors) {
     const connector = connectors.find((c) => c[VENDOR].id === vendor);
     const pkg = connector?.[VENDOR].info?.package;
@@ -140,7 +162,7 @@ export function demoPlan<W extends Pick<WorkflowDefinition, "name" | "file" | "u
     else planned.push({ connector, package: pkg });
   }
   if (reasons.length) throw new DemoRefused(reasons);
-  return { workflows: [...bundled], connectors: planned };
+  return { workflows: [...bundled], operations: [...called], connectors: planned };
 }
 
 export interface BuildDemoOptions {
@@ -227,6 +249,7 @@ const json = (value: unknown) => `JSON.parse(${JSON.stringify(JSON.stringify(val
 function demoModule(parts: {
   routeTree: string;
   workflows: { file: string; name: string }[];
+  operations: { file: string; name: string }[];
   collections: { file: string; names: string[] }[];
   connectors: { package: string; name: string }[];
   world: World | undefined;
@@ -237,6 +260,7 @@ function demoModule(parts: {
   return [
     'import { pageRuntime } from "sanoma/workflows/page";\n',
     ...parts.workflows.map(({ file, name }, i) => `import { ${name} as w${i} } from ${specifier(file)};\n`),
+    ...parts.operations.map(({ file, name }, i) => `import { ${name} as o${i} } from ${specifier(file)};\n`),
     ...parts.collections.map(
       ({ file, names }, i) =>
         `import { ${names.map((n, j) => `${n} as d${i}_${j}`).join(", ")} } from ${specifier(file)};\n`,
@@ -247,6 +271,7 @@ function demoModule(parts: {
     `export { routeTree } from ${specifier(parts.routeTree)};\n`,
     `const world = ${parts.world ? json(parts.world) : "undefined"};\n`,
     `export const runtime = () => pageRuntime({ workflows: [${parts.workflows.map((_, i) => `w${i}`).join(", ")}], `,
+    `operations: [${parts.operations.map((_, i) => `o${i}`).join(", ")}], `,
     `collections: [${collections.join(", ")}], `,
     `connectors: [${parts.connectors.map((_, i) => `c${i}`).join(", ")}], world });\n`,
     `export const description = ${json(parts.description)};\n`,
@@ -414,6 +439,7 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
     configFile: config.file ?? join(root, "sanoma.config.ts"),
     sites: description.sites,
     workflows: config.workflows ?? [],
+    operations: config.operations ?? [],
     connectors: config.connectors,
     fakes: new Set(resolved.fakes.keys()),
     collections: new Set(collections.map((c) => c.name)),
@@ -432,16 +458,23 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
       return { package: pkg, name: found[0], connector: found[1] as Connector<any, any> };
     }),
   );
-  await pageRuntime({ workflows: plan.workflows, collections, connectors: exported.map((c) => c.connector), world });
+  await pageRuntime({
+    workflows: plan.workflows,
+    operations: plan.operations,
+    collections,
+    connectors: exported.map((c) => c.connector),
+    world,
+  });
 
   const unexported: string[] = [];
-  const workflows = await Promise.all(
-    plan.workflows.map(async (wf) => {
-      const name = (await exportsOf(wf.file, (value) => value === wf))[0]?.[0];
-      if (name === undefined) unexported.push(`${relPath(root, wf.file)}: exports no ${wf.name}, which a demo imports`);
-      return { file: wf.file, name: name ?? "" };
-    }),
-  );
+  /** The name the file exports `value` by (an operation's, `default`), which the page imports. */
+  const exportedAs = async (file: string, value: unknown, what: string) => {
+    const name = (await exportsOf(file, (v) => v === value))[0]?.[0];
+    if (name === undefined) unexported.push(`${relPath(root, file)}: exports no ${what}, which a demo imports`);
+    return { file, name: name ?? "" };
+  };
+  const workflows = await Promise.all(plan.workflows.map((wf) => exportedAs(wf.file, wf, wf.name)));
+  const operations = await Promise.all(plan.operations.map((op) => exportedAs(op.file, op, op.id)));
   if (unexported.length) throw new DemoRefused(unexported);
 
   const sites = description.sites.map((site) => site.name);
@@ -472,6 +505,7 @@ export async function buildDemo(repo: string, { config, out, log }: BuildDemoOpt
   const text = demoModule({
     routeTree: routeTreeOf(root, "demo"),
     workflows,
+    operations,
     collections: data
       .map(({ file, found }) => ({ file, names: found.map(([name]) => name) }))
       .filter((c) => c.names.length),

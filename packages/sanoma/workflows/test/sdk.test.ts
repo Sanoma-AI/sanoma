@@ -7,7 +7,12 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { collection } from "../src/collection.ts";
 import { describeConfig, generateApi, writeApi } from "../src/describe.ts";
-import { defineConnector, defineWorkflow } from "../src/index.ts";
+import { defineConnector, defineDriver, defineOperation, defineWorkflow, withSetup } from "../src/index.ts";
+import companyApps from "./fixtures/company-apps/sanoma.config.ts";
+import score from "./fixtures/company-apps/apps/crm/operations/score.ts";
+import { customers as crmCustomers } from "./fixtures/company-apps/apps/crm/resources/data.ts";
+import { customers as shopCustomers } from "./fixtures/company-apps/apps/shop/resources/data.ts";
+import quote from "./fixtures/company-apps/operations/quote.ts";
 import outbound from "./fixtures/outbound/sanoma.config.ts";
 import { tree } from "./tree.ts";
 
@@ -80,6 +85,32 @@ describe("generateApi", () => {
     // A vendor's write is never called directly.
     expect(source).not.toContain("acme.customer.rename");
     expect(source).not.toMatch(/rename: OpFn/);
+  });
+
+  it("types the company's operations a page may call, an app's under its name, and leaves out a step-only one", async () => {
+    const relabel = defineOperation({
+      name: "relabel",
+      input: z.object({ id: z.string() }),
+      uses: [acme.customer.rename],
+      run: async (ctx, { id }) => ctx.acme.customer.rename({ id, name: "B" }),
+    });
+    const { source, problems } = generateApi(
+      describeConfig({
+        ...companyApps,
+        connectors: [
+          withSetup(acme, {
+            driver: () => defineDriver(acme, { customer: { get: async (i) => i, rename: async () => ({}) } }),
+          }),
+        ],
+        collections: [crmCustomers, shopCustomers],
+        operations: [quote, score, relabel],
+      }),
+    );
+    expect(problems).toEqual([]);
+    await expect(source).toMatchFileSnapshot("./fixtures/company-apps/api.ts.snap");
+    expect(source).toMatch(/operations: \{\n[\s\S]*quote: \{\n[\s\S]*run: OpFn<\{/);
+    expect(source).toMatch(/crm: \{\n[\s\S]*score: \{\n[\s\S]*run: OpFn<\{\n\s+email: string;/);
+    expect(source).not.toContain("relabel");
   });
 
   it("is deterministic: the same description gives the same text", () => {

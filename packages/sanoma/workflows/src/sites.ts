@@ -4,7 +4,7 @@ import { z } from "zod";
 import { childrenOf, keyName, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
-import { moduleSpecifier, stringValue, unwrap } from "./outline.ts";
+import { isOpPath, moduleSpecifier, stringValue, unwrap } from "./outline.ts";
 import { exportsOf, loadModules } from "./load.ts";
 import { APPS_DIR, appFolders, filesUnder, isDirectory, relPath, SITE_ENTRIES } from "./paths.ts";
 import { isObject } from "./resource.ts";
@@ -47,7 +47,8 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
  * called or passed on (`queryFn: api.data.leads.list`):
  * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` (an app's
  * `api.data.<app>.<collection>.<op>`) a collection,
- * and `api.<vendor>.<resource>.<op>` an operation. A name that is not written out (a variable, a
+ * and `api.<vendor>.<resource>.<op>` an operation (an app's company operation
+ * `api.operations.<app>.<name>.run`). A name that is not written out (a variable, a
  * template with holes, a computed member) is skipped, as is a use through a namespace import or a
  * destructured `api`. A call to what `description` does not have, or to an operation a page may
  * not call directly, is a problem. So is a `login` in `site.ts` that does not name one of
@@ -510,7 +511,8 @@ function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" |
     return path.length === 3 || path.length === 4
       ? { kind: "collection", name: path.slice(1, -1).join("."), method: path.at(-1) }
       : undefined;
-  if (path.length === 3) return { kind: "op", name: path.join(".") };
+  // `api.<vendor>.<resource>.<op>`, or an app's company operation, `api.operations.<app>.<name>.run`.
+  if (isOpPath(path)) return { kind: "op", name: path.join(".") };
   if (path.length > 2) return undefined;
   return { kind: "workflow", name: first, ...(second !== undefined && { method: second }) };
 }

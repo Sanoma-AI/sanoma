@@ -9,7 +9,8 @@ import { lintWorkflow } from "../src/lint.ts";
 import { loadScenarios } from "../src/scenario.ts";
 import { appOfFile } from "../src/company-file.ts";
 import { apiNameOf, domainsOf, siteDir } from "../src/shared.ts";
-import { resolveConfig } from "../src/index.ts";
+import { defineOperation, resolveConfig } from "../src/index.ts";
+import { z } from "zod";
 import { rootWith } from "./harness.ts";
 import fixture from "./fixtures/company-apps/sanoma.config.ts";
 import { customers as crmCustomers } from "./fixtures/company-apps/apps/crm/resources/data.ts";
@@ -117,17 +118,21 @@ describe("apps", () => {
     });
   });
 
-  it("refuses a collection or a site at the root named as an app is", () => {
+  it("refuses a collection, a site or a company operation at the root named as an app is", () => {
     const other = rootWith({
       "sanoma.config.ts": "",
       "apps/crm/app.ts": 'import { defineApp } from "sanoma";\nexport default defineApp({});\n',
       "sites/crm/routes/index.tsx": "",
     });
     const crm = collection({ name: "crm", key: "id", fields: { id: "text" } });
-    const { problems } = describeConfig({ connectors: [], collections: [crm], root: other });
+    // As if in the root's operations/: `api.operations.crm` would be both it and the app's.
+    const defined = defineOperation({ name: "crm", input: z.object({}), uses: [], run: async () => null });
+    const operation = { ...defined, file: join(other, "operations/crm.ts") } as typeof defined;
+    const { problems } = describeConfig({ connectors: [], collections: [crm], operations: [operation], root: other });
     expect(problems.map((p) => [p.file, p.message])).toEqual([
       ["resources/data.ts", "the collection crm is named as the app apps/crm is: name it otherwise"],
       ["sites/crm", "the site crm is named as the app apps/crm is: name it otherwise"],
+      ["operations/crm.ts", "the operation crm is named as the app apps/crm is: name it otherwise"],
     ]);
   });
 
@@ -182,8 +187,8 @@ describe("apps", () => {
     // The company's operations, each with its app, its code and its outline, as a workflow's.
     const operations = description.ops.filter((op) => op.vendor === "operations");
     expect(operations.map(({ id, app, ops, problems, direct }) => ({ id, app, ops, problems, direct }))).toEqual([
-      { id: "operations.crm.score.run", app: "crm", ops: ["data.crm.customers.get"], problems: [], direct: false },
-      { id: "operations.quote.run", app: undefined, ops: ["data.shop.customers.get"], problems: [], direct: false },
+      { id: "operations.crm.score.run", app: "crm", ops: ["data.crm.customers.get"], problems: [], direct: true },
+      { id: "operations.quote.run", app: undefined, ops: ["data.shop.customers.get"], problems: [], direct: true },
     ]);
     expect(operations[1]!.outline).toMatchObject({ nodes: [{ kind: "op", id: "data.shop.customers.get" }] });
     expect(operations[1]!.source).toContain("defineOperation");

@@ -5,7 +5,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDemo, DemoRefused, demoPlan } from "sanoma/app/demo";
 import { resend } from "@sanoma-ai/connector-resend";
-import { defineConnector } from "sanoma/workflows";
+import { defineConnector, defineOperation, defineWorkflow } from "sanoma/workflows";
 import { executablePath, launch as launchChrome } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -68,6 +68,7 @@ describe("demoPlan", () => {
       configFile,
       sites,
       workflows: [send],
+      operations: [],
       connectors: [resend],
       fakes: new Set(["resend"]),
       collections: new Set(["invoices"]),
@@ -77,9 +78,44 @@ describe("demoPlan", () => {
   it("bundles the workflows the sites call, by name or api name, and the connectors they use", () => {
     expect(plan([call("invoiceSend")])).toEqual({
       workflows: [send],
+      operations: [],
       connectors: [{ connector: resend, package: "@sanoma-ai/connector-resend" }],
     });
     expect(plan([]).workflows).toEqual([]);
+  });
+
+  it("bundles a company operation a site calls, and takes the vendors of one a workflow uses from its file", () => {
+    const notify = {
+      ...defineOperation({
+        name: "notify",
+        input: z.object({}),
+        uses: [resend.emails.send],
+        run: async (ctx) => ctx.resend.emails.send({ to: "a@b.c", from: "a@b.c", subject: "s", text: "t" }),
+      }),
+      file: "/acme/operations/notify.ts",
+    };
+    const resendPlanned = [{ connector: resend, package: "@sanoma-ai/connector-resend" }];
+    expect(plan([call("operations.notify.run", "op")], { operations: [notify] })).toEqual({
+      workflows: [],
+      operations: [notify],
+      connectors: resendPlanned,
+    });
+    // A workflow's operation runs in its run: bundled with the workflow, its vendors named from its file.
+    const nudge = {
+      ...defineWorkflow({ name: "nudge", trigger: "manual", input: z.object({}), uses: [notify], run: async () => {} }),
+      file: "/acme/workflows/nudge.ts",
+    };
+    expect(plan([call("nudge")], { workflows: [nudge], operations: [notify] })).toEqual({
+      workflows: [nudge],
+      operations: [],
+      connectors: resendPlanned,
+    });
+    expect(refusals(() => plan([call("nudge")], { workflows: [nudge], fakes: new Set() }))).toEqual([
+      "operations/notify.ts: uses resend, whose connector attaches no fake, which a demo runs every vendor on",
+    ]);
+    expect(refusals(() => plan([call("operations.nothing.run", "op")]))).toEqual([
+      "sites/www/routes/index.tsx:3: calls operations.nothing.run, which no file of operations/ defines",
+    ]);
   });
 
   it("refuses, at the file, a workflow defined in the config, the app's own operations, and a vendor it cannot fake or import", () => {

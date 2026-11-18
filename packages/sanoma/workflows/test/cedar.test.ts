@@ -571,6 +571,50 @@ permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"
     });
   });
 
+  it("decides a visitor's company operation by a permit naming it, then each call inside as a run's, forbids still holding", () => {
+    const mark = defineOperation({
+      name: "mark",
+      input: z.object({ id: z.string() }),
+      uses: [leads.save],
+      run: async (ctx, { id }) => ctx.data.leads.save({ record: { id, stage: "open" } }),
+    });
+    const marking = resolveConfig({ ...config, operations: [mark] });
+    const permit = {
+      file: "policies/visitors.cedar",
+      text: 'permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"operations.mark.run", resource);\n',
+    };
+    const permitted = loadPolicies([...FILES, permit]);
+    expect(validatePolicies(marking, permitted.policies, people)).toEqual([]);
+    const withPermit = cedarPolicy(marking, permitted.policies, people);
+    const without = cedarPolicy(marking, loaded.policies, people);
+    const markCall: PolicyCall = {
+      op: policyOpOf(mark),
+      effect: mark.effect,
+      input: { id: "l1" },
+      actor: ANONYMOUS_PRINCIPAL,
+      run: direct,
+    };
+    expect(withPermit(markCall)).toMatchObject({ kind: "allow" });
+    expect(without(markCall)).toEqual({ kind: "deny", reason: VISITOR_DENIED });
+    expect(allowAll(markCall)).toEqual({ kind: "deny", reason: VISITOR_DENIED });
+    // Inside it, the operation is named where a run's workflow is: allowed with no permit of their own.
+    const inside = { id: "direct:x", workflow: mark.id, approvals: [] };
+    const save = (stage: string) => ({ ...asVisitor(saveCall("x", stage), ANONYMOUS_PRINCIPAL), run: inside });
+    expect(withPermit(save("open"))).toMatchObject({ kind: "allow" });
+    expect(allowAll(save("open"))).toEqual({ kind: "allow" });
+    // A forbid still holds or refuses inside it.
+    expect(withPermit(save("won"))).toMatchObject({ kind: "deny", reason: "Only sales may mark a lead won" });
+    expect(withPermit({ ...asVisitor(refundCall(2_000_000, "x"), ANONYMOUS_PRINCIPAL), run: inside })).toMatchObject({
+      kind: "approve",
+      approver: { group: "finance" },
+    });
+    // The same save called directly is still refused: the operation's permit names it alone.
+    expect(withPermit(asVisitor(saveCall("x", "open"), ANONYMOUS_PRINCIPAL))).toEqual({
+      kind: "deny",
+      reason: VISITOR_DENIED,
+    });
+  });
+
   it("previews a visitor's start and direct call as the permits say, a call in a run as allowed", () => {
     // Asked by id alone, as a visitor is told by its id.
     const inRun = (request: ReturnType<typeof ask>) => ({ ...request, inRun: true });

@@ -72,7 +72,7 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
  * part of it (`kindDirOf`), or its own directory when it has none; the files
  * outside it a workflow may import are the company's `resources/data.ts`, its collections, and
  * the files of its `operations/`, its company operations (the root's or an app's, by real path);
- * an operation, `resources/data.ts` alone. No
+ * an operation, `resources/data.ts` alone, and not `sanoma/invoices/pdf`, which the Worker cannot render. No
  * `instanceof` against the runtime's error classes: read `errorCode(err)`.
  *
  * In each workflow's `run` (the literal `defineWorkflow` or `defineOperation` is called with), it reports what the
@@ -215,6 +215,10 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
       );
     }
     return `it reaches outside this directory, toward the config and its drivers; ${THROUGH_CTX}`;
+  }
+  // `@react-pdf/renderer`, which it loads, is left out of the Worker's bundle.
+  if (spec === "sanoma/invoices/pdf" && root !== undefined && basename(root) === "operations") {
+    return "an operation may answer a page on the Worker, which has no PDF renderer: render it in a workflow";
   }
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
   for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
