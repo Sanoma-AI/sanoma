@@ -72,7 +72,8 @@ function RunPage() {
               </Link>
             </ButtonLink>
           ) : (
-            workflow && (
+            workflow &&
+            !workflow.internal && (
               <ButtonLink size="sm">
                 <Link to="/workflows/$name" params={{ name: run.workflow }} search={{ new: true }}>
                   <PlayIcon aria-hidden="true" data-icon="inline-start" />

@@ -66,9 +66,10 @@ import {
   DATA_VENDOR,
   errorMessage,
   fitsOp,
-  groupNamesOf,
   isBatch,
   isDeclaredAgent,
+  personsOf,
+  principalOf,
   problemLine,
   type Saved,
   WORKFLOW_ACTION,
@@ -429,7 +430,7 @@ export function decideCall(
  * `SanomaClient.start` does before it queues one, and the worker before the run's body.
  */
 export function decideStart(
-  config: Pick<ResolvedConfig, "policy" | "policies" | "root">,
+  config: Pick<ResolvedConfig, "policy" | "root">,
   workflow: WorkflowDefinition,
   input: unknown,
   actor: Principal,
@@ -438,7 +439,7 @@ export function decideStart(
   const { policy } = config;
   return ask(policy, `${WORKFLOW_ACTION}${workflow.name}`, () => {
     const decision = policy.start(actor, workflow.name, input, approvals);
-    return decision.kind === "allow" ? (agentHold(config, workflow, decision, actor, approvals) ?? decision) : decision;
+    return decision.kind === "allow" ? (agentHold(config, workflow, input, actor, approvals) ?? decision) : decision;
   });
 }
 
@@ -446,33 +447,30 @@ export function decideStart(
 const AGENTS_WAIT_FOR_ADMIN = "sanoma:agents-wait-for-admin";
 
 /**
- * The runtime's own rule on a start the company's policy allowed (`allowed`), under `allowAll`
- * too: a declared agent's (`isDeclaredAgent`) start of a built-in workflow that is not read-only
- * (`readOnly`) waits for `admin`, until an approval addressed to `admin` covering the start is
- * approved; denied while no data file declares the group. A company lifts it with a `permit` for
- * agents: an allow whose reasons name one of its permits. Undefined for anything else (a person's
- * start, the runtime's own agents', a company workflow's), which the company's policy alone decides.
+ * The runtime's own rule on a start the company's policy allowed, under `allowAll` too: a declared
+ * agent's (`isDeclaredAgent`) start of a built-in that is not read-only (`readOnly`) waits for an
+ * approval by `admin`, denied while no person is in it, unless a company `permit` for agents lets
+ * it (`Policy.permitsAgent`). Undefined for any other start, which the company's policy alone decides.
  */
 function agentHold(
-  { policies = [], root }: Pick<ResolvedConfig, "policies" | "root">,
+  { policy, root }: Pick<ResolvedConfig, "policy" | "root">,
   workflow: WorkflowDefinition,
-  allowed: Decision,
+  input: unknown,
   actor: Principal,
   approvals: readonly ApprovalState[],
 ): Decision | undefined {
   if (!isDeclaredAgent(actor) || !BUILT_IN_WORKFLOWS.has(workflow.name) || readOnly(workflow)) return undefined;
-  const permits = policies.filter((p) => p.effect === "permit").map((p) => p.id);
-  if (allowed.reasons?.some((id) => permits.includes(id))) return undefined;
-  const action = `${WORKFLOW_ACTION}${workflow.name}`;
-  if (!groupNamesOf(readPeople(root).people).includes(ADMIN)) {
+  if (policy.permitsAgent?.(actor, workflow.name, input)) return undefined;
+  const { people } = readPeople(root);
+  if (!personsOf(people).some(({ id }) => principalOf(id, people)?.groups?.includes(ADMIN))) {
     return deny(
-      `An agent's start of ${workflow.name} waits for the group "${ADMIN}", which no data file declares: ` +
-        `declare it in resources/people.ts, or permit agents to start it in policies/`,
+      `An agent's start of ${workflow.name} waits for a person in the group "${ADMIN}", and no data file puts ` +
+        `one in it: add one in resources/people.ts, or permit agents to start it in policies/`,
       [AGENTS_WAIT_FOR_ADMIN],
     );
   }
   const approver: Approver = { group: ADMIN };
-  if (approvedFor(approvals, action, approver)) return undefined;
+  if (approvedFor(approvals, `${WORKFLOW_ACTION}${workflow.name}`, approver)) return undefined;
   return approve(approver, { title: `An agent's ${workflow.name} waits for admin`, reasons: [AGENTS_WAIT_FOR_ADMIN] });
 }
 

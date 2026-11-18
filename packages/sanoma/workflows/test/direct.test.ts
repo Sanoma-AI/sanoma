@@ -24,6 +24,7 @@ import {
 } from "../src/index.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
 import { VISITOR_DENIED } from "../src/policy.ts";
+import type { RunArgs } from "../src/run.ts";
 import { ANONYMOUS_PRINCIPAL, visitorPrincipal } from "../src/shared.ts";
 import { failure, rootWith, waitFor } from "./harness.ts";
 
@@ -116,7 +117,8 @@ const follow = defineOperation({
 
 /**
  * Allows, but denies a lead `lost` and holds one `won` for `lead`, and holds a pair that ends at a
- * `meeting`; lets `anonymous` look a lead up, and holds its read of the customer `Held` for `lead`.
+ * `meeting`; lets `anonymous` look a lead up, and holds its read of the customer `Held` for `lead`;
+ * lets a visitor save the lead `Tokened`.
  */
 const root = rootWith({
   "policies/policy.cedar": `@reason("leads are not lost")
@@ -132,6 +134,9 @@ forbid (principal, action == Sanoma::Action::"operations.pair.run", resource)
 when { context.input.stage == "meeting" };
 
 permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"operations.lookup.run", resource);
+
+permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"data.outbound.save", resource)
+when { context.input.record.company == "Tokened" };
 
 @hold("lead")
 forbid (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"acme.customer.get", resource)
@@ -575,6 +580,19 @@ describe("a direct call", () => {
     } finally {
       listing.mockRestore();
     }
+  });
+
+  it("starts an api token's held write as the token, with its subject", async () => {
+    const { token } = await client.tokens.mint({ subject: "visitor:better-auth:u1", groups: ["visitors"] });
+    const { principal: actor } = (await client.tokens.resolve(token))!;
+    const held = randomUUID();
+    const runId = `call:${actor.id}:${held}`;
+    const err = await failure(
+      client.call("data.outbound.save", { record: lead("Tokened", "won") }, { actor, id: held }),
+    );
+    expect(err).toMatchObject({ code: "approval_pending", data: { runId } });
+    const [row] = await dbos().listWorkflows({ workflowIDs: [runId], loadInput: true });
+    expect((row!.input as [RunArgs])[0].startedBy).toMatchObject({ id: actor.id, subject: "visitor:better-auth:u1" });
   });
 
   it("refuses what is not to be called directly, an unknown operation, and input its schema refuses", async () => {

@@ -52,12 +52,6 @@ const CHAT_HOLD =
   "the person sees the approval's card in the chat, and the answer comes once it is decided; one still waiting " +
   'past the wait is answered with the run\'s id, status "waiting for approval" and waitsFor, whose decision it waits for';
 
-/** The chat's started run, as both of its tools that start one say it. */
-const CHAT_RUN =
-  'A run that failed or was cancelled is answered with status "failed" or "cancelled", the run\'s id and its ' +
-  "error: it did start, so do not start it again. " +
-  `Held for an approval, ${CHAT_HOLD}.`;
-
 const tool = <const Name extends string, Input extends z.ZodObject>(spec: CatalogTool<Input, Name>) => spec;
 
 /** The five tools by name, in the order an agent is told them. */
@@ -104,7 +98,7 @@ export const CATALOG = {
     title: "Wait for a run",
     description:
       "Waits for a run to end and answers its output. A run still going when the wait ends is answered " +
-      'with status "running" and its id, to wait for again; one held for an approval, with status ' +
+      'with status "running" and its id, to wait for again; one held for an approval, at once, with status ' +
       '"waiting for approval" and waitsFor, whose decision it waits for.',
     input: z.object({ runId: RunId, waitMs: WaitMs }),
     hint: "read",
@@ -120,7 +114,10 @@ export const CATALOG = {
       mcp:
         "Answers the run's id, for get_run and wait_run. Retried with the same id, workflow and input, " +
         "it answers the run already started; the same id for anything else is refused.",
-      chat: `Answers the run's id and, when it ends within the wait, its output (status "finished"), else status "running", for wait_run. ${CHAT_RUN}`,
+      chat:
+        `Answers the run's id and, when it ends within the wait, its output (status "finished"), else status "running", for wait_run. ` +
+        'A run that failed or was cancelled is answered with status "failed" or "cancelled", the run\'s id and its ' +
+        `error: it did start, so do not start it again. Held for an approval, ${CHAT_HOLD}.`,
     },
     input: z.object({
       workflow: z.string().min(1).describe("The workflow's name or api name, as describe lists it"),
@@ -162,13 +159,15 @@ export const callRunId = (name: string, id: string, agent: string): string | und
   return named === "lookup" ? heldCallRunId(agent, id) : id;
 };
 
-/** A run that waits for its approvals, as the chat's tools answer it past their wait: whose decisions it waits for (`approverLabel`: a person's id, or "group <name>"). */
-export const stillHeld = (run: RunSummary): StillHeld => ({
-  held: { runId: run.runId },
+/** A run that waits for its approvals, as `wait_run` answers it: whose decisions it waits for (`approverLabel`: a person's id, or "group <name>"). */
+const waiting = (run: RunSummary): Omit<StillHeld, "held"> => ({
   runId: run.runId,
   status: "waiting for approval",
   waitsFor: run.approvals.filter((a) => a.status === "pending").map(({ approver }) => approverLabel(approver)),
 });
+
+/** A run that waits for its approvals, as the chat's tools answer it past their wait: `waiting`, with its card (`held`). */
+export const stillHeld = (run: RunSummary): StillHeld => ({ held: { runId: run.runId }, ...waiting(run) });
 
 /**
  * What the chat's `start_run` answers for the run `run`, just read (`RunOutput`): the
@@ -228,8 +227,19 @@ export async function runCatalog(
     case "get_run":
       return runNamed(host, parse(CATALOG.get_run.input, args, "The input").runId);
     case "wait_run": {
+      // One waiting for an approval is answered at once, saying whose decision it waits for.
       const { runId, waitMs } = parse(CATALOG.wait_run.input, args, "The input");
-      return resultOf(host, actor, (await runNamed(host, runId)).workflow, runId, { waitMs, signal });
+      const run = await runNamed(host, runId);
+      if (run.status === "waiting") return waiting(run);
+      try {
+        const result = { name: `${apiNameOf(run.workflow)}.result`, input: { runId, waitMs } };
+        const output = await callApi(host, actor, result, { signal });
+        return { runId, status: "finished", output: output ?? null };
+      } catch (err) {
+        if (asApiError(err).body.code !== "run_running") throw err;
+        const now = await runNamed(host, runId);
+        return now.status === "waiting" ? waiting(now) : { runId, status: "running" };
+      }
     }
     case "start_run": {
       const { workflow, input } = parse(CATALOG.start_run.input, args, "The input");
@@ -244,29 +254,4 @@ async function runNamed({ client }: Pick<CallHost, "client">, runId: string) {
   const run = await client.run(runId);
   if (!run) throw noRun(runId);
   return run;
-}
-
-/**
- * The output of the run `runId` of `workflow` once it ended, through `callApi`'s
- * `<workflow>.result`, as `{ runId, status: "finished", output }`; the run as it then stands when it
- * has not ended within the wait (its `run_running`, `runOutput`): still held, whose decisions it
- * waits for, or `{ runId, status: "running" }`, which is no failure. A failed run is `callApi`'s
- * failure. `signal` ends the wait early, with its reason.
- */
-export async function resultOf(
-  host: CallHost,
-  actor: Principal,
-  workflow: string,
-  runId: string,
-  { waitMs, signal }: { waitMs?: number; signal?: AbortSignal } = {},
-) {
-  try {
-    const name = `${apiNameOf(workflow)}.result`;
-    const input = { runId, ...(waitMs !== undefined && { waitMs }) };
-    const output = await callApi(host, actor, { name, input }, { signal });
-    return { runId, status: "finished", output: output ?? null };
-  } catch (err) {
-    if (asApiError(err).body.code === "run_running") return runOutput(host.client, await runNamed(host, runId));
-    throw err;
-  }
 }

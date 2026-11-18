@@ -5,8 +5,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
-import { appsListOps, GITHUB_API } from "../src/apps-list.ts";
-import { connectionOps } from "../src/connection.ts";
+import { GITHUB_API } from "../src/apps-list.ts";
 import {
   defineConnector,
   defineWorkflow,
@@ -52,23 +51,6 @@ const sample = defineWorkflow({
   run: async (ctx) => ctx.lab.sample.take({}),
 });
 
-/** A company workflow that lists the apps, through the built-in driver no fake implements. */
-const listApps = defineWorkflow({
-  name: "list-apps",
-  trigger: "manual",
-  input: z.object({}),
-  uses: [appsListOps.apps.list],
-  run: async (ctx) => ctx.sanoma.apps.list({}),
-});
-/** A company workflow that makes a connection: a mutation no sandbox run has fake account state for. */
-const makeConnection = defineWorkflow({
-  name: "make-connection",
-  trigger: "manual",
-  input: z.object({}),
-  uses: [connectionOps.connection.create],
-  run: async (ctx) => ctx.sanoma.connection.create({ rule: "mail", account: "alice", scopes: [] }),
-});
-
 describe("sandbox runs", () => {
   /** Operations the drivers were called with: a sandbox run calls none. */
   const live: string[] = [];
@@ -86,7 +68,7 @@ describe("sandbox runs", () => {
     ),
   });
   const app = useApp("sandbox", (vendors) => ({
-    workflows: [announce, review, sample, listApps, makeConnection],
+    workflows: [announce, review, sample],
     connectors: [
       // Each keeps its package's fake, which sandbox runs make their own of.
       ...vendors.connectors.map((c) => withSetup(c, { driver: () => tripwire(setupOf(c).driver!()) })),
@@ -236,9 +218,9 @@ describe("sandbox runs", () => {
     expect(types(await ledger(unknown))).toEqual(["run.started", "run.failed"]);
   });
 
-  it("runs a workflow on the built-in drivers no fake implements, beside the fakes", async () => {
-    // `sanoma.apps.list`, which no connector's fake implements: the sandbox calls its built-in
-    // driver instead of refusing the run.
+  it("runs a direct call: the built-in drivers no fake implements are there beside the fakes", async () => {
+    // `call` uses every operation that may be called directly, `sanoma.apps.list` among them, which
+    // no connector's fake implements: the sandbox calls its built-in driver instead of refusing the run.
     // That driver searches GitHub, mocked here.
     const github = setupServer(
       http.get(`${GITHUB_API}/search/repositories`, () =>
@@ -247,8 +229,8 @@ describe("sandbox runs", () => {
     );
     github.listen();
     onTestFinished(() => github.close());
-    const listed = await scenario("Apps listed");
-    const { run, checks, ledger: records } = await runScenario(listed, { client: c(), scope: scope() });
+    const direct = await scenario("Apps listed directly");
+    const { run, checks, ledger: records } = await runScenario(direct, { client: c(), scope: scope() });
     expect(run).toMatchObject({ status: "finished" });
     expect(records.find((r) => r.type === "op.called" && r.op === "sanoma.apps.list")).toMatchObject({
       output: { apps: [{ repo: "acme/crm" }] },
@@ -257,19 +239,26 @@ describe("sandbox runs", () => {
     expect(live).toEqual([]);
   });
 
-  it("refuses a connection mutation in a sandbox run without fake account state", async () => {
-    const run = await c().start(makeConnection, {}, { startedBy: alice, sandbox: "Connection made" });
+  it("refuses connection mutations in a direct sandbox call without fake account state", async () => {
+    const run = await c().startCall(
+      {
+        op: "sanoma.connection.create",
+        input: { rule: "mail", account: "alice", scopes: [] },
+      },
+      { startedBy: alice, sandbox: "Apps listed directly" },
+    );
     const err = await failure(c().result(run));
     expect(errorCode(err)).toBe("invalid_input");
     expect((err as Error).message).toContain("no fake for sanoma.connection.create");
     expect(types(await ledger(run))).toEqual(["run.started", "run.failed"]);
   });
 
-  it("refuses a sandbox run of an internal workflow, as any start of one", async () => {
-    const input = { op: "sanoma.apps.list", input: {} };
-    expect(await failure(c().start("call", input, { startedBy: alice, sandbox: "Apps listed" }))).toMatchObject({
+  it("refuses a scenario of an internal workflow but call, as any start of one from outside", async () => {
+    const direct = await scenario("Apps listed directly");
+    const draft = { ...direct, workflow: "save-draft", input: {} };
+    expect(await failure(runScenario(draft, { client: c(), scope: scope() }))).toMatchObject({
       code: "invalid_input",
-      message: "call is internal: only Sanoma itself starts it",
+      message: "save-draft is internal: only Sanoma itself starts it",
     });
   });
 

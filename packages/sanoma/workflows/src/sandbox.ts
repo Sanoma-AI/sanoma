@@ -1,5 +1,6 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { indexDrivers, sandboxDrivers } from "./config.ts";
+import { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
 import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
 import { connectionFakes } from "./fake.ts";
@@ -54,7 +55,7 @@ export function sandboxConnection(catalog: ConnectionCatalog, runId: string) {
  * run whose seeding is replayed from it has none, and fails, since a sandbox run does not
  * survive a worker restart.
  */
-export async function seedSandbox(run: Run, name: string): Promise<void> {
+export async function seedSandbox(run: Run, name: string, input: unknown): Promise<void> {
   const { state } = run;
   let copies: Map<string, DriverFn> | undefined;
   // The run's secrets, in memory as its fakes are: seeding and its calls share them.
@@ -89,8 +90,12 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
         state.ops,
         { sandbox: true },
       );
-      // A company operation has no fake: what it uses does.
-      const uses = opIdsOf(state.workflows.get(run.workflow)!).flatMap((id) => {
+      // The built-in call workflow selects exactly one operation. Other direct operations
+      // (including live connection mutations) need no fake unless this scenario calls them,
+      // which `applyGivens` checks. A company operation has no fake: what it uses does.
+      const uses = (
+        run.workflow === CALL_WORKFLOW ? [CallInput.parse(input).op] : opIdsOf(state.workflows.get(run.workflow)!)
+      ).flatMap((id) => {
         const op = state.ops.get(id);
         return isOperation(op) ? opIdsOf(op) : [id];
       });

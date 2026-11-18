@@ -1583,6 +1583,10 @@ describe("the page", () => {
     // it would link to this page. Nothing here goes to the Start page.
     expect(linkTag(found.html, "New run")).toMatch(/data-slot="button"[^>]*href="\/workflows\/announce\?new=true"/);
     expect(linkTag(code.html, "New run")).toMatch(/href="\/workflows\/announce\?new=true"/);
+    // An internal workflow has none: only Sanoma starts it.
+    const internal = await page("/workflows/call");
+    expect(internal.status).toBe(200);
+    expect(linkTag(internal.html, "New run")).toBeUndefined();
     expect(found.html).not.toContain('id="field-title"');
     expect(linkTag(found.html, "Run")).toBeUndefined();
     expect(found.html).not.toContain('href="/start?workflow=');

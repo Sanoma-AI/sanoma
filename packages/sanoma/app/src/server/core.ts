@@ -422,8 +422,11 @@ export async function startRun(
       const known = all.length ? `; the scenarios are ${all.map((s) => `"${s.name}"`).join(", ")}` : "; there are none";
       throw noSuch("scenario", `No scenario named "${body.scenario}"${known}${notLoaded(errors)}`);
     }
+    const options = { startedBy: actor, sandbox: scenario.name };
     return {
-      runId: await client.start(workflow, scenario.input, { startedBy: actor, sandbox: scenario.name }),
+      runId: await (workflow.name === CALL_WORKFLOW
+        ? client.startCall(scenario.input, options)
+        : client.start(workflow, scenario.input, options)),
       workflow: scenario.workflow,
     };
   }

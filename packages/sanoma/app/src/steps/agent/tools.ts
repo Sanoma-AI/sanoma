@@ -366,22 +366,6 @@ export function catalogTools(
     if (!run) throw noRun(runId);
     return run;
   };
-  /**
-   * A started run watched for `RESULT_WAIT_MS`, until it ends or waits for an approval; one that
-   * waits shows the held output, then is waited for up to `heldMs` for the decision, and once it is decided up to `DECIDED_WAIT_MS` more for its end.
-   * Its answer is the run's, as it then stands (`runOutput`): finished with its output, failed with
-   * its error, still running, or still held.
-   */
-  async function* watched(runId: string, signal: AbortSignal | undefined): AsyncGenerator<RunOutput, RunOutput> {
-    const started = await settled(runId, RESULT_WAIT_MS, signal);
-    if (started.status !== "waiting") return runOutput(client, started);
-    yield { held: { runId } } satisfies HeldOutput;
-    const decided = await poll(runId, Date.now() + heldMs, (r) => r.status !== "waiting", signal);
-    if (!decided) throw noRun(runId);
-    if (decided.status === "waiting" || isEnded(decided.status)) return runOutput(client, decided);
-    return runOutput(client, await settled(runId, DECIDED_WAIT_MS, signal));
-  }
-
   return {
     describe: tool({ ...spec("describe"), execute: (args) => call("describe", args, {}) }),
     lookup: tool({
@@ -417,7 +401,20 @@ export function catalogTools(
       ...spec("start_run"),
       async *execute(args, { toolCallId, abortSignal }): AsyncGenerator<RunOutput> {
         const { runId } = (await call("start_run", args, { toolCallId })) as { runId: string };
-        yield yield* watched(runId, abortSignal);
+        // Watched until it ends or waits for an approval; one that waits shows the held output, is
+        // waited for up to `heldMs` for the decision, and once decided up to `DECIDED_WAIT_MS` more.
+        let run = await settled(runId, RESULT_WAIT_MS, abortSignal);
+        if (run.status === "waiting") {
+          yield { held: { runId } } satisfies HeldOutput;
+          const decided = await poll(runId, Date.now() + heldMs, (r) => r.status !== "waiting", abortSignal);
+          if (!decided) throw noRun(runId);
+          // Still held, or ended: answered as it stands.
+          run =
+            decided.status === "waiting" || isEnded(decided.status)
+              ? decided
+              : await settled(runId, DECIDED_WAIT_MS, abortSignal);
+        }
+        yield await runOutput(client, run);
       },
     }),
   };

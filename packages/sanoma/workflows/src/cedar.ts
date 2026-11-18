@@ -55,7 +55,7 @@ import {
 // against the schema of its resolved config (`schemaOf`). Allow is the default: the runtime adds
 // the one `permit` for people and agents, so a company's policies are `forbid`s, each a hold when
 // it carries `@hold(...)` and a deny otherwise, the `permit`s that let visitors in, and those for
-// agents, which lift the runtime's rule on an agent's start of a built-in (`agentHold` in `call.ts`).
+// agents, which only lift the runtime's rule on an agent's start of a built-in (`agentHold` in `call.ts`).
 
 /** Where a company's policies are, under its root. */
 export const POLICIES_DIR = "policies";
@@ -253,7 +253,7 @@ export function validatePolicies(
  * The policy a repo's Cedar files make, the runtime's `permit` added; its `version` a hash of the
  * policies' ids and text. The runtime's permit leaves visitors out (`isVisitor`) of a run's start,
  * a direct call (a call of the `call` workflow) and a preview not `inRun`: those are asked of the
- * company's permits alone first. Any other call in a run is decided as anyone's, so a visitor let
+ * company's permits for visitors alone first. Any other call in a run is decided as anyone's, so a visitor let
  * start a run makes its calls, forbids holding still. It decides each call with
  * `statefulIsAuthorized` over the policy set and the schema of `resolved` (`schemaOf`), each parsed once:
  *
@@ -270,7 +270,8 @@ export function validatePolicies(
  * approver". A policy that fails to evaluate is a deny naming it (Cedar would skip it), as is one
  * reading a field a `before` lacks: a record saved under fields since changed is asked about
  * without the schema, so it can still be fixed or deleted.
- * `preview` asks the same ahead of a call, its context unknown; `start`, about a run's start.
+ * `preview` asks the same ahead of a call, its context unknown; `start`, about a run's start;
+ * `permitsAgent`, the company's permits for agents alone, about a start.
  */
 export function cedarPolicy(
   resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
@@ -278,15 +279,21 @@ export function cedarPolicy(
   people: readonly PeopleResource[],
 ): Policy {
   const staticPolicies = { ...Object.fromEntries(policies.map((p) => [p.id, p.text])), [ALLOW_ID]: ALLOW };
-  // What lets a visitor in at a start or a direct call: the company's permits alone, the forbids aside.
-  const permits = Object.fromEntries(policies.filter((p) => p.effect === "permit").map((p) => [p.id, p.text]));
+  /** The company's permits for `scopes`, the forbids aside. */
+  const permitsFor = (...scopes: (string | undefined)[]) =>
+    Object.fromEntries(
+      policies.filter((p) => p.effect === "permit" && scopes.includes(p.scope)).map((p) => [p.id, p.text]),
+    );
+  // What lets a visitor in at a start or a direct call; what lifts the runtime's rule on an agent's start.
+  const permits = permitsFor(VISITORS, ANONYMOUS);
+  const agentPermits = permitsFor(AGENTS);
   const version = hash(staticPolicies);
   const hasPermits = Object.keys(permits).length > 0;
   const directory = directoryOf(people);
 
-  let prepared: { cedar: CedarWasm; schema: CedarSchemaJson; set: string; permitsSet: string } | Error | undefined;
+  let prepared: { cedar: CedarWasm; schema: CedarSchemaJson; set: string } | Error | undefined;
   /**
-   * Cedar with the schema and both policy sets parsed, on the first question: a process that asks
+   * Cedar with the schema and the policy sets parsed, on the first question: a process that asks
    * none (a Worker's isolate serving a page or the sign-in) never builds the schema or has Cedar
    * parse it, the most of its first request's work. Policies Cedar refuses are refused once, then
    * on every question with the same error.
@@ -295,17 +302,17 @@ export function cedarPolicy(
     if (!prepared) {
       const cedar = cedarWasm();
       const schema = schemaOf(resolved, people);
-      // Cedar caches both per thread, by name: one for these policies over this schema, and its permits.
+      // Cedar caches each per thread, by name: one for these policies over this schema, and its permits.
       const set = `sanoma-${hash({ staticPolicies, schema })}`;
-      const permitsSet = `${set}-permits`;
       const errors = [
         cedar.preparsePolicySet(set, { staticPolicies }),
-        cedar.preparsePolicySet(permitsSet, { staticPolicies: permits }),
+        cedar.preparsePolicySet(`${set}-permits`, { staticPolicies: permits }),
+        cedar.preparsePolicySet(`${set}-agents`, { staticPolicies: agentPermits }),
         cedar.preparseSchema(set, schema),
       ].flatMap((answer) => (answer.type === "failure" ? answer.errors : []));
       prepared = errors.length
         ? new Error(`The Cedar policies do not parse: ${errors.map(messageOf).join("; ")}`)
-        : { cedar, schema, set, permitsSet };
+        : { cedar, schema, set };
     }
     if (prepared instanceof Error) throw prepared;
     return prepared;
@@ -400,7 +407,7 @@ export function cedarPolicy(
     atStart: boolean,
     entity: Record<string, unknown>,
   ): Decision => {
-    const { cedar, schema, set, permitsSet } = prepare();
+    const { cedar, schema, set } = prepare();
     const attrs = () => entity;
     /** The answer of the policy set `id`. */
     const ask = (id: string) => {
@@ -424,7 +431,7 @@ export function cedarPolicy(
     };
     // Refused, never held: a visitor cannot ask anyone for what no policy lets it do.
     if (atStart && isVisitor(principal)) {
-      const permitted = hasPermits ? ask(permitsSet) : undefined;
+      const permitted = hasPermits ? ask(`${set}-permits`) : undefined;
       // A request the schema refuses is told below, as anyone's; a permit that fails, by its id.
       if (permitted?.type !== "failure" && permitted?.response.decision !== "allow") {
         const failed = permitted?.response.diagnostics.errors[0];
@@ -482,6 +489,26 @@ export function cedarPolicy(
   const start = (actor: Principal, workflow: string, input: unknown, approvals: readonly ApprovalState[] = []) =>
     authorize(actor, `${WORKFLOW_ACTION}${workflow}`, undefined, { input }, approvals, true);
 
+  const permitsAgent = (actor: Principal, workflow: string, input: unknown): boolean => {
+    if (!Object.keys(agentPermits).length) return false;
+    const { cedar, set } = prepare();
+    const action = `${WORKFLOW_ACTION}${workflow}`;
+    const request = requestOf(
+      directory.principal(actor),
+      action,
+      undefined,
+      () => ({ input }),
+      () => ({}),
+    );
+    const answer = cedar.statefulIsAuthorized({
+      ...request,
+      preparsedSchemaName: set,
+      validateRequest: true,
+      preparsedPolicySetId: `${set}-agents`,
+    });
+    return answer.type === "success" && answer.response.decision === "allow";
+  };
+
   const preview = (requests: readonly PreviewRequest[]): PreviewAnswer[] =>
     requests.map(({ principal: actor, action, resource, inRun }) => {
       const { cedar, schema } = prepare();
@@ -518,7 +545,7 @@ export function cedarPolicy(
       return open ? { answer: "depends", rule: ruleOf(open) } : { answer: "allow" };
     });
 
-  return Object.freeze(Object.assign(decide, { version, preview, start }));
+  return Object.freeze(Object.assign(decide, { version, preview, start, permitsAgent }));
 }
 
 /**

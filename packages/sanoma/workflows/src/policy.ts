@@ -99,6 +99,8 @@ export type Policy = ((call: PolicyCall) => Decision) & {
     input: unknown,
     approvals?: readonly ApprovalState[],
   ) => Decision;
+  /** Does a company `permit` for agents alone let `actor` start `workflow` with `input`: what lifts `agentHold`. */
+  readonly permitsAgent?: (actor: Principal, workflow: string, input: unknown) => boolean;
 };
 
 /** A question asked ahead of a call: may `principal` take `action` (an operation, or `workflow:<name>` to start one) on `resource` (an operation's target)? */

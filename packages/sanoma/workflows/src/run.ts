@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { WorkerApp } from "./app-steps.ts";
 import type { SanomaClient } from "./client.ts";
 import type { Collection } from "./collection.ts";
-import type { DeclaredObjects, ResolvedConfig } from "./config.ts";
+import type { DeclaredObjects } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { DeadlineRegistry } from "./deadlines.ts";
 import type { ApprovalState, Approver, Principal, WorkflowDefinition } from "./define.ts";
@@ -85,8 +85,6 @@ export interface WorkerState {
   steps: readonly Steps[];
   /** Its `version`, when it has one, is recorded with each of its decisions. */
   policy: Policy;
-  /** The policies `policy` is made from (`ResolvedConfig.policies`): whose permits lift the runtime's rule on agents (`decideStart`). */
-  policies?: ResolvedConfig["policies"];
   /** The config's directory, whose data files declare the people an approval's decider is checked against (`readPeople`). */
   root?: string;
   ledger: LedgerStore;

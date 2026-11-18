@@ -5,6 +5,7 @@ import { withFake } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { decideStart } from "../src/call.ts";
 import { collection } from "../src/data.ts";
 import { readOnly } from "../src/define.ts";
 import { describeConfig } from "../src/describe.ts";
@@ -23,6 +24,7 @@ import {
   validatePolicies,
 } from "../src/index.ts";
 import { VENDOR } from "../src/op.ts";
+import { allowAll } from "../src/policy.ts";
 import { readPeople } from "../src/resources.ts";
 import { BUILT_IN_WORKFLOWS } from "../src/shared.ts";
 import { fakeMail, mailDataFile } from "./fakes/mail.ts";
@@ -45,12 +47,18 @@ export const bo = sanoma.person({ id: "bo" });
 export const cy = sanoma.person({ id: "cy" });
 export const bot = sanoma.agent({ id: "bot" });
 export const trusted = sanoma.agent({ id: "trusted" });
+export const careful = sanoma.agent({ id: "careful" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 `;
 const bot = { id: "bot", onBehalfOf: "bo" };
 const trusted = { id: "trusted", onBehalfOf: "bo" };
+const careful = { id: "careful", onBehalfOf: "bo" };
 const sending = "resources/mail.ts#sending";
 const AGENTS_WAIT = "sanoma:agents-wait-for-admin";
+/** Why an agent's start of the built-in `workflow` is refused while no person is in admin. */
+const NO_ADMIN = (workflow: string) =>
+  `An agent's start of ${workflow} waits for a person in the group "admin", and no data file puts one in it: ` +
+  "add one in resources/people.ts, or permit agents to start it in policies/";
 
 /** A company workflow that writes: the runtime's rule never covers it. */
 const notes = defineConnector("notes", {
@@ -129,7 +137,11 @@ describe("an agent's start of a built-in, under the company's policies", () => {
   const app = appWith("agent_hold_policies", {
     "policies/agents.cedar": `@id("trusted-applies")
 permit (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflow:apply", resource)
-when { principal == Sanoma::Principal::"trusted" };
+when { principal == Sanoma::Principal::"trusted" || principal == Sanoma::Principal::"careful" };
+
+@id("careful-applies-wait-for-bo")
+@hold("bo")
+forbid (principal == Sanoma::Principal::"careful", action == Sanoma::Action::"workflow:apply", resource);
 
 @id("bot-applies-wait-for-bo")
 @hold("bo")
@@ -151,6 +163,18 @@ forbid (principal == Sanoma::Principal::"cy", action == Sanoma::Action::"workflo
     const runId = await app.client.apply({}, { startedBy: trusted });
     await app.client.applyReport(runId);
     expect(await app.client.approvals(runId)).toEqual([]);
+  });
+
+  it("lifts it for an agent the company permits once the company's own hold on it is approved", async () => {
+    const runId = await app.client.apply({}, { startedBy: careful });
+    await waitFor(pending(() => app.client, runId));
+    await app.client.decide(runId, { decision: "approve", by: { id: "bo" } });
+    expect((await app.client.applyReport(runId)).results).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: sending, status: "done" })]),
+    );
+    expect(await app.client.approvals(runId)).toEqual([
+      expect.objectContaining({ approver: "bo", reasons: ["careful-applies-wait-for-bo"], status: "approved" }),
+    ]);
   });
 
   it("holds an agent's apply for the company's own hold first, then for admin", async () => {
@@ -182,6 +206,33 @@ forbid (principal == Sanoma::Principal::"cy", action == Sanoma::Action::"workflo
     ]);
     await app.client.decide(runId, { decision: "approve", by: { id: "ada" } });
     await app.client.applyReport(runId);
+  });
+});
+
+/** A people file with ada, the agent bot, and `admin`'s declaration. */
+const peopleWith = (admin: string) => `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada" });
+export const bot = sanoma.agent({ id: "bot" });
+${admin}
+`;
+
+describe("an agent's start of a built-in, with no person in admin", () => {
+  const apply = resolveConfig({ workflows: [], connectors: [fakeMail().connector] }).workflows.get("apply")!;
+
+  it("refuses it with one message whether admin is undeclared, empty or only agents", () => {
+    for (const admin of [
+      "",
+      'export const admin = sanoma.group({ name: "admin", members: [] });',
+      'export const admin = sanoma.group({ name: "admin", members: [bot] });',
+    ]) {
+      const root = rootWith({ "resources/people.ts": peopleWith(admin) });
+      expect(decideStart({ policy: allowAll, root }, apply, {}, { id: "bot", groups: ["agents"] }), admin).toEqual({
+        kind: "deny",
+        reason: NO_ADMIN("apply"),
+        reasons: [AGENTS_WAIT],
+      });
+    }
   });
 });
 
@@ -283,7 +334,7 @@ describe("the startable built-ins", () => {
       run: async () => 1,
     });
     expect(() => resolveConfig({ workflows: [own], connectors: [] })).toThrow(
-      `Workflow "own" is internal, which only the runtime's own workflows are; leave internal out`,
+      `Workflow "own" is internal, as only the runtime's own are; leave it out`,
     );
   });
 

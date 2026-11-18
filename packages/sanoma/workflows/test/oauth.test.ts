@@ -364,16 +364,18 @@ describe("OAuth consent", () => {
         .from(connectionAttempts)
         .where(sql`${connectionAttempts.id} = ${late.attempt}`);
       const runId = `connect:${late.attempt}`;
+      const input = { target: held!.target, requestId: held!.requestId, attempt: late.attempt };
       // Enqueued as the callback would, past it: `connect` is internal, which no start from outside makes.
+      await expect(client.start("connect", input, { startedBy: "alice", runId })).rejects.toMatchObject({
+        code: "invalid_input",
+        message: "connect is internal: only Sanoma itself starts it",
+      });
       const { queueName, appName } = resolveConfig(config());
       const raw = await dbosClient(databaseUrl, appName);
       try {
         await raw.enqueue(
           { queueName, workflowName: "connect", workflowID: runId, applicationName: appName },
-          {
-            input: { target: held!.target, requestId: held!.requestId, attempt: late.attempt },
-            startedBy: { id: "alice" },
-          },
+          { input, startedBy: { id: "alice" } },
         );
       } finally {
         await raw.destroy();

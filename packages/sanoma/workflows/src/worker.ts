@@ -282,7 +282,6 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
     collections: resolved.collections,
     steps: resolved.steps,
     policy: resolved.policy,
-    ...(resolved.policies && { policies: resolved.policies }),
     ...(resolved.root !== undefined && { root: resolved.root }),
     ledger: ledger.store,
     secrets: storedSecrets,
@@ -738,7 +737,7 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
       if (sandbox !== undefined) {
         // Imported here, so a live worker never loads the Gherkin parser or faker.
         const { seedSandbox } = await import("./sandbox.ts");
-        await seedSandbox(run, sandbox);
+        await seedSandbox(run, sandbox, parsed);
       }
       output = await currentRun.run(run, () => wf.run(buildCtx(wf, run), parsed));
     } finally {

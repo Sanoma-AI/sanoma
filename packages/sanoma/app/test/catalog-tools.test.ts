@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resend } from "@sanoma-ai/connector-resend";
 import { testDatabaseUrl, waitFor, withFake } from "sanoma/testing";
 import { useTestApp } from "sanoma/testing/harness";
 import {
@@ -78,6 +79,16 @@ const payout = defineWorkflow({
   uses: [],
   run: async (_ctx, { amount }) => ({ paid: amount }),
 });
+/** A workflow whose run goes on for an hour. */
+const goesOn = defineWorkflow({
+  name: "goes-on",
+  trigger: "manual",
+  input: z.object({}),
+  uses: ["sleep"],
+  run: async (ctx) => {
+    await ctx.sleep({ hours: 1 });
+  },
+});
 /** A workflow whose run starts and then fails. */
 const broken = defineWorkflow({
   name: "broken",
@@ -133,8 +144,10 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const testApp = useTestApp(
   {
-    workflows: [memo, payout, broken],
-    connectors: [withSetup(crm, { driver: () => crmDriver }), withFake(hooks, hooksFake)],
+    workflows: [memo, payout, goesOn, broken],
+    connectors: [withSetup(crm, { driver: () => crmDriver }), withFake(hooks, hooksFake), resend],
+    // So it has login-code, which no tool starts.
+    login: { sender: resend.emails.send, from: "Acme <login@acme.test>" },
     root,
   },
   { databaseUrl: testDatabaseUrl("catalog_tools") },
@@ -205,7 +218,7 @@ describe("the chat's catalog tools", () => {
 
   it("refuse an internal workflow, by its name or api name", async () => {
     const bo = toolsFor("bo", `c-internal-${RUN}`);
-    for (const workflow of ["save-draft", "saveDraft", "call", "change"]) {
+    for (const workflow of ["save-draft", "saveDraft", "call", "change", "chat", "login-code", "loginCode"]) {
       await expect(
         outputs(bo.start_run.execute!({ workflow, input: {} }, options(`b-${workflow}`))),
         workflow,
@@ -292,19 +305,22 @@ describe("the chat's catalog tools", () => {
     await expect(generator.next()).rejects.toThrow(/abort/i);
     expect(Date.now() - started).toBeLessThan(3000);
 
-    // The run still waits for its approval: wait_run would wait its whole 20 s, but for the stop.
+    // The run still waits for its approval: wait_run says so at once, and for whom, with no card of
+    // its own (the start's shows it).
+    started = Date.now();
+    const held = await lastOf(bo.wait_run.execute!({ runId }, options("s2")));
+    expect(held).toEqual({ runId, status: "waiting for approval", waitsFor: ["bo"] });
+    expect(heldRunOf(held)).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(3000);
+    // A run still going: wait_run would wait its whole 20 s, but for the stop.
+    const going = await testApp.client.start(goesOn, {}, { startedBy: "bo" });
     const waiting = new AbortController();
     started = Date.now();
     setTimeout(() => waiting.abort(), 200);
-    await expect(outputs(bo.wait_run.execute!({ runId }, options("s2", waiting.signal)))).rejects.toThrow(/abort/i);
+    await expect(outputs(bo.wait_run.execute!({ runId: going }, options("s3", waiting.signal)))).rejects.toThrow(
+      /abort/i,
+    );
     expect(Date.now() - started).toBeLessThan(3000);
-    // Unstopped, it answers that the run is still held, and for whom, once its wait is over.
-    expect(await lastOf(bo.wait_run.execute!({ runId, waitMs: 300 }, options("s3")))).toEqual({
-      held: { runId },
-      runId,
-      status: "waiting for approval",
-      waitsFor: ["bo"],
-    });
   }, 120_000);
 });
 

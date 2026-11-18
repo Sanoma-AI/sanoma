@@ -120,6 +120,7 @@ import {
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
+import { CallInput } from "./call-workflow.ts";
 import { RemoteEventSchema } from "./follow-workflow.ts";
 import { SaveDraftInput, type SaveDraftOutput } from "./app-workflows.ts";
 import { type ChatTell, ChatTurnInput } from "./chat-workflow.ts";
@@ -129,6 +130,9 @@ import type { RemoteEvent } from "./source.ts";
 
 /** Why a start's `startedBy` is refused. */
 const STARTED_BY = '`startedBy` must be a principal, such as "alice" or { id: "alice" }';
+
+/** Why a visitor's start of a built-in is refused: the app's own actions on the repository are staff's. */
+const VISITOR_BUILT_IN = "A visitor may not start the runtime's own workflows";
 
 /** A principal, or its id alone. */
 const PrincipalOrId = z.union([
@@ -400,17 +404,7 @@ export class SanomaClient {
     input: z.input<S>,
     options: StartOptions,
   ): Promise<string> {
-    const given: Principal = parseOrThrow(PrincipalOrId, options?.startedBy, STARTED_BY);
-    const sandbox = parseOrThrow(
-      z.string().min(1).optional(),
-      options?.sandbox,
-      "`sandbox` must be the name of a scenario in the config's `scenarios/`",
-    );
-    // A sandbox run's api token acts for the subject given (a scenario's `an api token … is acting`): it has no row.
-    const startedBy = await this.withSubject(
-      await this.admitted(given),
-      sandbox === undefined ? undefined : given.subject,
-    );
+    const { startedBy, sandbox } = await this.starter(options);
     if (typeof workflow === "string") {
       const named = this.config.workflows.get(workflow);
       if (!named) {
@@ -439,9 +433,36 @@ export class SanomaClient {
   }
 
   /**
+   * Starts a run of the built-in `call`, which makes the direct call `input` names (`CallInput`)
+   * as `options.startedBy`, asking no policy at its start: the policy decides the call in it as a
+   * direct one. A held direct call's run (`call`), and a scenario's `call` (`runScenario`).
+   */
+  async startCall(input: unknown, options: StartOptions): Promise<string> {
+    const { startedBy, sandbox } = await this.starter(options);
+    parseOrThrow(CallInput, input, `The input does not match ${CALL_WORKFLOW}'s schema`);
+    return this.queue(CALL_WORKFLOW, { input, startedBy, ...(sandbox !== undefined && { sandbox }) }, options.runId);
+  }
+
+  /** Who starts a run (`options.startedBy`) admitted, an api token with its subject (`withSubject`), and its `sandbox`. */
+  private async starter(options: StartOptions): Promise<{ startedBy: Principal; sandbox: string | undefined }> {
+    const given: Principal = parseOrThrow(PrincipalOrId, options?.startedBy, STARTED_BY);
+    const sandbox = parseOrThrow(
+      z.string().min(1).optional(),
+      options?.sandbox,
+      "`sandbox` must be the name of a scenario in the config's `scenarios/`",
+    );
+    // A sandbox run's api token acts for the subject given (a scenario's `an api token … is acting`): it has no row.
+    const startedBy = await this.withSubject(
+      await this.admitted(given),
+      sandbox === undefined ? undefined : given.subject,
+    );
+    return { startedBy, sandbox };
+  }
+
+  /**
    * Queues a run of `workflow` with `args` for the worker, as `runId` when given, asking no policy:
-   * `start`'s, once the policy has, and the client's own methods' (a held call's run, a run on a
-   * draft, a follow, a chat turn, an OAuth exchange, a sign-in code), each of which names its run.
+   * `start`'s, once the policy has, `startCall`'s, and the client's own methods' (a run on a draft,
+   * a follow, a chat turn, an OAuth exchange, a sign-in code), each of which names its run.
    */
   private async queue(workflow: string, args: RunArgs, runId: string | undefined): Promise<string> {
     const { startedBy, sandbox } = args;
@@ -501,9 +522,7 @@ export class SanomaClient {
   ): Promise<StartHold | undefined> {
     const action = `${WORKFLOW_ACTION}${workflow.name}`;
     const visitor = isVisitor(startedBy);
-    if (visitor && BUILT_IN_WORKFLOWS.has(workflow.name)) {
-      throw new PolicyDeniedError(action, "A visitor may not start the runtime's own workflows");
-    }
+    if (visitor && BUILT_IN_WORKFLOWS.has(workflow.name)) throw new PolicyDeniedError(action, VISITOR_BUILT_IN);
     // A visitor's start is decided whatever run its id names: a visitor shares an id (`anonymous`) with others.
     if (!visitor && runId !== undefined && (await this.row(runId))) return undefined;
     const decision = decideStart(this.config, workflow, input, startedBy);
@@ -612,7 +631,7 @@ export class SanomaClient {
       throw new PolicyDeniedError(op.id, decision.reason, deniedKeys(op, calls, decisions, collections));
     }
     if (decision.kind === "approve") {
-      await this.queue(CALL_WORKFLOW, held, heldId);
+      await this.startCall(held.input, { startedBy: actor, runId: heldId });
       // Held inside an operation: the run makes the whole operation once approved.
       if (within) throw new ApprovalPendingError(within.op, heldId);
       // A read held before, whose run has ended since, answers with that run's result.
@@ -1235,6 +1254,7 @@ export class SanomaClient {
     const first = `${DRAFT_RUNS[workflow].prefix}:${id}`;
     const runId = runs.length ? `${first}~${runs.length + 1}` : first;
     const startedBy = await this.admitted(parseOrThrow(PrincipalOrId, options?.startedBy, STARTED_BY));
+    if (isVisitor(startedBy)) throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, VISITOR_BUILT_IN);
     return this.queue(workflow, { input, startedBy }, runId);
   }
 
@@ -1818,6 +1838,7 @@ export class SanomaClient {
     options: { actor: Principal | string },
   ): Promise<{ connection: string; runId: string }> {
     const actor = await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    if (isVisitor(actor)) throw new PolicyDeniedError(`${WORKFLOW_ACTION}${CONNECT_WORKFLOW}`, VISITOR_BUILT_IN);
     const { attempts, catalog } = this.config.connections;
     const received = await attempts.receive(attempt, actor.id, params, async (row) => {
       if (

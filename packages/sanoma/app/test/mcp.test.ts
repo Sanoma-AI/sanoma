@@ -29,7 +29,7 @@ import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { CATALOG } from "../src/server/catalog.ts";
-import { actorOf, agentDescription, callApi } from "../src/server/core.ts";
+import { actorOf, agentDescription, callApi, RESULT_WAIT_MS } from "../src/server/core.ts";
 import { postMcp } from "../src/server/mcp.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 
@@ -398,12 +398,7 @@ describe("lookup", () => {
       (answer) => answer.structuredContent.status !== "running",
     );
     expect(waited.isError).toBeFalsy();
-    expect(waited.structuredContent).toEqual({
-      held: { runId },
-      runId,
-      status: "waiting for approval",
-      waitsFor: ["lead"],
-    });
+    expect(waited.structuredContent).toEqual({ runId, status: "waiting for approval", waitsFor: ["lead"] });
   });
 
   it("files one approval for a held lookup retried with its id", async () => {
@@ -457,6 +452,8 @@ describe("start_run, get_run and wait_run", () => {
       ["save-draft", "save-draft"],
       ["saveDraft", "save-draft"],
       ["change", "change"],
+      ["reshape", "reshape"],
+      ["follow", "follow"],
     ]) {
       expect((await tool("start_run", { workflow })).structuredContent, workflow).toMatchObject({
         code: "invalid_input",
@@ -614,7 +611,11 @@ describe("a declared agent acting for the person, named in x-sanoma-agent", () =
       async () => (await tool("wait_run", { runId, waitMs: 0 }, { agent })).structuredContent,
       (answer: any) => answer.status !== "running",
     );
-    expect(held).toEqual({ held: { runId }, runId, status: "waiting for approval", waitsFor: ["group admin"] });
+    expect(held).toEqual({ runId, status: "waiting for approval", waitsFor: ["group admin"] });
+    // Asked again with the full wait, it answers at once: the wait would end only on a decision.
+    const asked = Date.now();
+    expect((await tool("wait_run", { runId }, { agent })).structuredContent).toEqual(held);
+    expect(Date.now() - asked).toBeLessThan(RESULT_WAIT_MS / 2);
     await testApp.client.decide(runId, { decision: "approve", by: { id: "ada" } });
     const ended = await waitFor(
       async () => (await tool("get_run", { runId }, { agent })).structuredContent,

@@ -161,10 +161,10 @@ const approved = (approver: ApprovalState["approver"], by: string): ApprovalStat
   refused: [],
 });
 
-/** The runtime's rule on an agent's start of a built-in that changes something, with no admin group declared. */
+/** The runtime's rule on an agent's start of a built-in that changes something, with no person in admin. */
 const noAdmin = (workflow: string) =>
-  `workflow:${workflow} was denied by policy: An agent's start of ${workflow} waits for the group "admin", ` +
-  "which no data file declares: declare it in resources/people.ts, or permit agents to start it in policies/";
+  `workflow:${workflow} was denied by policy: An agent's start of ${workflow} waits for a person in the group ` +
+  '"admin", and no data file puts one in it: add one in resources/people.ts, or permit agents to start it in policies/';
 
 describe("schemaOf", () => {
   it("has the declared groups, agents and visitors, every operation in its effect's group and every workflow in start", () => {
@@ -544,7 +544,7 @@ permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"
     ]);
   });
 
-  it("permits agents too, and an allow names a satisfied permit for agents beside the runtime's own", () => {
+  it("permits agents too, only to lift the runtime's rule on an agent: never a visitor's way in", () => {
     const { policies } = loadPolicies([
       {
         file: "policies/agents.cedar",
@@ -556,15 +556,13 @@ permit (principal in Sanoma::Group::"agents", action == Sanoma::Action::"workflo
     expect(policies.map((p) => p.scope)).toEqual(["agents"]);
     expect(validatePolicies(resolved, policies, people)).toEqual([]);
     const agents = cedarPolicy(resolved, policies, people);
-    // Cedar's diagnostics on an allow list every permit satisfied: the company's, which the runtime's rule on agents reads.
-    expect(agents.start({ id: "refund-bot", groups: ["sales", "agents"] }, "refund", { amount: 1 })).toEqual({
-      kind: "allow",
-      reasons: expect.arrayContaining(["agents-refund", "allow-by-default"]),
-    });
-    expect(agents.start({ id: "bo", groups: [] }, "refund", { amount: 1 })).toEqual({
-      kind: "allow",
-      reasons: ["allow-by-default"],
-    });
+    // An api token whose groups name agents is still a visitor: no permit for agents lets it in.
+    const token = { id: "token:t1", groups: ["agents"] };
+    expect(agents.start(token, "refund", { amount: 1 })).toEqual({ kind: "deny", reason: VISITOR_DENIED });
+    expect(agents.permitsAgent?.({ id: "refund-bot", groups: ["sales", "agents"] }, "refund", { amount: 1 })).toBe(
+      true,
+    );
+    expect(agents.permitsAgent?.({ id: "bo", groups: [] }, "refund", { amount: 1 })).toBe(false);
   });
 
   it("refuses a visitor's start and direct call no permit names, and anonymous's", () => {
