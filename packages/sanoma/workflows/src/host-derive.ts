@@ -7,7 +7,7 @@ import { databaseUrlSecret } from "./database.ts";
 import { statusesOf } from "./env.ts";
 import type { Driver } from "./op.ts";
 import type { DeclaredResource, ResourceProblem } from "./description.ts";
-import { runtimeImage, sourceKeyId } from "./host.ts";
+import { ROUTER_AND_ROUTED, ROUTER_SECRET, runtimeImage, sourceKeyId } from "./host.ts";
 import type { Bindings } from "./lockfile.ts";
 import { type Resource, valueAt } from "./resource.ts";
 import { secret, type Secret, type Secrets } from "./secret.ts";
@@ -58,6 +58,11 @@ export interface HostFacts {
   origin?: string;
   /** Each public site's domain, by site name (`siteDomains`). */
   domains: Readonly<Record<string, string>>;
+  /**
+   * The agents' router the config serves (`router.hostname`), and whether its master secret
+   * (`ROUTER_SECRET`) is stored: a host is given a marker only for a name the store holds.
+   */
+  router?: { hostname: string; secret: boolean };
   /** True when the config keeps its secrets in the built-in store, which `SANOMA_SECRETS_KEY` unlocks. */
   builtInStore: boolean;
   /**
@@ -213,6 +218,8 @@ const nameOf = (repository: string) =>
  * - `source`, left out: the one repository its own data file declares (a reference to it, of a
  *   type its `source` names), else the repository the app runs from (`origin`);
  * - `domains`: each public site's domain (`siteDomains`);
+ * - the config's router's hostname (`inputs.router`), and its master secret among `secrets` when
+ *   it is stored (`ROUTER_SECRET`; without one the router forwards nothing);
  * - `secrets` (unless it binds its own bootstrap), markers only: the declared `database`'s URL as
  *   `SANOMA_DATABASE_URL`, the runtime's keys (the signing key the config binds, else the host's
  *   own, generated at its create; the encryption key with the built-in store), the source key for
@@ -231,7 +238,8 @@ const nameOf = (repository: string) =>
  * Problems: a host with no `database`, a name (none to tell, or another host's), an image or a
  * source that cannot be told, a credential its vendor's driver reads from this machine's
  * environment that nothing binds, a binding given to it (`host: true`) with no value where apply
- * runs, a private repository it has no deploy key for, two hosts that would attach the sites' domains.
+ * runs, a private repository it has no deploy key for, two hosts that would attach the sites'
+ * domains or the router's hostname, a host that serves the router and is declared behind one.
  */
 export function deriveHosts(
   resources: DeclaredResource[],
@@ -246,12 +254,14 @@ export function deriveHosts(
     const host = types.get(`${r.vendor}.${r.type}`)?.host;
     return host?.derives && host.inputs.domains !== undefined;
   });
-  if (attaching.length > 1 && Object.keys(facts.domains).length) {
+  const sited = Object.keys(facts.domains).length > 0;
+  if (attaching.length > 1 && (sited || facts.router)) {
+    const what = sited ? "the public sites' domains" : "the router's hostname";
     for (const r of attaching) {
       out.leftOut?.add(r.id);
       problems.push({
         ...r.at,
-        message: `${r.at.export}: ${attaching.length} hosts would attach the public sites' domains: declare one host that derives, the production one`,
+        message: `${r.at.export}: ${attaching.length} hosts would attach ${what}: declare one host that derives, the production one`,
       });
     }
   }
@@ -323,6 +333,11 @@ export function deriveHosts(
       setAt(desired, inputs.domains, { ...facts.domains });
     }
 
+    if (inputs.router !== undefined && facts.router) {
+      setAt(desired, inputs.router, facts.router.hostname);
+      if (inputs.agents !== undefined && valueAt(desired, inputs.agents) != null) problem(ROUTER_AND_ROUTED);
+    }
+
     if (spec.bindsBootstrap || inputs.secrets === undefined) {
       if (blocked) out.leftOut?.add(r.id);
       continue;
@@ -344,6 +359,8 @@ export function deriveHosts(
       : secret(HOST_SIGNING_KEY, { generate: true });
     if (facts.builtInStore) secrets.SANOMA_SECRETS_KEY = secret("SANOMA_SECRETS_KEY");
     if (keyed) secrets[SOURCE_KEY] = secret(SOURCE_KEY);
+    // The router's master secret, where the host attaches the router's hostname and the store holds one.
+    if (inputs.router !== undefined && facts.router?.secret) secrets[ROUTER_SECRET] = secret(ROUTER_SECRET);
     const wakeup = wokenBy(r, resources, types);
     if (wakeup) {
       secrets[WAKEUP_TOKEN] = secret(WAKEUP_TOKEN);
@@ -467,6 +484,8 @@ export async function hostFacts(options: {
   /** The config's secret bindings: whether it binds `SANOMA_SIGNING_KEY`, and those given to the hosts (`host: true`). */
   bindings?: SecretConfiguration["bindings"];
   sender?: string;
+  /** The hostname of the agents' router the config serves (`router.hostname`), when it serves one. */
+  router?: string;
   mint: boolean;
   /** A sandbox run's: its calls resolve no stored value, so a binding given to the hosts with none is no problem. */
   sandbox?: boolean;
@@ -492,7 +511,11 @@ export async function hostFacts(options: {
   );
   const delivered = Object.values(hostEnvironment);
   // Only what the store holds: a marker for a name it does not would fail the host's deploy.
-  const held = await stored([...statuses.map((c) => c.name), ...delivered]);
+  const held = await stored([
+    ...statuses.map((c) => c.name),
+    ...delivered,
+    ...(options.router !== undefined ? [ROUTER_SECRET] : []),
+  ]);
   const hostEnvironmentUnset = reading && !options.sandbox ? delivered.filter((name) => !held.has(name)) : [];
   const carried = new Map<string, string[]>();
   const unbound = new Map<string, string[]>();
@@ -526,6 +549,7 @@ export async function hostFacts(options: {
     ...(version !== undefined && { version }),
     ...(origin !== undefined && { origin }),
     domains,
+    ...(options.router !== undefined && { router: { hostname: options.router, secret: held.has(ROUTER_SECRET) } }),
     builtInStore: options.builtInStore,
     carried,
     ...(unbound.size > 0 && { unbound }),

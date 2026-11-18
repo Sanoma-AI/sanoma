@@ -872,9 +872,14 @@ export function defineResource<
     if (host && pathsIn(desired, new Set([host.revision])).length) {
       throw new Error(`${what}: leave out ${host.revision}: apply sets it from ${host.inputs.ref}`);
     }
-    // A host that derives is given its secrets and its sites' domains: a data file names neither.
+    // A host that derives is given its secrets, its sites' domains and the config's router's hostname: a data file names none.
     if (host?.derives) {
-      const { secrets, domains } = host.inputs;
+      const { secrets, domains, router } = host.inputs;
+      if (router !== undefined && pathsIn(desired, new Set([router])).length) {
+        throw new Error(
+          `${what}: leave out ${router}: the router's hostname is the config's, \`router: { hostname }\`, and the host attaches it`,
+        );
+      }
       if (secrets !== undefined && pathsIn(desired, new Set([secrets])).length) {
         throw new Error(
           `${what}: leave out ${secrets}: apply gives the host its database's URL, its keys and the connections it deploys with, and no secret is written in a file`,

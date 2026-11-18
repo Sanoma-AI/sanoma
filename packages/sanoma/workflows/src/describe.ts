@@ -46,7 +46,7 @@ import {
   STORAGE_PROBLEMS,
 } from "./shared.ts";
 import { readSites, type SiteEntry, siteDomains } from "./sites.ts";
-import { sourceKeyIds } from "./host.ts";
+import { ROUTER_AND_ROUTED, sourceKeyIds } from "./host.ts";
 
 // `sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
@@ -365,6 +365,12 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
         sites,
         resolved.root === undefined ? {} : siteDomains(resolved.root),
       ),
+      ...routerProblems(
+        dataFiles.resources,
+        resources,
+        resolved.router?.hostname,
+        resolved.root === undefined ? {} : siteDomains(resolved.root),
+      ),
       ...loginProblems(resolved, dataFiles.resources),
       ...connectionStorageProblems(resolved),
     ],
@@ -501,6 +507,36 @@ function domainProblems(
     problems.push({ ...resource.at, message });
   }
   return problems;
+}
+
+/**
+ * For a config that serves the agents' router at `router` (`router.hostname`), at each declared
+ * host that attaches it (its type's `host.inputs.router`): the router's hostname being the app's
+ * (`hostname`) or a public site's domain, where the launcher would serve no router
+ * (`routerOptionsFrom`), and the host declared behind a router too (`ROUTER_AND_ROUTED`).
+ */
+function routerProblems(
+  declared: readonly DeclaredResource[],
+  types: ReadonlyMap<string, Resource>,
+  router: string | undefined,
+  declaredDomains: Readonly<Record<string, string>>,
+): ResourceProblem[] {
+  if (router === undefined) return [];
+  return declared.flatMap((resource) => {
+    const inputs = types.get(`${resource.vendor}.${resource.type}`)?.host?.inputs;
+    if (inputs?.router === undefined) return [];
+    const hostname = inputs.hostname === undefined ? undefined : valueAt(resource.desired, inputs.hostname);
+    const site = siteAtHostname(router, declaredDomains);
+    const fix = "give the config's router a hostname of its own";
+    const messages = [
+      ...(typeof hostname === "string" && hostname.toLowerCase() === router
+        ? [`${router} is the app's hostname and the config's \`router.hostname\`: ${fix}`]
+        : []),
+      ...(site ? [`${router} is the config's \`router.hostname\` and the domain of ${site}: ${fix}`] : []),
+      ...(inputs.agents !== undefined && valueAt(resource.desired, inputs.agents) != null ? [ROUTER_AND_ROUTED] : []),
+    ];
+    return messages.map((message) => ({ ...resource.at, message }));
+  });
 }
 
 /**

@@ -629,6 +629,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     }
     names.set(wf.name, wf);
   }
+  // The agents' router, whose hostname a host that derives attaches (`deriveHosts`).
+  const router = config.router === undefined ? undefined : checkRouter(config.router, collections);
   // Built-in: checking the resources the data files declare against their vendors, and applying them.
   const read = (options: ReadOptions = {}) =>
     readDeclared(root, connectors, declarable, types, connections, {
@@ -637,6 +639,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       builtInStore: !config.secrets?.store,
       bindings: config.secrets?.bindings,
       ...(isOp(config.login?.sender) && { sender: config.login.sender.vendor }),
+      ...(router && { router: router.hostname }),
     });
   if (types.size) {
     names.set(
@@ -694,7 +697,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: sending a sign-in code, when the config names how.
   const login = config.login && checkLogin(config.login, ops, drivers, name);
   if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, name));
-  const router = config.router === undefined ? undefined : checkRouter(config.router, collections);
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   const bundled = rootSnapshot(root);
   return {
@@ -1160,6 +1162,7 @@ async function readDeclared(
     builtInStore: boolean;
     bindings?: SecretConfiguration["bindings"];
     sender?: string;
+    router?: string;
   },
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
   // Loaded when a run reads the files, not with the worker.
@@ -1181,6 +1184,7 @@ async function readDeclared(
       builtInStore: options.builtInStore,
       bindings: options.bindings,
       ...(options.sender !== undefined && { sender: options.sender }),
+      ...(options.router !== undefined && { router: options.router }),
       mint: !!options.mint && !!run && !run.sandbox,
       sandbox: !!run?.sandbox,
     });

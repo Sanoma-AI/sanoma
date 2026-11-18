@@ -276,7 +276,16 @@ export {
   type SourceHost,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
-export { RUNTIME_IMAGE, RUNTIME_PORT, runtimeImage, sourceKeyId, UNNAMED, wakeUrlOf } from "./host.ts";
+export {
+  ROUTER_AND_ROUTED,
+  ROUTER_SECRET,
+  RUNTIME_IMAGE,
+  RUNTIME_PORT,
+  runtimeImage,
+  sourceKeyId,
+  UNNAMED,
+  wakeUrlOf,
+} from "./host.ts";
 export {
   cloneUrl,
   deriveHosts,
