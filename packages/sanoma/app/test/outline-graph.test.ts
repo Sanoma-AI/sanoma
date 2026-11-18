@@ -10,7 +10,6 @@ import quote from "../../workflows/test/fixtures/company-apps/operations/quote.t
 import offer from "../../workflows/test/fixtures/company-apps/workflows/offer.ts";
 import { DEFAULT_SLEEP_NAME } from "sanoma/workflows/shared";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
-import { opsById } from "../src/queries.ts";
 import { type GraphNode, nodeAt, type Step } from "../src/graph/types.ts";
 import { calls, DRIFT_SHAPE, labels, pairs } from "./graph-helpers.ts";
 
@@ -298,7 +297,9 @@ describe("outlineGraph", () => {
     });
     const { outline, source } = description.workflows.find((wf) => wf.name === "offer")!;
     if (!("nodes" in outline)) throw new Error(`offer was not outlined: ${JSON.stringify(outline)}`);
-    const { nodes, edges } = outlineGraph(outline.nodes, { ops: opsById(description) });
+    const { nodes, edges } = outlineGraph(outline.nodes, {
+      ops: new Map(description.ops.map((entry) => [entry.id, entry])),
+    });
     expect(labels(nodes)).toEqual([
       "start start",
       "cluster:0 operations.quote.run",

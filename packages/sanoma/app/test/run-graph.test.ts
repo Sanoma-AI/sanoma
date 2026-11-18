@@ -451,7 +451,7 @@ describe("runGraph", () => {
           inner("resend.email.send", 1, "1"),
           { type: "run.finished", output: {} },
         ),
-        run("completed"),
+        run("finished"),
         NOW,
         outline,
       );
@@ -517,13 +517,16 @@ describe("runGraph", () => {
       const held = runGraph(
         [
           record(0, started),
-          record(3, {
-            ...requested("Send?", "approval-1", { requestedBy: "policy" }),
-            op: "resend.email.send",
-            opSeq: 2,
-            within: 1,
-            node: "0.0.0.0.0",
-          }),
+          record(
+            3,
+            requested("Send?", "approval-1", {
+              requestedBy: "policy",
+              op: "resend.email.send",
+              opSeq: 2,
+              within: 1,
+              node: "0.0.0.0.0",
+            }),
+          ),
         ],
         run("waiting", [asked]),
         NOW,
@@ -539,12 +542,10 @@ describe("runGraph", () => {
 
       const whole = approval("pending", { requestedBy: "policy", op: QUOTE, opSeq: 1 });
       const box = runGraph(
-        ledger(started, {
-          ...requested("Quote?", "approval-1", { requestedBy: "policy" }),
-          op: QUOTE,
-          opSeq: 1,
-          node: "0.0.0",
-        }),
+        ledger(
+          started,
+          requested("Quote?", "approval-1", { requestedBy: "policy", op: QUOTE, opSeq: 1, node: "0.0.0" }),
+        ),
         run("waiting", [whole]),
         NOW,
         outline,

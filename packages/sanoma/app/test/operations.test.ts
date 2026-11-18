@@ -9,7 +9,6 @@ import {
   resolveConfig,
   type SanomaConfig,
 } from "sanoma/workflows";
-import { describeConfig } from "sanoma/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fixture from "../../workflows/test/fixtures/company-apps/sanoma.config.ts";
 import { customers as crmCustomers } from "../../workflows/test/fixtures/company-apps/apps/crm/resources/data.ts";
@@ -19,7 +18,6 @@ import quote from "../../workflows/test/fixtures/company-apps/operations/quote.t
 import offer from "../../workflows/test/fixtures/company-apps/workflows/offer.ts";
 import { ACTOR_COOKIE } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
-import { callersOf, opHome, vendorsCalling } from "../src/queries.ts";
 import { instructions } from "../src/steps/agent/prompt.ts";
 import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
@@ -60,41 +58,6 @@ async function page(path: string) {
   const html = (await res.text()).replaceAll("<!-- -->", "");
   return { status: res.status, shown: html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "") };
 }
-
-describe("the company's operations, in the config", () => {
-  const description = describeConfig(config);
-
-  it("finds where each operation is shown: its own page, its collection's, its connector's", () => {
-    const op = (id: string) => description.ops.find((o) => o.id === id)!;
-    expect(opHome(description, op("operations.crm.score.run"))).toMatchObject({
-      to: "/connectors/operations/$name",
-      params: { name: "crm.score" },
-    });
-    expect(opHome(description, op("data.shop.customers.get"))).toMatchObject({
-      to: "/data/$name",
-      params: { name: "shop.customers" },
-    });
-    expect(opHome(description, { ...op("data.shop.customers.get"), vendor: "nobody", resource: "x" })).toBeUndefined();
-  });
-
-  it("finds what calls an operation: the workflows using it, and the operations calling it", () => {
-    expect(callersOf(description, ["data.shop.customers.get"])).toMatchObject({
-      workflows: [],
-      operations: [{ id: "operations.quote.run", name: "quote" }],
-    });
-    expect(callersOf(description, ["operations.quote.run"]).workflows.map((wf) => wf.name)).toEqual(["offer"]);
-  });
-
-  it("counts the vendors a workflow calls through its operations", () => {
-    const ops = new Map(description.ops.map((op) => [op.id, op]));
-    // A vendor as the config lists its connectors', for the collections' operations here.
-    const listed = {
-      ...description,
-      vendors: { ...description.vendors, data: { title: "Data" } },
-    } as typeof description;
-    expect(vendorsCalling(listed, ops, ["operations.quote.run"])).toEqual([{ id: "data", title: "Data" }]);
-  });
-});
 
 describe("the company's operations, in the operator agent's instructions", () => {
   it("lists them in a section of their own, each with its effect and what it calls, never as a connector", async () => {
@@ -158,7 +121,7 @@ describe("the company's operations, in the app", () => {
   it("puts the calls inside an operation under its row in the Permissions grid, linking to its page", async () => {
     const { shown } = await page("/permissions");
     expect(shown).toMatch(
-      /href="\/workflows\/offer"[\s\S]*href="\/connectors\/operations\/quote"[^>]*>operations\.quote\.run<\/a>[\s\S]*data\.shop\.customers\.get[\s\S]*href="\/connectors\/operations\/crm\.score"/,
+      /href="\/workflows\/offer"[\s\S]*href="\/connectors\/operations\/quote"[^>]*><code[^>]*>operations\.quote\.run<\/code><\/a>[\s\S]*data\.shop\.customers\.get[\s\S]*href="\/connectors\/operations\/crm\.score"/,
     );
   });
 });
