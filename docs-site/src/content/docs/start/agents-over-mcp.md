@@ -62,3 +62,78 @@ It has six tools, as the person or the agent acting for them, the same the app's
 `start_run`, `drift` and `lookup` take an optional `id` (letters, digits, `_` and `-`, at most 200), as the app's own calls send one. Send a new one for each call and the same one on a retry: a start or a drift with an id it already has answers that run (the run's id is the `id`) when the workflow, input, person and agent are the same, and is refused (`invalid_input`) when they are not; a held lookup retried with its id is the same held run, so it files one approval.
 
 `/mcp` only answers requests: a 2026-07-28 client's `subscriptions/listen` is refused at once (JSON-RPC `-32603`), since the tools never change. A refusal of a tool call is a tool error whose structured content is the error body above, with its `status`. A visitor is refused (403), as is a request from a page on another site, told by its `Sec-Fetch-Site` or `Origin` header, so a page elsewhere cannot act with this browser's name; a public site's host has no `/mcp` (404). An MCP client sends neither header and needs no CSRF token.
+
+## A router: one `/mcp` for many companies
+
+An instance can serve a router: one address, such as `https://mcp.acme.example/mcp`, that the agents of many companies connect to, while each company stays on its own host with its own sign-in. The router is stateless. It checks no token, signs nothing, and keeps no credential, session or cache. It finds which company a request is for and sends the request on. The company's own staff sign-in stays the only authority: it signs every token and checks every call.
+
+Turn it on in the config of the instance that serves it:
+
+```ts
+export default defineConfig({
+  connectors: [],
+  router: {
+    hostname: "mcp.acme.example",
+    companies: { collection: "companies", url: "url", live: { field: "status", is: "live" } },
+  },
+});
+```
+
+- `hostname` is the one host the router answers on, over HTTPS. Its issuer is `https://<hostname>` and its agent surface `https://<hostname>/mcp`.
+- `companies.collection` names one of this instance's [collections](/workflows/collections/). A record's key is the company's id (letters, digits, `-` and `_`), and its `url` field (another field with `companies.url`) is that company's base URL: an `https` origin with no path, user or query, such as `https://acme.sanoma.example`. Plain `http` is taken only for this machine (`localhost`, `127.x.x.x`, `::1`). A record with any other URL is not routed to.
+- `companies.live` is optional: only records whose `field` is `is` (or one of a list) are routed to. Without it, every record with a URL is.
+- `SANOMA_ROUTER_SECRET`, in the app's environment, is the router's master secret: 32 visible ASCII characters or more. It is sent to no one. Each company gets its own secret, derived from the master and the company's id ([below](#each-companys-secret)). Without it the router forwards nothing and its routes answer 503; one that is shorter, or holds a space or a character outside ASCII, stops `sanoma serve` at its start (on a Worker it is logged and no router is served).
+
+`sanoma check` refuses a `router` whose hostname is no hostname, whose collection the company does not have, or whose fields the collection lacks. The router reads the list on each request, through the app's own client, with no policy asked and nothing recorded (`SanomaClient.routedCompany`, which answers only a company's URL and whether it is routed to): it is the runtime's own read, not a person's. A company is found by its exact id, never by a host a request names, so the router contacts no address outside the list.
+
+Whoever may write the companies collection controls where each company's agent traffic goes: authorization codes, refresh tokens, access tokens and every `/mcp` call for a company are sent to the URL its record holds. Give the write to that collection, in the policy, only to the people and workflows that provision companies.
+
+The router's hostname is its own: `sanoma serve` refuses to start when it is `SANOMA_HOSTNAME` or a public site's domain (`SANOMA_DOMAINS`); a Worker logs it and serves no router.
+
+On the router's hostname the app serves these routes and nothing else (any other path is a 404, `/healthz` and the sign-in among them), ahead of every login. On the Worker, the hostname is one more host it answers beside `SANOMA_HOSTNAME` and the sites' domains.
+
+| Route                                           | What it answers                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /.well-known/oauth-protected-resource/mcp` | RFC 9728's metadata: `{ resource: "<router>/mcp", authorization_servers: ["<router>"], bearer_methods_supported: ["header"] }`. Also at `/.well-known/oauth-protected-resource`                                                                                                                                                                                                                                                                              |
+| `GET /.well-known/oauth-authorization-server`   | RFC 8414's metadata for the issuer `<router>`: `authorization_endpoint`, `token_endpoint` and `revocation_endpoint` at `<router>/authorize`, `/token` and `/revoke`, and the same scopes, grants, `S256`, `none` and Client ID Metadata Document support a company's own document names. No `jwks_uri`: the router has no keys                                                                                                                               |
+| `GET /authorize`                                | A page that asks "Which company?", with one field for the company's id. Submitted, it is a GET with `company=<id>` and the client's own query, answered with a 302 to `<that company's URL>/auth/better-auth/oauth2/authorize?<the client's query, unchanged>`. An id that is not listed gets the page again, saying so (404), never a redirect; one that is listed and not routed to now gets the page saying that company is not available right now (503) |
+| `POST /token`                                   | The form, unchanged, sent to the company named before the first `.` of its `code` (or its `refresh_token`, for a refresh), at `/auth/better-auth/oauth2/token`; that company's status, body and headers back. No such company: 400 `invalid_grant`. No code or token, or no form: 400 `invalid_request`. A form larger than 4 MB: 413, read no further than that                                                                                             |
+| `POST /revoke`                                  | The same for the form's `token`, sent to the company's `/auth/better-auth/oauth2/revoke`. A token that names no listed company is answered 200 with no body: RFC 7009 treats a token the server does not know as revoked already                                                                                                                                                                                                                             |
+| `GET`, `POST`, `DELETE /mcp`                    | With a bearer, the call goes to the company its `sanoma_company` claim names, read from the token without checking it, with the method, `Authorization`, `Accept`, `Content-Type` and MCP's own headers, and the body sent on as it arrives, never read or held by the router; the answer is passed back as it streams. Without one: a 401 naming the router's metadata. A bearer that names no listed company: 401 `invalid_token`                          |
+
+A company that is in the list but not routed to now (its `live` field says so, or its URL is not one the router sends to) is answered 503 `temporarily_unavailable` with `Retry-After: 60` on `/token`, `/revoke` and `/mcp`. A client keeps its tokens and asks again; it is never told they are no good.
+
+A token request and a revocation carry the caller's address (`x-sanoma-router-client-ip`) and that company's secret (`x-sanoma-router-secret`). A `/mcp` call carries neither, since nothing at a company's `/mcp` reads them. No forwarded request carries the caller's cookies. A redirect from a company is not followed and not passed on (502), as is a company that does not begin to answer in 30 seconds; an answer that has begun streams as long as it does. When the caller disconnects, the request to the company ends too.
+
+### Each company's secret
+
+The router never sends its master secret. It sends each company that company's own:
+
+```
+secret = HMAC-SHA256(key = master secret, message = company id), as lower-case hex
+```
+
+Both are taken as UTF-8, and the result is 64 characters. Whoever provisions a company computes it once and sets it as that company's `SANOMA_ROUTER_SECRET`, for example with `printf %s acme | openssl dgst -sha256 -hmac "$MASTER" -r | cut -d' ' -f1`. In code it is `routerSecretFor(master, company)` from `sanoma/workflows`. A company's secret that leaks lets its holder name a caller's address at that company's token endpoint, and nothing at any other company; it says nothing of the master.
+
+The one variable holds the master on the instance that serves the router and a company's own secret on an instance behind one. An instance that serves a router and is also listed behind that same router would need both, which is not supported: its token endpoint then counts every caller the router forwards as the router's one address.
+
+A company behind a router has the router's `/mcp` as its agent address. Set three variables on it; they are read before `SANOMA_HOSTNAME` and `SANOMA_HOST_URL`:
+
+```sh
+SANOMA_AGENT_URL=https://mcp.acme.example/mcp   # the router's agent surface
+SANOMA_COMPANY=acme                             # this company's id in the router's list
+SANOMA_ROUTER_SECRET=…                          # this company's own secret at the router
+```
+
+That company then:
+
+- signs tokens as the router (`iss` is `https://mcp.acme.example`, `aud` its `/mcp`), and names itself in each access token (`sanoma_company`);
+- puts `acme.` in front of every authorization code and refresh token it sends out, and takes one back only with it, so a code or token without the tag, or with another company's, gets `invalid_grant` and spends nothing;
+- refuses at `/mcp` a token whose `sanoma_company` is not its own (401 `invalid_token`), whoever signed it;
+- serves no RFC 8414 document of its own, and names the router's metadata in its RFC 9728 document and in `/mcp`'s 401;
+- keeps authorize, the sign-in and the consent on its own host, where its cookie is. Authorize there takes the router's `/mcp` as its `resource`, and nothing else;
+- counts its token endpoint's and its revocation's rate limit by the address the router names, only for a request that carries this company's secret (compared in constant time). On every other route (the sign-in, an email code, the consent, which a browser reaches itself) and without the secret, that header is ignored and the limit counts the connection's own address.
+
+What the tag does not do: it is not a credential. Anyone can write a token that names any company, and the router will send it there, where that company's sign-in refuses it. The router stops nothing a company would not stop itself.
+
+Not verified yet: no real Claude client has completed a sign-in that starts at the router's host and continues on a company's. The tests drive the whole flow with their own client, on Node and (for discovery and one `/mcp` call) on workerd. The Cloudflare host does not bind the router's variables or attach the router's hostname yet, so on a Worker they are set by hand.

@@ -1,9 +1,16 @@
 import { spawn } from "node:child_process";
-import { createHash, timingSafeEqual } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { IngressRoute } from "sanoma/app";
-import { envWakeup, errorMessage, isLoopback, type SanomaConfig, startWorker, superviseWorker } from "sanoma/workflows";
+import {
+  envWakeup,
+  errorMessage,
+  isLoopback,
+  sameSecret,
+  type SanomaConfig,
+  startWorker,
+  superviseWorker,
+} from "sanoma/workflows";
 import { APP_BUNDLE_HEADER, APP_BUNDLE_PATH } from "sanoma/workflows/shared";
 import { listenRoutes } from "./listen.ts";
 import { rootOf, type Stoppable, wakeRoute, workerOptions } from "./serve.ts";
@@ -59,8 +66,6 @@ export interface AppBundleOptions {
 /** A commit id, short or full (SHA-1 or SHA-256). */
 const REVISION = /^[0-9a-f]{7,64}$/;
 
-const digest = (text: string) => createHash("sha256").update(text).digest();
-
 /** A built revision's answer: its status, and the body, or the file beside the root that holds it (a bundle is megabytes). */
 type Answer = { status: number; body: string } | { status: 200; file: string };
 
@@ -88,7 +93,7 @@ export function appBundleRoute({
   run = runChild,
   onBuilding,
 }: AppBundleOptions): IngressRoute {
-  const expected = token && digest(`Bearer ${token}`);
+  const expected = token && `Bearer ${token}`;
   const answers = new Map<string, Answer | "building">();
   // One build at a time: each is a Vite build of the whole app, on a container's memory.
   let queue = Promise.resolve();
@@ -112,7 +117,7 @@ export function appBundleRoute({
     method: "GET",
     path: APP_BUNDLE_PATH,
     async handle(request) {
-      if (!expected || !timingSafeEqual(digest(request.headers.get("authorization") ?? ""), expected)) {
+      if (!expected || !sameSecret(request.headers.get("authorization") ?? "", expected)) {
         return answered(401, { error: "the token is not this instance's SANOMA_WAKEUP_TOKEN" });
       }
       const revision = new URL(request.url).searchParams.get("revision") ?? "";

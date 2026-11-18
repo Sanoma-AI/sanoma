@@ -14,7 +14,9 @@ import {
   checkPreparedOnly,
   errorMessage,
   GITHUB_APP,
+  type ResolvedConfig,
   resolveConfig,
+  routerOptionsFrom,
   SanomaClient,
   type SocialClients,
 } from "sanoma/workflows";
@@ -66,8 +68,10 @@ function socialOf(env: AppBundleEnv): SocialClients | undefined {
 }
 
 /**
- * The Worker's agent address, by the launchers' one rule (`agentAddressFrom`): its own
- * hostname's (`SANOMA_HOSTNAME`), the one host besides the sites' it then answers on; with none
+ * The Worker's agent address, by the launchers' one rule (`agentAddressFrom`): a router's when
+ * the three variables name one (`SANOMA_AGENT_URL`, `SANOMA_COMPANY`, and `SANOMA_ROUTER_SECRET`,
+ * this company's own secret there),
+ * else its own hostname's (`SANOMA_HOSTNAME`), the one host besides the sites' it then answers on; with none
  * declared, its own URL's (`SANOMA_HOST_URL`, the workers.dev URL the Cloudflare host binds on
  * every upload, where such a Worker is reached). With neither (a bundle run by a host that binds
  * none), or a value that names no address (logged, once: the handler is made once), none: the
@@ -79,6 +83,27 @@ function addressOf(env: AppBundleEnv): AgentAddress | undefined {
   } catch (err) {
     console.error(`sanoma: no agent can sign in at /mcp: ${errorMessage(err)}`);
     return undefined;
+  }
+}
+
+/**
+ * The config with what its router is served with, by the launchers' one rule
+ * (`routerOptionsFrom`): its master secret (`SANOMA_ROUTER_SECRET`), without which it forwards
+ * nothing. A hostname that is the Worker's own or a site's domain, or a secret that is none, is
+ * logged (once: the handler is made once) and the Worker serves no router: the config without it.
+ */
+function routedBy(
+  resolved: ResolvedConfig,
+  env: AppBundleEnv,
+  domains: Readonly<Record<string, string>>,
+): { resolved: ResolvedConfig; router?: { secret?: string } } {
+  if (!resolved.router) return { resolved };
+  try {
+    return { resolved, router: routerOptionsFrom(resolved.router, env, domains) };
+  } catch (err) {
+    console.error(`sanoma: the agents' router is not served: ${errorMessage(err)}`);
+    const { router: _router, ...unrouted } = resolved;
+    return { resolved: unrouted };
   }
 }
 
@@ -94,12 +119,12 @@ let made: Promise<AppHandler> | undefined;
 async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
   const databaseUrl = env.DATABASE?.connectionString;
   if (!databaseUrl) throw new Error("the Worker has no DATABASE binding with a connection string");
-  const resolved = resolveConfig({ ...config, root, databaseUrl });
+  const domains = env.SANOMA_DOMAINS ? domainsOf(env.SANOMA_DOMAINS) : {};
+  const { resolved, router } = routedBy(resolveConfig({ ...config, root, databaseUrl }), env, domains);
   // Each call made on the request's own client (`requests`), `tokens.resolve` and the logins' pool too.
   const client = member([]) as SanomaClient;
   const social = socialOf(env);
   const staff = staffLogin(betterAuthStaffLogin, social, addressOf(env));
-  const domains = env.SANOMA_DOMAINS ? domainsOf(env.SANOMA_DOMAINS) : {};
   // Each site the Worker serves, with its login half when it has one; another public site answers 503 on its hosts here.
   const sites = new Map<string, AdmittingLogin>();
   const halves: Promise<unknown>[] = [];
@@ -124,6 +149,7 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
       login: admitting(staff, () => snapshot.people),
       sites,
       domains,
+      ...(router && { router }),
       entry: start,
       files: (request, site) => fileFor(request, env, site),
     },
@@ -179,7 +205,14 @@ export async function serve(
     throw err;
   }));
   const { hostname } = new URL(request.url);
-  if (env.SANOMA_HOSTNAME && hostname !== env.SANOMA_HOSTNAME.toLowerCase() && !app.hosts.has(hostname)) {
+  // With its own hostname the app answers there, on its sites' domains and on its router's
+  // hostname (`config.router`), and nowhere else.
+  if (
+    env.SANOMA_HOSTNAME &&
+    hostname !== env.SANOMA_HOSTNAME.toLowerCase() &&
+    !app.hosts.has(hostname) &&
+    hostname !== app.routerHostname
+  ) {
     return plain(404, "Not found\n");
   }
   let client: Promise<SanomaClient> | undefined;

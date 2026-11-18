@@ -425,17 +425,21 @@ export async function sendLoginCode(client: AppContext["client"], email: string,
 
 /**
  * The 401 a client gets at `/mcp` without a token it may use (RFC 6750, with RFC 9728's pointer to
- * the resource's metadata), which is what starts its sign-in; `error` says why one was refused.
+ * the resource's metadata), which is what starts its sign-in; `error` says why one was refused,
+ * in `description`'s words (a quoted string's: no `"` or `\\`). The one such answer, the app's and the agents'
+ * router's (`agent-router.ts`, for its own metadata).
  * `metadata` is the configured address's document (`resourceMetadataOf`), on the resource's own
  * origin, whatever host the request came in on: a client that reached the app by another name is
  * sent to the one address tokens are issued for. With no address (`metadata` undefined) no
  * client can sign in: the 401 names no scheme, and says what to set (`NO_AGENT_ADDRESS`).
  */
-function challenge(metadata: string | undefined, error?: "invalid_token"): Response {
+export function challenge(
+  metadata: string | undefined,
+  error?: "invalid_token",
+  description = "The access token is not one this company's sign-in issued for its agent surface, or it expired",
+): Response {
   if (metadata === undefined) return refuse(401, NO_AGENT_ADDRESS);
-  const why = error
-    ? `error="${error}", error_description="The access token is not one this company's sign-in issued for its agent surface, or it expired", `
-    : "";
+  const why = error ? `error="${error}", error_description="${description}", ` : "";
   return refuse(401, "Sign in first", { "www-authenticate": `Bearer ${why}resource_metadata="${metadata}"` });
 }
 

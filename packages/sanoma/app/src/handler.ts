@@ -8,6 +8,7 @@ import type { ConfigDescription, SiteEntry } from "sanoma/workflows/describe";
 import { siteDir } from "sanoma/workflows/shared";
 import type { AdmittingLogin, AppContext, RequestContext, ServerEntry } from "./context.ts";
 import { hostName, placeOf } from "./loopback.ts";
+import { agentRouter } from "./agent-router.ts";
 import { seoFile } from "./seo.ts";
 import { siteHost, sitePath } from "./site-path.ts";
 import type { AppSnapshot } from "./snapshot.ts";
@@ -55,6 +56,13 @@ export interface AppHandlerOptions {
    * reads webhooks (`remoteWebhook`), and `POST /api/token/redeem` (`redeemToken`).
    */
   ingress?: readonly IngressRoute[];
+  /**
+   * For a config with a `router` (`ResolvedConfig.router`): its master secret
+   * (`SANOMA_ROUTER_SECRET`, as `routerOptionsFrom` reads it; without one it forwards nothing),
+   * and what it forwards with instead of `fetch` (a test's). A launcher that must not serve the
+   * router gives a `resolved` without one.
+   */
+  router?: { secret?: string; fetch?: typeof fetch };
   /** Start's server entry: the pages and the server functions. */
   entry: ServerEntry;
   /**
@@ -76,11 +84,14 @@ export interface AppHandler {
   hosts: ReadonlyMap<string, SiteEntry>;
   /** Each public site's domain, by site name, as `hosts` has it. */
   domains: ReadonlyMap<string, string>;
+  /** The hostname the agents' router answers on, when the config has one (`ResolvedConfig.router`). */
+  routerHostname?: string;
 }
 
 /**
- * Makes the app's handler: `/healthz`, the machine routes, the webhooks and the token's redeem,
- * then a public site's host (its robots.txt and sitemap, its front door, then its pages and its
+ * Makes the app's handler: the agents' router on its own hostname, when the config has one
+ * (`agentRouter`: its routes alone there, ahead of everything else), then `/healthz`, the machine
+ * routes, the webhooks and the token's redeem, then a public site's host (its robots.txt and sitemap, its front door, then its pages and its
  * `api`), then the staff login, the host's files and the app's pages and server functions. The
  * public sites' hosts are read from `first`, the snapshot the host starts with.
  */
@@ -100,6 +111,14 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
     { method: "POST", path: "/api/token/redeem", handle: (request) => redeemToken(client, request) },
   ]);
   const hosts = publicHosts(first.description, options.domains ?? {});
+  // The agents' router, on its hostname alone: its list read through the request's client.
+  const routing = resolved.router;
+  const router =
+    routing && agentRouter({ router: routing, ...options.router, company: (id) => client.routedCompany(routing, id) });
+  // The launchers refuse this at their start (`routerOptionsFrom`); said here for any other caller.
+  if (router && hosts.has(router.hostname)) {
+    console.warn(`sanoma app: ${router.hostname} is the router's hostname: the public site there is not served`);
+  }
   const domains = new Map([...hosts.values()].flatMap((site) => (site.domain ? [[site.name, site.domain]] : [])));
   /** The snapshot with each public site's domain on its entry, as `publicHosts` set it. */
   const withDomains = new WeakMap<AppSnapshot, AppSnapshot>();
@@ -136,6 +155,9 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
 
   async function answer(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    // The router's hostname is the router's alone: its routes, and a 404 for everything else the
+    // app serves elsewhere (a page, a machine route, the staff login).
+    if (router && hostName(url.host) === router.hostname) return router.handle(request);
     // A host's probe, before the login: it says the app answers, and nothing else.
     if (url.pathname === "/healthz" && (request.method === "GET" || request.method === "HEAD")) {
       return new Response(request.method === "HEAD" ? null : "ok\n", {
@@ -196,6 +218,7 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
     context,
     hosts,
     domains,
+    ...(router && { routerHostname: router.hostname }),
     async fetch(request) {
       try {
         return await answer(request);

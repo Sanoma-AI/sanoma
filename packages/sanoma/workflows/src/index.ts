@@ -10,10 +10,28 @@ export {
   RESOURCE_METADATA,
   resourceMetadataOf,
   AGENT_ADDRESS_ENV,
+  AGENT_GRANT_TYPES,
+  AGENT_SCOPES,
   AGENT_SURFACE_PATH,
   agentAddressAt,
   agentAddressFrom,
+  agentResourceMetadata,
+  agentServerMetadata,
+  bearerJws,
   checkAgentAddress,
+  COMPANY_CLAIM,
+  COMPANY_ID,
+  companyOfTag,
+  companyPrefix,
+  DISCOVERY_CACHE,
+  routedAgentAddress,
+  ROUTER_CLIENT_IP_HEADER,
+  ROUTER_SECRET_HEADER,
+  ROUTER_SECRET_MIN,
+  routerAddressOf,
+  routerSecretFor,
+  routerSecretFrom,
+  STAFF_OAUTH_ROUTES,
   NO_AGENT_ADDRESS,
   STAFF_AUTH_PATH,
   sameOrigin,
@@ -90,6 +108,9 @@ export {
   type InstalledAgent,
   joinDeclarations,
   type Login,
+  type ResolvedRouter,
+  type Router,
+  routerOptionsFrom,
   readRootSnapshot,
   resolveConfig,
   resolveDatabaseUrl,
@@ -429,7 +450,7 @@ export {
   type StoreMovePlan,
 } from "./store-move.ts";
 export { MigrateStoreInput } from "./store-move-workflow.ts";
-export { deploymentKey, keyBytes, signingKeyFor } from "./deployment-key.ts";
+export { deploymentKey, keyBytes, sameSecret, signingKeyFor } from "./deployment-key.ts";
 
 export {
   defineConnection,

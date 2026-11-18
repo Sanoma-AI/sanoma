@@ -1,8 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { createHash, timingSafeEqual } from "node:crypto";
 import { calculatePKCECodeChallenge, generateRandomCodeVerifier, generateRandomState } from "oauth4webapi";
-import { errorMessage, type Principal } from "sanoma/workflows";
+import { errorMessage, type Principal, sameSecret } from "sanoma/workflows";
 import { isLoopback, slugged } from "sanoma/workflows/shared";
 import { ApiError, INFRA, type SanomaSignIn } from "../api.ts";
 import type { AppContext } from "../context.ts";
@@ -133,11 +132,6 @@ export async function sanomaSignIn({ client }: AppContext): Promise<SanomaSignIn
   };
 }
 
-const digest = (text: string) => createHash("sha256").update(text).digest();
-
-/** Whether two strings are the same, in a time that does not say how much of them is. */
-const same = (a: string, b: string) => timingSafeEqual(digest(a), digest(b));
-
 /** How long the Cloud has to answer the redeem. */
 const REDEEM_MS = 15_000;
 
@@ -174,7 +168,7 @@ async function callbackPage(
   const code = params.get("code");
   const state = params.get("state");
   const pending = pendingOf((await client.secrets([SIGN_IN])).get(SIGN_IN)?.value);
-  if (!pending || !state || !same(state, pending.state)) {
+  if (!pending || !state || !sameSecret(state, pending.state)) {
     return page(400, "This sign-in is not the app's", `It expired, was used, or another started since. ${again}`);
   }
   await client.clearSecret(SIGN_IN, { by: pending.by });
