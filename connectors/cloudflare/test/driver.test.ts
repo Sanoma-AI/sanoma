@@ -225,6 +225,65 @@ const update = (input: object) =>
 /** The requests' methods and paths from `from` on, without the API's prefix. */
 const requests = (from = 0) => sent.slice(from).map((r) => `${r.method} ${r.path.replace(API, "")}`);
 
+// `cloudflare.host` and the agents' router: a company behind one (`agents`), and one that serves one.
+
+/** This company's own secret at the router, as `routerSecretFor` makes one, and the router's master. */
+const OWN = "c0ffee".repeat(10) + "abcd";
+const MASTER = "the-router's-master-secret-0123456789";
+const routedCall = (values: Record<string, string> = {}) =>
+  callWith({
+    SANOMA_WAKEUP_TOKEN: TOKEN,
+    DB_URL: DATABASE_URL,
+    ACME_AT_ROUTER: OWN,
+    ROUTER_MASTER: MASTER,
+    ...values,
+  });
+const hostOp = (name: string, input: object, call = routedCall()) => op(`host.${name}`, input, call);
+const address = { url: "https://mcp.acme.example/mcp", company: "acme" };
+const agents = { ...address, secret: { $secret: "ACME_AT_ROUTER" } };
+const ROUTER = "mcp.acme.example";
+/** The host as apply gives it for a config that serves a router: its hostname, and its master secret's marker. */
+const servingHost = {
+  ...desired,
+  routerHostname: ROUTER,
+  secrets: { ...desired.secrets, SANOMA_ROUTER_SECRET: { $secret: "ROUTER_MASTER" } },
+};
+/** `e`, a Worker's settings, with more bindings. */
+const withBindings = (e: Exchange, ...more: object[]): Exchange => {
+  const body = structuredClone(e.body) as { result: { bindings: object[] } };
+  body.result.bindings.push(...more);
+  return { ...e, body };
+};
+const textBinding = (name: string, value: string) => ({ type: "plain_text", name, text: value });
+const SECRET_BOUND = { type: "secret_text", name: "SANOMA_ROUTER_SECRET" };
+/** The Worker's bindings, as its last upload sent them, by name. */
+const bound = async () =>
+  Object.fromEntries(
+    ((await uploaded()).bindings as { name: string; type: string; text?: string }[]).map((b) => [b.name, b]),
+  );
+/** One plan's reads of a Worker whose settings are `settings`: the subdomain only the driver's first time. */
+const planReads = (settings: Exchange, first: boolean, ...domains: Exchange[]) => {
+  const [, application, subdomain] = only("update", (_, i) => i < 3);
+  return [settings, application!, ...(first ? [subdomain!] : []), ...domains];
+};
+/** The settings of the `update` fixture's Worker: no hostname, no router, no routed address. */
+const [SETTINGS] = fixture("update");
+
+/** A plan of the Worker `company` against `desired`. */
+const planHost = (given: object) =>
+  hostOp("plan", { id: "company", desired: given }) as Promise<{ action: string; planned: Record<string, unknown> }>;
+/** The Worker's settings `e` with a routed address's three bindings, and with a served router's two. */
+const routedSettings = (e: Exchange) =>
+  withBindings(e, textBinding("SANOMA_AGENT_URL", address.url), textBinding("SANOMA_COMPANY", "acme"), SECRET_BOUND);
+const servingSettings = (e: Exchange) => withBindings(e, textBinding("SANOMA_ROUTER_HOSTNAME", ROUTER), SECRET_BOUND);
+/** The driver's own refusal of a declaration, `invalid`, saying `message`. */
+const invalidWith = (message: RegExp) => ({
+  name: "DriverError",
+  retryable: false,
+  vendorCode: "invalid",
+  message: expect.stringMatching(message),
+});
+
 describe.skipIf(live)("cloudflareDriver", () => {
   describe("cloudflare.container", () => {
     it("prepares the image, uploads the Worker with its bindings, image and migration, turns its URL on, makes its application and waits for it", async () => {
@@ -1210,6 +1269,196 @@ describe.skipIf(live)("cloudflareDriver", () => {
       await expect(op("container.read", { id: "company" })).rejects.toMatchObject({
         message: expect.stringContaining("CLOUDFLARE_ACCOUNT_ID is not set"),
       });
+      expect(sent).toEqual([]);
+    });
+  });
+
+  describe("cloudflare.host and the agents' router", () => {
+    it("writes a routed company's three bindings, its secret as a secret, and no secret in a plan or a state", async () => {
+      play("create");
+      const routed = { ...desired, agents };
+      const planned = await hostOp("plan", { desired: routed });
+      expect(planned).toMatchObject({ action: "create", planned: { agents } });
+      const made = await hostOp("create", { desired: routed });
+      expect(made).toEqual({ id: "company", state: { ...state, agents: address } });
+      const bindings = await bound();
+      expect(bindings).toMatchObject({
+        SANOMA_AGENT_URL: { type: "plain_text", text: address.url },
+        SANOMA_COMPANY: { type: "plain_text", text: "acme" },
+        SANOMA_ROUTER_SECRET: { type: "secret_text", text: OWN },
+      });
+      expect(bindings).not.toHaveProperty("SANOMA_ROUTER_HOSTNAME");
+      // Names only: neither a plan nor a state, which the ledger records, holds the secret.
+      expect(JSON.stringify([planned, made])).not.toContain(OWN);
+    });
+
+    it("reads the address back from its bindings, and plans nothing, a change of company, a lost secret, or its removal", async () => {
+      const routed = routedSettings(SETTINGS!);
+      const unkeyed = withBindings(
+        SETTINGS!,
+        textBinding("SANOMA_AGENT_URL", address.url),
+        textBinding("SANOMA_COMPANY", "acme"),
+      );
+      play("routed-plans", [
+        ...planReads(routed, true),
+        ...planReads(routed, false),
+        ...planReads(unkeyed, false),
+        ...planReads(routed, false),
+        ...planReads(SETTINGS!, false),
+      ]);
+      expect(await planHost({ ...desired, agents })).toMatchObject({ action: "none", planned: { agents: address } });
+      const moved = { ...agents, company: "acme-2" };
+      expect(await planHost({ ...desired, agents: moved })).toMatchObject({
+        action: "update",
+        planned: { agents: moved },
+      });
+      // The two names without the secret: the next apply binds it again.
+      expect(await planHost({ ...desired, agents })).toMatchObject({ action: "update" });
+      // Left out of the declaration: the update that takes the three bindings off.
+      const removed = await planHost(desired);
+      expect(removed.action).toBe("update");
+      expect(removed.planned).not.toHaveProperty("agents");
+      // Declared for a Worker that has none: the update that writes them.
+      expect(await planHost({ ...desired, agents })).toMatchObject({ action: "update", planned: { agents } });
+    });
+
+    it("takes the three bindings off on the update whose declaration leaves `agents` out", async () => {
+      const updated = fixture("update");
+      play("routed-removed", [
+        routedSettings(updated[0]!),
+        updated[1]!,
+        updated[2]!,
+        routedSettings(updated[3]!),
+        ...updated.slice(4),
+      ]);
+      const made = (await hostOp("update", {
+        id: "company",
+        desired: { ...desired, revision: "def456" },
+        expect: { action: "update", replace: [] },
+      })) as { state: Record<string, unknown> };
+      expect(made.state).not.toHaveProperty("agents");
+      const bindings = await bound();
+      expect(Object.keys(bindings).filter((name) => /AGENT_URL|COMPANY|ROUTER/.test(name))).toEqual([]);
+    });
+
+    it.each([
+      // Not a router's `/mcp` as it is compared: the app's own origin, a trailing slash, no scheme.
+      [{ ...agents, url: "https://mcp.acme.example" }, /is not a router's agent surface/],
+      [{ ...agents, url: "https://mcp.acme.example/mcp/" }, /is not a router's agent surface/],
+      [{ ...agents, url: "mcp.acme.example/mcp" }, /is not a router's agent surface/],
+      // A `.` ends a company's id in a code and a refresh token.
+      [{ ...agents, company: "acme.example" }, /letters, digits, - and _ only/],
+      // The secret is named, never written: a value would be in the declaration, the plan and the ledger.
+      [{ ...address, secret: OWN }, /agents\.secret names the stored secret .*secret\("NAME"\), not its value/],
+      [address, /agents\.secret names the stored secret/],
+    ])("refuses the routed address %j at plan and at create, before any request", async (given, message) => {
+      const routed = { ...desired, agents: given };
+      await expect(planHost(routed)).rejects.toMatchObject(invalidWith(message));
+      await expect(hostOp("create", { desired: routed })).rejects.toMatchObject(invalidWith(message));
+      expect(sent).toEqual([]);
+    });
+
+    it.each(["too-short", `${"a".repeat(40)} ${"b".repeat(40)}`])(
+      "refuses a stored secret no router could send (%s), before any request and without saying it",
+      async (stored) => {
+        const refusal = hostOp("create", { desired: { ...desired, agents } }, routedCall({ ACME_AT_ROUTER: stored }));
+        await expect(refusal).rejects.toMatchObject(
+          invalidWith(/agents: the agent address's router has no secret a router can send/),
+        );
+        await expect(refusal).rejects.toMatchObject({ message: expect.not.stringContaining(stored) });
+        expect(sent).toEqual([]);
+      },
+    );
+
+    it("attaches the router's hostname like the app's, records it, binds the master secret, and detaches it at delete", async () => {
+      play("hostname");
+      const planned = await hostOp("plan", { desired: servingHost });
+      const made = await hostOp("create", { desired: servingHost });
+      // The app stays on workers.dev: the router's hostname is no `url`.
+      expect(made).toEqual({ id: "company", state: { ...state, routerHostname: ROUTER } });
+      const attached = sent.find((r) => r.method === "PUT" && r.path === apiPath("/workers/domains"));
+      expect(attached!.body).toEqual({ hostname: ROUTER, service: "sanoma-company", zone_id: ZONE });
+      const bindings = await bound();
+      expect(bindings).toMatchObject({
+        SANOMA_ROUTER_HOSTNAME: { type: "plain_text", text: ROUTER },
+        SANOMA_ROUTER_SECRET: { type: "secret_text", text: MASTER },
+      });
+      expect(bindings).not.toHaveProperty("SANOMA_HOSTNAME");
+      expect(bindings).not.toHaveProperty("SANOMA_AGENT_URL");
+      expect(JSON.stringify([planned, made])).not.toContain(MASTER);
+      expect(await hostOp("delete", { id: "company" })).toEqual({ id: "company", gone: true });
+      expect(sent.filter((r) => r.method === "DELETE" && r.path.includes("/workers/domains/"))).toHaveLength(1);
+      expect(await hostOp("read", { id: "company" })).toEqual({ id: "company", gone: true });
+    });
+
+    it("reads the router's hostname detached by hand as drift, and plans an update once the config serves none", async () => {
+      const served = servingSettings(SETTINGS!);
+      play("router-plans", [
+        ...planReads(served, true, attachedDomains(ROUTER)),
+        ...planReads(served, false, attachedDomains()),
+        ...planReads(served, false, attachedDomains(ROUTER)),
+      ]);
+      expect(await planHost(servingHost)).toMatchObject({ action: "none", planned: { routerHostname: ROUTER } });
+      expect(await planHost(servingHost)).toMatchObject({ action: "update", planned: { routerHostname: ROUTER } });
+      // The config's `router` taken out: apply leaves both out, and the update detaches and unbinds.
+      const removed = await planHost(desired);
+      expect(removed.action).toBe("update");
+      expect(removed.planned).not.toHaveProperty("routerHostname");
+    });
+
+    it("detaches the router's hostname before the upload once the config serves none, and uploads neither binding", async () => {
+      const updated = fixture("update");
+      const attached = attachedDomains(ROUTER);
+      play("router-removed", [
+        servingSettings(updated[0]!),
+        updated[1]!,
+        updated[2]!,
+        attached,
+        servingSettings(updated[3]!),
+        attached,
+        ...updated.slice(4, 9),
+        detached("d1"),
+        ...updated.slice(9),
+      ]);
+      await hostOp("update", {
+        id: "company",
+        desired: { ...desired, revision: "def456" },
+        expect: { action: "update", replace: [] },
+      });
+      expect(requests().filter((r) => /^(PUT|DELETE) \/workers\/(domains|scripts\/sanoma-company)/.test(r))).toEqual([
+        "DELETE /workers/domains/d1",
+        "PUT /workers/scripts/sanoma-company",
+        "PUT /workers/scripts/sanoma-company",
+      ]);
+      const bindings = await bound();
+      expect(Object.keys(bindings).filter((name) => /AGENT_URL|COMPANY|ROUTER/.test(name))).toEqual([]);
+    });
+
+    it("refuses a host that serves a router and is declared behind one, at plan and at create, before any request", async () => {
+      const both = { ...desired, routerHostname: ROUTER, agents };
+      const said = invalidWith(
+        /SANOMA_ROUTER_SECRET would be the router's master secret and this company's own at once/,
+      );
+      await expect(planHost(both)).rejects.toMatchObject(said);
+      await expect(hostOp("create", { desired: both })).rejects.toMatchObject(said);
+      // The same variable given the host another way (a binding with `host: true`): the upload would bind it twice.
+      const twice = { ...desired, agents, secrets: servingHost.secrets };
+      await expect(hostOp("create", { desired: twice })).rejects.toMatchObject(
+        invalidWith(/`agents` gives the Worker SANOMA_ROUTER_SECRET, which its secrets name too/),
+      );
+      expect(sent).toEqual([]);
+    });
+
+    it("refuses a router's hostname that is the app's or a site's, and a master secret no router could send, before any request", async () => {
+      await expect(hostOp("create", { desired: { ...servingHost, hostname: ROUTER } })).rejects.toMatchObject(
+        invalidWith(/the router's hostname mcp\.acme\.example is also the app's hostname/),
+      );
+      await expect(hostOp("plan", { desired: { ...servingHost, domains: { www: ROUTER } } })).rejects.toMatchObject(
+        invalidWith(/the router's hostname mcp\.acme\.example is also the domain of the site www/),
+      );
+      const short = hostOp("create", { desired: servingHost }, routedCall({ ROUTER_MASTER: "too-short" }));
+      await expect(short).rejects.toMatchObject(invalidWith(/SANOMA_ROUTER_SECRET is not one a router can send/));
+      await expect(short).rejects.toMatchObject({ message: expect.not.stringContaining("too-short") });
       expect(sent).toEqual([]);
     });
   });
