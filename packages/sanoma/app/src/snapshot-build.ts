@@ -21,6 +21,7 @@ import {
 } from "sanoma/workflows";
 import { type ConfigDescription, describeConfig, liveDescription, readLockfile } from "sanoma/workflows/describe";
 import { loadScenarios } from "sanoma/workflows/scenario";
+import { BUILT_IN_WORKFLOWS } from "sanoma/workflows/shared";
 import { INFRA, type ScenariosResponse } from "./api.ts";
 import { contentFields, publishedOf } from "./content-files.ts";
 import { type AppSnapshot, withoutSources } from "./snapshot.ts";
@@ -187,8 +188,9 @@ export async function scenariosOf(resolved: ResolvedConfig): Promise<ScenariosRe
 }
 
 /**
- * The repository's remote, its credentials left out, and each workflow's files in it: its own and
- * its company operations'. A remote git cannot read is none, logged.
+ * The repository's remote, its credentials left out, and each of the company's workflows' files in
+ * it: its own and its company operations'. The runtime's own are left out: `call` uses the
+ * operations a page may call, and is no workflow a change edits. A remote git cannot read is none, logged.
  */
 async function repositoryOf(resolved: ResolvedConfig, source: Source | undefined) {
   if (!source) return undefined;
@@ -197,10 +199,12 @@ async function repositoryOf(resolved: ResolvedConfig, source: Source | undefined
     return undefined;
   });
   const workflows = Object.fromEntries(
-    [...resolved.workflows.values()].map((wf) => [
-      wf.name,
-      [wf, ...wf.uses.filter(isOperation)].map(({ file }) => relative(source.root, file).split(sep).join("/")),
-    ]),
+    [...resolved.workflows.values()]
+      .filter((wf) => !BUILT_IN_WORKFLOWS.has(wf.name))
+      .map((wf) => [
+        wf.name,
+        [wf, ...wf.uses.filter(isOperation)].map(({ file }) => relative(source.root, file).split(sep).join("/")),
+      ]),
   );
   return { ...(remote && { remote: withoutCredentials(remote) }), workflows };
 }
