@@ -518,8 +518,8 @@ export class SanomaClient {
    * collection's or a vendor's read, or a company operation whose every used operation may be;
    * never a vendor's write, the runtime's own or a resource type's (`invalid_input`, as is an
    * unknown id or input its schema refuses). The policy decides it as the person, in a run
-   * `direct:<actor>:<id>` of the workflow `call` with no approvals. A deny throws `policy_denied`
-   * and writes nothing. An allowed call runs the driver once, without DBOS and without a retry (a
+   * `direct:<actor>:<id>` of the workflow `call` with no approvals. A deny throws `policy_denied`,
+   * and the call denied writes nothing. An allowed call runs the driver once, without DBOS and without a retry (a
    * driver's failure is `driver_failed`). A read returns its output and records nothing. A write is
    * recorded as one `op.called` per call it makes (`callsOf`, seq from 0) in that run, and with the
    * default ledger in one transaction with what it saves, so both are written or neither;
@@ -780,7 +780,8 @@ export class SanomaClient {
    * What the direct write recorded as `runId` returned, when one did (a batch's output from its
    * entries' records): refused (`invalid_input`) when another actor made it (another id, or the
    * same agent for another person), or it was of another operation or input, its
-   * failure again (`driver_failed`) when it failed, and `partial` when fewer records than its
+   * deny again (`policy_denied`) when a call inside it was denied, its failure again
+   * (`driver_failed`) when it failed otherwise, and `partial` when fewer records than its
    * calls are there (a batch's, appended one by one outside a transaction, cut short). Its
    * records are the run's but those within a company operation's call, or for a call inside one
    * (`from`, its first `seq`), those within it from that `seq`, one per call.
@@ -818,6 +819,10 @@ export class SanomaClient {
       );
     }
     const failed = made.find((r) => r.error);
+    // A deny inside a company operation is the same deny again: no driver failed.
+    if (failed?.error?.code === "policy_denied") {
+      throw new SanomaError("policy_denied", failed.error.message, { ...failed.error.data, runId });
+    }
     if (failed?.error) {
       throw new SanomaError(
         "driver_failed",

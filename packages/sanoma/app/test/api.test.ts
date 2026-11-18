@@ -13,6 +13,7 @@ import {
   DriverError,
   type Principal,
   resolveConfig,
+  SanomaClient,
   type SanomaConfig,
   visitorPrincipal,
   withSetup,
@@ -67,7 +68,8 @@ const acmeDriver = defineDriver(acme, {
 
 // The outbound fixture, copied to a root of its own: its collection, and its workflow, which imports
 // it from there, with its people and a policy that allows, but denies a lead `lost` and holds one
-// `won` for `lead`, and lets visitors start the workflow and call the operation `lookup`.
+// `won` for `lead`, lets visitors start the workflow and call the operations `lookup` and `note`,
+// and denies the agents, and ada, `peek` and acme's read for one company each.
 const root = mkdtempSync(join(tmpdir(), "sanoma-api-"));
 cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
 writeFileSync(
@@ -93,6 +95,24 @@ when { context.input.record.stage == "won" };
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:outbound-next", resource);
 
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"operations.lookup.run", resource);
+
+permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"operations.note.run", resource);
+
+@reason("not for agents")
+forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"operations.peek.run", resource)
+when { context.input.company == "Agentless" };
+
+@reason("not for agents")
+forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"acme.customer.get", resource)
+when { context.input.id == "Agentless" };
+
+@reason("not for ada")
+forbid (principal == Sanoma::Principal::"ada", action == Sanoma::Action::"operations.peek.run", resource)
+when { context.input.company == "Adaless" };
+
+@reason("not for ada")
+forbid (principal == Sanoma::Principal::"ada", action == Sanoma::Action::"acme.customer.get", resource)
+when { context.input.id == "Adaless" };
 `,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -127,6 +147,19 @@ const peek = defineOperation({
   run: async (ctx, { company }) => ({ stage: (await ctx.data.outbound.get({ key: company }))?.record.stage ?? null }),
 });
 
+/** A lead saved: a company operation that writes, which a permit names for the visitors. */
+const note = defineOperation({
+  name: "note",
+  input: z.object({ company: z.string() }),
+  uses: [outbound.save],
+  run: async (ctx, { company }) => {
+    const saved = await ctx.data.outbound.save({
+      record: { company, contact: "visitor@note.test", stage: "researched", owner: "ada" },
+    });
+    return { key: saved.key };
+  },
+});
+
 /** A customer renamed: a company operation that writes at a vendor, a workflow's step only. */
 const relabel = defineOperation({
   name: "relabel",
@@ -137,7 +170,7 @@ const relabel = defineOperation({
 
 const config: SanomaConfig = {
   workflows: [outboundNext, refuse],
-  operations: [lookup, peek, relabel],
+  operations: [lookup, peek, relabel, note],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
   root,
@@ -382,6 +415,12 @@ describe("POST /api/call", () => {
 /** Who a run is started by when the declared agent `claude-code` starts it for ada. */
 const agentForAda = { id: "claude-code", groups: ["agents"], onBehalfOf: "ada" };
 
+/** A 403 `policy_denied` whose message matches `why`. */
+const deniedFor = (why: RegExp) => ({
+  status: 403,
+  body: { code: "policy_denied", error: expect.stringMatching(why) },
+});
+
 describe("POST /api/call as a declared agent, named in x-sanoma-agent", () => {
   const agent = { [AGENT_HEADER]: "claude-code" };
 
@@ -409,6 +448,33 @@ describe("POST /api/call as a declared agent, named in x-sanoma-agent", () => {
     expect(await post({ name: "goLive", input: {} }, "ada", { headers: agent })).toMatchObject({
       status: 403,
       body: { code: "policy_denied" },
+    });
+  });
+
+  it("calls a company operation decided as the agent and as the person, for it and each call inside, the stricter answer standing", async () => {
+    const asAgent = (name: string, company: string) => post({ name, input: { company } }, "ada", { headers: agent });
+    // The agents' forbids: of the operation itself, and of acme's read inside lookup.
+    expect(await asAgent("operations.peek.run", "Agentless")).toMatchObject(deniedFor(/peek.*not for agents/));
+    expect(await asAgent("operations.lookup.run", "Agentless")).toMatchObject(
+      deniedFor(/acme\.customer\.get.*not for agents/),
+    );
+    // ada's forbids hold for the agent acting for her, on the operation and inside it.
+    expect(await asAgent("operations.peek.run", "Adaless")).toMatchObject(deniedFor(/peek.*not for ada/));
+    expect(await asAgent("operations.lookup.run", "Adaless")).toMatchObject(
+      deniedFor(/acme\.customer\.get.*not for ada/),
+    );
+    // ada herself is let through what only the agents are refused, and the agent through the rest.
+    expect(await post({ name: "operations.peek.run", input: { company: "Agentless" } })).toEqual({
+      status: 200,
+      body: { stage: null },
+    });
+    expect(await post({ name: "operations.lookup.run", input: { company: "Agentless" } })).toEqual({
+      status: 200,
+      body: { stage: null, name: "Acme Ltd" },
+    });
+    expect(await asAgent("operations.lookup.run", "Nobody")).toEqual({
+      status: 200,
+      body: { stage: null, name: "Acme Ltd" },
     });
   });
 
@@ -542,6 +608,52 @@ describe("callFn for a visitor", () => {
     // The same reads, called directly, are still refused.
     expect(await visit({ name: "data.outbound.get", input: { key: "Nobody" } }, visitor)).toMatchObject(denied);
     expect(await visit({ name: "acme.customer.get", input: { id: "Nobody" } }, visitor)).toMatchObject(denied);
+  });
+
+  it("calls a write operation a permit names, its save made within it with no permit of its own, never that save directly", async () => {
+    const id = crypto.randomUUID();
+    expect(await visit({ name: "operations.note.run", input: { company: "Visitor Co" }, id }, visitor)).toEqual({
+      body: { key: "Visitor Co" },
+    });
+    expect((await call({ name: "data.outbound.get", input: { key: "Visitor Co" } })).body).toMatchObject({
+      updatedBy: visitor.id,
+    });
+    // The operation's own record at seq 0, the save's within it.
+    const records = await testApp.config.ledger!.read(`direct:${visitor.id}:${id}`);
+    expect(records.map((r) => [r.seq, (r as { op?: string }).op, (r as { within?: number }).within])).toEqual([
+      [0, "operations.note.run", undefined],
+      [1, "data.outbound.save", 0],
+    ]);
+    expect(
+      await visit(
+        { name: "data.outbound.save", input: { record: lead("Direct Co") }, id: crypto.randomUUID() },
+        visitor,
+      ),
+    ).toMatchObject({ status: 403, body: { code: "policy_denied" } });
+  });
+
+  it("refuses a visitor every company operation where no Cedar file is, and answers staff", async () => {
+    // The same company with no policies/: allowAll, which permits a visitor nothing.
+    const open = mkdtempSync(join(tmpdir(), "sanoma-api-open-"));
+    cpSync(join(root, "resources"), join(open, "resources"), { recursive: true });
+    const openConfig = { ...testApp.config, root: open };
+    const allowing = await SanomaClient.connect(openConfig);
+    try {
+      const app: AppContext = { ...appContext(), resolved: resolveConfig(openConfig), client: allowing };
+      const ask = (principal: Principal) =>
+        answered(() =>
+          callApi(
+            app,
+            principal,
+            validate(CallRequest)({ name: "operations.lookup.run", input: { company: "Nobody" } }),
+          ),
+        );
+      expect(await ask(visitor)).toMatchObject({ status: 403, body: { code: "policy_denied" } });
+      expect(await ask({ id: "ada" })).toEqual({ body: { stage: null, name: "Acme Ltd" } });
+    } finally {
+      await allowing.close();
+      rmSync(open, { recursive: true, force: true });
+    }
   });
 
   it("starts none of the app's own actions on the repository, nor does an api token, whatever its groups", async () => {

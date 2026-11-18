@@ -96,6 +96,25 @@ const relabel = defineOperation({
 });
 
 /**
+ * A lead saved at the stage its leader is at, then the leader read at acme: a company operation
+ * whose write inside is read from the records, and which fails after that write while there is no
+ * leader (acme's read of `broken` fails).
+ */
+const follow = defineOperation({
+  name: "follow",
+  input: z.object({ company: z.string(), leader: z.string() }),
+  uses: [outbound.get, outbound.save, acme.customer.get],
+  run: async (ctx, { company, leader }) => {
+    const led = await ctx.data.outbound.get({ key: leader });
+    const saved = await ctx.data.outbound.save({
+      record: { company, contact: "ada@follow.test", stage: led?.record.stage ?? "researched", owner: "ada" },
+    });
+    const customer = await ctx.acme.customer.get({ id: led ? leader : "broken" });
+    return { saved: saved.key, name: customer.name };
+  },
+});
+
+/**
  * Allows, but denies a lead `lost` and holds one `won` for `lead`, and holds a pair that ends at a
  * `meeting`; lets `anonymous` look a lead up, and holds its read of the customer `Held` for `lead`.
  */
@@ -129,7 +148,7 @@ const config: SanomaConfig = {
   workflows: [],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
-  operations: [lookup, pair, relabel],
+  operations: [lookup, pair, relabel, follow],
   root,
 };
 const lead = (company: string, stage = "researched") => ({
@@ -607,6 +626,22 @@ describe("a direct call", () => {
       expect((await records()).map((r) => r.id)).toEqual(["direct:ada:seed:op.called:0"]);
     });
 
+    it("runs a read again when called again with its id, recording nothing", async () => {
+      await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "seed" });
+      const input = { company: "Acme" };
+      expect(await client.call("operations.lookup.run", input, { actor: ada, id: "l2" })).toMatchObject({
+        stage: "researched",
+      });
+      await client.call("data.outbound.save", { record: lead("Acme", "meeting") }, { actor: ada, id: "move" });
+      expect(await client.call("operations.lookup.run", input, { actor: ada, id: "l2" })).toMatchObject({
+        stage: "meeting",
+      });
+      expect((await records()).map((r) => r.id)).toEqual([
+        "direct:ada:move:op.called:0",
+        "direct:ada:seed:op.called:0",
+      ]);
+    });
+
     it("records a write at seq 0 after its body, each write inside after it, within it, and answers its id again", async () => {
       const input = { first: "Acme", second: "Beta", stage: "researched" };
       expect(await client.call("operations.pair.run", input, { actor: ada, id: "p1" })).toEqual({
@@ -657,6 +692,46 @@ describe("a direct call", () => {
       ]);
     });
 
+    it("makes again a write that stopped after its first write inside, that one answered by its record", async () => {
+      const input = { company: "Acme", leader: "Beta" };
+      // No Beta yet: the body fails after it saved Acme.
+      expect(await failure(client.call("operations.follow.run", input, { actor: ada, id: "f1" }))).toMatchObject({
+        code: "driver_failed",
+      });
+      // As if it stopped before its own record; Acme removed since, and Beta saved.
+      await db.delete(ledger).where(eq(ledger.id, "direct:ada:f1:op.called:0"));
+      await db.delete(data).where(eq(data.key, "Acme"));
+      await client.call("data.outbound.save", { record: lead("Beta") }, { actor: ada, id: "seed" });
+      expect(await client.call("operations.follow.run", input, { actor: ada, id: "f1" })).toEqual({
+        saved: "Acme",
+        name: "Acme Ltd",
+      });
+      // Acme is not saved again: its first save's record answered it.
+      expect((await rows()).map((r) => r.key)).toEqual(["Beta"]);
+      expect((await calls()).map((c) => [c.id, c.within])).toEqual([
+        ["direct:ada:f1:op.called:0", undefined],
+        ["direct:ada:f1:op.called:2", 0],
+        ["direct:ada:seed:op.called:0", undefined],
+      ]);
+    });
+
+    it("refuses its id again when the write inside it would make differs from the one recorded", async () => {
+      const input = { company: "Acme", leader: "Beta" };
+      await failure(client.call("operations.follow.run", input, { actor: ada, id: "f2" }));
+      await db.delete(ledger).where(eq(ledger.id, "direct:ada:f2:op.called:0"));
+      // Beta at another stage: the save of Acme made again is not the one recorded.
+      await client.call("data.outbound.save", { record: lead("Beta", "contacted") }, { actor: ada, id: "seed" });
+      expect(await failure(client.call("operations.follow.run", input, { actor: ada, id: "f2" }))).toMatchObject({
+        code: "invalid_input",
+        message: "Call direct:ada:f2 was made already with a different input; use another id",
+        data: { differs: ["input"] },
+      });
+      expect((await rows()).map((r) => [r.key, r.record.stage])).toEqual([
+        ["Acme", "researched"],
+        ["Beta", "contacted"],
+      ]);
+    });
+
     it("holds the whole operation when a call inside is held: a run of call makes it once approved", async () => {
       const held = randomUUID();
       const input = { first: "Acme", second: "Beta", stage: "won" };
@@ -703,7 +778,7 @@ describe("a direct call", () => {
       expect((await rows()).map((r) => r.key)).toEqual(["Acme", "Beta"]);
     });
 
-    it("fails on a call inside the policy denies, the earlier write standing and the operation recorded as failed", async () => {
+    it("fails on a call inside the policy denies, the earlier write standing, the operation recorded as failed and denied again by its id", async () => {
       const input = { first: "Acme", second: "Beta", stage: "lost" };
       expect(await failure(client.call("operations.pair.run", input, { actor: ada, id: "p3" }))).toMatchObject({
         code: "policy_denied",
@@ -714,6 +789,13 @@ describe("a direct call", () => {
         { id: "direct:ada:p3:op.called:0", op: "operations.pair.run", within: undefined, error: "policy_denied" },
         { id: "direct:ada:p3:op.called:1", op: "data.outbound.save", within: 0, error: undefined },
       ]);
+      // The same id again is the same deny, not a failure, and makes nothing.
+      expect(await failure(client.call("operations.pair.run", input, { actor: ada, id: "p3" }))).toMatchObject({
+        code: "policy_denied",
+        message: expect.stringContaining("data.outbound.save was denied by policy: leads are not lost"),
+        data: { op: "data.outbound.save", runId: "direct:ada:p3" },
+      });
+      expect(await calls()).toHaveLength(2);
     });
 
     it("lets a visitor in only by a permit naming the operation, its calls inside decided as a run's", async () => {
@@ -802,6 +884,7 @@ describe("the built-in call workflow in a config", () => {
       "data.outbound.list",
       "data.outbound.save",
       "data.outbound.saveMany",
+      "operations.follow.run",
       "operations.lookup.run",
       "operations.pair.run",
       "sanoma.apps.list",

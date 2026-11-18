@@ -191,7 +191,9 @@ export async function scenariosOf(resolved: ResolvedConfig): Promise<ScenariosRe
 /**
  * The repository's remote, its credentials left out, and each of the company's workflows' files in
  * it: its own and its company operations'. The runtime's own are left out: `call` uses the
- * operations a page may call, and is no workflow a change edits. A remote git cannot read is none, logged.
+ * operations a page may call, and is no workflow a change edits. The planner still counts a held
+ * `call` run as stranded, which is right: `call` is not carried across versions. A remote git
+ * cannot read is none, logged.
  */
 async function repositoryOf(resolved: ResolvedConfig, source: Source | undefined) {
   if (!source) return undefined;
