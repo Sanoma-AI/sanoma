@@ -6,6 +6,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   dbosClient,
+  defineOperation,
   defineWorkflow,
   memoryLedger,
   resolveConfig,
@@ -99,6 +100,24 @@ describe("the application version", () => {
       run: loudly.run as never,
     });
     expect(versionOf({ workflows: [wider] })).not.toBe(loud);
+  });
+
+  it("changes when a company operation's body, input schema or uses change", () => {
+    const op = { name: "draft", input: z.object({ title: z.string() }), uses: [ghost.post.create] } as const;
+    const plain = defineOperation({ ...op, run: async (ctx, { title }) => ctx.ghost.post.create({ title, html: "" }) });
+    const none = versionOf({});
+    const one = versionOf({ operations: [plain] });
+    expect(one).not.toBe(none);
+    expect(versionOf({ operations: [defineOperation({ ...op, run: plain.run })] })).toBe(one);
+    const bold = defineOperation({
+      ...op,
+      run: async (ctx, { title }) => ctx.ghost.post.create({ title, html: "<b></b>" }),
+    });
+    expect(versionOf({ operations: [bold] })).not.toBe(one);
+    const stricter = defineOperation({ ...op, input: z.object({ title: z.string().min(1) }), run: plain.run });
+    expect(versionOf({ operations: [stricter] })).not.toBe(one);
+    const wider = defineOperation({ ...op, uses: [ghost.post.create, bluesky.post.create], run: plain.run as never });
+    expect(versionOf({ operations: [wider] })).not.toBe(one);
   });
 
   it("is DBOS__APPVERSION when that is set, still prefixed with the app name", () => {

@@ -12,6 +12,8 @@ import { z } from "zod";
 import {
   changeOps,
   type Connector,
+  defineConnector,
+  defineOperation,
   defineSteps,
   defineWorkflow,
   memoryLedger,
@@ -262,6 +264,57 @@ describe("a change's operations, built in", () => {
     });
     expect(() => resolveConfig(config({ workflows: [named] }))).toThrow(
       'A workflow is named "change", the name of a built-in workflow',
+    );
+  });
+});
+
+describe("the company's operations", () => {
+  /** A draft on Ghost: the company's operation `operations.draft.run`. */
+  const draft = defineOperation({
+    name: "draft",
+    input: z.object({ title: z.string() }),
+    uses: [ghost.post.create],
+    run: async (ctx, { title }) => ctx.ghost.post.create({ title, html: "" }),
+  });
+  const drafting = defineWorkflow({
+    name: "drafting",
+    trigger: "manual",
+    input: z.object({}),
+    uses: [draft],
+    run: async (ctx) => ctx.operations.draft.run({ title: "x" }),
+  });
+
+  it("are operations of the config, which a workflow uses as it uses a connector's, with no driver of their own", () => {
+    const resolved = resolveConfig(config({ workflows: [drafting], operations: [draft, draft] }));
+    expect(resolved.ops.get("operations.draft.run")).toBe(draft);
+    expect(resolved.drivers.has("operations.draft.run")).toBe(false);
+  });
+
+  it("refuses a workflow using one the config does not have, saying where it goes", () => {
+    expect(() => resolveConfig(config({ workflows: [drafting] }))).toThrow(
+      'Workflow "drafting": operations.draft.run is not the default export of a file of operations/',
+    );
+  });
+
+  it("refuses one using what the config's connectors do not declare, naming the operation", () => {
+    expect(() => resolveConfig(config({ connectors: [resend, bluesky], operations: [draft] }))).toThrow(
+      'Operation "operations.draft.run": ghost.post.create is not declared by any connector in `connectors`',
+    );
+  });
+
+  it("refuses two of one id, something defineOperation did not make, and a connector of the vendor operations", () => {
+    const again = defineOperation({ name: "draft", input: z.object({}), uses: [], run: async () => null });
+    expect(() => resolveConfig(config({ operations: [draft, again] }))).toThrow(
+      'Two operations are named "operations.draft.run"; name each once',
+    );
+    expect(() => resolveConfig(config({ operations: [ghost.post.create as never] }))).toThrow(
+      "`operations` holds something `defineOperation` did not make",
+    );
+    const taken = defineConnector("operations", {
+      x: { run: { effect: "read", input: z.object({}), output: z.object({}) } },
+    });
+    expect(() => resolveConfig(config({ connectors: [ghost, resend, bluesky, taken as never] }))).toThrow(
+      'A connector in `connectors` is of the vendor "operations", which the company\'s own operations are of; name it otherwise',
     );
   });
 });

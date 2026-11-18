@@ -147,6 +147,18 @@ export default defineWorkflow({
 });
 `;
 
+/** The company's own operation, a file of operations/: the bundle imports it as it imports a workflow. */
+const TIDY = `import { defineOperation, z } from "sanoma";
+
+export default defineOperation({
+  name: "tidy",
+  description: "Tidies a name for the nightly run",
+  input: z.object({ name: z.string() }),
+  uses: [],
+  run: async (_ctx, { name }) => name.trim(),
+});
+`;
+
 /** A component of the members site that calls `api`, on a click. */
 const GREET = `import { api } from "sanoma/site";
 
@@ -174,6 +186,7 @@ function company(): { repo: string; config: ReturnType<typeof defineConfig> } {
   write(join(repo, "resources", "people.ts"), PEOPLE);
   write(join(repo, "workflows", "nightly.ts"), NIGHTLY);
   write(join(repo, "workflows", "render-invoice.ts"), INVOICE);
+  write(join(repo, "operations", "tidy.ts"), TIDY);
   write(join(repo, "sites", "members", "components", "greet.tsx"), GREET);
   write(join(repo, "sites", "members", "routes", "greet.tsx"), GREET_PAGE);
   // The agents' router, on a hostname of its own, over a collection that lists the companies.
@@ -473,6 +486,8 @@ describe("buildAppBundle", () => {
   it("carries the workflow files' workflows and what a connector reads of its package, as Node loads them", () => {
     const code = bundle.modules.map(({ content }) => Buffer.from(content, "base64").toString()).join("\n");
     expect(code).toContain('tidied: "nightly"');
+    // The operations' files' operations, as the workflows'.
+    expect(code).toContain("Tidies a name for the nightly run");
     // Only package.json says it.
     expect(code).toContain("Fixture login");
     // A workflow that renders an invoice, without the PDF renderer (`OPTIONAL`).
