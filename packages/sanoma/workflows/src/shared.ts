@@ -96,27 +96,45 @@ export const EFFECTS = ["read", "write", "publish", "send", "money", "access"] a
 /** What a workflow start's action id starts with, as a policy names it: `workflow:<name>`. */
 export const WORKFLOW_ACTION = "workflow:";
 
+/** What `previewRequests` reads of an operation: a company operation's `ops` are what it calls. */
+type AskedOp = Pick<OpEntry, "effect" | "vendor" | "resource" | "name" | "ops">;
+
 /**
  * What to ask the policy ahead of a run of `workflow` (`Policy.preview`, the principal aside): its
- * start, then each operation it may call, with its effect, in the run (`inRun`). The run form's
- * will-ask line asks it for the person; the Permissions grid (`permissionsGrid`) for each group.
+ * start, then each operation it may call, with its effect, in the run (`inRun`), a company
+ * operation followed by the calls inside it (`callRequests`). The run form's will-ask line asks it
+ * for the person; the Permissions grid (`permissionsGrid`) for each group.
  */
 export function previewRequests(
   workflow: Pick<WorkflowEntry, "name" | "ops">,
-  ops: ReadonlyMap<string, Pick<OpEntry, "effect" | "vendor" | "resource" | "name">>,
+  ops: ReadonlyMap<string, AskedOp>,
 ): Omit<PreviewRequest, "principal">[] {
-  // A batch is asked as its entries, the save and the delete the policy decides: no rule names it.
-  const asked = workflow.ops.flatMap((id) => {
+  return [
+    { action: { id: `${WORKFLOW_ACTION}${workflow.name}` } },
+    ...callRequests(workflow.ops, ops).flatMap((request) => [
+      request,
+      ...callRequests(ops.get(request.action.id)?.ops ?? [], ops),
+    ]),
+  ];
+}
+
+/**
+ * The calls of `ids` in a run, each asked once with its effect (`inRun`): a batch as its entries,
+ * the save and the delete the policy decides, since no rule names it. A company operation's own
+ * calls (its `ops`) are one level down: `previewRequests` asks them after it, each once within it.
+ */
+export function callRequests(
+  ids: readonly string[],
+  ops: ReadonlyMap<string, AskedOp>,
+): Omit<PreviewRequest, "principal">[] {
+  const asked = ids.flatMap((id) => {
     const op = ops.get(id);
     return op && isBatch(op) ? entryOpsOf(op) : [id];
   });
-  return [
-    { action: { id: `${WORKFLOW_ACTION}${workflow.name}` } },
-    ...[...new Set(asked)].map((id) => {
-      const effect = ops.get(id)?.effect;
-      return { action: effect === undefined ? { id } : { id, effect }, inRun: true };
-    }),
-  ];
+  return [...new Set(asked)].map((id) => {
+    const effect = ops.get(id)?.effect;
+    return { action: effect === undefined ? { id } : { id, effect }, inRun: true };
+  });
 }
 
 /** A site's folder name under `sites/`, its URL segment: what the app mounts and `readSites` reads. */
