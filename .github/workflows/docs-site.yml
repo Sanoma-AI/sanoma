@@ -1,6 +1,6 @@
 # The docs site (docs-site, docs.sanoma.work): built on pull requests that change it, so a broken
-# link or a connector the reference cannot read fails there, and deployed to Cloudflare Pages once a
-# release has published (the Release workflow, on its release/<version> branch), so the site
+# link or a connector the reference cannot read fails there, and deployed to Cloudflare (a Worker
+# serving the pages, docs-site/wrangler.jsonc) once a release has published (the Release workflow, on its release/<version> branch), so the site
 # describes a release that is on npm. It can also be deployed by hand, from main or a release
 # branch. See docs-site/README.md.
 name: Docs site
@@ -66,9 +66,10 @@ jobs:
       # Writes the connector reference, builds the pages and the search index, and fails on a link
       # to a page or heading that is not there.
       - run: pnpm --dir docs-site build
-      # Wrangler is the docs site's own, from its lockfile. Without the secrets (before the Pages
-      # project exists) nothing is deployed, and the run says so.
-      - name: Deploy to Cloudflare Pages
+      # Wrangler is the docs site's own, from its lockfile; wrangler.jsonc names the Worker and its
+      # domain, which the deploy creates if they are missing. Without the secrets nothing is
+      # deployed, and the run says so.
+      - name: Deploy to Cloudflare
         if: github.event_name != 'pull_request'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -78,5 +79,5 @@ jobs:
             echo "::warning::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are not set: built, not deployed (docs-site/README.md)"
             exit 0
           fi
-          pnpm --dir docs-site exec wrangler pages deploy dist --project-name sanoma-docs --branch main --commit-dirty=true
+          pnpm --dir docs-site exec wrangler deploy
           echo "Deployed \`$(git rev-parse HEAD)\` to https://docs.sanoma.work." >> "$GITHUB_STEP_SUMMARY"

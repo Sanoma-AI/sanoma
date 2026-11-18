@@ -1,10 +1,10 @@
-import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tfConnector } from "sanoma/internal/bridge/connector";
 import { BridgeError } from "sanoma/internal/bridge";
 import { type BridgeState, stateBridge } from "sanoma/internal/bridge/fake";
 import { findSentinels, testDatabaseUrl } from "sanoma/testing";
-import { useTestApp } from "sanoma/testing/harness";
+import { type TestApp, useTestApp } from "sanoma/testing/harness";
 import { fakeHost, testRepository } from "sanoma/testing/host";
 import { fakeWakeup } from "sanoma/testing/wakeup";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import { z } from "zod";
 import { LOCKFILE, readLockfile, serializeLockfile, writeLockfile } from "../src/describe.ts";
 import {
   type ApplyInput,
+  type ApplyPlan,
   type ApplyReport,
   defineWorkflow,
   DriverError,
@@ -24,10 +25,11 @@ import {
   type Source,
   withSetup,
 } from "../src/index.ts";
+import { PLAN_WORKFLOW } from "../src/shared.ts";
 import { chainDataFile, fakeMail, mailDataFile, recordsFor } from "./fakes/mail.ts";
 import { companyFakes } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
-import { pending, rootWith, waitFor } from "./harness.ts";
+import { pending, rootWith, storedSecrets, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. Apply on a copy of a company's data files and lockfile (so the
 // fixture's stay as they are), against fakes: the company's GitHub and Stripe, and Acme, a
@@ -67,6 +69,49 @@ const ops = (records: LedgerRecord[]) =>
 const actions = (report: ApplyReport) => report.plan.steps.map((s) => [s.id.replace(/^resources\//, ""), s.action]);
 const resultOf = (report: ApplyReport, id: string) => report.results.find((r) => r.id === id);
 
+/**
+ * Plans with `input` as `startedBy`: the plan run calls only what reads (an import, a type's
+ * `plan`, `sanoma.source.resolve`), asks no approval and changes nothing: the lockfile's bytes,
+ * the commits and the stored secrets are as they were. Its output, the plan.
+ */
+async function planOnly(
+  app: TestApp,
+  root: string,
+  commits: readonly unknown[],
+  input: ApplyInput,
+  startedBy: Principal,
+): Promise<ApplyPlan> {
+  const lockfile = () => (existsSync(join(root, LOCKFILE)) ? readFileSync(join(root, LOCKFILE), "utf8") : undefined);
+  const before = {
+    lockfile: lockfile(),
+    commits: commits.length,
+    secrets: await storedSecrets(app.config.databaseUrl!),
+  };
+  const runId = await app.client.start(PLAN_WORKFLOW, input, { startedBy });
+  const plan = (await app.client.result(runId)) as ApplyPlan;
+  const records = await app.client.ledger(runId);
+  expect(records.flatMap((r) => (r.type === "op.called" ? [r.op] : [])).filter((op) => !READS.test(op))).toEqual([]);
+  expect(records.some((r) => r.type === "approval.requested")).toBe(false);
+  expect({
+    lockfile: lockfile(),
+    commits: commits.length,
+    secrets: await storedSecrets(app.config.databaseUrl!),
+  }).toEqual(before);
+  return plan;
+}
+const READS = /\.(import|plan)$|^sanoma\.source\.resolve$/;
+
+/** A suite's `apply`: a plan with the same input first (`planOnly`), whose output is the plan the apply then makes. */
+const planThenApply =
+  (app: TestApp, root: string, commits: readonly unknown[]) =>
+  async (input: ApplyInput = {}, startedBy: Principal = alice) => {
+    const plan = await planOnly(app, root, commits, input, startedBy);
+    const runId = await app.client.apply(input, { startedBy });
+    const report = await app.client.applyReport(runId);
+    expect(plan).toEqual(report.plan);
+    return { runId, report };
+  };
+
 describe("the apply workflow on the company's resources", () => {
   const root = rootWithPolicy();
   const fakes = companyFakes();
@@ -98,10 +143,7 @@ describe("the apply workflow on the company's resources", () => {
     commits.length = 0;
   });
 
-  async function apply(input: ApplyInput = {}, startedBy: Principal = alice) {
-    const runId = await app.client.apply(input, { startedBy });
-    return { runId, report: await app.client.applyReport(runId) };
-  }
+  const apply = planThenApply(app, root, commits);
 
   it("binds what an identity finds, creates what nothing finds, and leaves what is as declared", async () => {
     const { runId, report } = await apply();
@@ -279,6 +321,8 @@ describe("the apply workflow on the company's resources", () => {
 
   it("asks one approval where the policy holds a change, covering every change with the plan, then makes them", async () => {
     fakes.github.override("repository", "website", { has_wiki: true });
+    // Their plan first: it asks no approval where their apply does, since it changes nothing.
+    const plan = await planOnly(app, root, commits, {}, careful);
     const runId = await app.client.apply({}, { startedBy: careful });
     await waitFor(pending(() => app.client, runId));
     const [approval] = await app.client.approvals(runId);
@@ -297,6 +341,7 @@ describe("the apply workflow on the company's resources", () => {
     const report = await app.client.applyReport(runId);
     expect(readLockfile(root).bindings).toMatchObject({ [id.old]: meanwhile, [id.blog]: expect.anything() });
     expect(JSON.parse(approval!.details!)).toEqual(report.plan);
+    expect(plan).toEqual(report.plan);
     expect(report.results.filter((r) => r.status === "done").map((r) => r.action)).toEqual([
       "none",
       "create",
@@ -406,10 +451,7 @@ describe("the apply workflow on a vendor that replaces", () => {
   const objectOf = (typeName: string, binding: string) =>
     (state.objects[`${typeName}/${binding}`] as { state: Record<string, unknown> } | undefined)?.state;
 
-  async function apply(input: ApplyInput = {}) {
-    const runId = await app.client.apply(input, { startedBy: alice });
-    return { runId, report: await app.client.applyReport(runId) };
-  }
+  const apply = planThenApply(app, root, commits);
 
   it("creates a site, then its hook given the site's new binding, and records no secret", async () => {
     const { runId, report } = await apply();
@@ -542,9 +584,10 @@ describe("the apply workflow on a wakeup", () => {
   );
   const host = fakeHost(async () => ({ url: "http://127.0.0.1:4100", stop: async () => {} }));
   const wakeup = fakeWakeup();
+  const { source, commits } = recordingSource(root);
   const app = useTestApp(
     { workflows: [], connectors: [host.connector, wakeup.connector], ledger: memoryLedger(), root },
-    { databaseUrl: testDatabaseUrl("apply-wakeup"), source: recordingSource(root).source },
+    { databaseUrl: testDatabaseUrl("apply-wakeup"), source },
   );
   const timer = async () =>
     (
@@ -565,12 +608,10 @@ describe("the apply workflow on a wakeup", () => {
     repo.remove();
   });
 
-  async function apply(input: ApplyInput = {}) {
-    return app.client.applyReport(await app.client.apply(input, { startedBy: alice }));
-  }
+  const apply = planThenApply(app, root, commits);
 
   it("gives a wakeup its host's URL from the host's state: made in the same run, then found", async () => {
-    const made = await apply();
+    const { report: made } = await apply();
     expect(actions(made)).toEqual([
       ["infra.ts#app", "create"],
       ["infra.ts#wake", "create"],
@@ -578,7 +619,7 @@ describe("the apply workflow on a wakeup", () => {
     expect(resultOf(made, "resources/infra.ts#app")!.host!.url).toBe("http://127.0.0.1:4100");
     expect(await timer()).toEqual({ name: "wake", host: "http://127.0.0.1:4100" });
     // Found the next time, so the wakeup is as declared, and drift says so.
-    expect(actions(await apply({ only: ["resources/infra.ts#wake"] }))).toEqual([["infra.ts#wake", "none"]]);
+    expect(actions((await apply({ only: ["resources/infra.ts#wake"] })).report)).toEqual([["infra.ts#wake", "none"]]);
     const drift = await app.client.driftReport(await app.client.drift({ startedBy: alice }));
     expect(drift.resources.find((r) => r.id === "resources/infra.ts#wake")).toMatchObject({ status: "clean" });
   });
@@ -586,7 +627,7 @@ describe("the apply workflow on a wakeup", () => {
   it("reports a host with a hostname at https://<hostname>, and leaves its wakeup at its wakeUrl", async () => {
     const infra = join(root, "resources/infra.ts");
     writeFileSync(infra, readFileSync(infra, "utf8").replace("port: 0 })", 'port: 0, hostname: "app.acme.example" })'));
-    const moved = await apply();
+    const { report: moved } = await apply();
     expect(resultOf(moved, "resources/infra.ts#app")!.host!.url).toBe("https://app.acme.example");
     // A wake never depends on the hostname: the wakeup reaches the host where it answers.
     expect(await timer()).toEqual({ name: "wake", host: "http://127.0.0.1:4100" });
@@ -597,9 +638,10 @@ describe("the apply workflow on a field taken from another resource's state", ()
   const root = rootWithPolicy();
   writeFileSync(join(root, "resources/mail.ts"), mailDataFile);
   const fake = fakeMail();
+  const { source, commits } = recordingSource(root);
   const app = useTestApp(
     { workflows: [], connectors: [fake.connector], ledger: memoryLedger(), root },
-    { databaseUrl: testDatabaseUrl("apply-from"), source: recordingSource(root).source },
+    { databaseUrl: testDatabaseUrl("apply-from"), source },
   );
   const sending = "resources/mail.ts#sending";
   const dns = "resources/mail.ts#dns";
@@ -608,10 +650,7 @@ describe("the apply workflow on a field taken from another resource's state", ()
     fake.reset();
   });
 
-  async function apply(input: ApplyInput = {}) {
-    const runId = await app.client.apply(input, { startedBy: alice });
-    return { runId, report: await app.client.applyReport(runId) };
-  }
+  const apply = planThenApply(app, root, commits);
 
   it("creates the domain, then the record set with the domain's records, planned unknown before", async () => {
     const { runId, report } = await apply();

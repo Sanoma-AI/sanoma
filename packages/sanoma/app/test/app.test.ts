@@ -988,7 +988,7 @@ describe("the page", () => {
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
     const html = await res.text();
     expect(html).toContain('<div id="app">');
-    expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>16<\/span><\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>17<\/span><\/h1>/);
     // The bar: Chat, then Home, Inbox and Workflows, no site tiles (the package's own build has no
     // sites), then Setup (with Data and Permissions, as the config has collections and a policy),
     // the current lit.
@@ -2175,11 +2175,11 @@ describe("resources and drift", () => {
   it("tabs the overview by filter, All runs last, and heads it with New workflow, each view its own link", async () => {
     const overview = await page("/workflows");
     expect(tabs(overview.html)).toEqual([
-      { label: "All", href: "/workflows", count: 16, selected: true },
+      { label: "All", href: "/workflows", count: 17, selected: true },
       { label: "Waiting on you", href: "/workflows?filter=waiting", count: 0, selected: false },
       // Announce's: its last run waited on an approval until the adopt test withdrew it (`endWaitingRuns`).
       { label: "Failed last run", href: "/workflows?filter=failed", count: 1, selected: false },
-      { label: "Built-in", href: "/workflows?filter=builtin", count: 15, selected: false },
+      { label: "Built-in", href: "/workflows?filter=builtin", count: 16, selected: false },
       { label: "All runs", href: "/workflows?view=runs", count: undefined, selected: false },
     ]);
     expect(overview.html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>(<svg.*?<\/svg>)?New workflow<\/button>/);
@@ -2202,7 +2202,7 @@ describe("resources and drift", () => {
     for (const title of ["Ghost", "Resend", "Bluesky"]) expect(announceRow).toMatch(new RegExp(`/>${title}</span>`));
     // The tests before leave announce with runs, so it has a last run.
     expect(announceRow).toMatch(/>(finished|failed|waiting|running|sleeping)/);
-    // ?filter=builtin keeps drift, apply, call (the config has a collection), and change and the app's actions (every config has them) alone.
+    // ?filter=builtin keeps drift, apply, plan, call (the config has a collection), and change and the app's actions (every config has them) alone.
     const builtin = await page("/workflows?filter=builtin");
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/drift"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/apply"/);
@@ -2210,7 +2210,7 @@ describe("resources and drift", () => {
     expect(builtin.html).not.toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/announce"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/change"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/go-live"/);
-    expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 15, selected: true });
+    expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 16, selected: true });
     expect(builtin.html).not.toMatch(/<a [^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-current="page"/);
   });
 

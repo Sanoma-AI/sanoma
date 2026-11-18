@@ -7,7 +7,7 @@ sidebar:
 
 `content`, from `sanoma/site`, is the Markdown under the company repo's `content/`, as of the build: each folder directly under `content/` is a kind, and each `*.md` directly in it an entry, its slug the file's name. Both names are URL segments (`/^[a-z][a-z0-9-]*$/`); subfolders, `.mdx` and other files are left alone. A post, `content/posts/zapier-and-sanoma.md`, and the page that shows it:
 
-```md
+```md title="content/posts/zapier-and-sanoma.md"
 ---
 title: Zapier and Sanoma
 description: How they differ.
@@ -42,11 +42,15 @@ function Post() {
 }
 ```
 
+## The calls
+
 | Call                            | What it gives                                                                                                                                                      |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `content.posts.list()`          | Every file of `content/posts/`, sorted by slug, as `{ slug, data }`: `data` is the front matter (`{}` with none)                                                   |
 | `content.posts.get(slug)`       | One file, `{ slug, data, body, html }`: `body` the Markdown after the front matter as written, `html` it rendered at build; `undefined` when there is no such file |
 | `content.<kind>` with no folder | `list()` gives `[]` and `get()` `undefined`; once `.sanoma/content.ts` types `content`, it does not type-check                                                     |
+
+## Details
 
 - **Translations:** `content/posts/hello.fr.md` is `hello` in French, beside `hello.md`, the site's default language's. Its front matter is laid over the original's, so what it does not repeat (a date, an image, `draft`) is the original's: a draft's translation is a draft unless it says `draft: false`. A translation with front matter alone keeps the original's body. `list({ locale })` and `get(slug, { locale })` give each slug's file in that language, else its `<slug>.md` (an entry's `locale` says which: absent for `<slug>.md`); without `locale`, `<slug>.md` alone, as before translations. A language is a tag such as `fr` or `pt-BR` ([Languages](/sites/languages/)).
 
@@ -56,5 +60,7 @@ function Post() {
 - **Drafts:** an entry whose front matter has `draft: true` is there while `sanoma` serves the sites from its dev server, and never in a build: not on a page, not in any file sent to the browser.
 - **Loading:** the content is one chunk of the browser's bundle, loaded on the first call, and part of the server's render, so a loader's `await content.posts.list()` adds no request. A change under `content/` is a new build (the build's key covers it). On the dev server, a file saved under `content/` shows on the next render of an open page, with no restart.
 - **Types:** `.sanoma/content.ts`, written with the sites' generated files (and again on the dev server when a file under `content/` changes), types `content` by augmenting `Register`, as `.sanoma/api.ts` types `api`: each kind's `data` is the union of its files' front matter, drafts included, a key in every file required and `?` otherwise; strings, numbers, booleans and `null` as themselves, a list as an array of its items' types, a mapping as an object merged the same way (so rows of a table in the front matter share one type). Values are never types: `status: draft` is a `string`. Until it is written, `content` is untyped.
+
+## Build helpers
 
 `readContent(repo, { drafts })` and `contentTypes(kinds)`, from `sanoma/app/build`, are what the build and `sanoma check` read with: the kinds and the problems, each `{ file, line, column, message }`, and the text of `.sanoma/content.ts` (`CONTENT_TYPES`).

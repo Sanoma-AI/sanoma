@@ -28,7 +28,7 @@ import { wakeupOps } from "../src/wakeup-type.ts";
 import { fakeMail, mailDataFile, recordsFor } from "./fakes/mail.ts";
 import { companyConfig, companyDir, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
-import { CALL_WORKFLOW, visitorPrincipal } from "../src/shared.ts";
+import { CALL_WORKFLOW, PLAN_WORKFLOW, visitorPrincipal } from "../src/shared.ts";
 import { AFTER_CHANGE, rootWith, useApp, withoutSetup } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The company fixture's data files, checked against the GitHub
@@ -370,11 +370,12 @@ describe("the built-in drift workflow in a config", () => {
   // The company's connectors with nothing attached: no drivers.
   const bare = { ...company, connectors: company.connectors.map(withoutSetup) };
 
-  it("is added, with apply, when the connectors declare resource types, using each type's import that has a driver", () => {
+  it("is added, with apply and plan, when the connectors declare resource types, using each type's import that has a driver", () => {
     // Beside change, follow, the app's actions and call, built in every config (call for the listing of apps).
     expect([...resolveConfig(config).workflows.keys()]).toEqual([
       DRIFT_WORKFLOW,
       APPLY_WORKFLOW,
+      PLAN_WORKFLOW,
       CHANGE_WORKFLOW,
       ...AFTER_CHANGE,
       CALL_WORKFLOW,
@@ -410,6 +411,10 @@ describe("the built-in drift workflow in a config", () => {
       "github.repository.plan",
       "github.repository.update",
     ]);
+    // Plan uses what apply observes and plans with: the imports and each writable type's plan, nothing that writes.
+    const plan = describeConfig(config).workflows.find((wf) => wf.name === PLAN_WORKFLOW);
+    expect(plan).toMatchObject({ title: "Plan resource changes", builtin: true, builtins: [], problems: [] });
+    expect(plan?.ops).toEqual([...entry!.ops, ...apply!.ops.filter((op) => op.endsWith(".plan"))]);
     // Without drivers they are there all the same, and use nothing: each resource reports the missing driver.
     expect(describeConfig(bare).workflows).toMatchObject([
       { name: "adopt", builtin: true, ops: [] },
@@ -444,6 +449,7 @@ describe("the built-in drift workflow in a config", () => {
       { name: "go-live-host", builtin: true, ops: [] },
       // Built in, as a change's operations are: a column change written without a remote brings the records along.
       { name: "patch", builtin: true, ops: ["sanoma.records.reshape"] },
+      { name: "plan", builtin: true, ops: [] },
       // Try again on a change merged without its records.
       { name: "reshape", builtin: true, ops: ["sanoma.records.reshape"] },
       { name: "save-draft", builtin: true, ops: [] },

@@ -4,48 +4,48 @@ Helpers for testing [`sanoma/workflows`](https://github.com/Sanoma-AI/sanoma/blo
 
 ## Install
 
-Moved to the docs: [Workers and apps for a test](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/workers.md).
+Moved to the docs: [Workers and apps for a test](https://docs.sanoma.work/testing/workers/).
 
 ## A worker for a test
 
-Moved to the docs: [Workers and apps for a test](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/workers.md#a-worker-for-a-test).
+Moved to the docs: [Workers and apps for a test](https://docs.sanoma.work/testing/workers/#a-worker-for-a-test).
 
 ## Finding a planted secret
 
-Moved to the docs: [Workers and apps for a test](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/workers.md#finding-a-planted-secret).
+Moved to the docs: [Workers and apps for a test](https://docs.sanoma.work/testing/workers/#finding-a-planted-secret).
 
 ## A test app
 
-Moved to the docs: [Workers and apps for a test](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/workers.md#a-test-app).
+Moved to the docs: [Workers and apps for a test](https://docs.sanoma.work/testing/workers/#a-test-app).
 
 ## Fake vendors
 
-Moved to the docs: [Fake vendors and replay](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/fakes.md#fake-vendors).
+Moved to the docs: [Fake vendors and replay](https://docs.sanoma.work/testing/fakes/#fake-vendors).
 
 ## Replaying a vendor's API
 
-Moved to the docs: [Fake vendors and replay](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/fakes.md#replaying-a-vendors-api).
+Moved to the docs: [Fake vendors and replay](https://docs.sanoma.work/testing/fakes/#replaying-a-vendors-api).
 
 ## Scenarios
 
-Moved to the docs: [Scenarios and sandbox runs](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/scenarios.md#scenarios).
+Moved to the docs: [Scenarios and sandbox runs](https://docs.sanoma.work/testing/scenarios/#scenarios).
 
 ## A connector's own features
 
-Moved to the docs: [Conformance suites](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/conformance.md).
+Moved to the docs: [Conformance suites](https://docs.sanoma.work/testing/conformance/).
 
 ## A host's conformance
 
-Moved to the docs: [Conformance suites](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/conformance.md#a-hosts-conformance).
+Moved to the docs: [Conformance suites](https://docs.sanoma.work/testing/conformance/#a-hosts-conformance).
 
 ## A wakeup's conformance
 
-Moved to the docs: [Conformance suites](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/conformance.md#a-wakeups-conformance).
+Moved to the docs: [Conformance suites](https://docs.sanoma.work/testing/conformance/#a-wakeups-conformance).
 
 ## A database's conformance
 
-Moved to the docs: [Conformance suites](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/conformance.md#a-databases-conformance).
+Moved to the docs: [Conformance suites](https://docs.sanoma.work/testing/conformance/#a-databases-conformance).
 
 ## A sandbox's conformance
 
-Moved to the docs: [Conformance suites](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/testing/conformance.md#a-sandboxs-conformance).
+Moved to the docs: [Conformance suites](https://docs.sanoma.work/testing/conformance/#a-sandboxs-conformance).

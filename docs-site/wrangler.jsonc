@@ -1,0 +1,8 @@
+// The docs site on Cloudflare: a Worker serving the built pages (dist) as static assets, at
+// docs.sanoma.work. `wrangler deploy` creates the Worker, the custom domain and its DNS record.
+{
+  "name": "sanoma-docs",
+  "compatibility_date": "2026-10-23",
+  "assets": { "directory": "./dist", "not_found_handling": "404-page" },
+  "routes": [{ "pattern": "docs.sanoma.work", "custom_domain": true }],
+}

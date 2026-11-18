@@ -123,6 +123,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "announce",
       "drift",
       "apply",
+      "plan",
       "change",
       "reshape",
       "follow",
