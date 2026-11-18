@@ -23,7 +23,6 @@ import { Credentials } from "../../components/credentials.tsx";
 import { Connections } from "../../components/connections.tsx";
 import { ScenarioErrors } from "../../components/scenario.tsx";
 import { type ScenarioRoles, scenarioRoles } from "../../graph/scenario-graph.ts";
-import { callersOf } from "../../lib/operations.ts";
 import { configQuery, connectorNamed, credentialsQuery, scenariosNaming, scenariosQuery } from "../../queries.ts";
 
 /** Where an OAuth callback sends the person back: the attempt to follow on its card, or why none. */
@@ -60,19 +59,7 @@ export const Route = createFileRoute("/connectors/$vendor")({
 function ConnectorPage() {
   const { vendor: id } = Route.useParams();
   const callback = Route.useSearch();
-  const select = useCallback(
-    (config: ConfigDescription) => {
-      const connector = connectorNamed(id)(config)!;
-      return {
-        ...connector,
-        callers: callersOf(
-          config,
-          connector.ops.map((op) => op.id),
-        ),
-      };
-    },
-    [id],
-  );
+  const select = useCallback((config: ConfigDescription) => connectorNamed(id)(config)!, [id]);
   const {
     data: { vendor, ops, resourceTypes, callers },
   } = useSuspenseQuery({ ...configQuery(), select });

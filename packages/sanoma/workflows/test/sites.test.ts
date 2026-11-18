@@ -381,7 +381,7 @@ describe("readSites", () => {
       pageProblem(
         "ops",
         9,
-        'calls operation "operations.relabel.run", which a page may not call directly: start a workflow that calls it',
+        'calls operation "operations.relabel.run", which a page may not call directly, since it calls acme.customer.rename: start a workflow that uses it',
       ),
     ]);
   });

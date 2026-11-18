@@ -23,7 +23,7 @@ import {
   type Principal,
   type WorkflowDefinition,
 } from "./define.ts";
-import { isDirect } from "./direct.ts";
+import { isDirect, notDirect } from "./direct.ts";
 import { errorInfo, parseOrThrow, RejectedError, SanomaError } from "./errors.ts";
 import type { Fake } from "./fake.ts";
 import { applyGivens, refuseUnfaked } from "./givens.ts";
@@ -467,15 +467,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
       }
       const op = ops.get(name);
       if (op) {
-        if (!isDirect(op, types)) {
-          throw new SanomaError(
-            "invalid_input",
-            `${name} cannot be called directly: it is a workflow's to call: start one that uses it`,
-            {
-              op: name,
-            },
-          );
-        }
+        if (!isDirect(op, types)) throw notDirect(name, op, types);
         const runId = `direct:${actor.id}:${id ?? `page:${++started}`}`;
         const seeded = current;
         let calls = 0;

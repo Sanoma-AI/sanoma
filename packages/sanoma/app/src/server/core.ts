@@ -33,7 +33,7 @@ import {
   type Saved,
   undoDraftOf,
 } from "sanoma/workflows/shared";
-import { agentActing, type ConfigDescription, permissionsGrid } from "sanoma/workflows/describe";
+import { agentActing, type ConfigDescription, type OutlineNode, permissionsGrid } from "sanoma/workflows/describe";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import { z } from "zod";
 import {
@@ -73,6 +73,7 @@ import {
   startRunSchema,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
+import { opsById, opsReached } from "../lib/operations.ts";
 import { bearerOf } from "../login/public.ts";
 import { databaseHost, headerValue, LOOPBACK } from "../loopback.ts";
 import type { AppSnapshot } from "../snapshot.ts";
@@ -640,25 +641,29 @@ export async function connections(
   { client, resolved, snapshot: { description } }: AppContext,
   actor: Principal,
 ): Promise<ConnectionsResponse> {
+  const ops = opsById(description);
   const cards = (await client.connections({ actor })).map((card) => {
     const isDefault = resolved.connections.catalog.definitions.get(card.id)?.default === true;
+    // What the calls say of this connection, a company operation's by the calls inside it.
+    const selectionsIn = (nodes: readonly OutlineNode[]): ("selected" | "default" | "possible")[] =>
+      flatten(nodes).flatMap((call) => {
+        if (call.kind !== "op") return [];
+        const inner = ops.get(call.id)?.outline;
+        if (inner && "nodes" in inner) return selectionsIn(inner.nodes);
+        if (!(call.ops ?? [call.id]).some((id) => id.split(".")[0] === card.vendor)) return [];
+        if (!call.connection) return isDefault ? ["default" as const] : [];
+        if ("dynamic" in call.connection) return ["possible" as const];
+        return call.connection.id === card.id ? ["selected" as const] : [];
+      });
     const workflows = description.workflows
       .filter((workflow) => !workflow.builtin)
       .flatMap((workflow) => {
         if (!("nodes" in workflow.outline)) {
-          return workflow.ops.some((id) => id.startsWith(`${card.vendor}.`))
+          return opsReached(ops, workflow.ops).some((id) => id.startsWith(`${card.vendor}.`))
             ? [{ name: workflow.name, title: workflow.title ?? workflow.name, selection: "possible" as const }]
             : [];
         }
-        const calls = flatten(workflow.outline.nodes).filter(
-          (node) => node.kind === "op" && (node.ops ?? [node.id]).some((id) => id.split(".")[0] === card.vendor),
-        );
-        const selections = calls.flatMap((call) => {
-          if (call.kind !== "op") return [];
-          if (!call.connection) return isDefault ? ["default" as const] : [];
-          if ("dynamic" in call.connection) return ["possible" as const];
-          return call.connection.id === card.id ? ["selected" as const] : [];
-        });
+        const selections = selectionsIn(workflow.outline.nodes);
         const selection = selections.includes("selected")
           ? "selected"
           : selections.includes("default")

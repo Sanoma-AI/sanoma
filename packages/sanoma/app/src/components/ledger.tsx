@@ -8,7 +8,8 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "#/co
 import { utcText } from "#/lib/time.ts";
 import { type RunCheck, SEALED_SHOWN, starterName } from "../api.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
-import { configQuery, opsById } from "../queries.ts";
+import { opsById } from "../lib/operations.ts";
+import { configQuery } from "../queries.ts";
 import { ApplyPlanView } from "./apply-plan.tsx";
 import {
   ALONE,

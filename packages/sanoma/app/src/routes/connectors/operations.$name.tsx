@@ -20,8 +20,8 @@ import {
   UsedBy,
 } from "../../components/common.tsx";
 import { SchemaFields } from "../../components/workflow.tsx";
-import { callersOf, companyOpNamed, operationFile } from "../../lib/operations.ts";
-import { configQuery, opsById, siteCallers, sourceQuery, workflowFile } from "../../queries.ts";
+import { callersOf, companyOpNamed, operationFile, opsById } from "../../lib/operations.ts";
+import { configQuery, siteCallers, sourceQuery, workflowFile } from "../../queries.ts";
 
 // `/connectors/operations/<name>`: one of the company's own operations (`defineOperation`), listed
 // under Yours on the Connectors page. The runtime refuses a connector of the vendor `operations`,

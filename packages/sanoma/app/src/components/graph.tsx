@@ -38,7 +38,8 @@ import { MAX_VENDORS, wildcardHeader, wildcardRows } from "../graph/wildcard.ts"
 import { useReducedMotion } from "#/lib/motion.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
-import { configQuery, opsById } from "../queries.ts";
+import { opsById } from "../lib/operations.ts";
+import { configQuery } from "../queries.ts";
 import { BaseNode } from "./base-node.tsx";
 import { ApprovalStatusBadge, BUILTIN_ICON, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";

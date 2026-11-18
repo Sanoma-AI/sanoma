@@ -7,6 +7,7 @@ import {
   defineConnector,
   defineDriver,
   defineOperation,
+  defineWorkflow,
   memoryLedger,
   type Principal,
   resolveConfig,
@@ -80,13 +81,46 @@ const relabel = defineOperation({
   run: async (ctx, { id }) => ctx.acme.customer.rename({ id }),
 });
 
+/** A workflow that reaches acme only through `relabel`: given to the app alone, with it. */
+const rename = defineWorkflow({
+  name: "rename",
+  trigger: "manual",
+  input: z.object({ id: z.string() }),
+  uses: [relabel],
+  run: async (ctx, { id }) => ctx.operations.relabel.run({ id }),
+});
+
+/** An operation that saves a shop customer, and a workflow that saves one only through it: given to the app alone. */
+const remember = defineOperation({
+  name: "remember",
+  input: z.object({ id: z.string(), email: z.string() }),
+  uses: [shopCustomers.save],
+  run: async (ctx, record) => ctx.data.shop.customers.save({ record }),
+});
+const welcome = defineWorkflow({
+  name: "welcome",
+  trigger: "manual",
+  input: z.object({ id: z.string(), email: z.string() }),
+  uses: [remember],
+  run: async (ctx, input) => ctx.operations.remember.run(input),
+});
+
+/** A vendor's read with a driver, which only the runtime's own `call` workflow uses. */
+const directory = defineConnector("directory", {
+  person: { find: { effect: "read", input: z.object({}), output: z.object({}) } },
+});
+
 beforeAll(async () => {
   ensureSanomaBuilt();
   app = await startApp(
     {
       ...testApp.config,
-      connectors: [withSetup(acme, { driver: () => defineDriver(acme, { customer: { rename: async () => ({}) } }) })],
-      operations: [quote, score, unread, relabel],
+      connectors: [
+        withSetup(acme, { driver: () => defineDriver(acme, { customer: { rename: async () => ({}) } }) }),
+        withSetup(directory, { driver: () => defineDriver(directory, { person: { find: async () => ({}) } }) }),
+      ],
+      operations: [quote, score, unread, relabel, remember],
+      workflows: [offer, rename, welcome],
     },
     { port: 0 },
   );
@@ -134,9 +168,9 @@ describe("the company's operations, in the config", () => {
     );
   });
 
-  it("finds what calls an operation: the workflows using it, and the operations calling it", () => {
+  it("finds what calls an operation: the workflows using it, themselves or through an operation, and the operations calling it", () => {
     expect(callersOf(description, ["data.shop.customers.get"])).toMatchObject({
-      workflows: [],
+      workflows: [{ name: "offer" }],
       operations: [{ id: "operations.quote.run", name: "quote" }],
     });
     expect(callersOf(description, ["operations.quote.run"]).workflows.map((wf) => wf.name)).toEqual(["offer"]);
@@ -175,7 +209,21 @@ describe("the company's operations, in the app", () => {
     expect(yours).toContain(
       "What an order of some items costs a shop customer · Pages and workflows · used by 1 workflow",
     );
-    expect(yours).toContain("Workflows only · used by 0 workflows");
+    expect(yours).toContain("Workflows only · used by 1 workflow");
+    // A workflow that reaches a vendor only through an operation counts on its connector's card;
+    // the runtime's own `call`, which may call every direct read, does not.
+    const card = (vendor: string) =>
+      shown.match(
+        new RegExp(`href="/connectors/${vendor}"[\\s\\S]*?(\\d+ operations? · used by \\d+ workflows?)`),
+      )?.[1];
+    expect(card("acme")).toBe("1 operation · used by 1 workflow");
+    expect(card("directory")).toBe("1 operation · used by 0 workflows");
+  });
+
+  it("lists on a connector's page what its card counts: the workflows through an operation too", async () => {
+    const usedBy = (await page("/connectors/acme")).shown.match(/>Used by<[\s\S]*/)?.[0];
+    expect(usedBy).toMatch(/href="\/workflows\/rename"[\s\S]*href="\/connectors\/operations\/relabel"/);
+    expect((await page("/connectors/directory")).shown).toMatch(/>Used by<[\s\S]*?>None\.?</);
   });
 
   it("shows an operation on its page: where it can run, what it takes, calls and is, and what uses it", async () => {
@@ -229,7 +277,14 @@ describe("the company's operations, in the app", () => {
   it("links to it from the workflow that calls it and the collection it reads", async () => {
     expect((await page("/workflows/offer")).shown).toContain('href="/connectors/operations/quote"');
     const collection = (await page("/data/shop.customers")).shown;
-    expect(collection).toMatch(/>Used by<[\s\S]*href="\/connectors\/operations\/quote"/);
+    // The workflows that reach it through an operation, then the operations.
+    expect(collection).toMatch(
+      />Used by<[\s\S]*href="\/workflows\/offer"[\s\S]*href="\/workflows\/welcome"[\s\S]*href="\/connectors\/operations\/quote"/,
+    );
+    // Data's Written by: the workflow that saves it only through an operation.
+    const row = (await page("/data")).shown.match(/href="\/data\/shop\.customers"(?:(?!<\/tr>)[\s\S])*<\/tr>/)?.[0];
+    expect(row).toMatch(/href="\/workflows\/welcome"/);
+    expect(row).not.toMatch(/href="\/workflows\/offer"/);
   });
 
   it("puts the calls inside an operation under its row in the Permissions grid, linking to its page", async () => {

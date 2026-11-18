@@ -24,7 +24,8 @@ import {
   StatusDot,
 } from "../components/common.tsx";
 import { AppGroupTitle, AppTabs, appGroupsOf, pickGroup } from "../components/app-scope.tsx";
-import { AppSearch, configQuery, hostEnforcementQuery, opsById, permissionsQuery, ROOT_APP } from "../queries.ts";
+import { opsById } from "../lib/operations.ts";
+import { AppSearch, configQuery, hostEnforcementQuery, permissionsQuery, ROOT_APP } from "../queries.ts";
 
 export const Route = createFileRoute("/permissions")({
   validateSearch: AppSearch,

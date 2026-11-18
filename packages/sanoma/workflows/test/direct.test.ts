@@ -858,7 +858,8 @@ describe("a direct call", () => {
     it("refuses one that writes at a vendor, a workflow's step only", async () => {
       expect(await failure(client.call("operations.relabel.run", { id: "c1" }, { actor: ada }))).toMatchObject({
         code: "invalid_input",
-        message: expect.stringContaining("operations.relabel.run cannot be called directly"),
+        message:
+          "operations.relabel.run cannot be called directly, since it calls acme.customer.rename: start a workflow that uses it",
       });
     });
   });
