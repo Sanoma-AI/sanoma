@@ -2,7 +2,7 @@
 title: Resources and data files
 description: "A resource type is a kind of vendor object a company declares the state of, such as a GitHub repository."
 sidebar:
-  order: 7
+  order: 8
 ---
 
 A resource type is a kind of vendor object a company declares the state of, such as a GitHub repository. `defineResource` declares one, and derives its operations, so the runtime knows only operations:

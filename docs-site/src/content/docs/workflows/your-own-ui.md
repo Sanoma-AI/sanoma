@@ -2,7 +2,7 @@
 title: Building your own UI
 description: "sanoma/app is one UI over a config; another (a Slack bot, an internal tool) can be built on the same pieces, which the package exports for that."
 sidebar:
-  order: 12
+  order: 13
 ---
 
 `sanoma/app` is one UI over a config; another (a Slack bot, an internal tool) can be built on the same pieces, which the package exports for that:
