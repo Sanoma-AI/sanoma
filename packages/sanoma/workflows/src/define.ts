@@ -1,9 +1,9 @@
 import type { ConnectionRef } from "./connection.ts";
 import type { WorkflowEntry } from "./description.ts";
 import { z } from "zod";
-import { isOp, type Op } from "./op.ts";
+import { defineConnector, isOp, isOperation, type Op } from "./op.ts";
 import { appOfFile, callerFile } from "./company-file.ts";
-import { type DATA_VENDOR, qualified } from "./shared.ts";
+import { COLLECTION_NAME, type DATA_VENDOR, EFFECTS, OPERATIONS_VENDOR, qualified } from "./shared.ts";
 
 /**
  * Who is acting: the person or agent that starts a run, calls an operation or decides an
@@ -220,11 +220,12 @@ type VendorCtx<O extends Op, V> = {
 };
 
 /**
- * `ctx.<vendor>.<resource>.<op>`. An app's collections are `ctx.data.<app>.<name>` at run time,
- * a folder's name no type knows: that level is untyped (`any`), the root's collections typed.
+ * `ctx.<vendor>.<resource>.<op>`. An app's collections are `ctx.data.<app>.<name>` at run time, and
+ * its operations `ctx.operations.<app>.<name>`, a folder's name no type knows: that level is untyped
+ * (`any`), the root's typed.
  */
 type CtxOps<O extends Op> = {
-  readonly [V in O["vendor"]]: V extends typeof DATA_VENDOR
+  readonly [V in O["vendor"]]: V extends typeof DATA_VENDOR | typeof OPERATIONS_VENDOR
     ? VendorCtx<O, V> & { readonly [app: string]: any }
     : VendorCtx<O, V>;
 };
@@ -320,8 +321,92 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
   readonly file: string;
 }
 
-/** The ids of the operations a workflow `uses`, in the order declared. */
+/** The ids of the operations a workflow or a company operation `uses`, in the order declared. */
 export const opIdsOf = (wf: Pick<WorkflowDefinition, "uses">): string[] => wf.uses.filter(isOp).map((op) => op.id);
+
+/**
+ * A company operation: the company's own server logic in a file of `operations/` (`defineOperation`),
+ * an operation of the vendor `operations`, `operations.<name>.run`, `operations.<app>.<name>.run` in
+ * an app's folder. A workflow lists it in `uses` and calls it on `ctx` as any operation: the policy
+ * decides it and the ledger records it as one call, and its `run` runs inside the run, each call it
+ * makes with its own steps, decision and record.
+ */
+export interface Operation<
+  N extends string = string,
+  U extends readonly Op[] = readonly Op[],
+  S extends z.ZodType = z.ZodType,
+  O = unknown,
+> extends Op<typeof OPERATIONS_VENDOR, N, "run", z.input<S>, O> {
+  /** The app whose folder defined it (`apps/<app>/operations/`), from its `file`; absent for one at the root. */
+  readonly app?: string;
+  /** The connectors' and collections' operations it calls: its `ctx` holds these and nothing else. */
+  readonly uses: U;
+  readonly run: (ctx: Ctx<U>, input: z.output<S>) => Promise<O>;
+  /** The file that defined it, absolute, from its call site: its outline is read from it, as a workflow's is. */
+  readonly file: string;
+}
+
+/**
+ * Defines a company operation in its own file of `operations/`. Its `name` is a lowercase letter,
+ * then letters and digits (a collection's rule); in an app's folder its resource is `<app>.<name>`.
+ * `uses` lists connectors' and collections' operations only: an approval, a sleep, `ctx.all` and
+ * another company operation are a workflow's, around operations. Its effect is the strongest of
+ * what it uses, in the order of `EFFECTS`, and `read` with none; it is idempotent when all of them
+ * are. Its `run` is held to a workflow body's rules (the lint and the outline).
+ */
+export function defineOperation<const N extends string, const U extends readonly Op[], S extends z.ZodType, O>(def: {
+  name: N;
+  description?: string;
+  input: S;
+  /** Checks what `run` returns, when given. */
+  output?: z.ZodType<O>;
+  uses: U;
+  run: (ctx: Ctx<U>, input: z.output<S>) => Promise<O>;
+}): Operation<N, U, S, O> {
+  const where = `defineOperation("${String(def.name)}")`;
+  if (typeof def.name !== "string" || !COLLECTION_NAME.test(def.name)) {
+    throw new Error(`${where}: the name must be a lowercase letter, then letters and digits, such as "quote"`);
+  }
+  if (!Array.isArray(def.uses)) throw new Error(`${where}: uses is a list of the operations it calls`);
+  for (const use of def.uses as readonly unknown[]) {
+    if (!isOp(use)) {
+      throw new Error(
+        `${where}: uses lists operations only; an approval, a sleep or ctx.all is a workflow's, around operations`,
+      );
+    }
+    if (isOperation(use)) {
+      throw new Error(
+        `${where}: ${use.id} is a company operation; an operation calls connectors' and collections' operations only: call both from a workflow`,
+      );
+    }
+  }
+  const file = callerFile();
+  if (file === undefined) {
+    throw new Error(
+      `Operation "${def.name}" was defined from code with no file (an eval, or a bundle without one): ` +
+        "its outline is read from the file, and a run is held to the outline",
+    );
+  }
+  const app = appOfFile(file);
+  const resource = qualified(app, def.name);
+  const op = defineConnector(OPERATIONS_VENDOR, {
+    [resource]: {
+      run: {
+        effect: EFFECTS[Math.max(0, ...def.uses.map((u) => EFFECTS.indexOf(u.effect)))]!,
+        idempotent: def.uses.every((u) => u.idempotent),
+        description: def.description,
+        input: def.input,
+        output: def.output ?? z.unknown(),
+      },
+    },
+  })[resource]!.run!;
+  return Object.freeze({ ...op, uses: def.uses, run: def.run, file, ...(app && { app }) }) as unknown as Operation<
+    N,
+    U,
+    S,
+    O
+  >;
+}
 
 /**
  * Defines a workflow in its own file. Its `name` is a lowercase letter, then lowercase letters,

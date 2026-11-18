@@ -110,6 +110,10 @@ Moved to the docs: [Collections](https://github.com/Sanoma-AI/sanoma/blob/main/d
 
 Moved to the docs: [Collections](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/workflows/collections.md#importing-a-sheet).
 
+### Your own operations
+
+Moved to the docs: [Your own operations](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/workflows/your-own-operations.md).
+
 ### Direct calls
 
 Moved to the docs: [Direct calls](https://github.com/Sanoma-AI/sanoma/blob/main/docs-site/src/content/docs/workflows/direct-calls.md).

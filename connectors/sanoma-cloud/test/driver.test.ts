@@ -1,8 +1,9 @@
 import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { type CallContext, memorySecrets } from "sanoma/workflows";
+import { type CallContext, memorySecrets, VENDOR } from "sanoma/workflows";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cloudDriver } from "../src/driver.ts";
+import { cloudDriver, workflowsApi } from "../src/driver.ts";
+import { cloud } from "../src/index.ts";
 
 // The driver against a stand-in for sanoma-ops's public api (`POST /api/call`) in this process:
 // the requests it sends (a start with an id per call, then results until the run ends, the token
@@ -471,8 +472,75 @@ describe("cloud's account operations through the workflows", () => {
   });
 });
 
+/** The Cloud's API as the sandbox half makes it: the token from the company's secrets, no run id. */
+const boxes = () => workflowsApi(async (name) => stored[name], { timeoutMs: 5_000 });
+
+/** The company's secrets as the app gives a sandbox half them. */
+const storedSecrets = async (names: readonly string[]) => new Map(names.map((name) => [name, stored[name]!]));
+
+describe("cloud's agent boxes through the workflows", () => {
+  const opened = {
+    id: "i1",
+    url: "https://i1-7700.agent37.app/?a37_token=t1",
+    expiresAt: "2026-11-17T12:00:00.000Z",
+    protocol: 2,
+  };
+
+  it("opens, exposes, stops and discards a box by its name alone, each a run of its own, with the token as a bearer", async () => {
+    workflows = {
+      cloudBoxOpen: () => ({ output: opened }),
+      cloudBoxExpose: () => ({
+        output: { url: "https://i1-3000.agent37.app/?a37_token=t2", expiresAt: opened.expiresAt },
+      }),
+      cloudBoxStop: () => ({ output: {} }),
+      cloudBoxDiscard: () => ({ output: {} }),
+    };
+    const api = boxes();
+    // The link's expiry is the Cloud's to keep: none of what the box is driven with.
+    const { expiresAt: _, ...kept } = opened;
+    expect(await api.boxOpen({ name: "sanoma-acme-ada", hosts: ["registry.npmjs.org"] })).toEqual(kept);
+    expect(await api.boxExpose({ name: "sanoma-acme-ada", port: 3000 })).toEqual({
+      url: "https://i1-3000.agent37.app/?a37_token=t2",
+    });
+    await api.boxStop({ name: "sanoma-acme-ada" });
+    await api.boxDiscard({ name: "sanoma-acme-ada" });
+    expect(starts()).toEqual([
+      ["cloudBoxOpen.start", { name: "sanoma-acme-ada", hosts: ["registry.npmjs.org"] }],
+      ["cloudBoxExpose.start", { name: "sanoma-acme-ada", port: 3000 }],
+      ["cloudBoxStop.start", { name: "sanoma-acme-ada" }],
+      ["cloudBoxDiscard.start", { name: "sanoma-acme-ada" }],
+    ]);
+    // Safe to start again: the Cloud finds the box the last run made.
+    expect(sent.filter((s) => s.name.endsWith(".start")).map((s) => s.id)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(sent.filter((s) => s.headers.authorization !== `Bearer ${TOKEN}`)).toEqual([]);
+  });
+
+  it("refuses a box answer that is not one, and fails with the Cloud's refusal in its own words", async () => {
+    workflows = { cloudBoxOpen: () => ({ output: { ...opened, url: "not a link" } }) };
+    await expect(boxes().boxOpen({ name: "a", hosts: [] })).rejects.toThrow(
+      "cloud-box-open: its answer is not what it should be",
+    );
+    const busy = "All of Sanoma Cloud's agent boxes are busy. Try again in a few minutes.";
+    workflows = { cloudBoxOpen: () => ({ status: 422, body: { error: busy, code: "driver_failed", runId: "r1" } }) };
+    await expect(boxes().boxOpen({ name: "a", hosts: [] })).rejects.toMatchObject({ retryable: false, message: busy });
+  });
+
+  it("is the connector's sandbox half, which reads the Cloud token from the company's secrets", async () => {
+    workflows = { cloudBoxDiscard: () => ({ output: {} }) };
+    const backend = await cloud[VENDOR].setup!.sandbox!({ secrets: storedSecrets, declared: {} });
+    await backend.discard({ name: "sanoma-acme-ada" });
+    expect(starts()).toEqual([["cloudBoxDiscard.start", { name: "sanoma-acme-ada" }]]);
+    expect(sent[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
+  });
+});
+
 describe("cloud's driver errors", () => {
-  it("fails a call with a failed run's failure, as the api answers it (422), final", async () => {
+  it("fails a call with a failed run's failure, in the workflow's own words as the api answers them (422), final", async () => {
     workflows = {
       cloudList: () => ({ output: [hostless()] }),
       cloudSignup: () => ({
@@ -481,7 +549,7 @@ describe("cloud's driver errors", () => {
       }),
     };
     await expect(op("host.create", { desired: declaredHost })).rejects.toMatchObject({
-      message: "Sanoma Cloud: cloud-signup: acme.sanoma.work is taken: pick another address",
+      message: "acme.sanoma.work is taken: pick another address",
       retryable: false,
       status: 422,
       vendorCode: "driver_failed",

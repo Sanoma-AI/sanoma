@@ -37,6 +37,10 @@ describe("a sandbox type", () => {
     });
   });
 
+  it("names no image or size when the vendor chooses them", () => {
+    expect(instanceOf({ inputs: {} }).sandbox?.inputs).toEqual({});
+  });
+
   it.each<[string, Overrides, RegExp]>([
     ["it is not writable", { writable: false }, /must be writable/],
     [

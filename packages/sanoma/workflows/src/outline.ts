@@ -1,6 +1,15 @@
 import { childrenOf, type Node, readSource, type SourceFile } from "./ast.ts";
-import { opIdsOf, type WorkflowDefinition } from "./define.ts";
-import { childLists, DATA_VENDOR, DEFAULT_SLEEP_NAME, fitsOp, flatten, writtenName } from "./shared.ts";
+import { type Operation, opIdsOf, type WorkflowDefinition } from "./define.ts";
+import { isOperation } from "./op.ts";
+import {
+  childLists,
+  DATA_VENDOR,
+  DEFAULT_SLEEP_NAME,
+  fitsOp,
+  flatten,
+  OPERATIONS_VENDOR,
+  writtenName,
+} from "./shared.ts";
 
 /**
  * What a workflow's `run` calls through `ctx`, in the order it makes the calls, with the loops,
@@ -106,10 +115,10 @@ export const outlineWorkflow = (wf: WorkflowDefinition<any, any>): Outline =>
  * spans index into (none with an `{ error }`). `found` is whether the file was parsed and holds
  * the workflow's `run`: an `{ error }` with it found is what `run` holds that the outline cannot
  * draw, which the lint reports too; one without is the file's (unread, unparsed, or no workflow
- * of that name).
+ * of that name). A company operation's (`defineOperation`) is read the same way, from its file.
  */
 export function outlineWithSource(
-  wf: WorkflowDefinition<any, any>,
+  wf: WorkflowDefinition<any, any> | Operation,
   file: SourceFile | string,
 ): { outline: Outline; source?: string; found: boolean } {
   if (typeof file === "string") return { outline: { error: file }, found: false };
@@ -118,10 +127,11 @@ export function outlineWithSource(
     return { outline: { error: `${file.file} could not be parsed: ${why}` }, found: false };
   }
   const consts = constsOf(file.program);
-  // An app's workflow is found by the name its file writes, without the app.
-  const name = writtenName(wf);
-  const fn = runIn(file.program, name, consts);
-  if (!fn) return { outline: { error: `${file.file} holds no workflow named "${name}"` }, found: false };
+  // An app's workflow or operation is found by the name its file writes, without the app.
+  const kind = isOperation(wf) ? "operation" : "workflow";
+  const name = writtenName(isOperation(wf) ? { name: wf.resource, app: wf.app } : wf);
+  const fn = runIn(file.program, kind, name, consts);
+  if (!fn) return { outline: { error: `${file.file} holds no ${kind} named "${name}"` }, found: false };
   const { nodes, problems } = outlineBody(fn, { consts, source: file.source });
   if (problems.length) {
     const lines = problems.map((p) => {
@@ -146,11 +156,13 @@ function withOps(nodes: OutlineNode[], uses: readonly string[]): OutlineNode[] {
 }
 
 /**
- * The workflow's `run` in its file: the literal `defineWorkflow` is called with that has its
- * `name` (a string, or a top-level `const` of the file holding it) and a `run` function.
+ * The workflow's `run` in its file (or an operation's, by `kind`): the literal `defineWorkflow`
+ * (`defineOperation`) is called with that has its `name` (a string, or a top-level `const` of the
+ * file holding it) and a `run` function.
  */
-function runIn(program: Node, name: string, consts: ReadonlyMap<string, string>): Node | undefined {
-  return workflowLiterals(program).find((literal) => literalOf(literal.name, consts) === name)?.run;
+function runIn(program: Node, kind: DefinedKind, name: string, consts: ReadonlyMap<string, string>): Node | undefined {
+  return workflowLiterals(program).find((literal) => literal.kind === kind && literalOf(literal.name, consts) === name)
+    ?.run;
 }
 
 /** The file's top-level string constants, `export const NAME = "drift"`, by name: what a name may be besides a literal. */
@@ -221,8 +233,11 @@ const DEFAULT_LIKE = (name: string) =>
 /** Two steps given one name, and how to tell them apart. */
 const TWICE = (name: string, fix: string) =>
   `two steps of this workflow are named "${name}": a name given is one step's, so a test or the graph can tell them apart; ${fix}`;
-/** A name given that reads as an operation's id, four segments only for an app's collection: what an unnamed call is called. */
-const OP_ID = new RegExp(String.raw`^([\w-]+(\.[\w-]+){2}|${DATA_VENDOR}(\.[\w-]+){3})$`);
+/**
+ * A name given that reads as an operation's id, four segments only for an app's collection or
+ * company operation: what an unnamed call is called.
+ */
+const OP_ID = new RegExp(String.raw`^([\w-]+(\.[\w-]+){2}|(${DATA_VENDOR}|${OPERATIONS_VENDOR})(\.[\w-]+){3})$`);
 
 /** Where a function's body starts: its own statement rules, nothing of the caller's. */
 const bodyOf = (fn: Node): Where => ({ fn, inCatch: false });
@@ -614,10 +629,11 @@ function switchArms(node: Node): Node[] {
 
 /**
  * Whether a path on `ctx` is an operation's: `<vendor>.<resource>.<op>`, or an app's collection's,
- * `data.<app>.<collection>.<op>` (a computed vendor may be either).
+ * `data.<app>.<collection>.<op>`, or an app's company operation's, `operations.<app>.<name>.run` (a
+ * computed vendor may be any).
  */
 const isOpPath = (members: readonly string[]): boolean =>
-  members.length === 3 || (members.length === 4 && (members[0] === DATA_VENDOR || members[0] === "*"));
+  members.length === 3 || (members.length === 4 && [DATA_VENDOR, OPERATIONS_VENDOR, "*"].includes(members[0]!));
 
 /** The member names from `ctx` to the callee, `*` for a computed one, when the callee is on `ctx`. */
 function ctxPath(callee: Node, ctx: string): string[] | undefined {
@@ -653,26 +669,38 @@ export function unwrap(node: Node): Node {
   return n;
 }
 
+/** The functions a workflow or a company operation is defined with, by the kind each defines. */
+const DEFINERS = new Map([
+  ["defineWorkflow", "workflow"],
+  ["defineOperation", "operation"],
+] as const);
+
+/** What a literal of `workflowLiterals` defines. */
+type DefinedKind = "workflow" | "operation";
+
 /**
  * Every workflow literal in a parsed file: the object literal `defineWorkflow({ name, …, run })`
- * (or `sanoma.defineWorkflow(…)`) is called with, when it has a `name` and a `run` function. For
- * the outline, which picks the one by its name, and the lint, which checks each `run`.
+ * (or `sanoma.defineWorkflow(…)`) is called with, when it has a `name` and a `run` function, and a
+ * company operation's, `defineOperation`'s, with its `kind`. For the outline, which picks the one
+ * by its kind and name, and the lint, which checks each `run`: an operation's body is held to a
+ * workflow's rules.
  */
-export function workflowLiterals(program: Node): { name: Node; run: Node }[] {
-  const found: { name: Node; run: Node }[] = [];
+export function workflowLiterals(program: Node): { kind: DefinedKind; name: Node; run: Node }[] {
+  const found: { kind: DefinedKind; name: Node; run: Node }[] = [];
   const find = (node: Node) => {
     if (!node) return;
     const literal = unwrap(node.arguments?.[0]);
     const callee = unwrap(node.callee);
     const called = callee?.type === "MemberExpression" && !callee.computed ? callee.property.name : callee?.name;
-    if (node.type === "CallExpression" && called === "defineWorkflow" && literal?.type === "ObjectExpression") {
+    const kind = node.type === "CallExpression" ? DEFINERS.get(called) : undefined;
+    if (kind && literal?.type === "ObjectExpression") {
       const value = (key: string) =>
         literal.properties.find(
           (p: Node) => p.type === "Property" && !p.computed && (p.key.name ?? p.key.value) === key,
         )?.value;
       const run = value("run");
       const name = value("name");
-      if (name && FUNCTIONS.has(run?.type)) found.push({ name, run });
+      if (name && FUNCTIONS.has(run?.type)) found.push({ kind, name, run });
     }
     for (const child of childrenOf(node)) find(child);
   };

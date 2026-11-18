@@ -33,6 +33,7 @@ import { ScanIcon } from "@phosphor-icons/react/dist/csr/Scan";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { type ReactNode, Suspense, useMemo } from "react";
 import { toast } from "sonner";
+import { useDeclareBox } from "#/components/shell/connect-agent.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
@@ -40,15 +41,7 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { boxless } from "#/lib/chat.ts";
 import { DRIFT_TONE } from "#/lib/tone.ts";
-import {
-  type AppConfig,
-  type CompanyState,
-  DECLARE_BOX,
-  errorBodyOf,
-  type GoLiveRun,
-  INFRA,
-  noWakeup,
-} from "../../api.ts";
+import { type AppConfig, type CompanyState, errorBodyOf, type GoLiveRun, INFRA, noWakeup } from "../../api.ts";
 import { ChatButton } from "../../components/chat-button.tsx";
 import {
   ButtonLink,
@@ -280,6 +273,7 @@ function Hosting({
   children: ReactNode;
 }) {
   const { resource: selected, edit, own } = Route.useSearch();
+  const declare = useDeclareBox({ force: true });
   const slots = useMemo(() => slotsOf(config), [config]);
   const results = useMemo(() => new Map(report?.resources.map((r) => [r.id, r])), [report]);
   const rows = useMemo(() => {
@@ -300,7 +294,7 @@ function Hosting({
       <CrumbHeader action={action} />
       {children}
       <StatePanel own={own === true} />
-      {boxless(config) && <Notice>{DECLARE_BOX}.</Notice>}
+      {boxless(config) && declare && <Notice>{declare}</Notice>}
       {slots.filled.length > 0 && (
         <div className="grid gap-(--gap-region) md:grid-cols-2 2xl:grid-cols-4">
           {slots.filled.map(({ title, capability, resource }) => (

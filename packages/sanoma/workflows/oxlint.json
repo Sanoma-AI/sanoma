@@ -1,7 +1,7 @@
 {
   "overrides": [
     {
-      "files": ["workflows/**", "apps/*/workflows/**"],
+      "files": ["workflows/**", "apps/*/workflows/**", "operations/**", "apps/*/operations/**"],
       "jsPlugins": ["./dist/plugin.js"],
       "rules": {
         "sanoma/date": "error",
@@ -83,7 +83,7 @@
               },
               {
                 "name": "sanoma/workflows",
-                "allowImportNames": ["defineWorkflow", "mayDecide", "errorCode", "sanoma", "z"],
+                "allowImportNames": ["defineOperation", "defineWorkflow", "mayDecide", "errorCode", "sanoma", "z"],
                 "allowTypeImports": true,
                 "message": "A workflow imports only these and types from sanoma/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
               }

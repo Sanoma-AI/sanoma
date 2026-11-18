@@ -16,7 +16,16 @@ A repo holds `sanoma.config.ts` at its root, with `workflows/`, optional `polici
 ```json
 {
   "extends": "sanoma/tsconfig.json",
-  "include": ["sanoma.config.ts", "workflows", "resources", "apps/*/app.ts", "apps/*/workflows", "apps/*/resources"]
+  "include": [
+    "sanoma.config.ts",
+    "workflows",
+    "operations",
+    "resources",
+    "apps/*/app.ts",
+    "apps/*/workflows",
+    "apps/*/operations",
+    "apps/*/resources"
+  ]
 }
 ```
 
@@ -44,7 +53,7 @@ export default defineWorkflow({
 });
 ```
 
-A workflow imports from `sanoma` what the lint lets it (`defineWorkflow`, `mayDecide`, `errorCode`, `z`, `sanoma`, the runtime's own operations, and types); `zod` itself and `sanoma/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages. A site, `sites/<name>/` (pages the app serves under `/sites/<name>/`; `defineSite({ public: true, login })` in its `site.ts` marks one for visitors, served at the root of its own host too, and `locales` its languages), imports `defineSite`, the app's route APIs (`Link`, `Outlet`, `useNavigate`, …) and `api`, which calls the company's operations and workflows as the person on the page ([calling operations and workflows](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/app/README.md#calling-operations-and-workflows)), from `sanoma/site` with the rest of what talks to the app (`RunForm`, a workflow's start form, and `useActor`, who is signed in), how its pages look (the app's components, presentational only) from `sanoma/ui`, Sanoma's claims about connectors, apps and solutions (`claims`, `appTier`, …) from `sanoma/claims`, and `createFileRoute` from `@tanstack/react-router`; the [app's README](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/app/README.md#a-sites-imports) has the whole list. A data file under `resources/` imports `secret` and `sanoma` (the people types) from `sanoma/resources`, and `resources/data.ts`, the company's [collections](/workflows/collections/), imports `collection` from `sanoma/data` and nothing else:
+A workflow imports from `sanoma` what the lint lets it (`defineOperation`, `defineWorkflow`, `mayDecide`, `errorCode`, `z`, `sanoma`, the runtime's own operations, and types); `zod` itself and `sanoma/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages. A site, `sites/<name>/` (pages the app serves under `/sites/<name>/`; `defineSite({ public: true, login })` in its `site.ts` marks one for visitors, served at the root of its own host too, and `locales` its languages), imports `defineSite`, the app's route APIs (`Link`, `Outlet`, `useNavigate`, …) and `api`, which calls the company's operations and workflows as the person on the page ([calling operations and workflows](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/app/README.md#calling-operations-and-workflows)), from `sanoma/site` with the rest of what talks to the app (`RunForm`, a workflow's start form, and `useActor`, who is signed in), how its pages look (the app's components, presentational only) from `sanoma/ui`, Sanoma's claims about connectors, apps and solutions (`claims`, `appTier`, …) from `sanoma/claims`, and `createFileRoute` from `@tanstack/react-router`; the [app's README](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/app/README.md#a-sites-imports) has the whole list. A data file under `resources/` imports `secret` and `sanoma` (the people types) from `sanoma/resources`, and `resources/data.ts`, the company's [collections](/workflows/collections/), imports `collection` from `sanoma/data` and nothing else:
 
 ```ts
 // resources/data.ts

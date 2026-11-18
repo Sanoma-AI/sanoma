@@ -52,7 +52,7 @@ import { collectionsDriver, recordsDriver } from "./collection-driver.ts";
 import { lazyDb, type LazyDb } from "./db.ts";
 import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
 import { callerFile } from "./company-file.ts";
-import type { Use, WorkflowDefinition } from "./define.ts";
+import type { Operation, Use, WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
 import { statusesOf, unconfigured } from "./env.ts";
 import type { Fake } from "./fake.ts";
@@ -69,6 +69,7 @@ import {
   type DriverEnv,
   type DriverFn,
   isOp,
+  isOperation,
   indexConnectors,
   keepsInput,
   makersOf,
@@ -98,6 +99,7 @@ import {
   MIGRATE_STORE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
   RESHAPE_WORKFLOW,
+  OPERATIONS_VENDOR,
   errorMessage,
   siteAtHostname,
 } from "./shared.ts";
@@ -187,6 +189,12 @@ export interface SanomaConfig {
    * records in the config's database, and in memory for a sandbox run.
    */
   collections?: readonly Collection[];
+  /**
+   * The company's own operations (`defineOperation`), besides those the launcher finds (`sanoma`
+   * imports every file of `operations/` and each app's `apps/<app>/operations/`): each an operation
+   * of the config, `operations.<name>.run`, which a workflow lists in `uses`.
+   */
+  operations?: readonly Operation<string, any>[];
   /**
    * Run the wakeup service inside this instance (`sanoma serve`), for other instances' wakeups
    * to register with. An instance that runs it must not stop, so `startWorker` refuses a config
@@ -404,14 +412,18 @@ export function defineConfig(config: SanomaConfig): SanomaConfig {
 /**
  * Joins the declaration files' modules (`declarationFiles`, each by its path) to `config`, as
  * `sanoma` loads it and the Worker's bundle composes it: a workflow file's default export is a
- * workflow (`defineWorkflow`), a file without one a helper; each export of a data file is a
- * collection. One the config lists already is kept, once. A `workflows` or `collections` that is
- * no list is left for `resolveConfig` to explain. Throws naming the file for an export that is
- * neither.
+ * workflow (`defineWorkflow`), an operation file's a company operation (`defineOperation`), a file
+ * without one a helper; each export of a data file is a collection. One the config lists already
+ * is kept, once. A `workflows`, `operations` or `collections` that is no list is left for
+ * `resolveConfig` to explain. Throws naming the file for an export that is none of these.
  */
 export function joinDeclarations(
   config: SanomaConfig,
-  modules: { workflows: [path: string, module: { default?: unknown }][]; data: [path: string, module: object][] },
+  modules: {
+    workflows: [path: string, module: { default?: unknown }][];
+    operations: [path: string, module: { default?: unknown }][];
+    data: [path: string, module: object][];
+  },
 ): void {
   if (config.workflows === undefined || Array.isArray(config.workflows)) {
     const workflows = new Set(config.workflows);
@@ -425,6 +437,19 @@ export function joinDeclarations(
       workflows.add(wf as WorkflowDefinition<any, any>);
     }
     if (workflows.size > 0) config.workflows = [...workflows];
+  }
+  if (config.operations === undefined || Array.isArray(config.operations)) {
+    const operations = new Set(config.operations);
+    for (const [path, { default: op }] of modules.operations) {
+      if (op === undefined) continue;
+      if (!isOperation(op)) {
+        throw new Error(
+          `${path}'s default export is not an operation: a file of operations/ exports one, \`export default defineOperation({ … })\`, or none (a helper)`,
+        );
+      }
+      operations.add(op);
+    }
+    if (operations.size > 0) config.operations = [...operations];
   }
   if (config.collections === undefined || Array.isArray(config.collections)) {
     const collections = new Set(config.collections);
@@ -504,6 +529,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     throw new Error("The config's `policy` is gone: the policy is policies/*.cedar in the root; leave it out");
   }
   const collections = collectionsOf(config);
+  const operations = operationsOf(config);
   const ledger = ledgerOf(config);
   const root = rootOf(config);
   const appName = appNameAt(root);
@@ -541,6 +567,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(hostTyped ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
+  // The company's own operations: no driver, their body runs in the run (`operationCall`).
+  for (const op of operations) ops.set(op.id, op);
   checkWakeupOps(types, ops);
   checkDatabaseOps(types, ops);
   checkFromRefs(types);
@@ -585,12 +613,13 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   );
   const fakes = makersOf(running, "fake");
   if (dataStore) fakes.set(DATA_VENDOR, () => collectionsFake(declared));
+  for (const op of operations) checkUses(`Operation "${op.id}"`, op.uses, ops, drivers);
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows ?? []) {
     if (BUILT_IN_WORKFLOWS.has(wf.name)) {
       throw new Error(`A workflow is named "${wf.name}", the name of a built-in workflow; name it otherwise`);
     }
-    checkUses(wf, ops, drivers);
+    checkUses(`Workflow "${wf.name}"`, wf.uses, ops, drivers);
     checkSchedule(wf);
     const other = names.get(wf.name);
     if (other && other !== wf) {
@@ -678,7 +707,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     databaseUrl,
     // The built-in's code and operations are part of the app's version, like the config's own. A
     // bundle's code is not the source's: it carries the hashes of the root it was read from.
-    version: bundled?.version ?? computeVersion({ appName, workflows: [...names.values()] }),
+    version: bundled?.version ?? computeVersion({ appName, workflows: [...names.values()], operations }),
     builtInCodes:
       bundled?.builtInCodes ??
       Object.fromEntries(
@@ -886,6 +915,30 @@ function collectionsOf(config: SanomaConfig): Map<string, Collection> {
     }
   }
   return collections;
+}
+
+/**
+ * The config's company operations, checked: each one `defineOperation` made, no two with one id, and
+ * no connector of their vendor, `OPERATIONS_VENDOR`.
+ */
+function operationsOf(config: SanomaConfig): Operation[] {
+  const list: unknown = config.operations ?? [];
+  if (!Array.isArray(list)) {
+    throw new Error("The config's `operations` must be an array of the operations `defineOperation` declares");
+  }
+  if (config.connectors.some((c) => c[VENDOR].id === OPERATIONS_VENDOR)) {
+    throw new Error(
+      `A connector in \`connectors\` is of the vendor "${OPERATIONS_VENDOR}", which the company's own operations are of; name it otherwise`,
+    );
+  }
+  const operations = new Map<string, Operation>();
+  for (const op of list) {
+    if (!isOperation(op)) throw new Error("`operations` holds something `defineOperation` did not make");
+    const other = operations.get(op.id);
+    if (other && other !== op) throw new Error(`Two operations are named "${op.id}"; name each once`);
+    operations.set(op.id, op);
+  }
+  return [...operations.values()];
 }
 
 /**
@@ -1367,29 +1420,36 @@ function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
 }
 
 /**
- * Every operation a workflow uses must be one the config's connectors declare, with a driver.
- * The workflow normally imports the same connector object; a copy is accepted only if it
- * declares the same effect and retry setting, and the worker's declaration is used either way.
- * None may use an operation a built-in workflow alone calls (`reservedFor`): a change's step, which
- * only the change workflow takes, or a reshape of a collection's records. A resource type's change operations are allowed: the call
- * refuses one aimed at a declared object (`DeclaredObjects`), which only apply changes.
+ * Every operation a workflow or a company operation (`owner`, as the message names it) uses must
+ * be one the config's connectors declare, with a driver, or one of its company operations, which
+ * has none: its body runs in the run. The workflow normally imports the same connector object; a
+ * copy is accepted only if it declares the same effect and retry setting, and the worker's
+ * declaration is used either way. None may use an operation a built-in workflow alone calls
+ * (`reservedFor`): a change's step, which only the change workflow takes, or a reshape of a
+ * collection's records. A resource type's change operations are allowed: the call refuses one
+ * aimed at a declared object (`DeclaredObjects`), which only apply changes.
  */
-function checkUses(wf: WorkflowDefinition<any, any>, ops: Map<string, Op>, impls: Map<string, unknown>) {
+function checkUses(owner: string, uses: readonly Use[], ops: Map<string, Op>, impls: Map<string, unknown>) {
   const problems: string[] = [];
-  for (const op of (wf.uses as readonly Use[]).filter(isOp)) {
+  for (const op of uses.filter(isOp)) {
     const known = ops.get(op.id);
     const reserved = known && reservedFor(known);
-    if (!known) problems.push(`${op.id} is not declared by any connector in \`connectors\``);
-    else if (reserved) {
+    if (!known) {
+      problems.push(
+        op.vendor === OPERATIONS_VENDOR
+          ? `${op.id} is not the default export of a file of operations/`
+          : `${op.id} is not declared by any connector in \`connectors\``,
+      );
+    } else if (reserved) {
       problems.push(`${op.id} ${reserved.does}, which ${reserved.by}: ${reserved.instead} instead`);
     } else if (known !== op && (known.effect !== op.effect || known.idempotent !== op.idempotent)) {
       problems.push(
         `${op.id} is declared with effect "${op.effect}"${op.idempotent ? " (idempotent)" : ""}, ` +
           `but its connector says "${known.effect}"${known.idempotent ? " (idempotent)" : ""}`,
       );
-    } else if (!impls.has(op.id)) {
+    } else if (!impls.has(op.id) && !isOperation(known)) {
       problems.push(`\`${op.id}\` has no driver: the connector package must attach one`);
     }
   }
-  if (problems.length) throw new Error(`Workflow "${wf.name}": ${problems.join("; ")}`);
+  if (problems.length) throw new Error(`${owner}: ${problems.join("; ")}`);
 }

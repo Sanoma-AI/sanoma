@@ -1,4 +1,4 @@
-import type { HostOutputs } from "sanoma/workflows";
+import type { HostOutputs, Resource } from "sanoma/workflows";
 import { hostnameUrl, isEnded } from "sanoma/workflows/shared";
 import { type CompanyState, GO_LIVE_LINES, type GoLiveRun, INFRA, type Place } from "../api.ts";
 
@@ -6,6 +6,23 @@ import { type CompanyState, GO_LIVE_LINES, type GoLiveRun, INFRA, type Place } f
 // Home's last step ticks (`isLive`) and which panel Hosting shows. `companyState`
 // (server/company-state.ts) gathers the facts; this file only reads them, so the tests call it
 // with facts of their own.
+
+/**
+ * The company's declared host among `resources` (the first whose type is a host) and where it
+ * runs: on Sanoma Cloud (`cloud`, a host that binds its own bootstrap) or on the company's own
+ * accounts (`own`). What `CompanyState.declared` says, and what a coding agent with no box is told
+ * to declare.
+ */
+export function declaredHostOf<R extends { vendor: string; type: string }>(
+  resources: readonly R[],
+  types: ReadonlyMap<string, Resource>,
+) {
+  for (const resource of resources) {
+    const host = types.get(`${resource.vendor}.${resource.type}`)?.host;
+    if (host) return { resource, place: host.bindsBootstrap ? ("cloud" as const) : ("own" as const) };
+  }
+  return undefined;
+}
 
 /** What a company's state is read from. */
 export interface CompanyFacts {

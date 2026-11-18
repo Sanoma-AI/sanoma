@@ -2,7 +2,7 @@
 title: The ledger
 description: "The ledger is the audit record of a run: who started it, every operation call with the policy's decision, every approval, and how it ended, as LedgerRecords in seq order."
 sidebar:
-  order: 8
+  order: 9
 ---
 
 The ledger is the audit record of a run: who started it, every operation call with the policy's decision, every approval, and how it ended, as `LedgerRecord`s in `seq` order. `client.ledger(runId)` reads it, and the app's run page shows it. Each `op.called` record names its `target` when the operation declares one (`data:outbound/Acme`: the instance the call acted on, as the policy saw it), and `client.history(target, limit?)` reads the calls that acted on one across every run, direct writes among them, newest first: a run's reads of the record too (each record's `effect` tells them from the writes), never a direct read, which is not recorded. Three stores keep it, each a `LedgerStore` (`append`, `read`, `readByTarget`, and `close` for one that holds a connection), and a config picks one with `ledger`:

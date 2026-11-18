@@ -3,8 +3,10 @@
   "include": [
     "sanoma.config.ts",
     "workflows",
+    "operations",
     "apps/*/app.ts",
     "apps/*/workflows",
+    "apps/*/operations",
     "apps/*/resources",
     "apps/*/scenarios"
   ]

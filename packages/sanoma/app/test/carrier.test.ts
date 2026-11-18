@@ -414,8 +414,16 @@ describe("the check in a person's box", () => {
       vi.stubEnv("GHOST_ADMIN_API_KEY", "not-for-the-check");
 
       // The local box of a person on this computer, as Publish and our loop's run_checks check in it.
-      const resolved = resolveConfig({ workflows: [], connectors: [], root: company });
-      const step = { source, resolved, by: { id: "ada" }, client: undefined as never, loopbackLogin: true };
+      const companyConfig = { workflows: [], connectors: [], root: company };
+      const resolved = resolveConfig(companyConfig);
+      const step = {
+        source,
+        config: companyConfig,
+        resolved,
+        by: { id: "ada" },
+        client: undefined as never,
+        loopbackLogin: true,
+      };
       const home = join(company, ".sanoma/agent-home/boxes", boxName(resolved.appName, "ada"));
       const clone = join(home, "repo");
       installInClone(company, clone);
