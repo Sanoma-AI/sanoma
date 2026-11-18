@@ -1,6 +1,9 @@
 // `sanoma/init`: the company template's files with a company's own declared in them, text in and
 // text out. `sanoma init` applies them to the files it copies, and a workflow or a site can apply
-// them to a repository's files (`github.repository.files`). No imports, so it runs anywhere.
+// them to a repository's files (`github.repository.files`). It imports only `sanoma/workflows/shared`,
+// plain values, so it runs anywhere.
+
+import { cloudHostnameOf } from "sanoma/workflows/shared";
 
 /** Who starts the company: the first person `resources/people.ts` declares. */
 export interface Creator {
@@ -37,11 +40,11 @@ export function declareName(text: string, name: string): string {
   return text.replace(CONFIG_OPENING, (opening) => `${opening}  name: ${JSON.stringify(name)},\n`);
 }
 
-/** The template's slug in `resources/sanoma/infra.ts`: the Cloud names and its address, literals the app's forms can edit. */
-const TEMPLATE_SLUG = /"company(\.sanoma\.work)?"/g;
+/** The template's address in `resources/sanoma/infra.ts`, the host's `hostname`: a literal the app's forms can edit. */
+const TEMPLATE_HOSTNAME = '"company.sanoma.work"';
 
-/** The infra file with the company's slug for the template's, in the names and the address. */
+/** The infra file with the company's address, `<slug>.sanoma.work`, for the template's. */
 export function declareSlug(text: string, slug: string): string {
-  if (text.search(TEMPLATE_SLUG) < 0) throw new Error(`the template's ${INFRA} names no "company"`);
-  return text.replaceAll(TEMPLATE_SLUG, (_, address: string | undefined) => JSON.stringify(slug + (address ?? "")));
+  if (!text.includes(TEMPLATE_HOSTNAME)) throw new Error(`the template's ${INFRA} names no ${TEMPLATE_HOSTNAME}`);
+  return text.replaceAll(TEMPLATE_HOSTNAME, () => JSON.stringify(cloudHostnameOf(slug)));
 }

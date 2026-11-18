@@ -419,12 +419,12 @@ describe("companies.json", () => {
     expect(liveOf(repo)).toBeUndefined();
     writeFileSync(lock, "{");
     expect(liveOf(repo)).toBeUndefined();
-    writeFileSync(lock, JSON.stringify({ "resources/sanoma/infra.ts#store": { type: "cloud.database", id: "acme" } }));
+    writeFileSync(lock, JSON.stringify({ "resources/sanoma/infra.ts#store": { type: "cloud.database", id: "c1" } }));
     expect(liveOf(repo)).toBeUndefined();
     writeFileSync(
       lock,
       JSON.stringify({
-        "resources/sanoma/infra.ts#host": { type: "cloud.host", id: "acme" },
+        "resources/sanoma/infra.ts#host": { type: "cloud.host", id: "c1" },
         "resources/sanoma/infra.ts#host.sourceKey": { type: "github.repository_deploy_key", id: "acme/ops:1" },
       }),
     );
@@ -434,17 +434,16 @@ describe("companies.json", () => {
       infra,
       `import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";
 
-export const store = cloud.database({ name: "acme" });
-export const host = cloud.host({ name: "acme", database: store });
+export const store = cloud.database({ region: "us-east" });
+export const host = cloud.host({ database: store });
 export default [store, host];
 `,
     );
     expect(liveOf(repo)).toEqual({});
     writeFileSync(
       infra,
-      `export const store = cloud.database({ name: "acme" });
+      `export const store = cloud.database({ region: "us-east" });
 export const host = cloud.host({
-  name: "acme",
   database: store,
   hostname: "acme.sanoma.work",
 });
@@ -464,7 +463,7 @@ export const host = cloud.host({
     expect(liveOf(repo)).toEqual({ hostname: "internal.sanoma.work" });
     writeFileSync(
       infra,
-      `export const host = cloud.host({ name: "acme" });\nexport const site = page({ hostname: "x.example" });\n`,
+      `export const host = cloud.host({ database: store });\nexport const site = page({ hostname: "x.example" });\n`,
     );
     expect(liveOf(repo)).toEqual({});
   });

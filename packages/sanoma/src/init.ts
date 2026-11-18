@@ -14,7 +14,7 @@ import { basename, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { AGENTS, BUILT_IN_CLIENTS, RESERVED_AGENTS, VISITORS } from "sanoma/workflows";
-import { isVisitor, slugged } from "sanoma/workflows/shared";
+import { CLOUD_SLUG, isVisitor, slugged } from "sanoma/workflows/shared";
 import { z } from "zod";
 import { stage } from "./events.ts";
 import { type Creator, declareFounder, declareName, declareSlug, INFRA } from "./template-files.ts";
@@ -157,12 +157,12 @@ export function pinDependencies(dependencies: Record<string, string>, own: Manif
 /**
  * A company's Sanoma Cloud slug, its address `<slug>.sanoma.work`: its name's (`slugged`), else its
  * directory's when the name gives none; lower case letters, digits and single dashes, a dash at
- * neither end, 3 to 40 of them, as the Cloud takes it; a shorter one gains `-company`, and none at
- * all is `company`.
+ * neither end, 3 to 40 of them, not one Sanoma keeps (`CLOUD_SLUG`), as the Cloud takes it; a
+ * shorter or kept one gains `-company`, and none at all is `company`.
  */
 export function slugOf(name: string | undefined, dir: string): string {
   const [slug = ""] = [name ?? "", dir].map((text) => slugged(text).slice(0, 40).replace(/-+$/, "")).filter(Boolean);
-  return slug.length >= 3 ? slug : [slug, "company"].filter(Boolean).join("-");
+  return CLOUD_SLUG.test(slug) ? slug : [slug, "company"].filter(Boolean).join("-");
 }
 
 /** What a command prints, trimmed; empty when it fails or is missing. */

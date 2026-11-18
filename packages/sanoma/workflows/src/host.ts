@@ -113,10 +113,11 @@ export interface HostSpec {
   bindsBootstrap?: boolean;
   /**
    * For a host that binds its own bootstrap in its vendor's account (Sanoma Cloud's), the
-   * operations of that account that going live from a computer calls, each by id: `repository`
-   * (`{ slug } → { owner, name }`, the company's repository made, empty, for the computer to push
-   * to; a write), `available` (`{ slug } → { available, yours }`, whether the address is free; a
-   * read) and `invite` (`{ slug, email } → { url }`, a one-use sign-in link on the host).
+   * operations of that account that going live from a computer calls, each by id, each on the
+   * company the vendor's token is for: `repository` (`{ slug } → { owner, name }`, the company's
+   * repository made, empty, for the computer to push to, the slug the address of a company the
+   * token makes; a write), `available` (`{ slug } → { available, yours }`, whether the address is
+   * free; a read) and `invite` (`{ email } → { url }`, a one-use sign-in link on the host).
    */
   account?: { repository: string; available: string; invite: string };
   /**

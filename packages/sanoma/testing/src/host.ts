@@ -838,16 +838,17 @@ const DERIVED_FACTS = {
 
 /**
  * The conformance checks for a host type that derives (`HostSpec.derives`), offline: a declaration
- * of its decisions alone (`name`, and `database` naming a declared database) is filled by apply
+ * of its decisions alone (`name` when its type takes one, `hostname` when given, and `database`
+ * naming a declared database) is filled by apply
  * (`deriveHosts`) with each derived value, which its type then parses: the installed sanoma's
  * runtime image, the app's `origin` as its source (and, when its type takes `inputs.name`, its
  * name left out, the repository's), the public sites' domains, and (unless it binds
  * its own bootstrap) its secrets as markers only, its database's URL among them; a declaration
- * that writes its secrets or its domains is refused. `name` is a valid name for the type.
+ * that writes its secrets or its domains is refused. `name` and `hostname` are valid for the type.
  */
 export function checkDerivedHost(
   type: Pick<Resource, "vendor" | "type" | "host" | "fields" | "schema">,
-  { name = "acme" }: { name?: string } = {},
+  { name = "acme", hostname }: { name?: string; hostname?: string } = {},
 ): HostCheck[] {
   const spec = type.host;
   if (!spec?.derives) throw new Error(`${type.vendor}.${type.type} does not derive: it has no host.derives`);
@@ -881,7 +882,11 @@ export function checkDerivedHost(
     type: type.type,
     name,
     at: at("host"),
-    desired: { name, ...(inputs.database && { [inputs.database]: "store" }) } as Record<string, unknown>,
+    desired: {
+      ...(Object.hasOwn(type.schema.shape, "name") && { name }),
+      ...(hostname !== undefined && inputs.hostname && { [inputs.hostname]: hostname }),
+      ...(inputs.database && { [inputs.database]: "store" }),
+    } as Record<string, unknown>,
     refs: inputs.database ? { [inputs.database]: store.id } : ({} as Record<string, string>),
   };
   const facts: HostFacts = { ...DERIVED_FACTS, carried: new Map([[type.vendor, ["HOST_CHECK_VENDOR_TOKEN"]]]) };

@@ -2,7 +2,7 @@
 // own address. Nothing is made until it goes live; until then it runs on this computer.
 import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";
 
-export const store = cloud.database({ name: "company" });
-export const host = cloud.host({ name: "company", database: store, hostname: "company.sanoma.work" });
+export const store = cloud.database({ region: "us-east" });
+export const host = cloud.host({ hostname: "company.sanoma.work", database: store });
 
 export default [store, host];

@@ -5,6 +5,7 @@ import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { CLOUD_SLUG_RULE, cloudSlugOf } from "sanoma/workflows/shared";
 import { Button } from "#/components/ui/button.tsx";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
@@ -14,10 +15,10 @@ import { startSanomaSignInFn } from "../functions.ts";
 import { appApi, cloudAddressQuery, configQuery, RUNS_KEY, sanomaSignInQuery } from "../queries.ts";
 import { ButtonLink, Notice, Region, ToneBadge } from "./common.tsx";
 
-/** What the panel reads of the config: the company's name and the slug `infra.ts` declares for its host. */
+/** What the panel reads of the config: the company's name and the slug of the address `infra.ts` declares for its host. */
 const selectReady = (config: AppConfig) => {
-  const name = config.resources.find((r) => r.id === `${INFRA}#host`)?.desired.name;
-  return { company: config.name, slug: typeof name === "string" ? name : "" };
+  const { hostname } = config.resources.find((r) => r.id === `${INFRA}#host`)?.desired ?? {};
+  return { company: config.name, slug: (typeof hostname === "string" && cloudSlugOf(hostname)) || "" };
 };
 
 /** How an address's check reads beside the field. */
@@ -132,7 +133,7 @@ export function ReadyToGoLive({ retry = false }: { retry?: boolean }) {
           </FieldDescription>
           <FieldError>
             {!valid
-              ? "Use lower case letters, digits and dashes, with no dash at either end: one of them, or 3 to 40."
+              ? `Use ${CLOUD_SLUG_RULE}.`
               : checked === "taken"
                 ? "Someone else has this address: choose another."
                 : check.error

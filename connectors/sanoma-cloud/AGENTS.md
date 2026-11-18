@@ -2,7 +2,7 @@
 
 Follow the shared [connector conventions](../AGENTS.md).
 
-- [README](README.md): the database and host types, the company's slug, the driver over sanoma-ops's workflows, the token and the environment, errors, running it live.
+- [README](README.md): the database and host types, the company (one per token, bound by its id) and its address, the driver over sanoma-ops's workflows, the token and the environment, errors, running it live.
 - [Source map](src/AGENTS.md): the resource types, the operations shared by the driver and the fake, the driver, the fake.
 - [Test map](test/AGENTS.md): the driver against a stand-in for the api, the Host and Database kits over the fake.
 
