@@ -523,7 +523,6 @@ describe("going live by contract", () => {
       repository: "cloud.company.repository",
       available: "cloud.company.available",
       invite: "cloud.company.invite",
-      read: "cloud.company.read",
     });
     expect(replaceable(app, template, [])).toBe(true);
     expect(replaceable(app, template, [`${INFRA}#store`])).toBe(false);

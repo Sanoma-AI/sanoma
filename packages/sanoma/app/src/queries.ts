@@ -26,7 +26,6 @@ import { toast } from "sonner";
 import { z } from "zod";
 import {
   type AvailableConnectors,
-  CLOUD_TRIAL_MS,
   type ChangesQuery,
   type CredentialsResponse,
   errorBodyOf,
@@ -49,7 +48,6 @@ import {
   getChatModel,
   getChats,
   getCloudAddress,
-  getCloudTrial,
   getColumnPlan,
   getCompanyState,
   getConfig,
@@ -413,19 +411,6 @@ export const companyStateQuery = ({ force = false } = {}) =>
       return data?.state === "live" && data.host?.healthy === false ? POLL_MS : false;
     },
     refetchOnWindowFocus: !force,
-  });
-
-/**
- * A Sanoma Cloud company's free trial (`getCloudTrial`), the bar's trial badge: asked by the badge
- * alone, once the company's state says it runs on Sanoma Cloud, never by the root loader, so no
- * page waits on the Cloud; kept an hour, and asked again each hour for the days left.
- */
-export const cloudTrialQuery = () =>
-  queryOptions({
-    queryKey: ["cloud-trial"],
-    queryFn: () => getCloudTrial(),
-    staleTime: CLOUD_TRIAL_MS,
-    refetchInterval: CLOUD_TRIAL_MS,
   });
 
 /**

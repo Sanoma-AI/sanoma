@@ -39,6 +39,11 @@ export interface HostOutputs {
   /** The commit it runs, when its state says. */
   revision?: string;
   healthy: boolean;
+  /**
+   * When the company's free trial at the host's vendor ends, ISO 8601, while the vendor runs it
+   * (Sanoma Cloud's): read with the host, so the app's trial badge never asks the vendor itself.
+   */
+  trialEndsAt?: string;
 }
 
 /** Where a wakeup, and a check of the host's own process, reaches it: its `wakeUrl`, else its `url`. */
@@ -117,11 +122,9 @@ export interface HostSpec {
    * company the vendor's token is for: `repository` (`{ slug } → { owner, name }`, the company's
    * repository made, empty, for the computer to push to, the slug the address of a company the
    * token makes; a write), `available` (`{ slug } → { available, yours }`, whether the address is
-   * free; a read), `invite` (`{ email } → { url }`, a one-use sign-in link on the host) and `read`
-   * (`{} → { id, slug, status, trialEndsAt }`, the company itself, which the app's trial badge
-   * reads; a read).
+   * free; a read) and `invite` (`{ email } → { url }`, a one-use sign-in link on the host).
    */
-  account?: { repository: string; available: string; invite: string; read: string };
+  account?: { repository: string; available: string; invite: string };
   /**
    * True for a host whose declaration says only the decisions (see above): apply derives its
    * image, source, ref, secrets and domains, and a data file may not declare `secrets` or `domains`.

@@ -126,12 +126,16 @@ const hostSchema = z.object({
   id: companyId,
   url: z.string().nullish().describe("Where the company answers, `https://<hostname>`, which the Cloud sets"),
   healthy: z.boolean().nullish().describe("Whether the Cloud says it runs"),
+  trialEndsAt: z
+    .string()
+    .nullish()
+    .describe("When the company's free trial ends, ISO 8601, while the Cloud runs the company; the Cloud sets it"),
 });
 
 /** A host's fields: what the Cloud sets, and what it cannot change in place (a deploy moves the revision and the address). */
 const hostFields = {
   immutable: ["source", "ref", "port"],
-  vendorOwned: ["id", "url", "healthy"],
+  vendorOwned: ["id", "url", "healthy", "trialEndsAt"],
   writeOnly: ["database"],
   references: {
     source: { type: "github.repository", by: ["http_clone_url"] },
@@ -155,6 +159,8 @@ const sourceKey = (state: Record<string, unknown>) => {
  * repository's default branch (`ref`, an override), as `cloudflare.host`; its port is the
  * Cloud's. A deploy moves it to the revision apply resolves from `ref`, and to another `hostname`
  * (a rename); nothing else changes in place. Its binding is the company's id, as the database's.
+ * Its state carries when the company's free trial ends while the Cloud runs it, which its outputs
+ * pass on to apply's and drift's reports for the app's trial badge.
  */
 export const host = defineResource({
   vendor: "cloud",
@@ -174,13 +180,13 @@ export const host = defineResource({
       repository: "cloud.company.repository",
       available: "cloud.company.available",
       invite: "cloud.company.invite",
-      read: "cloud.company.read",
     },
     revision: "revision",
     outputs: (state) => ({
       url: String(state.url ?? ""),
       ...(typeof state.revision === "string" && { revision: state.revision }),
       healthy: state.healthy === true,
+      ...(typeof state.trialEndsAt === "string" && { trialEndsAt: state.trialEndsAt }),
     }),
   },
 });
@@ -236,25 +242,12 @@ const storeUrlSpec = {
 } satisfies Record<string, OpSpec>;
 
 /**
- * The account's operations, which the app calls (the host's `account`): whether an address is
- * free, the company's repository made by the Sanoma.work GitHub App and a one-use link that signs
- * the account's own email in on the company's host, for going live from a computer, and the
- * company itself, for its trial badge. The company is the token's (one token, one company); only a
- * token that has none yet names its address, for the repository.
+ * The account's operations, which going live from a computer calls (the host's `account`): whether
+ * an address is free, the company's repository made by the Sanoma.work GitHub App, and a one-use
+ * link that signs the account's own email in on the company's host. The company is the token's
+ * (one token, one company); only a token that has none yet names its address, for the repository.
  */
 const companySpecs = {
-  read: {
-    effect: "read",
-    idempotent: true,
-    description: "The token's company: its id, its address, its status and when its free trial ends (cloud-list)",
-    input: z.object({}),
-    output: z.object({
-      id: z.string().describe("The company's id at the Cloud: it never changes"),
-      slug: z.string().describe("Its address now, `<slug>.sanoma.work`"),
-      status: z.string().describe("Where the Cloud has it: `creating`, `running`, `failed`, `closed` or `moved`"),
-      trialEndsAt: z.string().describe("When its free trial ends, ISO 8601"),
-    }),
-  },
   available: {
     effect: "read",
     idempotent: true,
@@ -309,7 +302,7 @@ type CloudSpecs = {
 /**
  * The connector's operations: each type's (`read`, `import`, `plan`, `create`, `update`,
  * `delete`), `database.storeUrl` in the database's group (Supabase's pattern), and the account's
- * (`company.read`, `.available`, `.repository`, `.invite`).
+ * (`company.available`, `.repository`, `.invite`).
  */
 export const cloudOps = {
   ...types,

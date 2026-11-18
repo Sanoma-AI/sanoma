@@ -158,6 +158,8 @@ function hostState(c: Company & { revision: string }): HostState {
     port: PORT,
     url: c.url,
     healthy: c.status !== "failed",
+    // The trial only while the Cloud runs the company: none while it is made, failed, closed or moved.
+    ...(c.status === "running" && { trialEndsAt: c.trialEndsAt }),
   };
 }
 
@@ -256,8 +258,8 @@ const planHost = async (
     const { id: made } = await tokenCompany(cloud);
     return {
       action: "create",
-      planned: { ...want, id: made, port: PORT, url: null, healthy: null },
-      unknown: ["url", "healthy"],
+      planned: { ...want, id: made, port: PORT, url: null, healthy: null, trialEndsAt: null },
+      unknown: ["url", "healthy", "trialEndsAt"],
       replace: [],
     };
   }
@@ -305,8 +307,8 @@ async function deployed(cloud: CloudApi, id: string, now: HostState, hostname: s
  * The connector's operations over the API `api(call)` gives for each call: the database type's
  * (`database.*`, with `storeUrl`), the host type's (`host.*`), the sandbox type's (`sandbox.*`, a
  * declaration bound to the company, whose boxes `cloudBackend` opens), and the account's
- * (`company.*`): the company itself (its trial), whether an address is free, the company's
- * repository made, a sign-in link on its host.
+ * (`company.*`): whether an address is free, the company's repository made, a sign-in link on its
+ * host.
  */
 export function cloudOperations(api: (call: CallContext) => CloudApi) {
   const databaseRead = async ({ id }: { id: string }, call: CallContext) => readDatabase(api(call), id);
@@ -378,10 +380,6 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
       delete: async ({ id }: { id: string }) => ({ id, gone: true as const }),
     },
     company: {
-      read: async (_: unknown, call: CallContext) => {
-        const { id, slug, status, trialEndsAt } = await tokenCompany(api(call));
-        return { id, slug, status, trialEndsAt };
-      },
       available: (input: { slug: string }, call: CallContext) => api(call).available(input),
       repository: async ({ slug }: { slug: string }, call: CallContext) => {
         const cloud = api(call);

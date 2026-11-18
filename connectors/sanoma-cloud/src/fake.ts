@@ -109,7 +109,7 @@ const link = (state: FakeCloudState, url: string) => ({
   expiresAt: new Date(Date.now() + LINK_MS).toISOString(),
 });
 
-/** A company of the fake, made now for the token at `slug`, its free trial 7 days, as the Cloud's. */
+/** A company of the fake, made now for the token at `slug`, its free trial 7 days (the Cloud sets its own length). */
 function newCompany(id: string, slug: string, name = slug): FakeCompany {
   const now = Date.now();
   return {

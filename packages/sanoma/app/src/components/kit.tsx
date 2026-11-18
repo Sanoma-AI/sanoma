@@ -312,15 +312,21 @@ function watchClock(onTick: () => void) {
 }
 
 const readClock = () => (now ??= Date.now());
-/** The server, and the browser while it hydrates, know no time: they render the UTC time. */
+/** The server, and the browser while it hydrates, know no time. */
 const noClock = () => undefined;
+
+/**
+ * Now, in the browser, from the page's one clock (ticking every 15 s while anything reads it);
+ * undefined on the server and while the browser hydrates, so both render the same markup.
+ */
+export const useClock = (): number | undefined => useSyncExternalStore(watchClock, readClock, noClock);
 
 /**
  * A time, relative to now in the browser, with the UTC time as its title. The server renders
  * the UTC time, so the page hydrates the same markup whatever the browser's clock and time zone.
  */
 export function When({ at }: { at: number }) {
-  const clock = useSyncExternalStore(watchClock, readClock, noClock);
+  const clock = useClock();
   const utc = utcText(at, { seconds: true });
   return (
     <time dateTime={new Date(at).toISOString()} title={utc}>

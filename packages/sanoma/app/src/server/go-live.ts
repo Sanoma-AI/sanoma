@@ -27,8 +27,6 @@ import { slugged } from "sanoma/workflows/shared";
 import {
   ApiError,
   type CloudAddress,
-  type CloudTrial,
-  CLOUD_TRIAL_MS,
   INFRA,
   type GoLiveChoices,
   type GoLiveProgress,
@@ -38,7 +36,6 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
-import { declaredHostOf, isLive } from "../lib/company-state.ts";
 import { applyAheadOf, invalid } from "./core.ts";
 import { declaredEmail } from "./people.ts";
 import { CLOUD_TOKEN } from "./sanoma-sign-in.ts";
@@ -425,50 +422,9 @@ export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{
   }
 }
 
-/** How long the Cloud's answer about the trial is kept in this process when it could not answer: five minutes. */
-const TRIAL_RETRY_MS = 5 * 60_000;
-const DAY_MS = 86_400_000;
-/** The Cloud's answer about a trial: when it ends, in ms, or none when it could not say; kept until `until`. */
-type KeptTrial = { until: number; endsAt: Promise<number | undefined> };
-/** The answer about each app's trial in this process, by the app's client. */
-const trials = new WeakMap<SanomaClient, KeptTrial>();
-
-/**
- * The company's free trial on Sanoma Cloud, for the bar's badge: when it ends and the days left
- * (its last day 1, 0 once it ended); null for a company not live on a Sanoma Cloud host, which asks
- * nothing, and while the Cloud cannot say. The account's `read`, asked at most once an hour per app
- * in this process, again five minutes after a failure, so a page view asks the Cloud nothing and
- * never waits on it more than once an hour; the days are counted from the answer kept.
- */
-export async function cloudTrial(app: AppContext): Promise<CloudTrial | null> {
-  const read = declaredHostOf(app.snapshot.description.resources, app.resolved.types)?.host.account?.read;
-  if (!read || !isLive(app.snapshot.bound, app.place)) return null;
-  let kept = trials.get(app.client);
-  if (!kept || Date.now() >= kept.until) {
-    const asking = { until: Date.now() + CLOUD_TRIAL_MS } as KeptTrial;
-    asking.endsAt = (async () => {
-      try {
-        const { trialEndsAt } = (await cloudCall(app, read, {})) as { trialEndsAt: string };
-        const endsAt = Date.parse(trialEndsAt);
-        if (Number.isNaN(endsAt)) throw new Error(`${trialEndsAt} is no date`);
-        return endsAt;
-      } catch (err) {
-        asking.until = Date.now() + TRIAL_RETRY_MS;
-        console.error(`sanoma app: Sanoma Cloud did not say when the free trial ends: ${errorMessage(err)}`);
-        return undefined;
-      }
-    })();
-    trials.set(app.client, (kept = asking));
-  }
-  const endsAt = await kept.endsAt;
-  if (endsAt === undefined) return null;
-  return { endsAt: new Date(endsAt).toISOString(), daysLeft: Math.max(0, Math.ceil((endsAt - Date.now()) / DAY_MS)) };
-}
-
 /**
  * One of the account's operations that no run makes (the sign-in link, as this app's own invite is
- * posted by itself, and the company's trial, which a page view reads), its driver called here with
- * the stored Cloud token alone; never logged.
+ * posted by itself), its driver called here with the stored Cloud token alone; never logged.
  */
 async function cloudCall({ resolved, client }: Company, opId: string, input: unknown): Promise<unknown> {
   const driver = resolved.drivers.get(opId);

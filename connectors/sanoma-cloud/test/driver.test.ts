@@ -2,6 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server, type ServerRespons
 import type { AddressInfo } from "node:net";
 import { type CallContext, memorySecrets, VENDOR } from "sanoma/workflows";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { host as hostType } from "../src/connector.ts";
 import { cloudDriver, workflowsApi } from "../src/driver.ts";
 import { cloud } from "../src/index.ts";
 
@@ -122,6 +123,19 @@ const declaredHost = {
 const starts = () => sent.filter((s) => s.name.endsWith(".start")).map((s) => [s.name, s.input]);
 
 describe("cloud's host through the workflows", () => {
+  it("reads when the company's free trial ends with its host, only while the Cloud runs it, and passes it on in its outputs", async () => {
+    workflows = { cloudList: () => ({ output: [acme()] }) };
+    const { state } = await op("host.read", { id: "c1" });
+    expect(state.trialEndsAt).toBe("2026-11-15T00:00:00.000Z");
+    expect(hostType.host!.outputs(state)).toMatchObject({ trialEndsAt: "2026-11-15T00:00:00.000Z" });
+    for (const status of ["creating", "failed", "moved"]) {
+      workflows = { cloudList: () => ({ output: [{ ...acme(), status }] }) };
+      const read = await op("host.read", { id: "c1" });
+      expect(read.state, status).not.toHaveProperty("trialEndsAt");
+      expect(hostType.host!.outputs(read.state), status).not.toHaveProperty("trialEndsAt");
+    }
+  });
+
   it("creates the token's company's with cloud-signup by its id, waiting out run_running, then reads it by id", async () => {
     let made = false;
     workflows = {
@@ -141,6 +155,7 @@ describe("cloud's host through the workflows", () => {
         port: 3000,
         url: "https://acme.sanoma.work",
         healthy: true,
+        trialEndsAt: "2026-11-15T00:00:00.000Z",
       },
     });
     expect(sent.map((s) => s.name)).toEqual([
@@ -314,7 +329,7 @@ describe("cloud's host through the workflows", () => {
     expect(await op("host.plan", { desired: declaredHost })).toMatchObject({
       action: "create",
       planned: { id: "c1", hostname: "acme.sanoma.work" },
-      unknown: ["url", "healthy"],
+      unknown: ["url", "healthy", "trialEndsAt"],
     });
   });
 
@@ -411,21 +426,6 @@ describe("cloud's database through the workflows", () => {
 });
 
 describe("cloud's account operations through the workflows", () => {
-  it("reads the token's company with cloud-list: its id, address, status and trial, and refuses a token for none", async () => {
-    workflows = { cloudList: () => ({ output: [acme()] }) };
-    expect(await op("company.read", {})).toEqual({
-      id: "c1",
-      slug: "acme",
-      status: "running",
-      trialEndsAt: "2026-11-15T00:00:00.000Z",
-    });
-    expect(starts()).toEqual([["cloudList.start", {}]]);
-    workflows = { cloudList: () => ({ output: [] }) };
-    await expect(op("company.read", {})).rejects.toMatchObject({ vendorCode: "no_company" });
-    workflows = { cloudList: () => ({ output: [acme(), { ...acme(), id: "c2" }] }) };
-    await expect(op("company.read", {})).rejects.toMatchObject({ vendorCode: "not_one" });
-  });
-
   it("says whether an address is free with cloud-available, and refuses an answer that is not one", async () => {
     workflows = { cloudAvailable: ({ slug }) => ({ output: { available: slug === "acme", yours: false } }) };
     expect(await op("company.available", { slug: "acme" })).toEqual({ available: true, yours: false });

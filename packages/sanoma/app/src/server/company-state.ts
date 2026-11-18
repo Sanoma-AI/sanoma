@@ -1,15 +1,16 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import type { SanomaClient } from "sanoma/workflows";
+import { APPLY_WORKFLOW, type SanomaClient } from "sanoma/workflows";
 import { DRIFT_WORKFLOW, GO_LIVE_CLOUD_WORKFLOW, GO_LIVE_HOST_WORKFLOW } from "sanoma/workflows/shared";
 import type { CompanyState } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { companyStateOf, declaredHostOf, hostAt } from "../lib/company-state.ts";
+import { companyStateOf, declaredHostOf, hostAt, isLive } from "../lib/company-state.ts";
 import { answers, appliedHost, goLiveRunOf, KEYS } from "./go-live.ts";
 
 // The facts a company's state is read from (`companyStateOf`): the lockfile's bindings and
 // `infra.ts`'s host as the snapshot read them, where this instance is, going live's latest run,
-// and, only when Hosting asks, where the host answers and whether it does.
+// for a company live on Sanoma Cloud when its free trial ends, and, only when Hosting asks, where
+// the host answers and whether it does.
 
 /** How long an answer from the host's `/healthz` is taken as it is. */
 const PROBE_MS = 10_000;
@@ -42,6 +43,27 @@ async function checkedHost(client: SanomaClient) {
 }
 
 /**
+ * When the company's free trial at Sanoma Cloud ends, as its host was last read: by the latest
+ * apply that made or changed the host, unless the latest drift check that finished is newer (the
+ * Cloud's answer, passed on in the host's outputs, `HostOutputs.trialEndsAt`); none while the Cloud
+ * does not run the company. Read from the reports in the company's own database: nothing asks the
+ * Cloud, which the trial is read from only as apply and drift read the host anyway.
+ */
+async function trialEnd(client: SanomaClient): Promise<string | undefined> {
+  const [[drift], applies] = await Promise.all([
+    client.runs({ workflow: DRIFT_WORKFLOW, status: "finished", limit: 1 }),
+    client.runs({ workflow: APPLY_WORKFLOW, status: "finished", limit: 10 }),
+  ]);
+  for (const run of applies) {
+    if (drift && drift.createdAt > run.createdAt) break;
+    const { results } = await client.applyReport(run.runId);
+    const host = results.find((r) => r.id === KEYS.host && r.host)?.host;
+    if (host) return host.trialEndsAt;
+  }
+  return drift && (await client.driftReport(drift.runId)).resources.find((r) => r.id === KEYS.host)?.host?.trialEndsAt;
+}
+
+/**
  * Whether the host answers at `host`: on a hosted instance yes, since it is this one; unknown
  * while it is not bound, as the address may be no host of the company's yet; else its `/healthz`
  * asked once its last answer is `PROBE_MS` old, and the last answer otherwise.
@@ -60,13 +82,16 @@ async function healthy(app: AppContext, host: { url: string; wakeUrl?: string })
  * The company's state. Where the host answers (the latest apply that made it, else the latest
  * drift check, else its declared hostname) and whether `/healthz` does are read only with `force`
  * (Hosting, as it opens and while going live): the badge and Home never wake a host that stops
- * when idle, nor read the apply reports that say where it is.
+ * when idle. For a company live on a Sanoma Cloud host, when its free trial ends (`trialEnd`),
+ * from its own database; any other company reads nothing for it.
  */
 export async function companyState(app: AppContext, { force = false } = {}): Promise<CompanyState> {
   const { snapshot, resolved, client, place } = app;
   const declaredHost = declaredHostOf(snapshot.description.resources, resolved.types);
-  const run = await goLiveRun(client);
+  const onCloud = declaredHost?.place === "cloud" && isLive(snapshot.bound, place);
+  const [run, trialEndsAt] = await Promise.all([goLiveRun(client), onCloud ? trialEnd(client) : undefined]);
   const facts = {
+    trialEndsAt,
     bound: snapshot.bound,
     place,
     declared: declaredHost?.place ?? null,

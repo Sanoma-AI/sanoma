@@ -63,7 +63,7 @@ import { authorizeConnection } from "./server/connect.ts";
 import { availableConnectors } from "./server/available.ts";
 import { planColumnChange, proposeColumnChange } from "./server/columns.ts";
 import { companyState } from "./server/company-state.ts";
-import { cloudAddress, cloudTrial, goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
+import { cloudAddress, goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
 import { sanomaSignIn, startSanomaSignIn } from "./server/sanoma-sign-in.ts";
 import { hostDerived } from "./server/host-derived.ts";
 import { invitePerson, peopleSignIns } from "./server/people.ts";
@@ -281,9 +281,6 @@ export const getGoLiveProgress = createServerFn(READ).handler(({ context }) => g
 export const getCompanyState = createServerFn(READ)
   .validator(validate(z.object({ force: z.boolean().optional() })))
   .handler(({ data, context }) => companyState(context.app, data));
-
-/** A Sanoma Cloud company's free trial, the bar's trial badge: null for a company not live on Sanoma Cloud. */
-export const getCloudTrial = createServerFn(READ).handler(({ context }) => cloudTrial(context.app));
 
 /** Home's setup card: each step done or not, the agent's from the engine cookie too. */
 export const getSetupProgress = createServerFn(READ).handler(({ context }) =>

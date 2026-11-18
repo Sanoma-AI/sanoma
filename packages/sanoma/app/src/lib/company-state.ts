@@ -8,10 +8,10 @@ import { type CompanyState, GO_LIVE_LINES, type GoLiveRun, INFRA, type Place } f
 // with facts of their own.
 
 /**
- * The company's declared host among `resources` (the first whose type is a host), its type's
- * `host`, and where it runs: on Sanoma Cloud (`cloud`, a host that binds its own bootstrap) or on
- * the company's own accounts (`own`). What `CompanyState.declared` says, what a coding agent with
- * no box is told to declare, and whose account the trial badge reads.
+ * The company's declared host among `resources` (the first whose type is a host) and where it
+ * runs: on Sanoma Cloud (`cloud`, a host that binds its own bootstrap) or on the company's own
+ * accounts (`own`). What `CompanyState.declared` says, and what a coding agent with no box is told
+ * to declare.
  */
 export function declaredHostOf<R extends { vendor: string; type: string }>(
   resources: readonly R[],
@@ -19,7 +19,7 @@ export function declaredHostOf<R extends { vendor: string; type: string }>(
 ) {
   for (const resource of resources) {
     const host = types.get(`${resource.vendor}.${resource.type}`)?.host;
-    if (host) return { resource, host, place: host.bindsBootstrap ? ("cloud" as const) : ("own" as const) };
+    if (host) return { resource, place: host.bindsBootstrap ? ("cloud" as const) : ("own" as const) };
   }
   return undefined;
 }
@@ -37,6 +37,8 @@ export interface CompanyFacts {
   run: GoLiveRun | null;
   /** Where the host answers (`hostAt`), and whether `/healthz` did when it was asked. */
   host?: { url: string; healthy?: boolean } | undefined;
+  /** When its free trial at Sanoma Cloud ends, ISO 8601, as its host was last read: only for a company live there. */
+  trialEndsAt?: string | undefined;
 }
 
 /** The lockfile's key of what `infra.ts` declares as `name`. */
@@ -52,10 +54,17 @@ const failed = (run: GoLiveRun) =>
 /**
  * The company's state: going live's run not ended is `deploying`; else its host bound (or this
  * instance a hosted one) is `live`; else going live's latest run having failed is `failed`; else
- * `local`. A copy of a live company opened on this computer is its drafting copy; a live company
- * whose declared host is Sanoma Cloud's runs there.
+ * `local`. A copy of a live company opened on this computer is its drafting copy.
  */
-export function companyStateOf({ bound, place, declared, repository, run, host }: CompanyFacts): CompanyState {
+export function companyStateOf({
+  bound,
+  place,
+  declared,
+  repository,
+  run,
+  host,
+  trialEndsAt,
+}: CompanyFacts): CompanyState {
   const hostBound = bound.includes(key("host"));
   const live = isLive(bound, place);
   const state = run && !isEnded(run.status) ? "deploying" : live ? "live" : run && failed(run) ? "failed" : "local";
@@ -69,10 +78,10 @@ export function companyStateOf({ bound, place, declared, repository, run, host }
     state,
     draftingCopy: live && place === "this-computer",
     declared,
-    onCloud: live && declared === "cloud",
     lines: GO_LIVE_LINES.map((line) => ({ line, done: done[line] })),
     run,
     host: host ?? null,
+    trialEndsAt: trialEndsAt ?? null,
   };
 }
 
