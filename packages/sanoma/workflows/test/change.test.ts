@@ -15,6 +15,7 @@ import { lintWorkflow } from "../src/lint.ts";
 import { stillMade } from "../src/change-steps.ts";
 import { CHANGE_MERGE, type ChangeReport, defineWorkflow, type LedgerRecord, memoryLedger } from "../src/index.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
+import estimate from "./fixtures/estimate.ts";
 import { freshDatabase, pending, rootWith, testhostInfra, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The change workflow end to end over a fake host and a repository
@@ -71,6 +72,17 @@ const waits = defineWorkflow({
   },
 });
 
+/** A workflow of this file that uses a company operation of another and waits: a draft that edits the operation's file strands its runs. */
+const estimates = defineWorkflow({
+  name: "estimates",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [estimate, "sleep"],
+  run: async (ctx) => {
+    await ctx.sleep({ hours: 1 });
+  },
+});
+
 /** Removing `legacy` for good from the collection `name`: what Try again's removals carry. */
 const removal = (name: string): TableChangePlan => ({
   collection: name,
@@ -106,7 +118,14 @@ describe("the change workflow", () => {
   const repo = memorySource({ root: here, remote });
   const databaseUrl = freshDatabase("change");
   const app = useTestApp(
-    { workflows: [waits], collections, connectors: [remote.connector], ledger: memoryLedger(), root },
+    {
+      workflows: [waits, estimates],
+      operations: [estimate],
+      collections,
+      connectors: [remote.connector],
+      ledger: memoryLedger(),
+      root,
+    },
     { databaseUrl, source: repo.source, app: repo.app },
   );
   const pool = lazyDb(databaseUrl, "change test");
@@ -660,6 +679,22 @@ describe("the change workflow", () => {
       stranded: [waiting],
     });
     await app.client.changeEvent("strand", { kind: "close", by: "alice" }, { by: "alice" });
+    await app.client.result(runId);
+  });
+
+  it("counts as stranded the waiting runs of a workflow that uses a company operation the change edits", async () => {
+    const waiting = await app.client.start(estimates, {}, { startedBy: "alice" });
+    await waitFor(async () => (await app.client.ledger(waiting)).some((r) => r.type === "sleep.started"));
+    repo.edit("strand-op", { "fixtures/estimate.ts": "// edited\n" });
+    const runId = await open("strand-op");
+    await waitFor(pending(() => app.client, runId));
+    // The operation's code is the workflow's version too; `waits`, which does not use it, is not stranded.
+    expect((await app.client.change("strand-op"))!.state.facts).toMatchObject({
+      touches: ["fixtures/", "fixtures/estimate.ts"],
+      strandedRuns: 1,
+      stranded: [waiting],
+    });
+    await app.client.changeEvent("strand-op", { kind: "close", by: "alice" }, { by: "alice" });
     await app.client.result(runId);
   });
 

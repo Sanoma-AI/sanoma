@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
 import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
-import { APPS_DIR, COLLECTIONS_FILE, inside, nearestDir, RELATIVE } from "./paths.ts";
+import { APPS_DIR, COLLECTIONS_FILE, inside, kindDirOf, RELATIVE } from "./paths.ts";
 import { LOCAL_ENTRIES } from "./shared.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
@@ -67,8 +67,9 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
  * Checks a workflow file, or a company operation's (a file of `operations/`), which is held to the
  * same rules. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
  * type from `sanoma/workflows` or `sanoma`, `LOCAL_ENTRIES`, `@sanoma-ai/connector-<vendor>`,
- * `zod`, and relative files. With `filename`, a relative import must stay inside the file's nearest
- * `workflows/` (or `operations/`) directory, or its own directory when it has none; the files
+ * `zod`, and relative files. With `filename`, a relative import must stay inside the file's
+ * `workflows/` (or `operations/`) directory, the root's or an app's, a subfolder of either name
+ * part of it (`kindDirOf`), or its own directory when it has none; the files
  * outside it a workflow may import are the company's `resources/data.ts`, its collections, and
  * the files of its `operations/`, its company operations (the root's or an app's, by real path);
  * an operation, `resources/data.ts` alone. No
@@ -93,7 +94,7 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   const read = typeof input === "string" ? parsed(input, filename ?? "workflow.ts") : input;
   const { program, at } = read;
   const problems = [...read.problems];
-  const root = filename === undefined ? undefined : nearestDir(filename, ["workflows", "operations"]);
+  const root = filename === undefined ? undefined : kindDirOf(filename, ["workflows", "operations"]);
 
   const checkSource = (node: Node) => {
     const spec: string = node.source.value;

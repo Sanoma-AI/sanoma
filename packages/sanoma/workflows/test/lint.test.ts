@@ -166,6 +166,38 @@ describe("lintWorkflow", () => {
     );
   });
 
+  it("takes the tree from the kind's folder at the root or an app's, not from a subfolder named as the other kind", () => {
+    // workflows/operations/ is part of workflows/: a file beside it, the company's operations, an app's.
+    expect(messages(`import { x } from "../helper.ts";`, "/repo/workflows/operations/send.ts")).toEqual([]);
+    expect(messages(`import quote from "../../operations/quote.ts";`, "/repo/workflows/operations/send.ts")).toEqual(
+      [],
+    );
+    expect(messages(`import { x } from "../helper.ts";`, "/repo/apps/crm/workflows/operations/send.ts")).toEqual([]);
+    expect(messages(`import config from "../../sanoma.config.ts";`, "/repo/workflows/operations/send.ts")).toEqual([
+      expect.stringMatching(/^import "\.\.\/\.\.\/sanoma\.config\.ts" .*outside workflows\//),
+    ]);
+    // operations/workflows/ is part of operations/: a file beside it, and still no workflow.
+    expect(messages(`import { x } from "../helper.ts";`, "/repo/operations/workflows/send.ts")).toEqual([]);
+    expect(messages(`import offer from "../../workflows/offer.ts";`, "/repo/operations/workflows/send.ts")).toEqual([
+      expect.stringMatching(/^import "\.\.\/\.\.\/workflows\/offer\.ts" .*outside operations\//),
+    ]);
+    // In a company, its root bounds the walk: a folder above it named as a kind is none of its trees.
+    const root = mkdtempSync(join(tmpdir(), "sanoma-lint-"));
+    const at = (path: string) => join(root, path);
+    try {
+      mkdirSync(at("workflows/acme"), { recursive: true });
+      writeFileSync(at("workflows/acme/sanoma.config.ts"), "");
+      expect(messages(`import { x } from "../helper.ts";`, at("workflows/acme/workflows/operations/send.ts"))).toEqual(
+        [],
+      );
+      expect(messages(`import config from "../sanoma.config.ts";`, at("workflows/acme/workflows/send.ts"))).toEqual([
+        expect.stringMatching(/outside workflows\//),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("holds an operation's run to a workflow body's rules, and lets it import defineOperation", () => {
     const src = `
       import { defineOperation, z } from "sanoma";

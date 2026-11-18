@@ -33,8 +33,11 @@ export interface AppSnapshot extends RootSnapshot {
   repository?: {
     /** Its remote's URL, with no credentials; none without a remote. Never sent to a page. */
     remote?: string;
-    /** Each of the config's workflows by name, its file's path from the repository's root, with `/`. */
-    workflows: Record<string, string>;
+    /**
+     * Each of the config's workflows by name, the paths from the repository's root, with `/`, of its
+     * file and of each company operation's it uses: a change to any of them is a change to it.
+     */
+    workflows: Record<string, string[]>;
   };
   /** `resources/sanoma/infra.ts` as written, or null before going live writes it. */
   infra: string | null;

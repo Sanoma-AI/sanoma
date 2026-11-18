@@ -504,10 +504,10 @@ function domainProblems(
 }
 
 /**
- * A site's `api` names each workflow `apiNameOf(name)` beside the vendors' operations, the
- * collections (`api.data`) and the company's operations (`api.operations`), so a workflow whose name
- * comes out as another's, a vendor's id, `data` or `operations` is a problem, at 1:1 of its file. A
- * built-in is never the one renamed.
+ * A site's `api` names each workflow `apiNameOf(name)` beside the vendors' operations and the
+ * collections (`api.data`), and `operations` is kept for the company's operations, so a workflow
+ * whose name comes out as another's, a vendor's id, `data` or `operations` is a problem, at 1:1 of
+ * its file. A built-in is never the one renamed.
  */
 function addApiNameProblems(workflows: WorkflowEntry[], vendors: ReadonlySet<string>) {
   for (const wf of workflows) {
@@ -519,7 +519,7 @@ function addApiNameProblems(workflows: WorkflowEntry[], vendors: ReadonlySet<str
       : api === DATA_VENDOR
         ? "which is the collections'"
         : api === OPERATIONS_VENDOR
-          ? "which is the company's operations'"
+          ? "which is kept for the company's operations"
           : vendors.has(api)
             ? `which is the vendor ${api}'s operations`
             : api === "then"
