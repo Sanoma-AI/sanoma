@@ -1,5 +1,5 @@
 import type { HostRootFacts, RootSnapshot } from "sanoma/workflows";
-import type { ConfigDescription, SiteEntry } from "sanoma/workflows/describe";
+import type { ConfigDescription, Outline, SiteEntry } from "sanoma/workflows/describe";
 import { siteDir } from "sanoma/workflows/shared";
 import type { ScenariosResponse } from "./api.ts";
 import type { Published } from "./content-files.ts";
@@ -15,11 +15,11 @@ import type { Published } from "./content-files.ts";
  * app's pages read of the files.
  */
 export interface AppSnapshot extends RootSnapshot {
-  /** `describeConfig(config)` without the sources of the workflows read from their files (`withoutSources`): what `getConfig` answers. */
+  /** `describeConfig(config)` without the sources of the workflows and operations read from their files (`withoutSources`): what `getConfig` answers. */
   description: ConfigDescription;
   /**
    * The text of each file the description names (`getSource`), by the path it names it by: a
-   * workflow's file (its outline's `file`, with `\n` line endings) and a company file (a
+   * workflow's or a company operation's file (its outline's `file`, with `\n` line endings) and a company file (a
    * resource's, a collection's, a site's or an app's, or a problem's, relative to the root).
    */
   sources: Record<string, string>;
@@ -33,8 +33,11 @@ export interface AppSnapshot extends RootSnapshot {
   repository?: {
     /** Its remote's URL, with no credentials; none without a remote. Never sent to a page. */
     remote?: string;
-    /** Each of the config's workflows by name, its file's path from the repository's root, with `/`. */
-    workflows: Record<string, string>;
+    /**
+     * Each of the config's workflows by name, the paths from the repository's root, with `/`, of its
+     * file and of each company operation's it uses: a change to any of them is a change to it.
+     */
+    workflows: Record<string, string[]>;
   };
   /** `resources/sanoma/infra.ts` as written, or null before going live writes it. */
   infra: string | null;
@@ -55,15 +58,20 @@ export const siteFileBroken = (site: SiteEntry) =>
 /** What the Worker serves of the public sites: each whose `site.ts` reads, with its login when it has one. */
 export const servedOnWorker = (site: SiteEntry) => site.public && !siteFileBroken(site);
 
+/** An entry without its source when its outline was read from its file. */
+const withoutSource = <E extends { outline?: Outline; source?: string }>(entry: E): E => {
+  if (entry.outline === undefined || !("file" in entry.outline)) return entry;
+  const { source: _, ...rest } = entry;
+  return rest as E;
+};
+
 /**
- * The description as the page gets it: without the source of a workflow read from its file, which
- * is a whole file that `getSource` serves, one at a time. A workflow read from `run`'s own text keeps it.
+ * The description as the page gets it: without the source of a workflow (or a company operation)
+ * read from its file, which is a whole file that `getSource` serves, one at a time. A workflow read
+ * from `run`'s own text keeps it.
  */
 export const withoutSources = (description: ConfigDescription): ConfigDescription => ({
   ...description,
-  workflows: description.workflows.map((workflow) => {
-    if (!("file" in workflow.outline)) return workflow;
-    const { source: _, ...entry } = workflow;
-    return entry;
-  }),
+  workflows: description.workflows.map(withoutSource),
+  ops: description.ops.map(withoutSource),
 });

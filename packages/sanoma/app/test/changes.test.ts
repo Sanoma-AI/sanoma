@@ -1,10 +1,20 @@
-import type { CheckResult } from "sanoma/workflows";
+import { fileURLToPath } from "node:url";
+import { type CheckResult, memoryLedger, type SanomaClient, type Source } from "sanoma/workflows";
 import { changeIdOf, undoDraftOf } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import companyApps from "../../workflows/test/fixtures/company-apps/sanoma.config.ts";
+import { customers as crmCustomers } from "../../workflows/test/fixtures/company-apps/apps/crm/resources/data.ts";
+import { customers as shopCustomers } from "../../workflows/test/fixtures/company-apps/apps/shop/resources/data.ts";
+import score from "../../workflows/test/fixtures/company-apps/apps/crm/operations/score.ts";
+import followUp from "../../workflows/test/fixtures/company-apps/apps/crm/workflows/follow-up.ts";
+import quote from "../../workflows/test/fixtures/company-apps/operations/quote.ts";
+import offer from "../../workflows/test/fixtures/company-apps/workflows/offer.ts";
+import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import type { DraftCard } from "../src/lib/chat.ts";
 import { tellCommits } from "../src/steps/agent/checkout.ts";
-import { openChange } from "../src/server/core.ts";
+import { change, openChange } from "../src/server/core.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 import { asChangeRef, groupFiles, phaseLabel } from "../src/lib/changes.ts";
 import { cellWords, diffGrids } from "../src/lib/grid-diff.ts";
 import { barLabels } from "./bar-helpers.ts";
@@ -14,6 +24,8 @@ import { publishedAgain, publishOf, REFUNDS_WAIT, renderDraftCard, useChangeApp 
 // change of a draft that edits `policies/`, over C5's fake host, as the server renders its pages;
 // a chat's draft sent for review and told its new commits; and the draft card as the server
 // renders it. Needs Postgres (`pnpm db:up`) and the built app.
+
+const companyAppsRoot = fileURLToPath(new URL("../../workflows/test/fixtures/company-apps/", import.meta.url));
 
 describe("a change's words", () => {
   it("names each phase, Publish waiting by its approver", () => {
@@ -66,6 +78,29 @@ describe("a change's words", () => {
     expect(asChangeRef("Refund 40")).toBeUndefined();
     expect(asChangeRef(JSON.stringify({ problems: [], rebinds: [], steps: [] }))).toBeUndefined();
     expect(asChangeRef(JSON.stringify({ change: { id: "x" }, facts: { touches: [] } }))).toBeUndefined();
+  });
+
+  it("names the workflows a change edits: by their own files, and by the company operations they use", async () => {
+    // The company-apps fixture's `offer` uses the root's `quote` and the CRM's `score`, as the planner counts its stranded runs.
+    const snapshot = await appSnapshot(
+      {
+        ...companyApps,
+        workflows: [offer, followUp],
+        operations: [quote, score],
+        collections: [crmCustomers, shopCustomers],
+        root: companyAppsRoot,
+        ledger: memoryLedger(),
+      },
+      { source: { root: companyAppsRoot } as Source },
+    );
+    const edits = async (touches: string[]) => {
+      const client = { change: async () => ({ state: { facts: { touches } } }) } as unknown as SanomaClient;
+      return (await change({ client, snapshot } as AppContext, "x"))!.edits;
+    };
+    expect(await edits(["operations/quote.ts"])).toEqual(["offer"]);
+    expect(await edits(["apps/crm/operations/score.ts"])).toEqual(["offer"]);
+    expect(await edits(["apps/crm/workflows/follow-up.ts"])).toEqual(["crm.follow-up"]);
+    expect(await edits(["resources/people.ts"])).toEqual([]);
   });
 
   it("finds a change run's draft", () => {

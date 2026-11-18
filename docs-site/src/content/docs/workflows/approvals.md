@@ -2,7 +2,7 @@
 title: Approvals
 description: "An approval comes from the workflow (ctx.approval(title, { approver, covers?, links?, details? })) or from the policy holding a call (a @hold)."
 sidebar:
-  order: 9
+  order: 10
 ---
 
 An approval comes from the workflow (`ctx.approval(title, { approver, covers?, links?, details? })`) or from the policy holding a call (a `@hold`). Each is in `run.approvals` with its `status`, so a later call it covers is let through once it is approved.

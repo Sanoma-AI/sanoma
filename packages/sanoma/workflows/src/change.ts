@@ -44,7 +44,7 @@ import {
 export const ChangeFacts = z.object({
   /** Every path the change edits and each of its parent directories (`touchesOf`). */
   touches: z.array(z.string()),
-  /** How many waiting runs are of a workflow the change edits, which the publish cannot move. */
+  /** How many waiting runs are of a workflow the change edits (its file, or a company operation's it uses), which the publish cannot move. */
   strandedRuns: z.number().int(),
   /** Those runs' ids. */
   stranded: z.array(z.string()),

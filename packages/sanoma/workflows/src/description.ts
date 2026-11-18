@@ -264,7 +264,11 @@ export const WorkflowEntrySchema = z.strictObject({
 });
 export type WorkflowEntry = z.infer<typeof WorkflowEntrySchema>;
 
-/** What an operation is, read from its connector: enough to badge it and show its contract. */
+/**
+ * What an operation is, read from its connector: enough to badge it and show its contract. A
+ * company operation's (`defineOperation`, the vendor `operations`) has its code too, as a
+ * workflow's entry has: `app`, `ops`, `file`, `outline`, `problems` and `source`.
+ */
 export const OpEntrySchema = z.strictObject({
   id: z.string(),
   vendor: z.string(),
@@ -281,6 +285,18 @@ export const OpEntrySchema = z.strictObject({
   input: JsonSchema,
   /** What a call returns once its schema has parsed the vendor's reply (`io: "output"`). */
   output: JsonSchema,
+  /** For a company operation: the app whose folder defines it (`apps/<app>/operations/`); absent for one at the root. */
+  app: z.string().optional(),
+  /** For a company operation: the operation ids it may call, in the order declared. */
+  ops: z.array(z.string()).optional(),
+  /** For a company operation: the file that defined it, absolute, as a workflow's. */
+  file: z.string().optional(),
+  /** For a company operation: what its `run` calls, read from its file, as a workflow's outline. */
+  outline: z.custom<Outline>().optional(),
+  /** For a company operation: what is wrong in its file, by position, as a workflow's `problems`. */
+  problems: z.array(LintProblemSchema).optional(),
+  /** For a company operation: its file's text, which the outline's spans index into, as a workflow's `source`. */
+  source: z.string().optional(),
 });
 export type OpEntry = z.infer<typeof OpEntrySchema>;
 

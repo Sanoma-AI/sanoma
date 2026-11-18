@@ -11,7 +11,7 @@ npm install sanoma
 
 It is a part of [`sanoma`](https://www.npmjs.com/package/sanoma), whose bin runs the worker and the app over a repo's `sanoma.config.ts` and whose root entry re-exports what a workflow imports from `sanoma/workflows`; `startWorker` and `startApp` remain for a custom host.
 
-A connector declares a vendor's operations: their inputs, outputs and effect. A workflow lists the operations it `uses`, and its `ctx` exposes those and nothing else.
+A connector declares a vendor's operations: their inputs, outputs and effect. A workflow lists the operations it `uses`, and its `ctx` exposes those and nothing else. The company's [own operations](/workflows/your-own-operations/) (`defineOperation`, a file of `operations/`) are listed the same way and called as `ctx.operations.<name>.run`.
 
 ```ts
 import { defineConnector, defineWorkflow } from "sanoma/workflows";

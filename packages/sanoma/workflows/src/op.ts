@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import type { Principal } from "./define.ts";
+import type { Operation, Principal } from "./define.ts";
 import type { Authentication, CallAuthentication } from "./authentication.ts";
 import type { ConnectionSnapshot } from "./connection.ts";
 import type { HarnessV1 } from "@ai-sdk/harness";
@@ -9,7 +9,7 @@ import type { Fake } from "./fake.ts";
 import type { SandboxBackend, SandboxContext } from "./sandbox-contract.ts";
 import type { Secrets } from "./secret.ts";
 import type { RemoteHalf } from "./source.ts";
-import { DOMAIN_NAME, hostnameUrl, instanceUrl } from "./shared.ts";
+import { DOMAIN_NAME, hostnameUrl, instanceUrl, OPERATIONS_VENDOR } from "./shared.ts";
 import type { Steps } from "./steps.ts";
 
 /**
@@ -1074,6 +1074,14 @@ export const setupOf = (connector: Connector<any, any>): ConnectorSetup => conne
 
 export function isOp(x: unknown): x is Op {
   return typeof x === "object" && x !== null && (x as Op).kind === "op";
+}
+
+/**
+ * Whether `x` is a company operation (`defineOperation`): an operation of the vendor `operations`
+ * with a body of its own. Read by property, so a copy of this package reads another's.
+ */
+export function isOperation(x: unknown): x is Operation {
+  return isOp(x) && x.vendor === OPERATIONS_VENDOR && typeof (x as Operation).run === "function";
 }
 
 /**

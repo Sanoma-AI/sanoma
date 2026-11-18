@@ -19,6 +19,7 @@ import {
   cedarPolicy,
   defineConfig,
   defineConnector,
+  defineOperation,
   defineResource,
   defineWorkflow,
   loadPolicies,
@@ -169,6 +170,17 @@ describe("schemaOf", () => {
     expect(text).toContain('action "data.leads.save" in [Action::"effect:write"] appliesTo {');
     expect(text).toContain('action "workflow:refund" in [Action::"start"] appliesTo {');
     expect(text).not.toMatch(/\bmount\b|approverGroups|"site:|"collection:/);
+  });
+
+  it("has a company operation as an action in the group of its effect, the strongest of what it uses", () => {
+    const rebate = defineOperation({
+      name: "rebate",
+      input: z.object({ amount: z.number().int() }),
+      uses: [shop.refunds.create],
+      run: async (ctx, { amount }) => ctx.shop.refunds.create({ amount, customer: "c" }),
+    });
+    const withRebate = schemaText(schemaOf(resolveConfig({ ...config, operations: [rebate] }), people));
+    expect(withRebate).toContain('action "operations.rebate.run" in [Action::"effect:money"] appliesTo {');
   });
 
   it("types the input from its zod schema, a collection's save with the record as it was", () => {

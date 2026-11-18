@@ -118,7 +118,7 @@ describe("lintWorkflow", () => {
       ["../resources/github.ts", "../resources/area/data.ts", "../sanoma.config.ts"].map((spec) =>
         expect.stringMatching(
           new RegExp(
-            `^import "${spec.replaceAll(".", "\\.")}" .*outside workflows/.*only resources/data\\.ts \\(the collections, the root's or an app's apps/<app>/resources/data\\.ts\\) may be imported$`,
+            `^import "${spec.replaceAll(".", "\\.")}" .*outside workflows/.*only resources/data\\.ts \\(the collections, the root's or an app's apps/<app>/resources/data\\.ts\\) and the files of operations/ \\(the company's operations, the root's or an app's\\) may be imported$`,
           ),
         ),
       ),
@@ -140,6 +140,81 @@ describe("lintWorkflow", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("lets a workflow import the company's operations, the root's or an app's, and an operation the collections alone", () => {
+    // A workflow names an operation in `uses`, as it names a collection.
+    expect(messages(`import quote from "../operations/quote.ts";`, "/repo/workflows/offer.ts")).toEqual([]);
+    expect(messages(`import score from "../../crm/operations/score.ts";`, "/repo/apps/crm/workflows/x.ts")).toEqual([]);
+    expect(messages(`import score from "../apps/crm/operations/lib/score.ts";`, "/repo/workflows/x.ts")).toEqual([]);
+    // An operation's tree is its operations/: the collections outside it, as for a workflow, and a file beside it.
+    expect(messages(`import { rates } from "../resources/data.ts";`, "/repo/operations/quote.ts")).toEqual([]);
+    expect(messages(`import { round } from "./lib/round.ts";`, "/repo/operations/quote.ts")).toEqual([]);
+    expect(
+      messages(
+        `import { x } from "../workflows/offer.ts";\nimport { y } from "../resources/github.ts";`,
+        "/repo/operations/quote.ts",
+      ),
+    ).toEqual(
+      ["../workflows/offer.ts", "../resources/github.ts"].map((spec) =>
+        expect.stringMatching(
+          new RegExp(
+            `^import "${spec.replaceAll(".", "\\.")}" .*outside operations/.*only resources/data\\.ts \\(the collections, the root's or an app's apps/<app>/resources/data\\.ts\\) may be imported$`,
+          ),
+        ),
+      ),
+    );
+  });
+
+  it("takes the tree from the kind's folder at the root or an app's, not from a subfolder named as the other kind", () => {
+    // workflows/operations/ is part of workflows/: a file beside it, the company's operations, an app's.
+    expect(messages(`import { x } from "../helper.ts";`, "/repo/workflows/operations/send.ts")).toEqual([]);
+    expect(messages(`import quote from "../../operations/quote.ts";`, "/repo/workflows/operations/send.ts")).toEqual(
+      [],
+    );
+    expect(messages(`import { x } from "../helper.ts";`, "/repo/apps/crm/workflows/operations/send.ts")).toEqual([]);
+    expect(messages(`import config from "../../sanoma.config.ts";`, "/repo/workflows/operations/send.ts")).toEqual([
+      expect.stringMatching(/^import "\.\.\/\.\.\/sanoma\.config\.ts" .*outside workflows\//),
+    ]);
+    // operations/workflows/ is part of operations/: a file beside it, and still no workflow.
+    expect(messages(`import { x } from "../helper.ts";`, "/repo/operations/workflows/send.ts")).toEqual([]);
+    expect(messages(`import offer from "../../workflows/offer.ts";`, "/repo/operations/workflows/send.ts")).toEqual([
+      expect.stringMatching(/^import "\.\.\/\.\.\/workflows\/offer\.ts" .*outside operations\//),
+    ]);
+    // In a company, its root bounds the walk: a folder above it named as a kind is none of its trees.
+    const root = mkdtempSync(join(tmpdir(), "sanoma-lint-"));
+    const at = (path: string) => join(root, path);
+    try {
+      mkdirSync(at("workflows/acme"), { recursive: true });
+      writeFileSync(at("workflows/acme/sanoma.config.ts"), "");
+      expect(messages(`import { x } from "../helper.ts";`, at("workflows/acme/workflows/operations/send.ts"))).toEqual(
+        [],
+      );
+      expect(messages(`import config from "../sanoma.config.ts";`, at("workflows/acme/workflows/send.ts"))).toEqual([
+        expect.stringMatching(/outside workflows\//),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("holds an operation's run to a workflow body's rules, and lets it import defineOperation", () => {
+    const src = `
+      import { defineOperation, z } from "sanoma";
+      export default defineOperation({
+        name: "quote",
+        input: z.object({}),
+        uses: [],
+        run: async (ctx) => {
+          if (ctx.runId === "") return 0;
+          throw new Error("no");
+        },
+      });
+    `;
+    expect(messages(src, "/repo/operations/quote.ts")).toEqual([
+      expect.stringMatching(/^`return` before the end of run is not allowed in a workflow/),
+      expect.stringMatching(/^`throw` outside a catch is not allowed in a workflow/),
+    ]);
   });
 
   it("refuses the runtime's client, worker and app, which a workflow could use to approve itself", () => {
