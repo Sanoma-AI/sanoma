@@ -59,8 +59,12 @@ export async function loadConfig(cwd = process.cwd(), { fresh = false } = {}): P
   // Imported here, not at the top: `cli.ts` loads this module before any command needs the runtime.
   const { declarationFiles, errorMessage, joinDeclarations } = await import("sanoma/workflows");
   const files = declarationFiles(root);
-  // The workflows' first; joined in the files' order.
-  const modules = { workflows: await importReal(files.workflows, tag), data: await importReal(files.data, tag) };
+  // The workflows' first, then the operations'; joined in the files' order.
+  const modules = {
+    workflows: await importReal(files.workflows, tag),
+    operations: await importReal(files.operations, tag),
+    data: await importReal(files.data, tag),
+  };
   try {
     joinDeclarations(config, modules);
   } catch (err) {

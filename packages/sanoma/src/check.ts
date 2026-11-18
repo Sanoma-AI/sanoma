@@ -27,15 +27,15 @@ export interface CheckOptions {
 }
 
 /** The directories oxlint reads, those that exist: the apps' hold the same kinds, which the same rules match. */
-const LINTED = ["workflows", "resources", "sites", "apps"];
+const LINTED = ["workflows", "operations", "resources", "sites", "apps"];
 
 /**
  * Checks a repo the way its tests would, without a test framework: what is wrong in its
  * `policies/**\/*.cedar` (`policyProblems`, as `resolveConfig` reads them); the generated files written first (`writeGenerated`: `.sanoma/api.ts` and the Cedar schema,
  * each when it changed); `tsc -p tsconfig.json` in
  * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
- * this package's `oxlint.json`), over `workflows/`, `resources/`, `sites/` and `apps/`; every problem
- * `describeConfig` finds in the data files and the workflows' files (the import rules and what
+ * this package's `oxlint.json`), over `workflows/`, `operations/`, `resources/`, `sites/` and `apps/`; every problem
+ * `describeConfig` finds in the data files and the workflows' and operations' files (the import rules and what
  * the outline cannot draw: what the worker refuses to start with), and each site's call to what
  * the config does not have; with sites, their generated files written first and, beside those
  * three, the app built with them and `tsc -p sites/tsconfig.json` (`checkSites`), and what is
@@ -191,15 +191,17 @@ async function lint(root: string, log: (line: string) => void): Promise<string[]
 }
 
 /**
- * `describeConfig`'s problems: the data files', then each workflow's, its file relative to the
- * root, then each site's (a call to what the config does not have). A file defining several
- * workflows gives each its problems: one line each here.
+ * `describeConfig`'s problems: the data files', then each workflow's and each company operation's,
+ * its file relative to the root, then each site's (a call to what the config does not have). A
+ * file defining several workflows gives each its problems: one line each here.
  */
-function configProblems({ problems, workflows, sites }: ConfigDescription, root: string): string[] {
+function configProblems({ problems, workflows, ops, sites }: ConfigDescription, root: string): string[] {
   const people = readPeople(root);
   const lines = new Set([
     ...problems.map(problemLine),
-    ...workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: relative(root, wf.file), ...p }))),
+    ...[...workflows, ...ops].flatMap(({ file, problems: found = [] }) =>
+      file === undefined ? [] : found.map((p) => problemLine({ file: relative(root, file), ...p })),
+    ),
     ...sites.flatMap((site) => site.problems.map(problemLine)),
     // The people's own (an id two share, a reserved one, an `off` that turns off no built-in), which admit nobody while they stand.
     ...people.problems.map(problemLine),

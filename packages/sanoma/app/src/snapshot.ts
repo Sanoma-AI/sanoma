@@ -15,11 +15,11 @@ import type { Published } from "./content-files.ts";
  * app's pages read of the files.
  */
 export interface AppSnapshot extends RootSnapshot {
-  /** `describeConfig(config)` without the sources of the workflows read from their files (`withoutSources`): what `getConfig` answers. */
+  /** `describeConfig(config)` without the sources of the workflows and operations read from their files (`withoutSources`): what `getConfig` answers. */
   description: ConfigDescription;
   /**
    * The text of each file the description names (`getSource`), by the path it names it by: a
-   * workflow's file (its outline's `file`, with `\n` line endings) and a company file (a
+   * workflow's or a company operation's file (its outline's `file`, with `\n` line endings) and a company file (a
    * resource's, a collection's, a site's or an app's, or a problem's, relative to the root).
    */
   sources: Record<string, string>;
@@ -56,14 +56,20 @@ export const siteFileBroken = (site: SiteEntry) =>
 export const servedOnWorker = (site: SiteEntry) => site.public && !siteFileBroken(site);
 
 /**
- * The description as the page gets it: without the source of a workflow read from its file, which
- * is a whole file that `getSource` serves, one at a time. A workflow read from `run`'s own text keeps it.
+ * The description as the page gets it: without the source of a workflow (or a company operation)
+ * read from its file, which is a whole file that `getSource` serves, one at a time. A workflow read
+ * from `run`'s own text keeps it.
  */
 export const withoutSources = (description: ConfigDescription): ConfigDescription => ({
   ...description,
   workflows: description.workflows.map((workflow) => {
     if (!("file" in workflow.outline)) return workflow;
     const { source: _, ...entry } = workflow;
+    return entry;
+  }),
+  ops: description.ops.map((op) => {
+    if (op.outline === undefined || !("file" in op.outline)) return op;
+    const { source: _, ...entry } = op;
     return entry;
   }),
 });

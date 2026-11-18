@@ -109,9 +109,10 @@ async function made(config: SanomaConfig, resolved: ResolvedConfig, options: Sna
     }
   };
   const sources: Record<string, string> = {};
-  for (const workflow of full.workflows) {
-    if (!("file" in workflow.outline)) continue;
-    const file = workflow.outline.file;
+  // Each workflow's file, and each company operation's.
+  for (const { outline } of [...full.workflows, ...full.ops]) {
+    if (outline === undefined || !("file" in outline)) continue;
+    const file = outline.file;
     const found = text(file);
     if (found !== undefined) sources[file] = found.replaceAll("\r\n", "\n");
   }
