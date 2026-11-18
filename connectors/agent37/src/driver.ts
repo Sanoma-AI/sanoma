@@ -6,7 +6,6 @@ import {
   asleep,
   BOX,
   BUDGET_MS,
-  EDGE,
   GROUP,
   holding,
   KEY,
@@ -40,7 +39,7 @@ const keyOf = () => {
  * The instance type's operations, which list the workspace's instances, and the boxes', each with
  * the key in `AGENT37_API_KEY`, read at each call, so a read says whether the key works. See the README.
  */
-export function agent37Driver({ timeoutMs = 30_000, edge = EDGE, budgetMs = BUDGET_MS }: Agent37DriverOptions = {}) {
+export function agent37Driver({ timeoutMs = 30_000, budgetMs = BUDGET_MS }: Agent37DriverOptions = {}) {
   const apiOf = () => agent37Api(keyOf(), timeoutMs);
   return defineDriver(
     agent37Ops,
@@ -50,7 +49,17 @@ export function agent37Driver({ timeoutMs = 30_000, edge = EDGE, budgetMs = BUDG
         async open({ name, group, network, ttl }) {
           const key = keyOf();
           const api = agent37Api(key, timeoutMs);
-          const id = await openInstance(api, key, { name, want: wanted({}), group, network, edge, budgetMs });
+          // The open's own link lasts as long as the open may take (Agent37 makes it 60 s at least);
+          // the caller's is minted after it, for the whole of `ttl`.
+          const ttlOfOpen = Math.ceil(budgetMs / 1000);
+          const { id } = await openInstance(api, key, {
+            name,
+            want: wanted({}),
+            group,
+            network,
+            ttl: ttlOfOpen,
+            budgetMs,
+          });
           // The runner answered this release's protocol, or `openInstance` replaced it.
           return { id, ...(await api.signedUrl(id, RUNNER_PORT, ttl)), protocol: RUNNER_PROTOCOL };
         },

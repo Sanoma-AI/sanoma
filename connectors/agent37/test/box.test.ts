@@ -9,7 +9,7 @@ import {
   runnerBox,
   runnerHealth,
 } from "sanoma/workflows";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { BOX, GROUP } from "../src/backend.ts";
 import { agent37Ops } from "../src/connector.ts";
 import { agent37Driver } from "../src/driver.ts";
@@ -27,6 +27,7 @@ beforeAll(async () => {
 afterAll(() => vendor.close());
 beforeEach(() => {
   vi.stubGlobal("fetch", vendor.fetch);
+  vi.stubGlobal("WebSocket", vendor.WebSocket);
   vi.stubEnv("AGENT37_API_KEY", KEY);
   vendor.sent.length = 0;
   return () => {
@@ -34,13 +35,11 @@ beforeEach(() => {
     vi.unstubAllEnvs();
   };
 });
+// The account key goes to Agent37's API alone, never in a request to a box.
+afterEach(() => vendor.keyless());
 
 let calls = 0;
-const call = (
-  op: string,
-  input: Record<string, unknown>,
-  ops = agent37Driver({ edge: vendor.edge, budgetMs: 20_000 }).ops,
-) => {
+const call = (op: string, input: Record<string, unknown>, ops = agent37Driver({ budgetMs: 20_000 }).ops) => {
   const key = `run-1:${++calls}`;
   return ops[op]!(input, {
     idempotencyKey: key,
@@ -178,6 +177,14 @@ describe("box operations", () => {
     expect(failed).toBeInstanceOf(DriverError);
     expect(failed).toMatchObject({ status: 409, vendorCode: "instance_limit_reached", retryable: false });
     expect(vendor.instances.size).toBe(0);
+  });
+
+  it("has the edge refuse and record a request to a box that carries the account key, over fetch or a WebSocket", async () => {
+    const at = vendor.edge("anybox", 3000);
+    expect(await fetch(`${at}/health`, { headers: { "X-Agent37-Key": KEY } }).then((res) => res.status)).toBe(401);
+    const ws = new WebSocket(at.replace(/^http/, "ws"), { headers: { "X-Agent37-Key": KEY } } as unknown as string[]);
+    await new Promise((closed) => ws.addEventListener("close", closed));
+    expect(vendor.keyed.splice(0)).toEqual([`${at}/health`, `${at.replace(/^http/, "ws")}/`]);
   });
 
   it("takes a box's name or a group to discard, not both, and keeps its links out of the ledger", () => {

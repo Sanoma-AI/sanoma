@@ -25,10 +25,11 @@ import { otherGroup } from "./operations.ts";
 // allowlist, set in place on one made with another). Its commands and files go through Sanoma's
 // runner in it (`runnerBox`, at its port 7700 behind Agent37's edge, which the app dials: an
 // allowlist limits only what the box dials out), which `open` starts there when it does not
-// answer: Agent37's own exec is buffered and has no stdin, which an agent's process needs. Its
-// ports are reached through the edge, and `stop` puts it to sleep, which keeps the runner running
-// for the next `open`. The control plane's box operations (`driver.ts`) open a box the same way
-// (`openInstance`), and hand back a signed link to its runner instead of a connection.
+// answer: Agent37's own exec is buffered and has no stdin, which an agent's process needs. Every
+// request to a port of the box, the runner's too, goes over a signed link minted with the API: the
+// key goes to Agent37's API and nowhere else. `stop` puts the box to sleep, which keeps the runner
+// running for the next `open`. The control plane's box operations (`driver.ts`) open a box the
+// same way (`openInstance`), and hand back a signed link to its runner instead of a connection.
 
 export const KEY = "AGENT37_API_KEY";
 
@@ -41,7 +42,7 @@ export const GROUP = "sanoma_group";
 /** How long `open` and `stop` wait for an instance to be running, or asleep, in all. */
 export const BUDGET_MS = 3 * 60_000;
 
-/** Agent37's edge: where an instance's port is reached. */
+/** Agent37's edge: where an instance's port is reached, with a signed link's token. */
 export const EDGE = (id: string, port: number) => `https://${id}-${port}.agent37.app`;
 
 /**
@@ -62,9 +63,13 @@ export function labelOf(name: string): string {
   return `${name.slice(0, LABEL - 11)}-${createHash("sha256").update(name).digest("hex").slice(0, 10)}`;
 }
 
+/**
+ * How long the links a box's turn reaches its runner and ports over last, in seconds: a day, so a
+ * long turn can still reconnect. Agent37 cannot revoke one sooner; it stays in this process.
+ */
+const TURN_LINK_S = 24 * 60 * 60;
+
 export interface Agent37BackendOptions {
-  /** Where an instance's port is reached: Agent37's edge, `https://{id}-{port}.agent37.app`. */
-  edge?: (id: string, port: number) => string;
   /** How long `open` waits for a box, and `stop` for its sleep. Default 3 minutes. */
   budgetMs?: number;
 }
@@ -75,7 +80,7 @@ export interface Agent37BackendOptions {
  */
 export function agent37Backend(
   { secrets, declared }: SandboxContext,
-  { edge = EDGE, budgetMs = BUDGET_MS }: Agent37BackendOptions = {},
+  { budgetMs = BUDGET_MS }: Agent37BackendOptions = {},
 ): SandboxBackend {
   const keyOf = async () => {
     const key = (await secrets([KEY])).get(KEY);
@@ -87,12 +92,11 @@ export function agent37Backend(
       const key = await keyOf();
       const api = agent37Api(key);
       const want = wanted(declared, { image, size });
-      const id = await openInstance(api, key, { name, want, network: hosts, edge, budgetMs });
-      const headers = { "X-Agent37-Key": key };
-      const { stop, ...box } = runnerBox({ url: edge(id, RUNNER_PORT), headers, id });
+      const { id, url } = await openInstance(api, key, { name, want, network: hosts, ttl: TURN_LINK_S, budgetMs });
+      const { stop, ...box } = runnerBox({ url, id });
       return {
         ...box,
-        expose: async (port) => ({ url: edge(id, port), headers }),
+        expose: async (port) => ({ url: (await api.signedUrl(id, port, TURN_LINK_S)).url }),
         async stop() {
           // What runs in it is killed first, which a sleep would keep; a runner that cannot be
           // reached, or does not answer in time, kills nothing, and the sleep goes ahead.
@@ -122,7 +126,8 @@ interface Opening {
    * anywhere and one there keeps its own.
    */
   network?: readonly string[];
-  edge: (id: string, port: number) => string;
+  /** How long the signed link to its runner, which the open checks it over and answers, lasts, in seconds. */
+  ttl: number;
   budgetMs: number;
 }
 
@@ -131,16 +136,19 @@ interface Opening {
  * so one instance is made. Agent37 keeps metadata without reading it, so two opens of one name in
  * different processes at once can each make an instance.
  */
-export const opening = new Map<string, Promise<string>>();
+export const opening = new Map<string, Promise<OpenedInstance>>();
+
+/** An instance opened: its id, and a signed link to its runner (`signedUrl`'s). */
+type OpenedInstance = { id: string; url: string; expiresAt: string };
 
 /**
- * Opens the box `name` with Agent37's API and edge, the key `key`: finds the instance whose
- * metadata holds its name or makes it (asleep when idle 15 minutes), its network set to `network`
- * either way when given, wakes or starts it, starts
- * the runner in it unless it answers, and puts pnpm in it with exec. It leaves no connection open,
- * which would keep the box awake. The instance's id.
+ * Opens the box `name` with Agent37's API, the key `key`: finds the instance whose metadata holds
+ * its name or makes it (asleep when idle 15 minutes), its network set to `network` either way when
+ * given, wakes or starts it, starts the runner in it unless it answers over a signed link to its
+ * port (the key is sent to the API alone), and puts pnpm in it with exec. It leaves no connection
+ * open, which would keep the box awake. The instance's id, and that link for `ttl` seconds.
  */
-export function openInstance(api: Agent37Api, key: string, box: Opening): Promise<string> {
+export function openInstance(api: Agent37Api, key: string, box: Opening): Promise<OpenedInstance> {
   const before = opening.get(box.name) ?? Promise.resolve();
   const opened = before.catch(() => undefined).then(() => openOnce(api, key, box));
   opening.set(box.name, opened);
@@ -151,8 +159,8 @@ export function openInstance(api: Agent37Api, key: string, box: Opening): Promis
 async function openOnce(
   api: Agent37Api,
   key: string,
-  { name, want, group, network, edge, budgetMs }: Opening,
-): Promise<string> {
+  { name, want, group, network, ttl, budgetMs }: Opening,
+): Promise<OpenedInstance> {
   const [found] = await holding(api, BOX, name);
   if (found && group !== undefined && found.metadata?.[GROUP] !== group) throw otherGroup(name, group);
   // A box that exists keeps its image; a new one's may be registered first, outside the budget.
@@ -178,7 +186,8 @@ async function openOnce(
       Math.max(1, deadline - Date.now()),
     ));
   await running(api, made, deadline);
-  await runnerUp(api, made.id, edge(made.id, RUNNER_PORT), { "X-Agent37-Key": key }, deadline);
+  const runner = await api.signedUrl(made.id, RUNNER_PORT, ttl);
+  await runnerUp(api, made.id, runner.url, deadline);
   // On every open, so a box whose runner an earlier release started gets it too.
   const pnpm = await api.exec(made.id, PNPM, Math.max(1, deadline - Date.now()));
   if (pnpm.exit_code !== 0) {
@@ -186,7 +195,7 @@ async function openOnce(
       `agent37: pnpm could not be put in the box ${made.id} (exit ${pnpm.exit_code}): ${pnpm.stderr.trim()}`,
     );
   }
-  return made.id;
+  return { id: made.id, ...runner };
 }
 
 /**
@@ -257,21 +266,15 @@ const CHUNK = 96_000;
 let packing: Promise<string> | undefined;
 
 /**
- * Starts the runner in the instance `id` unless it answers at `url` with this release's protocol:
- * writes it in with exec (gzip in base64, in chunks), ends the one that answered another protocol
- * (by the pid it answered), starts it detached, and waits until a runner of this protocol
- * answers, up to `deadline`. A box that slept kept it running; one that was stopped booted fresh
+ * Starts the runner in the instance `id` unless it answers at `url` (a signed link to its port)
+ * with this release's protocol: writes it in with exec (gzip in base64, in chunks), ends the one
+ * that answered another protocol (by the pid it answered), starts it detached, and waits until a
+ * runner of this protocol answers, up to `deadline`. A box that slept kept it running; one that was stopped booted fresh
  * without it. One that answered nothing is never killed: when it was there all along, the new one
  * finds its port taken and ends, and the old one answers.
  */
-async function runnerUp(
-  api: Agent37Api,
-  id: string,
-  url: string,
-  headers: Record<string, string>,
-  deadline: number,
-): Promise<void> {
-  const found = await runnerHealth(url, headers);
+async function runnerUp(api: Agent37Api, id: string, url: string, deadline: number): Promise<void> {
+  const found = await runnerHealth(url);
   if (isCurrent(found)) return;
   const sh = async (command: string) => {
     const { exit_code, stderr } = await api.exec(id, `cd && ${command}`);
@@ -305,7 +308,7 @@ async function runnerUp(
     `{ ${end}nohup node ${RUNNER} >${LOG} 2>&1 </dev/null & }`;
   for (const write of writes) await sh(write);
   // Node starts it in a fraction of a second.
-  while (!isCurrent(await runnerHealth(url, headers))) {
+  while (!isCurrent(await runnerHealth(url))) {
     if (Date.now() > deadline) throw new Error(`agent37: the runner in ${id} does not answer; its log is ~/${LOG}`);
     await delay(200);
   }
