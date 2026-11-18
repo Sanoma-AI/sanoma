@@ -147,7 +147,6 @@ A company behind a router declares `agents` on its host:
 ```ts
 // resources/sanoma/infra.ts
 import { cloudflare } from "@sanoma-ai/connector-cloudflare/resources";
-import { secret } from "sanoma/resources";
 
 export const host = cloudflare.host({
   name: "acme",
@@ -155,15 +154,23 @@ export const host = cloudflare.host({
   agents: {
     url: "https://mcp.acme.example/mcp", // SANOMA_AGENT_URL
     company: "acme", // SANOMA_COMPANY
-    secret: secret("ROUTER_SECRET_ACME"), // the name that holds this company's own secret
   },
 });
 ```
 
-Apply writes the three bindings on the Worker's next upload. `secret` names a stored secret and is never the value: store this company's own secret under that name, or bind the name to a variable where apply runs (`secrets: { bindings: { ROUTER_SECRET_ACME: { env: "ACME_ROUTER_SECRET" } } }`). The name is your own, not one that starts with `SANOMA_`. `sanoma check` refuses a `url` that is not a router's `/mcp` and a `company` that is no id; apply refuses a stored secret no router could send, before it changes anything, and never shows it. Plans, states and the ledger hold the URL and the company, and the secret's name only.
+`sanoma check` refuses a `url` that is not a router's `/mcp` and a `company` that is no id. The instance that serves the router declares nothing more: its config's `router.hostname` is enough, and apply attaches that hostname to the Worker as a custom domain, beside the app's `hostname` and the sites' domains.
 
-The instance that serves the router declares nothing more: its config's `router.hostname` is enough. Apply attaches that hostname to the Worker as a custom domain, beside the app's `hostname` and the sites' domains, and binds the master secret from the secret stored as `SANOMA_ROUTER_SECRET` (or bound, `SANOMA_ROUTER_SECRET: { env: "SANOMA_ROUTER_SECRET" }`). With no value under that name the Worker is deployed without it and the router's routes answer 503. `sanoma check` reports a router's hostname that is the host's own `hostname` or a site's domain.
+Either way the host is given one secret, stored as `SANOMA_ROUTER_SECRET`: this company's own secret for a company behind a router, the master secret for the company that serves one. Give the name a value where apply runs by binding it to a variable in `sanoma.config.ts` and setting that variable (in `.env` on your machine; on the host the Worker passes it to the runtime itself):
 
-Take `agents` out of the data file, or `router` out of the config, and the next apply uploads the Worker without the bindings and detaches the router's hostname. A host with `agents` in a company whose config has a `router` is a problem in `sanoma check`: the one variable cannot hold both secrets. A container that is running keeps the environment it started with, so after changing `agents` alone, or a secret's value, advance the host's `configurationRevision`. The connector's [README](https://github.com/Sanoma-AI/sanoma/blob/main/connectors/cloudflare/README.md#the-agents-router) has the requests and the refusals.
+```ts
+export default defineConfig({
+  connectors: [cloudflare],
+  secrets: { bindings: { SANOMA_ROUTER_SECRET: { env: "SANOMA_ROUTER_SECRET" } } },
+});
+```
+
+Without a value apply reports the problem and leaves the host out of its plan; it never uploads the Worker without the secret, and the Hosting page lists the secret as not stored. Apply refuses a value no router could send before it changes anything, and never shows it. Plans, states and the ledger hold the URL, the company and the secret's name.
+
+Take `agents` out of the data file, or `router` out of the config, and the next apply uploads the Worker without the bindings and detaches the router's hostname. Three things are problems in `sanoma check`: a host with `agents` in a company whose config has a `router` (the one variable cannot hold both secrets); a router's hostname that is a declared host's `hostname` or a site's domain; and, at apply, two hosts that derive in a config with a `router`, since both would attach its hostname. A config with a `router` takes one such host today. A declared host of another type (`docker.container`, say) gets a warning: it attaches no hostname and is given no secret, so route the hostname and set the variable yourself. A container that is running keeps the environment it started with, so after changing `agents` alone, or the secret's value, advance the host's `configurationRevision`. The connector's [README](https://github.com/Sanoma-AI/sanoma/blob/main/connectors/cloudflare/README.md#the-agents-router) has the requests and the refusals.
 
 Not verified yet: no real Claude client has completed a sign-in that starts at the router's host and continues on a company's. The tests drive the whole flow with their own client, on Node and (for discovery and one `/mcp` call) on workerd. The Cloudflare host's bindings and the router's hostname are tested on its fake and on replies written from Cloudflare's API reference, not on a live account.
