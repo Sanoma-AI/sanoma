@@ -128,6 +128,7 @@ describe("the company's operations, in the config", () => {
   it("shows an operation's file from its folder of operations, with /, on Windows too", () => {
     expect(operationFile(op("operations.crm.score.run"))).toBe("apps/crm/operations/score.ts");
     expect(operationFile({ file: "C:\\Users\\ada\\shop\\operations\\quote.ts" })).toBe("operations/quote.ts");
+    expect(operationFile({ file: "/home/ada/shop/lib/quote.ts" })).toBe("quote.ts");
     expect(operationFile({ app: "crm", file: "C:\\shop\\apps\\crm\\operations\\score.ts" })).toBe(
       "apps/crm/operations/score.ts",
     );

@@ -42,12 +42,14 @@ export const companyOpNamed = (name: string) => (config: Pick<ConfigDescription,
 /**
  * A company operation's file, from the company's root (`operations/quote.ts`,
  * `apps/crm/operations/score.ts`): its absolute `file` from its folder of operations on, with `/`
- * (a Windows path's `\` too).
+ * (a Windows path's `\` too). One given to the config from another folder shows its file's name
+ * alone, never the path on the machine.
  */
 export function operationFile({ app, file = "" }: Pick<OpEntry, "app" | "file">): string {
   const folder = `${app === undefined ? "" : `apps/${app}/`}operations/`;
   const path = file.replaceAll("\\", "/");
-  return path.slice(path.lastIndexOf(`/${folder}`) + 1);
+  const at = path.lastIndexOf(`/${folder}`);
+  return path.slice((at < 0 ? path.lastIndexOf("/") : at) + 1);
 }
 
 /** Whether an operation's id is a company operation's (`operations.<name>.run`). */
