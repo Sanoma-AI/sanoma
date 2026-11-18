@@ -1,7 +1,7 @@
 // @ts-check
 import { readFileSync } from "node:fs";
 import starlight from "@astrojs/starlight";
-import { defineConfig } from "astro/config";
+import { defineConfig, fontProviders } from "astro/config";
 import starlightLinksValidator from "starlight-links-validator";
 import starlightLlmsTxt from "starlight-llms-txt";
 
@@ -19,6 +19,40 @@ const connectors = JSON.parse(readFileSync(new URL("./src/data/reference.json", 
 // source (scripts/reference.ts).
 export default defineConfig({
   site: "https://docs.sanoma.work",
+  // A page loads when its link is hovered, so moving between pages is near instant.
+  prefetch: { prefetchAll: true, defaultStrategy: "hover" },
+  // The website's type, by Astro's fonts (docs.astro.build/en/guides/fonts): downloaded from
+  // Fontsource at build, served from /_astro/fonts, and written into each page by
+  // src/components/Head.astro.
+  fonts: [
+    {
+      provider: fontProviders.fontsource(),
+      name: "IBM Plex Sans",
+      cssVariable: "--font-plex-sans",
+      weights: ["100 700"],
+      styles: ["normal"],
+      subsets: ["latin", "latin-ext"],
+      fallbacks: ["system-ui", "sans-serif"],
+    },
+    {
+      provider: fontProviders.fontsource(),
+      name: "Fraunces",
+      cssVariable: "--font-fraunces",
+      weights: ["100 900"],
+      styles: ["normal"],
+      subsets: ["latin", "latin-ext"],
+      fallbacks: ["Georgia", "serif"],
+    },
+    {
+      provider: fontProviders.fontsource(),
+      name: "IBM Plex Mono",
+      cssVariable: "--font-plex-mono",
+      weights: [400, 600],
+      styles: ["normal"],
+      subsets: ["latin", "latin-ext"],
+      fallbacks: ["ui-monospace", "monospace"],
+    },
+  ],
   integrations: [
     starlight({
       title: "Sanoma",
@@ -27,7 +61,7 @@ export default defineConfig({
       social: [{ icon: "github", label: "Sanoma on GitHub", href: REPO }],
       editLink: { baseUrl: `${REPO}/edit/main/docs-site/` },
       customCss: ["./src/styles/sanoma.css"],
-      components: { Footer: "./src/components/Footer.astro" },
+      components: { Head: "./src/components/Head.astro", Footer: "./src/components/Footer.astro" },
       // Cedar has no grammar in Shiki: a policy is shown as plain text.
       expressiveCode: { shiki: { langAlias: { cedar: "txt" } } },
       sidebar: [

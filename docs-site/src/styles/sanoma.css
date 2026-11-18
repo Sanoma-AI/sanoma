@@ -2,15 +2,11 @@
  * Sanoma's look on Starlight: the website's colours (pine on paper) and type (Fraunces over IBM
  * Plex), mapped onto Starlight's own variables, so no component is replaced.
  */
-@import "@fontsource-variable/fraunces";
-@import "@fontsource-variable/ibm-plex-sans";
-@import "@fontsource/ibm-plex-mono/400.css";
-@import "@fontsource/ibm-plex-mono/600.css";
-
 :root {
-  --sl-font: "IBM Plex Sans Variable", system-ui, sans-serif;
-  --sl-font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --sanoma-font-display: "Fraunces Variable", Georgia, serif;
+  /* The fonts and their fallbacks come from astro.config.mjs's `fonts`. */
+  --sl-font: var(--font-plex-sans);
+  --sl-font-mono: var(--font-plex-mono);
+  --sanoma-font-display: var(--font-fraunces);
 
   /* Dark, Starlight's default. */
   --sl-color-accent-low: #1c322d;
