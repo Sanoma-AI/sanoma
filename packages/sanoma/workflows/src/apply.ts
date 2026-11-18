@@ -669,17 +669,28 @@ function planner(
   };
 }
 
-/** The change operations (`plan`, `create`, `update`, `delete`) of each writable type that have a driver, sorted. */
-const changesOf = (
+/**
+ * What apply and plan observe and plan with, of the operations that have a driver: each type's
+ * `import`, the change operations (`plan`, `create`, `update`, `delete`) of each writable one,
+ * sorted, their ids (`usable`), and `sanoma.source.resolve`.
+ */
+function planningOps(
   types: ReadonlyMap<string, Resource>,
   ops: ReadonlyMap<string, Op>,
   drivers: ReadonlyMap<string, unknown>,
-): Op[] =>
-  [...types.values()]
+) {
+  const changes = [...types.values()]
     .filter((r) => r.writable)
     .flatMap((r) => ["plan", "create", "update", "delete"].map((name) => ops.get(`${r.vendor}.${r.type}.${name}`)))
     .filter((op): op is Op => op !== undefined && drivers.has(op.id))
     .toSorted((a, b) => a.id.localeCompare(b.id));
+  return {
+    imports: importsOf(types, ops, drivers),
+    changes,
+    usable: new Set(changes.map((op) => op.id)),
+    resolve: ops.get(SOURCE_RESOLVE) as ResolveOp | undefined,
+  };
+}
 
 /**
  * The apply workflow for a config: it `uses` the `import` of every resource type the connectors
@@ -722,10 +733,7 @@ export function applyWorkflow(
   drivers: ReadonlyMap<string, unknown>,
   steps: ApplySteps,
 ): WorkflowDefinition<readonly ApplyUse[], typeof ApplyInput> {
-  const imports = importsOf(types, ops, drivers);
-  const changes = changesOf(types, ops, drivers);
-  const usable = new Set(changes.map((op) => op.id));
-  const resolve = ops.get(SOURCE_RESOLVE) as ResolveOp | undefined;
+  const { imports, changes, usable, resolve } = planningOps(types, ops, drivers);
   const hooks = [...new Set([...types.values()].flatMap((r) => (r.afterCreate ?? []).map((hook) => hook.op)))]
     .toSorted()
     .flatMap((id) => {
@@ -953,10 +961,7 @@ export function planWorkflow(
   drivers: ReadonlyMap<string, unknown>,
   declared: () => Promise<ApplyDeclared>,
 ): WorkflowDefinition<readonly (ImportOp | PlanOp | ResolveOp)[], typeof ApplyInput> {
-  const imports = importsOf(types, ops, drivers);
-  const changes = changesOf(types, ops, drivers);
-  const usable = new Set(changes.map((op) => op.id));
-  const resolve = ops.get(SOURCE_RESOLVE) as ResolveOp | undefined;
+  const { imports, changes, usable, resolve } = planningOps(types, ops, drivers);
   return defineWorkflow({
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "plan" satisfies typeof PLAN_WORKFLOW,

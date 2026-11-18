@@ -126,6 +126,11 @@ describe("the change view in the app", () => {
       () => client.run(runId),
       (run) => run?.status === "finished",
     );
+    // Its output has a plan's shape and is drawn as JSON: only the built-in plan's is drawn as a plan,
+    // so the one plan on its page is its approval's.
+    const run = await page(`/workflows/review-plan/runs/${runId}`);
+    expect(run.status).toBe(200);
+    expect(run.text.split('data-slot="apply-plan"')).toHaveLength(2);
   });
 
   it("renders a plan run's output as the change view in its ledger", async () => {

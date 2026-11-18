@@ -12,6 +12,7 @@ import { LOCKFILE, writeLockfile } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import {
   type ApplyInput,
+  type ApplyPlan,
   defineConnector,
   defineResource,
   memoryLedger,
@@ -19,9 +20,11 @@ import {
   sourceKeyPair,
   withSetup,
   resolveSecrets,
+  SOURCE_KEY,
 } from "../src/index.ts";
 import { memorySecretStore } from "../src/secret-store.ts";
-import { ALICE, rootWith } from "./harness.ts";
+import { PLAN_WORKFLOW } from "../src/shared.ts";
+import { ALICE, freshDatabase, rootWith, storedSecrets } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. Apply on a host that derives (`deriveHosts`), as sanoma-ops
 // declares one: the GitHub repository in a file of its own, the host in `resources/sanoma/infra.ts`,
@@ -239,6 +242,42 @@ describe("the apply workflow on a host that derives", () => {
         ),
       }),
     ]);
+  });
+});
+
+describe("a plan before a host's first apply", () => {
+  const root = rootWith({
+    "resources/people.ts": ALICE,
+    "resources/identity/github.ts": REPOSITORY,
+    "resources/sanoma/infra.ts": INFRA,
+  });
+  execFileSync("git", ["init", "-q", root]);
+  execFileSync("git", ["-C", root, "remote", "add", "origin", "git@github.com:acme/company.git"]);
+  const github = fakeGithub();
+  const host = fakeAcmeHost();
+  // No source key stored or bound: the first apply mints it.
+  const databaseUrl = freshDatabase("plan-host-derive");
+  const harness = useTestApp(
+    {
+      workflows: [],
+      connectors: [withSetup(githubConnector, { driver: () => github.driver }), host.connector],
+      ledger: memoryLedger(),
+      root,
+    },
+    { databaseUrl },
+  );
+  const keyId = sourceKeyId("resources/sanoma/infra.ts#host");
+  const stored = async () => (await storedSecrets(databaseUrl)).map((s) => s.name);
+
+  it("mints nothing, and plans what the first apply does but the deploy key that apply mints a source key for", async () => {
+    const planRun = await harness.client.start(PLAN_WORKFLOW, {}, { startedBy: { id: "alice" } });
+    const plan = (await harness.client.result(planRun)) as ApplyPlan;
+    expect(await stored()).toEqual([]);
+
+    const report = await harness.client.applyReport(await harness.client.apply({}, { startedBy: { id: "alice" } }));
+    expect(await stored()).toEqual([SOURCE_KEY]);
+    expect(report.results).toContainEqual(expect.objectContaining({ id: keyId, action: "create", status: "done" }));
+    expect(plan).toEqual({ ...report.plan, steps: report.plan.steps.filter((s) => s.id !== keyId) });
   });
 });
 

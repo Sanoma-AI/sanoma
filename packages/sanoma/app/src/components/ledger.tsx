@@ -1,6 +1,6 @@
 import type { ErrorInfo, LedgerRecord } from "sanoma/workflows";
 import type { ConfigDescription, OpEntry } from "sanoma/workflows/describe";
-import { approverLabel, LOGIN_CODE_WORKFLOW } from "sanoma/workflows/shared";
+import { approverLabel, LOGIN_CODE_WORKFLOW, PLAN_WORKFLOW } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { memo, type ReactNode } from "react";
@@ -260,8 +260,8 @@ export const LedgerRow = memo(function LedgerRow({
       break;
     case "run.finished": {
       kind = "finished";
-      // A plan's output (the plan workflow's) as apply's approval shows it.
-      const plan = asApplyPlan(record.output);
+      // The built-in plan's output as apply's approval shows it.
+      const plan = record.workflow === PLAN_WORKFLOW ? asApplyPlan(record.output) : undefined;
       body = plan ? <ApplyPlanView plan={plan} /> : <Expandable label="Output" value={record.output} />;
       break;
     }

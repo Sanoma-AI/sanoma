@@ -7,7 +7,6 @@ import { findSentinels, testDatabaseUrl } from "sanoma/testing";
 import { type TestApp, useTestApp } from "sanoma/testing/harness";
 import { fakeHost, testRepository } from "sanoma/testing/host";
 import { fakeWakeup } from "sanoma/testing/wakeup";
-import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { LOCKFILE, readLockfile, serializeLockfile, writeLockfile } from "../src/describe.ts";
@@ -30,7 +29,7 @@ import { PLAN_WORKFLOW } from "../src/shared.ts";
 import { chainDataFile, fakeMail, mailDataFile, recordsFor } from "./fakes/mail.ts";
 import { companyFakes } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
-import { pending, rootWith, waitFor } from "./harness.ts";
+import { pending, rootWith, storedSecrets, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. Apply on a copy of a company's data files and lockfile (so the
 // fixture's stay as they are), against fakes: the company's GitHub and Stripe, and Acme, a
@@ -69,16 +68,6 @@ const ops = (records: LedgerRecord[]) =>
   records.flatMap((r) => (r.type === "op.called" && !r.error ? [[r.op, r.input] as const] : []));
 const actions = (report: ApplyReport) => report.plan.steps.map((s) => [s.id.replace(/^resources\//, ""), s.action]);
 const resultOf = (report: ApplyReport, id: string) => report.results.find((r) => r.id === id);
-
-/** The secrets stored in the app's database, each by its name and version. */
-async function storedSecrets(databaseUrl: string) {
-  const db = new Pool({ connectionString: databaseUrl });
-  try {
-    return (await db.query("SELECT namespace, name, version FROM sanoma_credentials ORDER BY namespace, name")).rows;
-  } finally {
-    await db.end();
-  }
-}
 
 /**
  * Plans with `input` as `startedBy`: the plan run calls only what reads (an import, a type's
@@ -332,7 +321,7 @@ describe("the apply workflow on the company's resources", () => {
 
   it("asks one approval where the policy holds a change, covering every change with the plan, then makes them", async () => {
     fakes.github.override("repository", "website", { has_wiki: true });
-    // A plan of theirs waits for no one: it changes nothing.
+    // Their plan first: it asks no approval where their apply does, since it changes nothing.
     const plan = await planOnly(app, root, commits, {}, careful);
     const runId = await app.client.apply({}, { startedBy: careful });
     await waitFor(pending(() => app.client, runId));
