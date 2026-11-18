@@ -91,6 +91,16 @@ export function freshDatabase(suffix: string): string {
   return url;
 }
 
+/** The secrets stored in the app's database at `databaseUrl`, each by its namespace, name and version. */
+export async function storedSecrets(databaseUrl: string) {
+  const db = new Pool({ connectionString: databaseUrl });
+  try {
+    return (await db.query("SELECT namespace, name, version FROM sanoma_credentials ORDER BY namespace, name")).rows;
+  } finally {
+    await db.end();
+  }
+}
+
 export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   while (!(await check())) {

@@ -20,6 +20,7 @@ import {
   type Worker,
   withSetup,
 } from "../src/index.ts";
+import { PLAN_WORKFLOW } from "../src/shared.ts";
 import { fakeMail, mailDataFile } from "./fakes/mail.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
 import { freshDatabase, pending, rootWith, setBuiltInCode, testhostInfra, waitFor } from "./harness.ts";
@@ -176,6 +177,20 @@ describe("one apply at a time", () => {
     const sandboxed = await client.apply({}, { startedBy: alice, sandbox: "Applied in the sandbox" });
     expect(await row(sandboxed)).toMatchObject({ queueName: resolved.queueName });
     expect(await client.result(sandboxed, 15_000)).toMatchObject({ results: expect.any(Array) });
+    await client.decide(held, { decision: "approve", by: { id: "lead" } });
+    await client.applyReport(held);
+  });
+
+  it("runs a plan while a live apply holds the queue: it changes nothing, so it waits for none", async () => {
+    const held = await client.apply({ only: [sending] }, { startedBy: careful });
+    await waitFor(pending(() => client, held));
+    const planned = await client.start(PLAN_WORKFLOW, {}, { startedBy: alice });
+    expect(await row(planned)).toMatchObject({ queueName: resolved.queueName });
+    expect(await client.result(planned, 15_000)).toMatchObject({
+      problems: [],
+      steps: expect.arrayContaining([expect.objectContaining({ id: sending, action: "create" })]),
+    });
+    expect(await client.applyAhead(planned)).toBeUndefined();
     await client.decide(held, { decision: "approve", by: { id: "lead" } });
     await client.applyReport(held);
   });

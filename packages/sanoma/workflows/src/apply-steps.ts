@@ -5,7 +5,7 @@ import { decide } from "./call.ts";
 import type { Approver } from "./define.ts";
 import { type Binding, type Bindings, diffLockfiles, LOCKFILE, readLockfile, writeLockfile } from "./lockfile.ts";
 import { runNow } from "./run.ts";
-import { APPLY_WORKFLOW } from "./shared.ts";
+import { APPLY_WORKFLOW, type PLAN_WORKFLOW } from "./shared.ts";
 
 // The apply workflow's steps that call no vendor: reading the data files, asking the policy
 // ahead, and writing the lockfile. Here, not in apply.ts, which is held to the workflow lint and
@@ -39,8 +39,29 @@ async function lastWritten(appName: string): Promise<Bindings | undefined> {
 }
 
 /**
+ * The step that reads the data files and the lockfile as drift reads them, and the
+ * lockfile against the one apply last wrote (a change someone else made), for `workflow`: apply's
+ * mints what a deriving host is given, plan's mints nothing. `appName` scopes the search.
+ */
+export const declaredStep =
+  (
+    appName: string,
+    read: (options?: { mint?: boolean }) => Promise<Omit<ApplyDeclared, "rebinds">>,
+    workflow: typeof APPLY_WORKFLOW | typeof PLAN_WORKFLOW,
+  ) =>
+  (): Promise<ApplyDeclared> =>
+    DBOS.runStep(
+      async () => {
+        const declared = await read({ mint: workflow === APPLY_WORKFLOW });
+        const before = await lastWritten(appName);
+        return { ...declared, rebinds: before ? diffLockfiles(before, declared.bindings) : [] };
+      },
+      { name: `${workflow}:data-files` },
+    );
+
+/**
  * The apply workflow's steps for a config: `read`, the data files and the lockfile as drift reads
- * them, under `root`, minting what a deriving host is given; `appName` scopes the search for the lockfile apply last wrote.
+ * them, under `root`; `appName` scopes the search for the lockfile apply last wrote.
  */
 export function applySteps(
   appName: string,
@@ -48,16 +69,7 @@ export function applySteps(
   read: (options?: { mint?: boolean }) => Promise<Omit<ApplyDeclared, "rebinds">>,
 ): ApplySteps {
   return {
-    // The data files, and the lockfile against the one apply last wrote: a change someone else made.
-    declared: () =>
-      DBOS.runStep(
-        async () => {
-          const declared = await read({ mint: true });
-          const before = await lastWritten(appName);
-          return { ...declared, rebinds: before ? diffLockfiles(before, declared.bindings) : [] };
-        },
-        { name: "apply:data-files" },
-      ),
+    declared: declaredStep(appName, read, APPLY_WORKFLOW),
     // The policy asked as each call would ask it, now, so one approval can cover them all.
     holds: (calls: PlannedCall[]) =>
       DBOS.runStep(

@@ -1,13 +1,15 @@
 import type { ErrorInfo, LedgerRecord } from "sanoma/workflows";
 import type { ConfigDescription, OpEntry } from "sanoma/workflows/describe";
-import { approverLabel, LOGIN_CODE_WORKFLOW } from "sanoma/workflows/shared";
+import { approverLabel, LOGIN_CODE_WORKFLOW, PLAN_WORKFLOW } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { memo, type ReactNode } from "react";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { utcText } from "#/lib/time.ts";
 import { type RunCheck, SEALED_SHOWN, starterName } from "../api.ts";
+import { asApplyPlan } from "../lib/apply-plan.ts";
 import { configQuery, opsById } from "../queries.ts";
+import { ApplyPlanView } from "./apply-plan.tsx";
 import {
   ALONE,
   DecisionBadge,
@@ -256,10 +258,13 @@ export const LedgerRow = memo(function LedgerRow({
         </p>
       );
       break;
-    case "run.finished":
+    case "run.finished": {
       kind = "finished";
-      body = <Expandable label="Output" value={record.output} />;
+      // The built-in plan's output as apply's approval shows it.
+      const plan = record.workflow === PLAN_WORKFLOW ? asApplyPlan(record.output) : undefined;
+      body = plan ? <ApplyPlanView plan={plan} /> : <Expandable label="Output" value={record.output} />;
       break;
+    }
     case "run.failed":
       kind = "failed";
       body = <ErrorText error={record.error} />;
