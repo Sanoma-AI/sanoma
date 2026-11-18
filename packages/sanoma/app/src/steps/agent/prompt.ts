@@ -6,6 +6,7 @@ import {
   type Chat,
   isDirect,
   isOperation,
+  type Op,
   type Principal,
   type SanomaConfig,
   VENDOR,
@@ -153,15 +154,16 @@ export async function instructions(step: AppStepContext, principal: Principal, c
   const [guide, drafts] = await Promise.all([companyGuide(step), openDrafts(step, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
   const ops = [...resolved.ops.values()].toSorted((a, b) => a.id.localeCompare(b.id));
+  /** An operation's effect, and whether it is a lookup (a read that may be called directly). */
+  const effectOf = (op: Op) =>
+    `${op.effect}${op.effect === "read" && isDirect(op, resolved.types) ? ", a lookup" : ""}`;
   const connectors = [
     ...Map.groupBy(
       ops.filter((op) => !isOperation(op)),
       (op) => op.vendor,
     ),
   ].map(([vendor, of]) => {
-    const listed = of.map(
-      (op) => `  - ${op.id} (${op.effect}${op.effect === "read" && isDirect(op, resolved.types) ? ", a lookup" : ""})`,
-    );
+    const listed = of.map((op) => `  - ${op.id} (${effectOf(op)})`);
     return `- ${titles.get(vendor) ?? vendor} (${vendor}):\n${listed.join("\n")}`;
   });
   if (connectors.length)
@@ -169,7 +171,7 @@ export async function instructions(step: AppStepContext, principal: Principal, c
   // The company's own operations are no connector's: a section of their own, each with what it calls.
   const own = ops
     .filter(isOperation)
-    .map((op) => `- ${op.id} (${op.effect}): calls ${namesOrNone(op.uses.map((use) => use.id))}`);
+    .map((op) => `- ${op.id} (${effectOf(op)}): calls ${namesOrNone(op.uses.map((use) => use.id))}`);
   if (own.length)
     sections.push(
       `The company's own operations (operations/ and apps/<name>/operations/), each with its effect and what it calls:\n${own.join("\n")}`,

@@ -4,13 +4,15 @@ import { useTestApp } from "sanoma/testing/harness";
 import {
   type AppStepContext,
   type Chat,
+  defineOperation,
   memoryLedger,
   type Principal,
   resolveConfig,
   type SanomaConfig,
 } from "sanoma/workflows";
 import { describeConfig } from "sanoma/workflows/describe";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import fixture from "../../workflows/test/fixtures/company-apps/sanoma.config.ts";
 import { customers as crmCustomers } from "../../workflows/test/fixtures/company-apps/apps/crm/resources/data.ts";
 import { customers as shopCustomers } from "../../workflows/test/fixtures/company-apps/apps/shop/resources/data.ts";
@@ -19,7 +21,7 @@ import quote from "../../workflows/test/fixtures/company-apps/operations/quote.t
 import offer from "../../workflows/test/fixtures/company-apps/workflows/offer.ts";
 import { ACTOR_COOKIE } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
-import { callersOf, opHome, vendorsCalling } from "../src/lib/operations.ts";
+import { callersOf, operationFile, opHome, vendorsCalling } from "../src/lib/operations.ts";
 import { instructions } from "../src/steps/agent/prompt.ts";
 import { ensureSanomaBuilt } from "../../test/fixture.ts";
 
@@ -28,6 +30,17 @@ import { ensureSanomaBuilt } from "../../test/fixture.ts";
 // root's `offer` uses): Yours on the Connectors page, an operation's page, the links to it from a
 // workflow, a collection and the Permissions grid, as the server renders them; and the operator
 // agent's instructions.
+
+// A company operation may be called directly once the page-call lane lets it: until then, `quote`
+// stands in for one, for the instructions alone (the app's server is its own bundle).
+vi.mock("sanoma/workflows", async (actual) => {
+  const workflows = await actual<typeof import("sanoma/workflows")>();
+  return {
+    ...workflows,
+    isDirect: (...args: Parameters<typeof workflows.isDirect>) =>
+      args[0].id === "operations.quote.run" || workflows.isDirect(...args),
+  };
+});
 
 const root = fileURLToPath(new URL("../../workflows/test/fixtures/company-apps/", import.meta.url));
 
@@ -45,9 +58,20 @@ const config: SanomaConfig = {
 const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("app_operations") });
 let app: App;
 
+/**
+ * An operation whose file writes no name it has, so its outline cannot be read: given to the app
+ * alone, as the worker refuses to start with it.
+ */
+const unread = defineOperation({
+  name: ["un", "read"].join(""),
+  input: z.object({}),
+  uses: [],
+  run: async () => null,
+});
+
 beforeAll(async () => {
   ensureSanomaBuilt();
-  app = await startApp(testApp.config, { port: 0 });
+  app = await startApp({ ...testApp.config, operations: [quote, score, unread] }, { port: 0 });
 }, 120_000);
 
 afterAll(async () => {
@@ -83,6 +107,14 @@ describe("the company's operations, in the config", () => {
     expect(opHome(description, { ...op("data.shop.customers.get"), vendor: "nobody", resource: "x" })).toBeUndefined();
   });
 
+  it("shows an operation's file from its folder of operations, with /, on Windows too", () => {
+    expect(operationFile(op("operations.crm.score.run"))).toBe("apps/crm/operations/score.ts");
+    expect(operationFile({ file: "C:\\Users\\ada\\shop\\operations\\quote.ts" })).toBe("operations/quote.ts");
+    expect(operationFile({ app: "crm", file: "C:\\shop\\apps\\crm\\operations\\score.ts" })).toBe(
+      "apps/crm/operations/score.ts",
+    );
+  });
+
   it("finds what calls an operation: the workflows using it, and the operations calling it", () => {
     expect(callersOf(description, ["data.shop.customers.get"])).toMatchObject({
       workflows: [],
@@ -100,13 +132,14 @@ describe("the company's operations, in the config", () => {
 });
 
 describe("the company's operations, in the operator agent's instructions", () => {
-  it("lists them in a section of their own, each with its effect and what it calls, never as a connector", async () => {
+  it("lists them in a section of their own, each with its effect, a lookup's too, and what it calls, never as a connector", async () => {
     const step = { config, resolved: resolveConfig(config) } as AppStepContext;
     const text = await instructions(step, { id: "ada", groups: [] } as Principal, { id: "chat-1" } as Chat);
     expect(text).toContain(
       "The company's own operations (operations/ and apps/<name>/operations/), each with its effect and what it calls:\n" +
         "- operations.crm.score.run (read): calls data.crm.customers.get\n" +
-        "- operations.quote.run (read): calls data.shop.customers.get",
+        // A read that may be called directly is a lookup, as a connector's is.
+        "- operations.quote.run (read, a lookup): calls data.shop.customers.get",
     );
     expect(text).not.toMatch(/^- operations \(operations\):/m);
     expect(text).toContain("its connectors: none;");
@@ -146,6 +179,15 @@ describe("the company's operations, in the app", () => {
     const { shown } = await page("/connectors/operations/crm.score");
     expect(shown).toMatch(/href="\/permissions\?app=crm"[^>]*>Permissions<\/a>/);
     expect(shown).toMatch(/>Code <code[^>]*>apps\/crm\/operations\/score\.ts<\/code>/);
+  });
+
+  it("says what is wrong in an operation's file when its outline cannot be read, never that the file is gone", async () => {
+    const { status, shown } = await page("/connectors/operations/unread");
+    expect(status).toBe(200);
+    expect(shown).toMatch(/>Code <code[^>]*>[^<]*operations\.test\.ts<\/code>/);
+    expect(shown).toContain("No source to show");
+    expect(shown).toContain("operations.test.ts holds no operation named &quot;unread&quot;");
+    expect(shown).not.toContain("can no longer be read");
   });
 
   it("says when no operation has the name", async () => {

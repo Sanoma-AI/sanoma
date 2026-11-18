@@ -220,6 +220,40 @@ describe("permissionsGrid", () => {
     ]);
   });
 
+  it("gives a company with no operations of its own the grid it had before their calls were nested", () => {
+    const allowed = Array.from({ length: 3 }, () => ({ answer: "allow" }));
+    const direct = [
+      "sanoma.apps.list",
+      "sanoma.connection.activate",
+      "sanoma.connection.authorize",
+      "sanoma.connection.bind",
+      "sanoma.connection.configure",
+      "sanoma.connection.create",
+      "sanoma.connection.disconnect",
+      "sanoma.connection.prepare",
+      "sanoma.connection.refresh",
+      "sanoma.connection.revoke",
+      "sanoma.connection.test",
+      "sanoma.run.inspect",
+      "sanoma.storeMigration.cancel",
+      "sanoma.storeMigration.plan",
+      "shop.refunds.list",
+    ];
+    // Strict: no row gains `ops`, not even an empty list, but a workflow's.
+    expect(gridOf(allowAll)).toStrictEqual({
+      groups: [null, "agents", "finance", "visitors", "anonymous"],
+      workflows: [
+        {
+          id: "refund",
+          title: "Refund",
+          cells: [...allowed, ...visitorDenied],
+          ops: [{ id: "shop.refunds.create", cells: [...allowed, { answer: "allow" }, { answer: "allow" }] }],
+        },
+      ],
+      ops: direct.map((id) => ({ id, cells: [...allowed, ...visitorDenied] })),
+    });
+  });
+
   it("puts the calls inside a company operation under its row, wherever its row is", () => {
     const apps = describeConfig({
       ...companyApps,

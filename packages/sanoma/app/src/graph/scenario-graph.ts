@@ -31,15 +31,18 @@ export function scenarioRoles(
  * A workflow's outline marked with what the scenario says of each operation (`scenarioRoles`).
  * An outline's op id with a computed segment (`*`) is marked for each operation it fits, as the
  * run graph matches it; a step about a step by its name marks the call of that name (its own, or
- * its operation's id). Pure: the other nodes, and the graph, are returned as they are.
+ * its operation's id). A company operation's box is its call, marked as an op node is. Pure: the
+ * other nodes, and the graph, are returned as they are.
  */
 export function annotateGraph(graph: Graph, { steps }: Pick<ScenarioEntry, "steps">): Graph {
   if (!steps.some((step) => step.op !== undefined || step.name !== undefined)) return graph;
   const nodes = graph.nodes.map((node): GraphNode => {
-    if (node.kind !== "op") return node;
+    if (node.kind !== "op" && node.kind !== "cluster") return node;
+    const call = node.kind === "op" ? { id: node.label, name: node.name } : node.op;
+    if (!call) return node;
     // `fitsOp` holds for the same id too.
     const scenario = scenarioRoles(steps, ({ op, name }) =>
-      name !== undefined ? name === (node.name ?? node.label) : op !== undefined && fitsOp(node.label, op),
+      name !== undefined ? name === (call.name ?? call.id) : op !== undefined && fitsOp(call.id, op),
     );
     if (Object.keys(scenario).length === 0) return node;
     return { ...node, state: { ...node.state, scenario } };

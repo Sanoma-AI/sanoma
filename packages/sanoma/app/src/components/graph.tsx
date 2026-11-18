@@ -243,12 +243,7 @@ function OpNode(props: Props<"op">) {
         ) : (
           state?.durationMs !== undefined && <span className="text-muted-foreground">{`${state.durationMs} ms`}</span>
         )}
-        {state?.scenario?.seeded && <Badge variant="outline">seeded</Badge>}
-        {state?.scenario?.fails && <Badge variant="outline">fails</Badge>}
-        {state?.scenario?.expected && <Badge variant="outline">expected</Badge>}
-        {state?.scenario?.forbidden && <Badge variant="outline">not called</Badge>}
-        {state?.scenario?.denied && <Badge variant="outline">must deny</Badge>}
-        {state?.scenario?.held && <Badge variant="outline">must hold</Badge>}
+        <ScenarioBadges state={state} />
       </Line>
       {node.ops && (
         <>
@@ -339,10 +334,26 @@ function Decision({ state }: { state: OpState | undefined }) {
   return state?.decision && <ToneBadge tone={DECISION_TONE[state.decision]}>{state.decision}</ToneBadge>;
 }
 
+/** What a scenario says of a call, on a workflow's outline (`annotateGraph`). */
+function ScenarioBadges({ state }: { state: OpState | undefined }) {
+  const scenario = state?.scenario;
+  return (
+    <>
+      {scenario?.seeded && <Badge variant="outline">seeded</Badge>}
+      {scenario?.fails && <Badge variant="outline">fails</Badge>}
+      {scenario?.expected && <Badge variant="outline">expected</Badge>}
+      {scenario?.forbidden && <Badge variant="outline">not called</Badge>}
+      {scenario?.denied && <Badge variant="outline">must deny</Badge>}
+      {scenario?.held && <Badge variant="outline">must hold</Badge>}
+    </>
+  );
+}
+
 /**
  * A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a
  * badge. A company operation's (`op`) says along its top what the operation is, as an op node
- * does: its tone, its name or id, its effect and, in a run, its decision or the approval holding it.
+ * does: its tone, its name or id, its effect, in a run its decision or the approval holding it, and
+ * on an outline what a scenario says of it.
  */
 function ClusterNode({ data: { node, selectable }, selected }: Props<"cluster">) {
   const { state } = node;
@@ -379,6 +390,7 @@ function OpStrip({ op, state }: { op: { id: string; name?: string }; state: OpSt
       <code className={cn("truncate", op.name && "text-muted-foreground")}>{op.id}</code>
       {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
       <Decision state={state} />
+      <ScenarioBadges state={state} />
     </div>
   );
 }

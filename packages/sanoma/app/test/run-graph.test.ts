@@ -512,6 +512,80 @@ describe("runGraph", () => {
       expect(summary(runGraph(records, run("cancelled"), NOW, outline).nodes)[1]).toBe("op:1 off");
     });
 
+    it("names a call still running by no other call the outline has where it was", () => {
+      // The file changed since the run: another operation is where the company operation was.
+      const changed: OutlineNode[] = [{ kind: "op", path: "0", id: "ghost.post.create", span: [0, 10] }];
+      const { nodes } = runGraph(
+        [record(0, started), record(2, called("data.shop.customers.get", { within: 1, node: "0.0.0" }))],
+        run("running"),
+        NOW,
+        changed,
+      );
+      expect(labels(nodes)).toEqual([
+        "start start",
+        "op:1 operations",
+        "op:2 data.shop.customers.get in op:1",
+        "end pending",
+      ]);
+      expect(nodes[1]).not.toHaveProperty("span");
+    });
+
+    it("keeps the calls of two ctx.all members calling the operation each in its own box", () => {
+      // Each member calls `quote` (`ctx.all([quote(a), quote(b)])`), and both read a customer.
+      const fanned: OutlineNode[] = [
+        {
+          kind: "all",
+          path: "0",
+          span: [0, 100],
+          branches: [
+            [{ kind: "op", path: "0.0.0", id: QUOTE, span: [10, 40] }],
+            [{ kind: "op", path: "0.1.0", id: QUOTE, span: [50, 80] }],
+          ],
+        },
+      ];
+      const read = (within: number, node: string, index: number) =>
+        inGroup(called("data.shop.customers.get", { within, node }), index, 2);
+      const { nodes, edges } = runGraph(
+        ledger(
+          started,
+          inGroup(called(QUOTE, { node: "0.0.0" }), 0, 2),
+          inGroup(called(QUOTE, { node: "0.1.0" }), 1, 2),
+          read(2, "0.1.0.0.0", 1),
+          read(1, "0.0.0.0.0", 0),
+          { type: "run.finished", output: {} },
+        ),
+        run("finished"),
+        NOW,
+        fanned,
+      );
+      expect(labels(nodes)).toEqual([
+        "start start",
+        `op:1 ${QUOTE}`,
+        "op:4 data.shop.customers.get in op:1",
+        `op:2 ${QUOTE}`,
+        "op:3 data.shop.customers.get in op:2",
+        "end finished",
+      ]);
+      expect(spans(nodes)).toEqual([
+        "start null",
+        "op:1 [10,40]",
+        "op:4 null",
+        "op:2 [50,80]",
+        "op:3 null",
+        "end null",
+      ]);
+      expect(pairs(edges)).toEqual([
+        "start->op:1",
+        "op:1->op:4",
+        "op:4->op:1",
+        "start->op:2",
+        "op:2->op:3",
+        "op:3->op:2",
+        "op:1->end",
+        "op:2->end",
+      ]);
+    });
+
     it("draws a call inside it that a policy holds in the box, and the operation itself held as an empty box", () => {
       const asked = approval("pending", { requestedBy: "policy", op: "resend.email.send", opSeq: 2 });
       const held = runGraph(

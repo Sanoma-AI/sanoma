@@ -1,6 +1,7 @@
 import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "sanoma/workflows";
 import type { OutlineNode } from "sanoma/workflows/describe";
 import { fitsOp, flatten, isEnded, OPERATIONS_VENDOR } from "sanoma/workflows/shared";
+import { isCompanyOp } from "../lib/operations.ts";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 import { type Ends, nameOf, outlineGraph } from "./outline-graph.ts";
@@ -10,7 +11,7 @@ type OpStep = Extract<Step, { kind: "op" }>;
 type AllStep = Extract<Step, { kind: "all" }>;
 
 /** A company operation's step holds the calls made inside it (`calls`), none yet. */
-const callsOf = (op: string) => (op.startsWith(`${OPERATIONS_VENDOR}.`) ? { calls: [] } : {});
+const callsOf = (op: string) => (isCompanyOp(op) ? { calls: [] } : {});
 
 /**
  * A run's graph, built from its ledger (`records`, in `seq` order) and its approvals as the run
@@ -70,8 +71,8 @@ export function runGraph(
    * Adds an operation call's step as `place` does, or, made within a company operation's call
    * (`within`, that call's `seq`), inside that call's step, its box. The box is made here on its
    * first record inside when the call has no record of its own yet: placed at the operation's
-   * node, the outline's op node that the record's `node` is under (`<operation's node>.0.<path>`),
-   * as a member of its `ctx.all`.
+   * node, the outline's company operation node that the record's `node` is under (`<operation's
+   * node>.0.<path>`), as a member of its `ctx.all`; nowhere, when the outline has another call there.
    */
   const placeCall = (
     step: OpStep,
@@ -81,7 +82,8 @@ export function runGraph(
     let box = ops.get(within);
     if (!box) {
       const at = nodes.find(
-        (n): n is Extract<OutlineNode, { kind: "op" }> => n.kind === "op" && !!node?.startsWith(`${n.path}.0.`),
+        (n): n is Extract<OutlineNode, { kind: "op" }> =>
+          n.kind === "op" && isCompanyOp(n.id) && !!node?.startsWith(`${n.path}.0.`),
       );
       const id = at?.id ?? OPERATIONS_VENDOR;
       box = { kind: "op", id, ...nameOf(at?.name, id), key: `op:${within}`, state: { tone: ended ? "off" : "active" } };

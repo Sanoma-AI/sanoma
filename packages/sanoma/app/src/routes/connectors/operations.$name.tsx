@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import type { ConfigDescription } from "sanoma/workflows/describe";
+import type { ConfigDescription, Outline } from "sanoma/workflows/describe";
 import { FunctionIcon } from "@phosphor-icons/react/dist/csr/Function";
 import { useCallback } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
@@ -11,6 +11,7 @@ import {
   effectBadge,
   loadCode,
   None,
+  Nothing,
   Notice,
   OpItem,
   PanelCard,
@@ -20,7 +21,7 @@ import {
 } from "../../components/common.tsx";
 import { SchemaFields } from "../../components/workflow.tsx";
 import { callersOf, companyOpNamed, operationFile } from "../../lib/operations.ts";
-import { configQuery, opsById, siteCallers, sourceQuery } from "../../queries.ts";
+import { configQuery, opsById, siteCallers, sourceQuery, workflowFile } from "../../queries.ts";
 
 // `/connectors/operations/<name>`: one of the company's own operations (`defineOperation`), listed
 // under Yours on the Connectors page. The runtime refuses a connector of the vendor `operations`,
@@ -32,7 +33,9 @@ export const Route = createFileRoute("/connectors/operations/$name")({
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const op = companyOpNamed(params.name)(config);
     if (!op) throw notFound();
-    if (op.file !== undefined) await queryClient.query({ ...sourceQuery(op.file), staleTime: "static" });
+    // The source is served only for an operation whose outline was read: its outline's `file`.
+    const file = op.outline && workflowFile({ outline: op.outline });
+    if (file !== undefined) await queryClient.query({ ...sourceQuery(file), staleTime: "static" });
     return { crumb: op.name };
   },
   head: ({ params }) => pageTitle(params.name),
@@ -118,7 +121,7 @@ function OperationPage() {
           </ItemGroup>
         )}
       </Region>
-      {op.file !== undefined && <Code file={op.file} shown={operationFile(op)} />}
+      {op.outline && <Code outline={op.outline} shown={operationFile(op)} />}
       <UsedBy {...callers} />
     </>
   );
@@ -130,9 +133,11 @@ function Fields({ schema }: { schema: Record<string, unknown> }) {
   return <SchemaFields schema={schema} />;
 }
 
-/** The operation's file, as it is now, under its path from the company's root. */
-function Code({ file, shown }: { file: string; shown: string }) {
-  const { data } = useSuspenseQuery(sourceQuery(file));
+/**
+ * The operation's file, as it is now, under its path from the company's root; or, when its outline
+ * could not be read, what is wrong in it, as a workflow's page says.
+ */
+function Code({ outline, shown }: { outline: Outline; shown: string }) {
   return (
     <Region
       title={
@@ -141,13 +146,23 @@ function Code({ file, shown }: { file: string; shown: string }) {
         </>
       }
     >
-      {data.source === null ? (
-        <Notice variant="destructive">{shown} can no longer be read.</Notice>
+      {"error" in outline ? (
+        <Nothing title="No source to show">{outline.error}</Nothing>
       ) : (
-        <PanelCard>
-          <CodePanel source={data.source} />
-        </PanelCard>
+        <Source file={outline.file} shown={shown} />
       )}
     </Region>
+  );
+}
+
+/** A file's text, or that it can no longer be read. */
+function Source({ file, shown }: { file: string; shown: string }) {
+  const { data } = useSuspenseQuery(sourceQuery(file));
+  return data.source === null ? (
+    <Notice variant="destructive">{shown} can no longer be read.</Notice>
+  ) : (
+    <PanelCard>
+      <CodePanel source={data.source} />
+    </PanelCard>
   );
 }
