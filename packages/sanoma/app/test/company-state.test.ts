@@ -71,6 +71,15 @@ describe("a company's state", () => {
     expect(companyStateOf(fresh).draftingCopy).toBe(false);
   });
 
+  it("is on Sanoma Cloud only live on the Cloud's host it declares", () => {
+    expect(companyStateOf({ ...fresh, bound: [HOST] }).onCloud).toBe(true);
+    expect(companyStateOf({ ...fresh, place: "live" }).onCloud).toBe(true);
+    // The template's Cloud host, not gone live; a company live on its own accounts; none declared.
+    expect(companyStateOf(fresh).onCloud).toBe(false);
+    expect(companyStateOf({ ...fresh, declared: "own", place: "live" }).onCloud).toBe(false);
+    expect(companyStateOf({ ...fresh, declared: null, place: "live" }).onCloud).toBe(false);
+  });
+
   it("ticks going live's lines from the bindings, and the last once the bound host answers", () => {
     expect(lines({})).toEqual({ repository: false, database: false, host: false, signIn: false });
     expect(lines({ repository: true, bound: [STORE] })).toEqual({

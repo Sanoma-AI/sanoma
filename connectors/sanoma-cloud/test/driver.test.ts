@@ -411,6 +411,21 @@ describe("cloud's database through the workflows", () => {
 });
 
 describe("cloud's account operations through the workflows", () => {
+  it("reads the token's company with cloud-list: its id, address, status and trial, and refuses a token for none", async () => {
+    workflows = { cloudList: () => ({ output: [acme()] }) };
+    expect(await op("company.read", {})).toEqual({
+      id: "c1",
+      slug: "acme",
+      status: "running",
+      trialEndsAt: "2026-11-15T00:00:00.000Z",
+    });
+    expect(starts()).toEqual([["cloudList.start", {}]]);
+    workflows = { cloudList: () => ({ output: [] }) };
+    await expect(op("company.read", {})).rejects.toMatchObject({ vendorCode: "no_company" });
+    workflows = { cloudList: () => ({ output: [acme(), { ...acme(), id: "c2" }] }) };
+    await expect(op("company.read", {})).rejects.toMatchObject({ vendorCode: "not_one" });
+  });
+
   it("says whether an address is free with cloud-available, and refuses an answer that is not one", async () => {
     workflows = { cloudAvailable: ({ slug }) => ({ output: { available: slug === "acme", yours: false } }) };
     expect(await op("company.available", { slug: "acme" })).toEqual({ available: true, yours: false });

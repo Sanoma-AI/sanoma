@@ -117,9 +117,11 @@ export interface HostSpec {
    * company the vendor's token is for: `repository` (`{ slug } → { owner, name }`, the company's
    * repository made, empty, for the computer to push to, the slug the address of a company the
    * token makes; a write), `available` (`{ slug } → { available, yours }`, whether the address is
-   * free; a read) and `invite` (`{ email } → { url }`, a one-use sign-in link on the host).
+   * free; a read), `invite` (`{ email } → { url }`, a one-use sign-in link on the host) and `read`
+   * (`{} → { id, slug, status, trialEndsAt }`, the company itself, which the app's trial badge
+   * reads; a read).
    */
-  account?: { repository: string; available: string; invite: string };
+  account?: { repository: string; available: string; invite: string; read: string };
   /**
    * True for a host whose declaration says only the decisions (see above): apply derives its
    * image, source, ref, secrets and domains, and a data file may not declare `secrets` or `domains`.

@@ -174,6 +174,7 @@ export const host = defineResource({
       repository: "cloud.company.repository",
       available: "cloud.company.available",
       invite: "cloud.company.invite",
+      read: "cloud.company.read",
     },
     revision: "revision",
     outputs: (state) => ({
@@ -235,12 +236,25 @@ const storeUrlSpec = {
 } satisfies Record<string, OpSpec>;
 
 /**
- * The account's operations, which going live from a computer calls (the host's `account`): whether
- * an address is free, the company's repository made by the Sanoma.work GitHub App, and a one-use
- * link that signs the account's own email in on the company's host. The company is the token's
- * (one token, one company); only a token that has none yet names its address, for the repository.
+ * The account's operations, which the app calls (the host's `account`): whether an address is
+ * free, the company's repository made by the Sanoma.work GitHub App and a one-use link that signs
+ * the account's own email in on the company's host, for going live from a computer, and the
+ * company itself, for its trial badge. The company is the token's (one token, one company); only a
+ * token that has none yet names its address, for the repository.
  */
 const companySpecs = {
+  read: {
+    effect: "read",
+    idempotent: true,
+    description: "The token's company: its id, its address, its status and when its free trial ends (cloud-list)",
+    input: z.object({}),
+    output: z.object({
+      id: z.string().describe("The company's id at the Cloud: it never changes"),
+      slug: z.string().describe("Its address now, `<slug>.sanoma.work`"),
+      status: z.string().describe("Where the Cloud has it: `creating`, `running`, `failed`, `closed` or `moved`"),
+      trialEndsAt: z.string().describe("When its free trial ends, ISO 8601"),
+    }),
+  },
   available: {
     effect: "read",
     idempotent: true,
@@ -295,7 +309,7 @@ type CloudSpecs = {
 /**
  * The connector's operations: each type's (`read`, `import`, `plan`, `create`, `update`,
  * `delete`), `database.storeUrl` in the database's group (Supabase's pattern), and the account's
- * (`company.available`, `.repository`, `.invite`).
+ * (`company.read`, `.available`, `.repository`, `.invite`).
  */
 export const cloudOps = {
   ...types,

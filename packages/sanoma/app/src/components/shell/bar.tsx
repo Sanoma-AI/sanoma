@@ -26,6 +26,7 @@ import { companyStateQuery, configQuery, pendingOf, remoteQuery, waitingRunsQuer
 import { Tip, toneBadge } from "../kit.tsx";
 import { SiteIcon } from "../site-icon.tsx";
 import { NavUser } from "./nav-user.tsx";
+import { TrialBadge } from "./trial-badge.tsx";
 
 // The bar: Chat, then Sanoma's own pages, the company's sites and how it is set up, in groups,
 // then who you are. Each item is a page; there is nothing beside the bar but the chat column.
@@ -131,7 +132,8 @@ const ACTIVE = { "data-active": true } as const;
 /**
  * The bar, on the `sidebar` surface: Chat, which folds and unfolds the chat column (`chat`; left
  * out in the phone's sheet, which has no column), the groups (`useGroups`), and at its foot the
- * company's state (`StateBadge`) above the user menu.
+ * company's state (`StateBadge`), a Sanoma Cloud company's free trial (`TrialBadge`) and the user
+ * menu.
  */
 export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () => void }; className?: string }) {
   const groups = useGroups();
@@ -190,6 +192,7 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
       </nav>
       <div className="mt-auto flex flex-col items-center gap-2">
         <StateBadge />
+        <TrialBadge />
         <NavUser />
       </div>
     </div>

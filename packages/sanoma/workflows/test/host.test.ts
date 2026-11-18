@@ -83,7 +83,14 @@ describe("a host type", () => {
     ],
     [
       "an account, when it does not bind its own bootstrap",
-      { account: { repository: "acme.company.repository", available: "acme.company.available", invite: "acme.i" } },
+      {
+        account: {
+          repository: "acme.company.repository",
+          available: "acme.company.available",
+          invite: "acme.i",
+          read: "acme.company.read",
+        },
+      },
       /account is for a host that binds its own bootstrap/,
     ],
     ["a revision that is write-only", { writeOnly: ["env", "commit"] }, /revision must not be write-only/],

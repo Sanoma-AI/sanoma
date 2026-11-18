@@ -603,6 +603,8 @@ export interface CompanyState {
   draftingCopy: boolean;
   /** The host `infra.ts` declares: Sanoma Cloud's (its type binds its own bootstrap), one of the company's own accounts, or none. */
   declared: "cloud" | "own" | null;
+  /** Live, on the Sanoma Cloud host it declares: the bar's trial badge asks for its trial (`getCloudTrial`). */
+  onCloud: boolean;
   /** How far going live is, a line each thing it makes: done or not. */
   lines: { line: (typeof GO_LIVE_LINES)[number]; done: boolean }[];
   /** Going live's latest run: its apply once it started one, else the run itself; none before going live. */
@@ -613,6 +615,18 @@ export interface CompanyState {
    */
   host: { url: string; healthy?: boolean } | null;
 }
+
+/**
+ * A Sanoma Cloud company's free trial (`getCloudTrial`): when it ends, ISO 8601, and the days left
+ * in it, its last day 1 and 0 once it ended. It only informs: the app blocks nothing by it.
+ */
+export interface CloudTrial {
+  endsAt: string;
+  daysLeft: number;
+}
+
+/** How long a Cloud company's trial is kept, by the server (the Cloud's answer) and by the bar: an hour. */
+export const CLOUD_TRIAL_MS = 60 * 60_000;
 
 /** Signed in to Sanoma or not (`getSanomaSignIn`): never the token. */
 export interface SanomaSignIn {

@@ -17,7 +17,7 @@ import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { companyState } from "../src/server/company-state.ts";
-import { cloudAddress, goLiveProgress, goLiveSignIn } from "../src/server/go-live.ts";
+import { cloudAddress, cloudTrial, goLiveProgress, goLiveSignIn } from "../src/server/go-live.ts";
 import { liveSnapshot } from "../src/snapshot-build.ts";
 import { pushCloud } from "../src/steps/go-live-cloud.ts";
 import { appSteps } from "../src/steps/index.ts";
@@ -109,6 +109,9 @@ afterAll(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** How many times the app asked the Cloud for the company's trial. */
+const trialReads = () => fake.calls.filter((call) => call.op === "cloud.company.read").length;
+
 /** Goes live on Sanoma Cloud as Hosting does, and waits for the run to end: its output, or the API's refusal. */
 const goLive = async (input: { address?: string }) => pageApi(await now(), alice).goLiveCloud(input);
 
@@ -116,6 +119,9 @@ describe("going live on Sanoma Cloud", () => {
   it("is ready on the template's file, which going live on the company's own accounts writes again", async () => {
     expect(await goLiveProgress(await now())).toMatchObject({ infra: null, replaces: true, run: null });
     expect((await companyState(await now())).state).toBe("local");
+    // Not live on the Cloud: no trial, and the Cloud never asked.
+    expect(await cloudTrial(await now())).toBeNull();
+    expect(trialReads()).toBe(0);
   });
 
   it("refuses to go live before a Cloud token is stored, and makes nothing", async () => {
@@ -206,6 +212,36 @@ describe("going live on Sanoma Cloud", () => {
     expect(records.some((r) => r.type === "op.called" && r.op === "cloud.company.repository")).toBe(true);
     expect(JSON.stringify(records)).not.toContain(TOKEN);
     expect(JSON.stringify(runs)).not.toContain(TOKEN);
+  });
+
+  it("reads the free trial from the Cloud at most once an hour, counting its days from the answer kept", async () => {
+    const MIN = 60_000;
+    const DAY = 24 * 60 * MIN;
+    const start = Date.now();
+    vi.useFakeTimers({ now: start, toFake: ["Date"] });
+    try {
+      const company = fake.state.company!;
+      company.trialEndsAt = new Date(start + 2 * DAY + 30 * MIN).toISOString();
+      // The Cloud cannot be reached: no trial, never an error, and not asked again for five minutes.
+      fake.failNext("cloud.company.read", new DriverError("Sanoma Cloud: fetch failed", { retryable: true }));
+      expect(await cloudTrial(await now())).toBeNull();
+      expect(await cloudTrial(await now())).toBeNull();
+      expect(trialReads()).toBe(1);
+      vi.setSystemTime(start + 5 * MIN);
+      expect(await cloudTrial(await now())).toEqual({ endsAt: company.trialEndsAt, daysLeft: 3 });
+      // Within the hour, the answer kept: the days count down without asking.
+      vi.setSystemTime(start + 40 * MIN);
+      expect(await cloudTrial(await now())).toEqual({ endsAt: company.trialEndsAt, daysLeft: 2 });
+      expect(trialReads()).toBe(2);
+      // Its last day, then ended: each asked again, an hour on.
+      vi.setSystemTime(start + DAY + 40 * MIN);
+      expect((await cloudTrial(await now()))?.daysLeft).toBe(1);
+      vi.setSystemTime(start + 2 * DAY + 31 * MIN);
+      expect((await cloudTrial(await now()))?.daysLeft).toBe(0);
+      expect(trialReads()).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("signs a person in on the host with a link the Cloud's account mints", async () => {
