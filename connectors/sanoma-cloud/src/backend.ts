@@ -44,7 +44,9 @@ export function cloudBackend(cloud: CloudApi): SandboxBackend {
       const { id, url, protocol } = await cloud.boxOpen(checked(BOX_INPUTS.open, { name, hosts }));
       if (protocol !== RUNNER_PROTOCOL) throw otherProtocol(protocol);
       return {
-        ...runnerBox({ url, id, sleep: () => cloud.boxStop({ name }) }),
+        // The open's link at every connect: another would take another `cloud-box-open`, so a
+        // reconnect after it expires (an hour) fails, as the README says.
+        ...runnerBox({ url: async () => url, id, sleep: () => cloud.boxStop({ name }) }),
         expose: async (port) => ({ url: (await cloud.boxExpose({ name, port })).url }),
       };
     },

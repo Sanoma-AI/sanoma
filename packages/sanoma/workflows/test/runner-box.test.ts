@@ -44,7 +44,7 @@ afterAll(async () => {
 });
 
 const boxOf = (): Box => ({
-  ...runnerBox({ url, id: "runner" }),
+  ...runnerBox({ url: async () => url, id: "runner" }),
   expose: async (port) => ({ url: `http://127.0.0.1:${port}` }),
 });
 /** The runner's machine as a backend: one box, its home emptied by `discard`. */
@@ -159,10 +159,31 @@ describe("the sandbox runner", () => {
     expect(await runnerHealth(url)).toEqual({ protocol: RUNNER_PROTOCOL, pid: runner.pid });
   });
 
+  it("asks for its URL at each connect, so a link that expired is replaced at the next, and again after one it could not get", async () => {
+    const asked: string[] = [];
+    let refuse = true;
+    const box = runnerBox({
+      url: async () => {
+        asked.push(url);
+        if (refuse) throw new Error("no link");
+        return url;
+      },
+      id: "runner",
+    });
+    await expect(box.read("x")).rejects.toThrow("no link");
+    refuse = false;
+    expect(await box.read("missing")).toBeNull();
+    // The stop closes the connection; the next call connects again over a new URL.
+    await box.stop();
+    expect(await box.read("missing")).toBeNull();
+    await box.stop();
+    expect(asked).toHaveLength(3);
+  });
+
   it("fails what it cannot do as the runner's error", async () => {
     const box = boxOf();
     try {
-      await expect(box.write("/dev/null/x", new Uint8Array())).rejects.toThrow(/the runner at 127\.0\.0\.1:\d+: /);
+      await expect(box.write("/dev/null/x", new Uint8Array())).rejects.toThrow("the runner in runner: ");
     } finally {
       await box.stop();
     }
