@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { collection } from "../src/data.ts";
-import { describeConfig } from "../src/describe.ts";
+import { describeConfig, routerWarnings } from "../src/describe.ts";
 import {
   cloneUrl,
   deriveHosts,
@@ -10,7 +10,7 @@ import {
   type HostFacts,
   hostFacts,
 } from "../src/host-derive.ts";
-import { detaching, ROUTER_AND_ROUTED, sourceKeyId, UNNAMED } from "../src/host.ts";
+import { detaching, routingProblems, sourceKeyId, UNNAMED } from "../src/host.ts";
 import { loadDataFiles } from "../src/resources.ts";
 import { isSecret, memorySecrets } from "../src/secret.ts";
 import { defineConnector, defineResource, type HostSpec, type Resource, RUNTIME_IMAGE } from "../src/index.ts";
@@ -30,7 +30,7 @@ const hostSchema = z.object({
   domains: z.record(z.string(), z.string()).nullish(),
   hostname: z.string().nullish(),
   routerHostname: z.string().nullish(),
-  agents: z.object({ url: z.string(), company: z.string(), secret: z.string() }).nullish(),
+  agents: z.object({ url: z.string(), company: z.string() }).nullish(),
 });
 const spec: HostSpec = {
   capabilities: { lifetime: "stops-on-exit", publicUrl: true, buildsFromGit: false, staticEgress: false },
@@ -60,7 +60,7 @@ const service = defineResource({
   fields: {
     immutable: ["name"],
     vendorOwned: [],
-    writeOnly: ["secrets", "database", "agents.secret"],
+    writeOnly: ["secrets", "database"],
     references: {
       source: { type: "github.repository", by: ["http_clone_url"] },
       database: { type: ["acme.db", "acme.pool"] },
@@ -69,6 +69,31 @@ const service = defineResource({
   find: ({ name }) => name ?? UNNAMED,
   writable: true,
   host: spec,
+});
+// A host declared whole, whose type takes no router: one more host of the config's, on another hostname.
+const box = defineResource({
+  vendor: "acme",
+  type: "box",
+  title: "Box",
+  identity: "name",
+  schema: z.object({
+    name: z.string(),
+    source: z.string(),
+    ref: z.string(),
+    revision: z.string().nullish(),
+    port: z.number(),
+    secrets: z.record(z.string(), z.string()).nullish(),
+    hostname: z.string().nullish(),
+  }),
+  fields: { immutable: ["name"], vendorOwned: [], writeOnly: ["secrets"] },
+  find: ({ name }) => name,
+  writable: true,
+  host: {
+    capabilities: { lifetime: "long-lived", publicUrl: true, buildsFromGit: false, staticEgress: false },
+    inputs: { source: "source", ref: "ref", secrets: "secrets", port: "port", hostname: "hostname" },
+    revision: "revision",
+    outputs: (state) => ({ url: String(state.url ?? ""), healthy: true }),
+  },
 });
 const db = defineResource({
   vendor: "acme",
@@ -108,14 +133,14 @@ const deployKey = defineResource({
   },
   find: (declared) => `${declared.repository}:${declared.key}`,
 });
-const acme = defineConnector("acme", { service, db, pool }, { title: "Acme", package: "@acme/connector" });
+const acme = defineConnector("acme", { service, box, db, pool }, { title: "Acme", package: "@acme/connector" });
 const github = defineConnector(
   "github",
   { repository, repository_deploy_key: deployKey },
   { title: "GitHub", package: "@acme/github" },
 );
 const types = new Map<string, Resource>(
-  [service, db, pool, repository, deployKey].map((type) => [
+  [service, box, db, pool, repository, deployKey].map((type) => [
     `${type.vendor}.${type.type}`,
     type as unknown as Resource,
   ]),
@@ -302,6 +327,18 @@ const derived = (files: Record<string, string>, overrides: Partial<HostFacts> = 
   const host = resources.find((r) => r.id === "resources/sanoma/infra.ts#host")!;
   return { resources, problems, out, host, secrets: host.desired.secrets as Record<string, unknown> };
 };
+
+/** Why a host given the router's secret is left out while it has no value. */
+const unset = (whose: string) =>
+  expect.objectContaining({
+    export: "host",
+    message: expect.stringMatching(
+      new RegExp(`^host: SANOMA_ROUTER_SECRET has no value where apply runs, .*\\(${whose}\\)$`),
+    ),
+  });
+/** One more host of the config's, of a type that takes no router, served at `hostname`. */
+const SIDE = (hostname: string) =>
+  `export const side = acme.box({ name: "side", source: "x", ref: "main", port: 3000, hostname: "${hostname}" });\n`;
 
 describe("what a host that derives is given, or refused", () => {
   it("delivers explicitly selected environment names using logical secret references", () => {
@@ -530,44 +567,77 @@ describe("what a host that derives is given, or refused", () => {
     expect([...closed.out.leftOut]).toEqual(["resources/sanoma/infra.ts#host"]);
   });
 
-  it("is given the config's router's hostname, and its master secret only when one is stored", () => {
+  const HOST = "resources/sanoma/infra.ts#host";
+  const ROUTER = "mcp.acme.example";
+  const BEHIND = INFRA.replace(
+    "database: store }",
+    'database: store, agents: { url: "https://mcp.acme.example/mcp", company: "acme" } }',
+  );
+
+  it("is given the config's router's hostname and its master secret, always, and left out while that has no value", () => {
     const files = { "resources/sanoma/infra.ts": INFRA };
-    const router = { hostname: "mcp.acme.example", secret: true };
-    const serving = derived(files, { router });
+    const serving = derived(files, { router: ROUTER });
     expect(serving.problems).toEqual([]);
-    expect(serving.host.desired.routerHostname).toBe("mcp.acme.example");
+    expect(serving.host.desired.routerHostname).toBe(ROUTER);
     expect(serving.secrets.SANOMA_ROUTER_SECRET).toEqual({ $secret: "SANOMA_ROUTER_SECRET" });
-    // None stored: a marker for it would fail the deploy, and the router forwards nothing without one.
-    const unkeyed = derived(files, { router: { ...router, secret: false } });
-    expect(unkeyed.host.desired.routerHostname).toBe("mcp.acme.example");
-    expect(unkeyed.secrets).not.toHaveProperty("SANOMA_ROUTER_SECRET");
+    // No value where apply runs: never deployed without it, which would unbind it from a Worker that has it.
+    const unkeyed = derived(files, { router: ROUTER, routerSecretUnset: true });
+    expect(unkeyed.problems).toEqual([unset("the master secret of the router it serves")]);
+    expect([...unkeyed.out.leftOut]).toEqual([HOST]);
+    // Still named among what it is given, so the Hosting page lists it as not stored.
+    expect(unkeyed.secrets.SANOMA_ROUTER_SECRET).toEqual({ $secret: "SANOMA_ROUTER_SECRET" });
     // No router in the config: nothing of one, so a host that had it attached plans its detach.
     const plain = derived(files);
     expect(plain.host.desired).not.toHaveProperty("routerHostname");
     expect(plain.secrets).not.toHaveProperty("SANOMA_ROUTER_SECRET");
-    // The name a binding gives the host itself (`host: true`) stays that binding's.
-    const bound = derived(files, { router, hostEnvironment: { SANOMA_ROUTER_SECRET: "SANOMA_ROUTER_SECRET" } });
+    // The same name a binding gives the host itself (`host: true`) is that secret; another is refused.
+    const bound = derived(files, { router: ROUTER, hostEnvironment: { SANOMA_ROUTER_SECRET: "SANOMA_ROUTER_SECRET" } });
     expect(bound.problems).toEqual([]);
-    expect(bound.secrets.SANOMA_ROUTER_SECRET).toEqual({ $secret: "SANOMA_ROUTER_SECRET" });
+    const other = derived(files, { router: ROUTER, hostEnvironment: { SANOMA_ROUTER_SECRET: "MASTER" } });
+    expect(other.problems.map((p) => p.message)).toEqual([
+      "host: SANOMA_ROUTER_SECRET has a derived host binding and cannot be replaced by MASTER",
+    ]);
   });
 
-  it("tells whether the router's master secret is stored, for a config that serves one", async () => {
-    const { resources } = load({ "resources/sanoma/infra.ts": INFRA });
-    const told = (values: Record<string, string>, router?: string) =>
-      hostFacts({
+  it("is given its own secret at the router it is declared behind, always, and left out while that has no value", () => {
+    const files = { "resources/sanoma/infra.ts": BEHIND };
+    const behind = derived(files);
+    expect(behind.problems).toEqual([]);
+    expect(behind.host.desired.agents).toEqual({ url: "https://mcp.acme.example/mcp", company: "acme" });
+    expect(behind.host.desired).not.toHaveProperty("routerHostname");
+    expect(behind.secrets.SANOMA_ROUTER_SECRET).toEqual({ $secret: "SANOMA_ROUTER_SECRET" });
+    const unkeyed = derived(files, { routerSecretUnset: true });
+    expect(unkeyed.problems).toEqual([unset("this company's own secret at the router it is behind")]);
+    expect([...unkeyed.out.leftOut]).toEqual([HOST]);
+  });
+
+  it("tells whether the router's secret has a value, read only when a host is given it, never to a sandbox run", async () => {
+    const read: string[] = [];
+    const told = (file: string, values: Record<string, string>, router?: string, sandbox = false) => {
+      const { resources } = load({ "resources/sanoma/infra.ts": file });
+      const store = memorySecrets(values);
+      return hostFacts({
         rootFacts: async () => ({ domains: {} }),
         resources,
         types,
         drivers: new Map(),
-        secrets: memorySecrets(values),
+        secrets: { ...store, get: (name) => (read.push(name), store.get(name)) },
         builtInStore: true,
         ...(router !== undefined && { router }),
         mint: false,
+        sandbox,
       });
+    };
     const master = { SANOMA_ROUTER_SECRET: "a-master-secret-of-32-characters-or-more" };
-    expect((await told(master, "mcp.acme.example"))?.router).toEqual({ hostname: "mcp.acme.example", secret: true });
-    expect((await told({}, "mcp.acme.example"))?.router).toEqual({ hostname: "mcp.acme.example", secret: false });
-    expect(await told(master)).not.toHaveProperty("router");
+    expect(await told(INFRA, master, ROUTER)).toMatchObject({ router: ROUTER });
+    expect(await told(INFRA, master, ROUTER)).not.toHaveProperty("routerSecretUnset");
+    expect(await told(INFRA, {}, ROUTER)).toMatchObject({ router: ROUTER, routerSecretUnset: true });
+    expect(await told(BEHIND, {})).toMatchObject({ routerSecretUnset: true });
+    expect(await told(BEHIND, {}, undefined, true)).not.toHaveProperty("routerSecretUnset");
+    // Neither a router in the config nor one it is behind: the secret is not read.
+    read.length = 0;
+    expect(await told(INFRA, {})).not.toHaveProperty("routerSecretUnset");
+    expect(read).not.toContain("SANOMA_ROUTER_SECRET");
   });
 
   it("is refused with the router's hostname in its file: it is the config's", () => {
@@ -576,50 +646,90 @@ describe("what a host that derives is given, or refused", () => {
     );
   });
 
-  const BEHIND = INFRA.replace(
-    "database: store }",
-    'database: store, agents: { url: "https://mcp.acme.example/mcp", company: "acme", secret: secret("ACME_AT_ROUTER") } }',
-  ).replace("\n\n", '\nimport { secret } from "sanoma/resources";\n\n');
-
-  it("is a problem, and left out, when it serves the config's router and is declared behind one", () => {
-    const files = { "resources/sanoma/infra.ts": BEHIND };
-    const behind = derived(files);
-    expect(behind.problems).toEqual([]);
-    // The company's own secret at the router stays a name, in its own place.
-    expect(behind.host.desired.agents).toEqual({
-      url: "https://mcp.acme.example/mcp",
-      company: "acme",
-      secret: { $secret: "ACME_AT_ROUTER" },
-    });
-    const both = derived(files, { router: { hostname: "mcp.acme.example", secret: true } });
-    expect(both.problems).toEqual([expect.objectContaining({ export: "host", message: `host: ${ROUTER_AND_ROUTED}` })]);
-    expect([...both.out.leftOut]).toEqual(["resources/sanoma/infra.ts#host"]);
+  it("is a problem, and left out, when it serves the config's router and is declared behind one, or at its own hostname", () => {
+    const both = derived({ "resources/sanoma/infra.ts": BEHIND }, { router: ROUTER });
+    const [said] = routingProblems({ router: ROUTER, agents: {} });
+    expect(said).toContain("SANOMA_ROUTER_SECRET would be the router's master secret and this company's own at once");
+    expect(both.problems).toEqual([expect.objectContaining({ export: "host", message: `host: ${said}` })]);
+    expect([...both.out.leftOut]).toEqual([HOST]);
+    // Apply says of the router's hostname what `sanoma check` does: the host's own, or a site's.
+    const own = derived({ "resources/sanoma/infra.ts": INFRA }, { router: "internal.acme.example" });
+    expect(own.problems.map((p) => p.message)).toEqual([
+      "host: internal.acme.example is the config's `router.hostname` and the app's hostname: give the router a hostname of its own",
+    ]);
+    const sited = derived({ "resources/sanoma/infra.ts": INFRA }, { router: "WWW.acme.example" });
+    expect(sited.problems.map((p) => p.message)).toEqual([
+      "host: WWW.acme.example is the config's `router.hostname` and the domain of the site www: give the router a hostname of its own",
+    ]);
   });
 
-  it("is described with a problem for a router's hostname that is its own or a site's, and for a router of its own behind another", () => {
-    const companies = collection({ name: "companies", key: "slug", fields: { slug: "text", url: "text" } });
-    const described = (files: Record<string, string>, hostname: string) =>
-      describeConfig({
-        workflows: [],
-        connectors: [acme, github],
-        collections: [companies],
-        router: { hostname, companies: { collection: "companies" } },
-        root: tree(`host-derive-router-${++trees}`, files),
-      }).problems.map((p) => p.message);
+  it("is a problem twice over: two hosts would serve the config's router, sites or none", () => {
+    const second = 'export const staging = acme.service({ name: "staging", database: store });\n';
+    const { resources, bindings } = load({ "resources/sanoma/infra.ts": INFRA + second });
+    const out = { leftOut: new Set<string>() };
+    const problems = deriveHosts(resources, types, bindings, facts({ domains: {}, router: ROUTER }), out);
+    expect(problems.map((p) => p.message)).toEqual(
+      ["host", "staging"].map(
+        (name) =>
+          `${name}: 2 hosts would serve the config's router at mcp.acme.example: a config with \`router\` takes one host that derives (declare the others from a company, a config, without it)`,
+      ),
+    );
+    expect([...out.leftOut]).toEqual([HOST, "resources/sanoma/infra.ts#staging"]);
+    // A host whose type takes no router is none of them.
+    const boxed = 'export const side = acme.box({ name: "side", source: "x", ref: "main", port: 3000 });\n';
+    const one = load({ "resources/sanoma/infra.ts": INFRA + boxed });
+    expect(deriveHosts(one.resources, types, one.bindings, facts({ domains: {}, router: ROUTER }))).toEqual([]);
+  });
+
+  const companies = collection({ name: "companies", key: "slug", fields: { slug: "text", url: "text" } });
+  const routedConfig = (files: Record<string, string>, hostname: string) => ({
+    workflows: [],
+    connectors: [acme, github],
+    collections: [companies],
+    router: { hostname, companies: { collection: "companies" } },
+    root: tree(`host-derive-router-${++trees}`, files),
+  });
+  const described = (files: Record<string, string>, hostname: string) =>
+    describeConfig(routedConfig(files, hostname)).problems.map((p) => p.message);
+
+  it("is described with a problem for a router's hostname that is its own, a site's or another host's, and for a router of its own behind another", () => {
     const site = {
       "sites/www/site.ts":
         'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true, domain: "www.acme.example" });\n',
       "sites/www/routes/index.tsx": 'import { createFileRoute } from "@tanstack/react-router";\n',
     };
     const files = { "resources/sanoma/infra.ts": INFRA, ...site };
-    expect(described(files, "mcp.acme.example")).toEqual([]);
+    expect(described(files, ROUTER)).toEqual([]);
     expect(described(files, "internal.acme.example")).toEqual([
-      "internal.acme.example is the app's hostname and the config's `router.hostname`: give the config's router a hostname of its own",
+      "internal.acme.example is the config's `router.hostname` and the app's hostname: give the router a hostname of its own",
     ]);
     expect(described(files, "www.acme.example")).toEqual([
-      "www.acme.example is the config's `router.hostname` and the domain of www: give the config's router a hostname of its own",
+      "www.acme.example is the config's `router.hostname` and the domain of the site www: give the router a hostname of its own",
     ]);
-    expect(described({ "resources/sanoma/infra.ts": BEHIND }, "mcp.acme.example")).toEqual([ROUTER_AND_ROUTED]);
+    expect(described({ "resources/sanoma/infra.ts": BEHIND }, ROUTER)).toEqual(
+      routingProblems({ router: ROUTER, agents: {} }),
+    );
+    // Another declared host serves the app there: two hosts would hold the one hostname.
+    expect(described({ "resources/sanoma/infra.ts": INFRA + SIDE("MCP.acme.example") }, ROUTER)).toEqual([
+      "mcp.acme.example is the config's `router.hostname`, which this host attaches, and is served by resources/sanoma/infra.ts#side too",
+    ]);
+    expect(described({ "resources/sanoma/infra.ts": INFRA + SIDE("side.acme.example") }, ROUTER)).toEqual([]);
+  });
+
+  it("is warned of, never a problem, when its type sets up no router in a config that serves one", () => {
+    const config = routedConfig({ "resources/sanoma/infra.ts": INFRA + SIDE("side.acme.example") }, ROUTER);
+    const { resources, problems } = describeConfig(config);
+    expect(problems).toEqual([]);
+    expect(routerWarnings(resources, types, ROUTER)).toEqual([
+      expect.objectContaining({
+        file: "resources/sanoma/infra.ts",
+        export: "side",
+        message: expect.stringMatching(
+          /^the config serves the agents' router at mcp\.acme\.example, which this host's type, acme\.box, does not set up: route .* set SANOMA_ROUTER_SECRET/,
+        ),
+      }),
+    ]);
+    expect(routerWarnings(resources, types, undefined)).toEqual([]);
   });
 
   it("would detach the domains its Worker has while no site declares one: apply says so instead", () => {

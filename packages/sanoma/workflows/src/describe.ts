@@ -46,7 +46,7 @@ import {
   STORAGE_PROBLEMS,
 } from "./shared.ts";
 import { readSites, type SiteEntry, siteDomains } from "./sites.ts";
-import { ROUTER_AND_ROUTED, sourceKeyIds } from "./host.ts";
+import { routingProblems, sourceKeyIds } from "./host.ts";
 
 // `sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
@@ -364,12 +364,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
         resources,
         sites,
         resolved.root === undefined ? {} : siteDomains(resolved.root),
-      ),
-      ...routerProblems(
-        dataFiles.resources,
-        resources,
         resolved.router?.hostname,
-        resolved.root === undefined ? {} : siteDomains(resolved.root),
       ),
       ...loginProblems(resolved, dataFiles.resources),
       ...connectionStorageProblems(resolved),
@@ -457,18 +452,25 @@ function appClashes(
  * public sites' own, `declaredDomains`) names that is not a public site, each domain it gives more
  * than one site, and a domain that is the host's `hostname` too, or another host's hostname or
  * domain, at the host's declaration: the app serves only a public site at a domain, one site at
- * each, and itself at another, and one host holds each.
+ * each, and itself at another, and one host holds each. For a config that serves the agents'
+ * router at `router` (`router.hostname`), at each host that attaches it (its type's
+ * `host.inputs.router`): what `routingProblems` says of the two (the router's hostname being
+ * the host's own or a site's, the host declared behind a router too), and another host's
+ * hostname or domain being the router's.
  */
 function domainProblems(
   declared: readonly DeclaredResource[],
   types: ReadonlyMap<string, Resource>,
   sites: readonly SiteEntry[],
   declaredDomains: Readonly<Record<string, string>>,
+  router?: string,
 ): ResourceProblem[] {
   const isPublic = new Set(sites.filter((site) => site.public).map((site) => site.name));
   const problems: ResourceProblem[] = [];
   // Each hostname a host serves the app at, and each host's domains, lowercased: one host attaches each.
   const hostnames: [string, DeclaredResource][] = [];
+  /** The hosts that serve the config's router: they attach its hostname. */
+  const routing: DeclaredResource[] = [];
   const held = new Map<string, Set<DeclaredResource>>();
   const hold = (name: string, resource: DeclaredResource) =>
     held.set(name.toLowerCase(), (held.get(name.toLowerCase()) ?? new Set()).add(resource));
@@ -493,6 +495,11 @@ function domainProblems(
     }
     const site = typeof hostname === "string" ? siteAtHostname(hostname, domains) : undefined;
     if (site) messages.push(`${hostname as string} is the app's hostname and the domain of ${site}`);
+    if (router !== undefined && inputs?.router !== undefined) {
+      routing.push(resource);
+      const agents = inputs.agents === undefined ? undefined : valueAt(resource.desired, inputs.agents);
+      messages.push(...routingProblems({ router, hostname, domains, agents }));
+    }
     problems.push(...messages.map((message) => ({ ...resource.at, message })));
     for (const [, domain] of named) hold(domain as string, resource);
     if (typeof hostname === "string") {
@@ -506,36 +513,33 @@ function domainProblems(
     const message = `${hostname} is the app's hostname here and is served by ${others.map((o) => o.id).join(", ")} too`;
     problems.push({ ...resource.at, message });
   }
+  for (const resource of routing) {
+    const others = [...(held.get(router!.toLowerCase()) ?? [])].filter((other) => other !== resource);
+    if (others.length === 0) continue;
+    const message = `${router} is the config's \`router.hostname\`, which this host attaches, and is served by ${others.map((o) => o.id).join(", ")} too`;
+    problems.push({ ...resource.at, message });
+  }
   return problems;
 }
 
 /**
- * For a config that serves the agents' router at `router` (`router.hostname`), at each declared
- * host that attaches it (its type's `host.inputs.router`): the router's hostname being the app's
- * (`hostname`) or a public site's domain, where the launcher would serve no router
- * (`routerOptionsFrom`), and the host declared behind a router too (`ROUTER_AND_ROUTED`).
+ * For a config that serves the agents' router at `router`, each declared host whose type takes
+ * no router (no `host.inputs.router`: `docker.container`, a host that binds its own bootstrap):
+ * it neither attaches the router's hostname nor is given its master secret, so whoever runs it
+ * routes the hostname to it and sets `SANOMA_ROUTER_SECRET` there. A warning, never a problem:
+ * `sanoma check` says it beside the people's and the sites'.
  */
-function routerProblems(
-  declared: readonly DeclaredResource[],
-  types: ReadonlyMap<string, Resource>,
+export function routerWarnings(
+  declared: readonly Pick<DeclaredResource, "vendor" | "type" | "at">[],
+  types: ReadonlyMap<string, Pick<Resource, "host">>,
   router: string | undefined,
-  declaredDomains: Readonly<Record<string, string>>,
 ): ResourceProblem[] {
   if (router === undefined) return [];
   return declared.flatMap((resource) => {
-    const inputs = types.get(`${resource.vendor}.${resource.type}`)?.host?.inputs;
-    if (inputs?.router === undefined) return [];
-    const hostname = inputs.hostname === undefined ? undefined : valueAt(resource.desired, inputs.hostname);
-    const site = siteAtHostname(router, declaredDomains);
-    const fix = "give the config's router a hostname of its own";
-    const messages = [
-      ...(typeof hostname === "string" && hostname.toLowerCase() === router
-        ? [`${router} is the app's hostname and the config's \`router.hostname\`: ${fix}`]
-        : []),
-      ...(site ? [`${router} is the config's \`router.hostname\` and the domain of ${site}: ${fix}`] : []),
-      ...(inputs.agents !== undefined && valueAt(resource.desired, inputs.agents) != null ? [ROUTER_AND_ROUTED] : []),
-    ];
-    return messages.map((message) => ({ ...resource.at, message }));
+    const host = types.get(`${resource.vendor}.${resource.type}`)?.host;
+    if (!host || host.inputs.router !== undefined) return [];
+    const message = `the config serves the agents' router at ${router}, which this host's type, ${resource.vendor}.${resource.type}, does not set up: route ${router} to it and set SANOMA_ROUTER_SECRET, the router's master secret, in its environment yourself`;
+    return [{ ...resource.at, message }];
   });
 }
 

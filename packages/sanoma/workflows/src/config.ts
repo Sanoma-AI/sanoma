@@ -101,7 +101,7 @@ import {
   RESHAPE_WORKFLOW,
   OPERATIONS_VENDOR,
   errorMessage,
-  siteAtHostname,
+  routerHostnameTaken,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
@@ -870,15 +870,15 @@ export function routerOptionsFrom(
   env: { SANOMA_HOSTNAME?: string; SANOMA_ROUTER_SECRET?: string },
   domains: Readonly<Record<string, string>> = {},
 ): { secret?: string } {
-  if (env.SANOMA_HOSTNAME?.trim().toLowerCase() === hostname) {
+  const taken = routerHostnameTaken(hostname, env.SANOMA_HOSTNAME, domains);
+  if (taken?.app) {
     throw new Error(
       `The config's \`router.hostname\`, ${hostname}, is SANOMA_HOSTNAME, the app's own hostname: give the router a hostname of its own, such as mcp.${hostname}`,
     );
   }
-  const site = siteAtHostname(hostname, domains);
-  if (site !== undefined) {
+  if (taken) {
     throw new Error(
-      `The config's \`router.hostname\`, ${hostname}, is the domain of the public site ${site} (SANOMA_DOMAINS): give the router a hostname of its own`,
+      `The config's \`router.hostname\`, ${hostname}, is the domain of the public site ${taken.site} (SANOMA_DOMAINS): give the router a hostname of its own`,
     );
   }
   const secret = routerSecretFrom(env);

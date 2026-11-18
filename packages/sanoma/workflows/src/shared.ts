@@ -222,6 +222,21 @@ export const hostnameUrl = (hostname: string): string => `https://${hostname}`;
 export const siteAtHostname = (hostname: string, domains: Readonly<Record<string, unknown>>): string | undefined =>
   Object.entries(domains).find(([, domain]) => typeof domain === "string" && same(domain, hostname))?.[0];
 
+/**
+ * What else is served at the hostname of the config's router, compared in lower case: `{ app }`
+ * when it is the app's own `hostname`, `{ site }` when it is that public site's domain, undefined
+ * when it is the router's alone. Where it is another's, the app serves no router there.
+ */
+export function routerHostnameTaken(
+  router: string,
+  hostname: string | null | undefined,
+  domains: Readonly<Record<string, unknown>> = {},
+): { app: true; site?: never } | { site: string; app?: never } | undefined {
+  if (same(router, hostname?.trim() || undefined)) return { app: true };
+  const site = siteAtHostname(router, domains);
+  return site === undefined ? undefined : { site };
+}
+
 /** The domains `domainsText` wrote, by site name; throws for a pair that is not `<site>=<hostname>`, or a site named twice. */
 export function domainsOf(text: string): Record<string, string> {
   const domains: Record<string, string> = {};
