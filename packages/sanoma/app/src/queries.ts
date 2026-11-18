@@ -1,5 +1,5 @@
 import type { AppApi, ApprovalState, ChangeView, RunStatus, RunSummary } from "sanoma/workflows";
-import type { CollectionEntry, ConfigDescription, OpEntry, SiteCall, WorkflowEntry } from "sanoma/workflows/describe";
+import type { CollectionEntry, ConfigDescription, SiteCall, WorkflowEntry } from "sanoma/workflows/describe";
 import {
   apiNameOf,
   type AvailableApps,
@@ -81,6 +81,7 @@ import {
 } from "./functions.ts";
 import type { UntypedApi } from "./api-client.ts";
 import type { ColumnChange } from "./components/grid/plan.ts";
+import { byTitle, vendorsCalling } from "./lib/operations.ts";
 import { api } from "./site-api.ts";
 
 /**
@@ -154,24 +155,6 @@ export const workflowFile = (workflow: Pick<WorkflowEntry, "outline">): string |
 /** The config's operations by id, for `select`: built once per config, not on every render. */
 export const opsById = (config: ConfigDescription) => new Map(config.ops.map((op) => [op.id, op]));
 
-/** One collation, so the server and the browser sort alike. */
-const byTitle = (a: string, b: string) => a.localeCompare(b, "en");
-
-/** A vendor a workflow calls, by id, and its title (its id when the config gives none). */
-export type CalledVendor = { id: string; title: string };
-
-/**
- * The outside vendors these operations are from, each once, sorted by title: those a connector
- * brings (`config.vendors`), never the built-in `sanoma` and `data`, which call nothing outside.
- */
-const vendorsCalling = (config: ConfigDescription, ops: Map<string, OpEntry>, ids: readonly string[]): CalledVendor[] =>
-  [...new Set(ids.flatMap((id) => ops.get(id)?.vendor ?? []))]
-    .flatMap((id) => {
-      const vendor = config.vendors[id];
-      return vendor ? [{ id, title: vendor.title }] : [];
-    })
-    .toSorted((a, b) => byTitle(a.title, b.title));
-
 /** The vendors the workflow's operations call, sorted by title: for `select`. None for a workflow the config does not have. */
 export const vendorsOf = (name: string) => (config: ConfigDescription) =>
   vendorsCalling(config, opsById(config), workflowNamed(name)(config)?.ops ?? []);
@@ -212,19 +195,6 @@ export const workflowNamed = (name: string) => (config: ConfigDescription) =>
 /** The config's collection of this name, if it has one: for `select`, or called with the config. */
 export const collectionNamed = (name: string) => (config: ConfigDescription) =>
   config.collections.find((c) => c.name === name);
-
-/**
- * What uses the collection: the workflows that name one of its operations in `uses`, sorted by
- * title, the built-in `call` (which may call every direct operation) left out, and the sites'
- * files that call it (`siteCallers`). For `select`.
- */
-export const usedBy = (collection: string) => (config: ConfigDescription) => {
-  const ops = new Set(collectionNamed(collection)(config)?.ops);
-  const workflows = config.workflows
-    .filter((wf) => !wf.builtin && wf.ops.some((op) => ops.has(op)))
-    .toSorted((a, b) => byTitle(a.title ?? a.name, b.title ?? b.name));
-  return { workflows, sites: siteCallers(config, "collection", collection) };
-};
 
 /** A site's file that calls something, and how: its page, when the file is one. */
 export interface SiteCaller {

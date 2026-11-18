@@ -289,6 +289,27 @@ describe("diffGrids", () => {
     expect(onlyChanged(diff, 1)).toMatchObject({ workflows: [{ id: "payout", ops: [] }], ops: [] });
   });
 
+  it("diffs the calls inside a company operation under it, in a workflow and as a direct row", () => {
+    const quote = (inner: PreviewAnswer) => ({
+      ...row("operations.quote.run", [allow]),
+      ops: [row("data.a.get", [inner])],
+    });
+    const grid = (inner: PreviewAnswer): PermissionsGrid => ({
+      groups: [null],
+      workflows: [{ ...row("offer", [allow]), ops: [quote(inner)] }],
+      ops: [quote(inner)],
+    });
+    const diff = diffGrids(grid(hold("ops")), grid(allow));
+    expect(diff.workflows[0]).toMatchObject({
+      status: "changed",
+      ops: [{ id: "operations.quote.run", status: "changed", ops: [{ id: "data.a.get", status: "changed" }] }],
+    });
+    expect(diff.ops[0]).toMatchObject({ status: "changed", ops: [{ status: "changed" }] });
+    expect(diffSummary(diff)).toEqual(["2 loosened"]);
+    // Only what changed keeps the way down to it.
+    expect(onlyChanged(diff).ops).toMatchObject([{ id: "operations.quote.run", ops: [{ id: "data.a.get" }] }]);
+  });
+
   it("leaves blank a cell neither grid has: a removed row's, in a new column", () => {
     const diff = diffGrids(
       { groups: [null], workflows: [], ops: [row("gone", [deny])] },

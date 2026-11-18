@@ -1,16 +1,17 @@
 import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "sanoma/workflows";
 import type { OutlineNode } from "sanoma/workflows/describe";
-import { fitsOp, flatten, isEnded } from "sanoma/workflows/shared";
+import { fitsOp, flatten, isEnded, OPERATIONS_VENDOR } from "sanoma/workflows/shared";
+import { isCompanyOp } from "../lib/operations.ts";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
-import { type Ends, outlineGraph } from "./outline-graph.ts";
+import { type Ends, nameOf, outlineGraph } from "./outline-graph.ts";
 import type { CallStep, Graph, Step } from "./types.ts";
 
 type OpStep = Extract<Step, { kind: "op" }>;
 type AllStep = Extract<Step, { kind: "all" }>;
 
-/** A step's name as a node shows it: only when it is not what the node says anyway (the op's id). */
-const nameOf = (name: string | undefined, id: string) => (name === undefined || name === id ? {} : { name });
+/** A company operation's step holds the calls made inside it (`calls`), none yet. */
+const callsOf = (op: string) => (isCompanyOp(op) ? { calls: [] } : {});
 
 /**
  * A run's graph, built from its ledger (`records`, in `seq` order) and its approvals as the run
@@ -19,7 +20,10 @@ const nameOf = (name: string | undefined, id: string) => (name === undefined || 
  * lanes, one per member (`group.index`); while the run is in the group, the members it has
  * recorded nothing for yet are pending lanes. `now` is when the ledger was read, which a sleep's
  * end is compared with. Given the workflow's `outline`, each call's node has the `span` of the
- * outline node its record names (see `place`).
+ * outline node its record names (see `place`). A company operation's call is a box holding the
+ * calls its body made, the records `within` it, in their order and with no span (theirs is in the
+ * operation's file); the box takes its state from the operation's own record, and until there is
+ * one, it is active while the run goes and off once the run has ended.
  */
 export function runGraph(
   records: readonly LedgerRecord[],
@@ -36,7 +40,8 @@ export function runGraph(
   let start: Ends["start"] = { tone: "ok" };
   let end: Ends["end"] | undefined;
 
-  const byPath = new Map(flatten(outline).map((node) => [node.path, node]));
+  const nodes = flatten(outline);
+  const byPath = new Map(nodes.map((node) => [node.path, node]));
 
   /**
    * Adds the step after the others, or to its member's lane in its `ctx.all`, with its place in
@@ -62,6 +67,32 @@ export function runGraph(
     (fan.step.branches[group.index] ??= []).push(step);
   };
 
+  /**
+   * Adds an operation call's step as `place` does, or, made within a company operation's call
+   * (`within`, that call's `seq`), inside that call's step, its box. The box is made here on its
+   * first record inside when the call has no record of its own yet: placed at the operation's
+   * node, the outline's company operation node that the record's `node` is under (`<operation's
+   * node>.0.<path>`), as a member of its `ctx.all`; nowhere, when the outline has another call there.
+   */
+  const placeCall = (
+    step: OpStep,
+    { within, node, group }: { within?: number; node?: string; group?: LedgerGroup },
+  ) => {
+    if (within === undefined) return place(step, node, group);
+    let box = ops.get(within);
+    if (!box) {
+      const at = nodes.find(
+        (n): n is Extract<OutlineNode, { kind: "op" }> =>
+          n.kind === "op" && isCompanyOp(n.id) && !!node?.startsWith(`${n.path}.0.`),
+      );
+      const id = at?.id ?? OPERATIONS_VENDOR;
+      box = { kind: "op", id, ...nameOf(at?.name, id), key: `op:${within}`, state: { tone: ended ? "off" : "active" } };
+      ops.set(within, box);
+      place(box, at?.path, group);
+    }
+    (box.calls ??= []).push(step);
+  };
+
   for (const record of records) {
     switch (record.type) {
       case "run.started":
@@ -81,9 +112,10 @@ export function runGraph(
             durationMs: record.durationMs,
             ...(record.error?.code && { errorCode: record.error.code }),
           },
+          ...callsOf(record.op),
         };
         ops.set(record.seq, step);
-        place(step, record.node, record.group);
+        placeCall(step, record);
         break;
       }
       case "approval.requested": {
@@ -102,9 +134,10 @@ export function runGraph(
               ...nameOf(record.name, record.op),
               key: `op:${record.opSeq}`,
               state: { tone: heldTone(status, ended), recordId: record.id, ...(approval && { approval }) },
+              ...callsOf(record.op),
             };
             ops.set(record.opSeq, step);
-            place(step, record.node, record.group);
+            placeCall(step, record);
           }
         } else {
           const tone = ended && status === "pending" ? "off" : APPROVAL_TONE[status];
@@ -168,7 +201,7 @@ export function runGraph(
   end ??= ended
     ? { label: run.status, state: { tone: RUN_TONE[run.status] } }
     : { label: "pending", pending: true, state: { tone: woke ? "active" : "off" } };
-  return outlineGraph(steps, { start, end });
+  return outlineGraph(steps, { ends: { start, end } });
 }
 
 /** True when the outline node is the step's call: an op of its id (`*` fits any), an approval with its title or a computed one, a sleep. */

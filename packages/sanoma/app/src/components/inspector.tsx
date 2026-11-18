@@ -1,5 +1,6 @@
 import type { ApprovalState, LedgerRecord, RunSummary } from "sanoma/workflows";
 import type { Span, WorkflowEntry } from "sanoma/workflows/describe";
+import { OPERATIONS_VENDOR } from "sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
@@ -13,6 +14,7 @@ import { starterName } from "../api.ts";
 import type { GraphNode, GraphNodeKind } from "../graph/types.ts";
 import { spanLines } from "../lib/lines.ts";
 import { recordsFor } from "../lib/records.ts";
+import { opHome, operationFile } from "../lib/operations.ts";
 import { configQuery, opsById, sourceQuery } from "../queries.ts";
 import { ApprovalDecision, ApprovalDetails } from "./approval.tsx";
 import {
@@ -35,14 +37,21 @@ import { WorkflowSections } from "./workflow.tsx";
 
 // The floating card over a workflow page's graph: New run, the selected node, or the overview.
 
-/** A node's kind, as the inspector's title names it. Only the kinds a page can select. */
+/** A node's kind, as the inspector's title names it. Only the kinds a page can select: a cluster is a company operation's box. */
 const KIND_TITLE: Partial<Record<GraphNodeKind, string>> = {
   start: "Start",
   end: "End",
   op: "Operation",
+  cluster: "Operation",
   approval: "Approval",
   sleep: "Sleep",
 };
+
+/** The operation a node calls, as an op node says it: its own, or a company operation's box's. */
+function calledBy(node: GraphNode): { id: string; name?: string | undefined; ops?: string[] | undefined } | undefined {
+  if (node.kind === "op") return { id: node.label, name: node.name, ops: node.ops };
+  return node.kind === "cluster" ? node.op : undefined;
+}
 
 /** The source the nodes' spans index into, for their line numbers: its file's name, or the text itself. */
 export type SourceText = { file: string } | { source: string | null | undefined };
@@ -119,7 +128,7 @@ export function Inspector({
         className={className}
         action={close}
       >
-        {(node.kind === "op" || node.span) && <NodeFacts node={node} text={text} onLines={onLines} />}
+        {(calledBy(node) || node.span) && <NodeFacts node={node} text={text} onLines={onLines} />}
         {run && approval?.status === "pending" && <InspectedApproval run={run.run} approval={approval} />}
         {run && records.length > 0 && <NodeRecords records={records} titles={run.titles} />}
       </Panel>
@@ -195,34 +204,42 @@ function Panel({
 
 /**
  * What the node is, for an operation or a node with a span: its operation (vendor, effect and
- * what it does), and where it is in the source.
+ * what it does; for a company operation, its file, linking to its page), and where it is in the
+ * source.
  */
 function NodeFacts({ node, text, onLines }: { node: GraphNode; text: SourceText; onLines: () => void }) {
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   const { data: vendors } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors });
-  const op = node.kind === "op" ? ops.get(node.label) : undefined;
+  const called = calledBy(node);
+  const op = called && ops.get(called.id);
   return (
     <Facts>
-      {node.kind === "op" && (
+      {called && (
         <>
           <Fact label="Calls">
             <span className="flex flex-wrap items-center gap-2">
-              <OpName id={node.label} op={op} />
+              <OpName id={called.id} op={op} />
             </span>
           </Fact>
-          {op && (
-            <Fact label="Vendor">
-              <span className="flex items-center gap-2">
-                <VendorLogo vendor={op.vendor} alt="" />
-                {vendors[op.vendor]?.title ?? op.vendor}
-              </span>
+          {op?.vendor === OPERATIONS_VENDOR ? (
+            <Fact label="File">
+              <Link {...opHome({ vendors }, op)!}>{operationFile(op)}</Link>
             </Fact>
+          ) : (
+            op && (
+              <Fact label="Vendor">
+                <span className="flex items-center gap-2">
+                  <VendorLogo vendor={op.vendor} alt="" />
+                  {vendors[op.vendor]?.title ?? op.vendor}
+                </span>
+              </Fact>
+            )
           )}
           {op?.description && <Fact label="Does">{op.description}</Fact>}
-          {node.ops && node.ops.length > 0 && (
+          {called.ops && called.ops.length > 0 && (
             <Fact label="Can reach">
               <span className="flex flex-col">
-                {node.ops.map((id) => (
+                {called.ops.map((id) => (
                   <code key={id}>{id}</code>
                 ))}
               </span>
@@ -299,12 +316,13 @@ function InspectedApproval({ run, approval }: { run: RunSummary; approval: Appro
 }
 
 /**
- * What the inspector says under a node's kind: its step's name (an operation's or a sleep's,
- * when the call gives one), and what the node says, unless that is only its kind or an
- * operation's id, which its facts show.
+ * What the inspector says under a node's kind: its step's name (an operation's, a company
+ * operation's box's or a sleep's, when the call gives one), and what the node says, unless that is
+ * only its kind or an operation's id, which its facts show.
  */
 function describe(node: GraphNode): string | undefined {
-  const name = node.kind === "op" || node.kind === "sleep" ? node.name : undefined;
-  const label = node.kind === "op" || node.label === node.kind ? undefined : node.label;
+  const called = calledBy(node);
+  const name = called ? called.name : node.kind === "sleep" ? node.name : undefined;
+  const label = called || node.label === node.kind ? undefined : node.label;
   return [name, label].filter(Boolean).join(" · ") || undefined;
 }

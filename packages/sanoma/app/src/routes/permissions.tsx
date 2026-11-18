@@ -2,7 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { CatchBoundary, createFileRoute, type ErrorComponentProps, Link } from "@tanstack/react-router";
 import type { PreviewAnswer } from "sanoma/workflows";
 import type { ConfigDescription, Span } from "sanoma/workflows/describe";
-import { ANONYMOUS, appOfPath, approverLabel, errorMessage } from "sanoma/workflows/shared";
+import { ANONYMOUS, appOfPath, approverLabel, errorMessage, OPERATIONS_VENDOR } from "sanoma/workflows/shared";
 import { Fragment, Suspense, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";
@@ -24,7 +24,7 @@ import {
   StatusDot,
 } from "../components/common.tsx";
 import { AppGroupTitle, AppTabs, appGroupsOf, pickGroup } from "../components/app-scope.tsx";
-import { AppSearch, configQuery, hostEnforcementQuery, permissionsQuery, ROOT_APP } from "../queries.ts";
+import { AppSearch, configQuery, hostEnforcementQuery, opsById, permissionsQuery, ROOT_APP } from "../queries.ts";
 
 export const Route = createFileRoute("/permissions")({
   validateSearch: AppSearch,
@@ -41,12 +41,16 @@ export const Route = createFileRoute("/permissions")({
 
 /**
  * The grid's rows in one folder (`app`, none for the root): its workflows, and the operations
- * called directly of its collections (the vendors' at the root, which no app holds).
+ * called directly of its collections and its own operations (the vendors' at the root, which no
+ * app holds).
  */
 function rowsIn(data: PermissionsResponse, config: ConfigDescription, app: string | undefined) {
   const workflowApp = new Map(config.workflows.map((wf) => [wf.name, wf.app]));
   const collectionApp = new Map(config.collections.map((c) => [c.name, c.app]));
+  const ops = opsById(config);
   const opApp = (id: string) => {
+    const op = ops.get(id);
+    if (op?.vendor === OPERATIONS_VENDOR) return op.app;
     const collection = /^data\.(.+)\.[^.]+$/.exec(id)?.[1];
     return collection === undefined ? undefined : collectionApp.get(collection);
   };
@@ -111,7 +115,7 @@ function PermissionsPage() {
           {data.policy.problems && <PolicyProblems />}
           <AppTabs groups={groups} tab={tab} link={(key) => <Link to="/permissions" search={{ app: key }} />} />
           <Card className="gap-0 py-0">
-            <PermissionsTable<PermissionsRow & { ops?: PermissionsRow[] }>
+            <PermissionsTable<PermissionsRow>
               groups={data.groups}
               workflows={rows.workflows}
               ops={rows.ops}
@@ -174,13 +178,17 @@ function PermissionsPage() {
   );
 }
 
+/** Rows, each with the rows under it: a company operation's calls. */
+const withCalls = (rows: readonly PermissionsRow[]): PermissionsRow[] =>
+  rows.flatMap((row) => [row, ...withCalls(row.ops ?? [])]);
+
 /**
  * The policy beside the title, in one muted line: Cedar, its version, and how many groups,
  * workflows and operations (each once, in a workflow or called directly) the grid has.
  */
 function PolicyLine({ data }: { data: PermissionsResponse }) {
   const groups = data.groups.filter((group) => group !== null && group !== ANONYMOUS).length;
-  const ops = new Set([...data.workflows.flatMap((w) => w.ops), ...data.ops].map((op) => op.id)).size;
+  const ops = new Set(withCalls([...data.workflows.flatMap((w) => w.ops), ...data.ops]).map((op) => op.id)).size;
   return (
     <p className="text-sm text-muted-foreground">
       Cedar, <code>policies/*.cedar</code>

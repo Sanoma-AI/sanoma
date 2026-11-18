@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
-import { outlineWorkflow } from "sanoma/workflows/describe";
+import { describeConfig, outlineWorkflow } from "sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
+import companyApps from "../../workflows/test/fixtures/company-apps/sanoma.config.ts";
+import { customers as crmCustomers } from "../../workflows/test/fixtures/company-apps/apps/crm/resources/data.ts";
+import { customers as shopCustomers } from "../../workflows/test/fixtures/company-apps/apps/shop/resources/data.ts";
+import score from "../../workflows/test/fixtures/company-apps/apps/crm/operations/score.ts";
+import quote from "../../workflows/test/fixtures/company-apps/operations/quote.ts";
+import offer from "../../workflows/test/fixtures/company-apps/workflows/offer.ts";
 import { DEFAULT_SLEEP_NAME } from "sanoma/workflows/shared";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
 import { type GraphNode, nodeAt, type Step } from "../src/graph/types.ts";
@@ -280,6 +286,46 @@ describe("outlineGraph", () => {
       "op:6 ctx.bluesky.post.create",
       "end -",
     ]);
+  });
+
+  it("draws a company operation as a box holding its outline's calls, which have no place in the workflow's file", () => {
+    const description = describeConfig({
+      ...companyApps,
+      workflows: [offer],
+      operations: [quote, score],
+      collections: [crmCustomers, shopCustomers],
+    });
+    const { outline, source } = description.workflows.find((wf) => wf.name === "offer")!;
+    if (!("nodes" in outline)) throw new Error(`offer was not outlined: ${JSON.stringify(outline)}`);
+    const { nodes, edges } = outlineGraph(outline.nodes, {
+      ops: new Map(description.ops.map((entry) => [entry.id, entry])),
+    });
+    expect(labels(nodes)).toEqual([
+      "start start",
+      "cluster:0 operations.quote.run",
+      "op:1 data.shop.customers.get in cluster:0",
+      "split:2 branch",
+      "cluster:3 operations.crm.score.run",
+      "op:4 data.crm.customers.get in cluster:3",
+      "skip:5 otherwise",
+      "end end",
+    ]);
+    expect(pairs(edges)).toContain("cluster:0->op:1");
+    expect(pairs(edges)).toContain("op:1->cluster:0");
+    expect(nodes[1]).toMatchObject({ kind: "cluster", op: { id: "operations.quote.run" } });
+    // The box is the call in the workflow's file; the calls in it are in the operation's.
+    expect(calls(nodes, source!)).toEqual([
+      "start -",
+      "cluster:0 ctx.operations.quote.run",
+      "op:1 -",
+      expect.any(String),
+      "cluster:3 ctx.operations.crm.score.run",
+      "op:4 -",
+      "skip:5 -",
+      "end -",
+    ]);
+    // Without the config's operations, each is the one node it was.
+    expect(labels(outlineGraph(outline.nodes).nodes)).toContain("op:0 operations.quote.run");
   });
 
   it("finds the node a click in the source is in: the innermost, the last of equals (a loop's latest pass), or none", () => {

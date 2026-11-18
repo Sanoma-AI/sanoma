@@ -34,7 +34,7 @@ const steps: ScenarioEntry["steps"] = [
 /** Each node as its id, and what the scenario says of it: `-` when nothing. */
 const marks = (nodes: readonly GraphNode[]) =>
   nodes.map((n) => {
-    const said = n.kind === "op" ? n.state?.scenario : undefined;
+    const said = n.kind === "op" || n.kind === "cluster" ? n.state?.scenario : undefined;
     return `${n.id} ${said ? Object.keys(said).join(" ") : "-"}`;
   });
 
@@ -98,6 +98,39 @@ describe("annotateGraph", () => {
       "op:2 expected",
       "end -",
     ]);
+  });
+
+  it("marks the calls inside a company operation's box, as any other call", () => {
+    const boxed = outlineGraph([{ kind: "op", id: "operations.quote.run", calls: [op("data.shop.customers.get")] }]);
+    const marked = annotateGraph(boxed, {
+      steps: [{ text: "a shop customer exists", kind: "given", op: "data.shop.customers.get" }],
+    });
+    expect(marks(marked.nodes)).toEqual(["start -", "cluster:0 -", "op:1 seeded", "end -"]);
+  });
+
+  it("marks a company operation's box by its operation's id, or its step's name, as a call", () => {
+    const boxed = outlineGraph([
+      { kind: "op", id: "operations.quote.run", calls: [op("data.shop.customers.get")] },
+      { kind: "op", id: "operations.quote.run", name: "Price it", calls: [op("data.shop.customers.get")] },
+    ]);
+    const held: ScenarioEntry["steps"] = [
+      { text: "operations.quote.run was held for admin", kind: "then", op: "operations.quote.run", decision: "held" },
+    ];
+    expect(marks(annotateGraph(boxed, { steps: held }).nodes)).toEqual([
+      "start -",
+      "cluster:0 held",
+      "op:1 -",
+      "cluster:2 held",
+      "op:3 -",
+      "end -",
+    ]);
+    const byName: ScenarioEntry["steps"] = [
+      { text: 'step "Price it" ran 1 time', kind: "then", name: "Price it", called: true },
+    ];
+    const marked = annotateGraph(boxed, { steps: byName });
+    expect(marks(marked.nodes)).toEqual(["start -", "cluster:0 -", "op:1 -", "cluster:2 expected", "op:3 -", "end -"]);
+    // The box keeps its operation: only its state is added.
+    expect(marked.nodes[3]).toEqual({ ...boxed.nodes[3], state: { scenario: { expected: true } } });
   });
 
   it("returns the graph as it is for a scenario that names no operation", () => {

@@ -108,4 +108,19 @@ describe("the will-ask line", () => {
     ]);
     expect(depends).toBe("Big refunds may hold shop.refunds.create, depending on the input.");
   });
+
+  it("names each action once, a call asked both directly and inside a company operation too", () => {
+    const send = { action: { id: "resend.email.send", effect: "send" as const }, inRun: true };
+    const asked = [
+      { action: { id: "workflow:quote" } },
+      { action: { id: "operations.quote.run" }, inRun: true },
+      send,
+      send,
+    ];
+    const allow = { answer: "allow" } as const;
+    const held = { answer: "hold", approver: { group: "admin" } } as const;
+    expect(willAsk(asked, [allow, allow, held, held])).toBe("Will ask admin before resend.email.send.");
+    const denied = { answer: "deny", rule: { id: "no-mail", file: "policies/a.cedar" } } as const;
+    expect(willAsk(asked, [allow, allow, denied, denied])).toBe("no-mail refuses resend.email.send.");
+  });
 });

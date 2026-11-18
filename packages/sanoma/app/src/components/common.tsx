@@ -42,9 +42,10 @@ import { cn, plural } from "#/lib/utils.ts";
 import { Logo } from "#/components/logo.tsx";
 import { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry, SiteEntry } from "sanoma/workflows/describe";
-import { approverLabel, CALL_WORKFLOW, type Tier } from "sanoma/workflows/shared";
+import { approverLabel, CALL_WORKFLOW, OPERATIONS_VENDOR, type Tier } from "sanoma/workflows/shared";
 import { toast } from "sonner";
 import { errorBodyOf } from "../api.ts";
+import { opHome } from "../lib/operations.ts";
 import { appBehindQuery, configQuery, runLink, RUNS_KEY, type SiteCaller } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
@@ -198,25 +199,56 @@ export function ItemHeading({ children }: { children: ReactNode }) {
 
 /**
  * An operation as a list item: its name, whether it is safe to retry, and what it does, then
- * `children`, when given, under that. Inside an `ItemGroup`.
+ * `children`, when given, under that. Inside an `ItemGroup`. With `link`, the item links to where
+ * the operation is shown (`opHome`), when it is shown anywhere. A company operation is not marked
+ * safe to retry: a failed call inside it is tried again on its own, not the whole operation.
  */
-export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefined; children?: ReactNode }) {
-  return (
-    <Item role="listitem" variant="outline" size="xs">
-      <ItemContent>
-        <ItemHeading>
-          <OpName id={id} op={op} />
-          {op?.idempotent && (
+export function OpItem({
+  id,
+  op,
+  link = false,
+  children,
+}: {
+  id: string;
+  op: OpEntry | undefined;
+  link?: boolean;
+  children?: ReactNode;
+}) {
+  const { data: home } = useSuspenseQuery({
+    ...configQuery(),
+    select: (config) => (link && op ? opHome(config, op) : undefined),
+  });
+  const retry = op?.idempotent && op.vendor !== OPERATIONS_VENDOR;
+  const content = (
+    <ItemContent>
+      <ItemHeading>
+        <OpName id={id} op={op} />
+        {/* In a link, the badge alone: a tip's trigger would be a focusable inside the link. */}
+        {retry &&
+          (home ? (
+            <Badge variant="outline">safe to retry</Badge>
+          ) : (
             <Tip tip="If a call fails, it is tried again; the vendor ignores repeats.">
               <Badge variant="outline" tabIndex={0}>
                 safe to retry
               </Badge>
             </Tip>
-          )}
-        </ItemHeading>
-        {op?.description && <ItemDescription>{op.description}</ItemDescription>}
-        {children}
-      </ItemContent>
+          ))}
+      </ItemHeading>
+      {op?.description && <ItemDescription>{op.description}</ItemDescription>}
+      {children}
+    </ItemContent>
+  );
+  return home ? (
+    <LinkItem variant="outline" size="xs">
+      <Link {...home}>
+        {content}
+        {CHEVRON}
+      </Link>
+    </LinkItem>
+  ) : (
+    <Item role="listitem" variant="outline" size="xs">
+      {content}
     </Item>
   );
 }
@@ -629,7 +661,7 @@ export function Section({ title, children }: { title: ReactNode; children: React
   );
 }
 
-/** "Used by" as a page's region: the workflows that may call what the page shows, then the sites' files that call it. */
+/** "Used by" as a page's region: the workflows and the company's operations that may call what the page shows, then the sites' files that call it. */
 export function UsedBy(props: UsedByProps) {
   return (
     <Region title="Used by">
@@ -640,17 +672,20 @@ export function UsedBy(props: UsedByProps) {
 
 interface UsedByProps {
   workflows?: { name: string; title?: string | undefined }[];
+  /** The company's own operations, by id and name (`operationName`). */
+  operations?: { id: string; name: string }[];
   sites?: SiteCaller[];
 }
 
 /**
- * What calls something: each workflow, linking to its page, then each site's file under the
- * site's title and how it calls (a page this build serves links to itself, but one with a path
- * parameter, which has no one URL; a component's file names the file).
+ * What calls something: each workflow, linking to its page, each of the company's own operations,
+ * linking to its page, then each site's file under the site's title and how it calls (a page this
+ * build serves links to itself, but one with a path parameter, which has no one URL; a
+ * component's file names the file).
  */
-export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
+export function UsedByList({ workflows = [], operations = [], sites = [] }: UsedByProps) {
   const { routesByPath } = useRouter();
-  if (!workflows.length && !sites.length) return <None />;
+  if (!workflows.length && !operations.length && !sites.length) return <None />;
   return (
     <ItemGroup>
       {workflows.map((wf) => (
@@ -658,6 +693,19 @@ export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
           <Link to="/workflows/$name" params={{ name: wf.name }}>
             <ItemContent>
               <ItemTitle>{wf.title ?? wf.name}</ItemTitle>
+            </ItemContent>
+            {CHEVRON}
+          </Link>
+        </LinkItem>
+      ))}
+      {operations.map((op) => (
+        <LinkItem key={op.id} variant="outline" size="xs">
+          <Link to="/connectors/operations/$name" params={{ name: op.name }}>
+            <ItemContent>
+              <ItemTitle>
+                {op.name}
+                <code className="font-normal text-muted-foreground">{op.id}</code>
+              </ItemTitle>
             </ItemContent>
             {CHEVRON}
           </Link>

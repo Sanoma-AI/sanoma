@@ -32,6 +32,7 @@ import {
   type GraphNodeKind,
   isPending,
   isSelectable,
+  type OpState,
 } from "../graph/types.ts";
 import { MAX_VENDORS, wildcardHeader, wildcardRows } from "../graph/wildcard.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
@@ -74,19 +75,32 @@ const PRO_OPTIONS = { hideAttribution: true };
 /** Below this zoom the badges cannot be read: fit one end of the graph instead of all of it. */
 const READABLE_ZOOM = 0.8;
 
+/** A node's border in its tone. */
+const TONE_BORDER = {
+  ok: "border-tone-ok-foreground/40",
+  bad: "border-tone-bad-foreground/70",
+  waiting: "border-tone-waiting-foreground/70",
+  active: "border-tone-active-foreground/70",
+  idle: "border-tone-idle-foreground/50",
+  off: "border-border",
+} satisfies Record<Tone, string>;
+
 const frame = cva("flex size-full flex-col justify-center gap-1 px-2.5 text-xs shadow-xs transition-colors", {
   variants: {
-    tone: {
-      ok: "border-tone-ok-foreground/40",
-      bad: "border-tone-bad-foreground/70",
-      waiting: "border-tone-waiting-foreground/70",
-      active: "border-tone-active-foreground/70",
-      idle: "border-tone-idle-foreground/50",
-      off: "border-border",
-    } satisfies Record<Tone, string>,
+    tone: TONE_BORDER,
     pending: { true: "border-dashed bg-transparent text-muted-foreground" },
     // A click selects it.
     clickable: { true: "cursor-pointer hover:bg-muted" },
+    selected: { true: "ring-2 ring-ring" },
+  },
+});
+
+/** A cluster's box: dashed and muted around a loop's body (no tone); a company operation's in its tone, selectable. */
+const clusterBox = cva("size-full rounded-lg border", {
+  variants: {
+    tone: TONE_BORDER,
+    op: { false: "border-dashed border-muted-foreground/40" },
+    clickable: { true: "cursor-pointer" },
     selected: { true: "ring-2 ring-ring" },
   },
 });
@@ -111,6 +125,7 @@ const nameOf = (node: GraphNode) => {
     const clock = node.state ? `sleep ${node.label}` : node.label;
     return node.name ? `${node.name}: ${clock}` : clock;
   }
+  if (node.kind === "cluster" && node.op) return node.op.name ? `${node.op.name}: ${node.op.id}` : node.op.id;
   return node.kind === "op" && node.name ? `${node.name}: ${node.label}` : node.label;
 };
 
@@ -199,7 +214,6 @@ function OpNode(props: Props<"op">) {
   const { node } = props.data;
   const { vendors, effect } = useOpFacts(node);
   const { state } = node;
-  const held = state?.approval && state.decision === undefined ? state.approval : undefined;
   return (
     <Frame {...props}>
       <Line>
@@ -223,24 +237,13 @@ function OpNode(props: Props<"op">) {
       )}
       <Line>
         {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
-        {held ? (
-          <ToneBadge tone={APPROVAL_TONE[held.status]} title={held.title}>
-            {held.status === "pending" ? `held · ${approverLabel(held.approver)}` : held.status}
-          </ToneBadge>
-        ) : (
-          state?.decision && <ToneBadge tone={DECISION_TONE[state.decision]}>{state.decision}</ToneBadge>
-        )}
+        <Decision state={state} />
         {state?.errorCode ? (
           <span className="truncate text-destructive">{state.errorCode}</span>
         ) : (
           state?.durationMs !== undefined && <span className="text-muted-foreground">{`${state.durationMs} ms`}</span>
         )}
-        {state?.scenario?.seeded && <Badge variant="outline">seeded</Badge>}
-        {state?.scenario?.fails && <Badge variant="outline">fails</Badge>}
-        {state?.scenario?.expected && <Badge variant="outline">expected</Badge>}
-        {state?.scenario?.forbidden && <Badge variant="outline">not called</Badge>}
-        {state?.scenario?.denied && <Badge variant="outline">must deny</Badge>}
-        {state?.scenario?.held && <Badge variant="outline">must hold</Badge>}
+        <ScenarioBadges state={state} />
       </Line>
       {node.ops && (
         <>
@@ -318,15 +321,76 @@ function PendingNode(props: Props<"pending">) {
   );
 }
 
-/** A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a badge. */
-function ClusterNode({ data: { node } }: Props<"cluster">) {
+/** A call's decision, or the approval holding it, once a run says. */
+function Decision({ state }: { state: OpState | undefined }) {
+  const held = state?.approval && state.decision === undefined ? state.approval : undefined;
+  if (held) {
+    return (
+      <ToneBadge tone={APPROVAL_TONE[held.status]} title={held.title}>
+        {held.status === "pending" ? `held · ${approverLabel(held.approver)}` : held.status}
+      </ToneBadge>
+    );
+  }
+  return state?.decision && <ToneBadge tone={DECISION_TONE[state.decision]}>{state.decision}</ToneBadge>;
+}
+
+/** What a scenario says of a call, on a workflow's outline (`annotateGraph`). */
+function ScenarioBadges({ state }: { state: OpState | undefined }) {
+  const scenario = state?.scenario;
   return (
-    <div className="size-full rounded-lg border border-dashed border-muted-foreground/40" title={node.label}>
+    <>
+      {scenario?.seeded && <Badge variant="outline">seeded</Badge>}
+      {scenario?.fails && <Badge variant="outline">fails</Badge>}
+      {scenario?.expected && <Badge variant="outline">expected</Badge>}
+      {scenario?.forbidden && <Badge variant="outline">not called</Badge>}
+      {scenario?.denied && <Badge variant="outline">must deny</Badge>}
+      {scenario?.held && <Badge variant="outline">must hold</Badge>}
+    </>
+  );
+}
+
+/**
+ * A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a
+ * badge. A company operation's (`op`) says along its top what the operation is, as an op node
+ * does: its tone, its name or id, its effect, in a run its decision or the approval holding it, and
+ * on an outline what a scenario says of it.
+ */
+function ClusterNode({ data: { node, selectable }, selected }: Props<"cluster">) {
+  const { state } = node;
+  return (
+    <div
+      className={clusterBox({
+        tone: node.op && (state?.tone ?? "off"),
+        op: !!node.op,
+        clickable: selectable,
+        selected,
+      })}
+      title={nameOf(node)}
+    >
       <Handles />
-      {/* Inside the box however long the label: the title above has it whole. */}
-      <Badge variant="outline" className="m-1.5 max-w-[calc(100%-12px)] bg-card">
-        <span className="min-w-0 truncate">{node.label}</span>
-      </Badge>
+      {node.op ? (
+        <OpStrip op={node.op} state={state} />
+      ) : (
+        // Inside the box however long the label: the title above has it whole.
+        <Badge variant="outline" className="m-1.5 max-w-[calc(100%-12px)] bg-card">
+          <span className="min-w-0 truncate">{node.label}</span>
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+/** A company operation's box's top line, `CLUSTER_HEADER` high. */
+function OpStrip({ op, state }: { op: { id: string; name?: string }; state: OpState | undefined }) {
+  const effect = use(Ops).get(op.id)?.effect;
+  return (
+    <div className="flex h-7 min-w-0 items-center gap-1.5 px-2.5 text-xs">
+      <Dot tone={state?.tone} />
+      {op.name && <span className="shrink-0 font-medium">{op.name}</span>}
+      <code className={cn("truncate", op.name && "text-muted-foreground")}>{op.id}</code>
+      {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
+      <Decision state={state} />
+      <ScenarioBadges state={state} />
     </div>
   );
 }

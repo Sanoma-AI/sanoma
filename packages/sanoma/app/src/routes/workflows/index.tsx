@@ -32,9 +32,9 @@ import { type AppGroup, AppGroupRow, AppTabs, appGroupsOf, pickGroup } from "../
 import { ChatButton } from "../../components/chat-button.tsx";
 import { LinkRow, RunsTable } from "../../components/runs-table.tsx";
 import { startsOf } from "../../components/workflow.tsx";
+import type { CalledVendor } from "../../lib/operations.ts";
 import {
   AppSearch,
-  type CalledVendor,
   configQuery,
   lastRunsQuery,
   POLL_MS,

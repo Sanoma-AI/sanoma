@@ -22,9 +22,10 @@ const named = (id: string) => (id.startsWith(WORKFLOW_ACTION) ? "the start" : id
  * reason>" for a deny; and "<rule> may hold <op>, depending on the input" when the input decides.
  */
 export function willAsk(requests: PreviewQuery, answers: readonly PreviewAnswer[]): string | undefined {
-  // By approver, a person and a group of one name apart: each named as the line names it.
-  const holds = new Map<string, { who: string; actions: string[] }>();
-  const others: string[] = [];
+  // By approver, a person and a group of one name apart: each named as the line names it. Each
+  // action once: a call made directly and inside a company operation is asked at both levels.
+  const holds = new Map<string, { who: string; actions: Set<string> }>();
+  const others = new Set<string>();
   answers.forEach((a, i) => {
     const action = named(requests[i]!.action.id);
     if (a.answer === "allow") return;
@@ -32,13 +33,13 @@ export function willAsk(requests: PreviewQuery, answers: readonly PreviewAnswer[
     if (a.answer === "hold") {
       // A hold always names its approver (`cedarPolicy`).
       const key = JSON.stringify(a.approver);
-      const hold = holds.get(key) ?? { who: approverName(a.approver!), actions: [] };
-      hold.actions.push(action);
+      const hold = holds.get(key) ?? { who: approverName(a.approver!), actions: new Set() };
+      hold.actions.add(action);
       holds.set(key, hold);
     } else if (a.answer === "deny") {
-      others.push(`${rule} refuses ${action}${a.rule?.reason ? `: ${a.rule.reason}` : ""}`);
+      others.add(`${rule} refuses ${action}${a.rule?.reason ? `: ${a.rule.reason}` : ""}`);
     } else {
-      others.push(`${rule} may hold ${action}, depending on the input`);
+      others.add(`${rule} may hold ${action}, depending on the input`);
     }
   });
   const lines = [

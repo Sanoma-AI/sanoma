@@ -1,4 +1,4 @@
-import type { Span } from "sanoma/workflows/describe";
+import type { OpEntry, Span } from "sanoma/workflows/describe";
 import { DEFAULT_SLEEP_NAME } from "sanoma/workflows/shared";
 import type { CallStep, Graph, GraphEdge, GraphNode, Step, StepState } from "./types.ts";
 
@@ -9,6 +9,25 @@ export interface Ends {
 }
 
 const OUTLINE_ENDS: Ends = { end: { label: "end" } };
+
+/** What a company operation's box has besides its label: its step's key, its operation, state and span. */
+type OpBox = { key?: string | undefined } & Partial<
+  Pick<Extract<GraphNode, { kind: "cluster" }>, "op" | "state" | "span">
+>;
+
+/**
+ * The calls inside a company operation, from its entry's outline: its nodes without their spans,
+ * which index the operation's file, not the workflow's source. None for any other operation, or one
+ * whose outline could not be read.
+ */
+function callsIn(op: OpEntry | undefined): Step[] | undefined {
+  const outline = op?.outline;
+  if (!outline || !("nodes" in outline)) return undefined;
+  return JSON.parse(JSON.stringify(outline.nodes, (key, value: unknown) => (key === "span" ? undefined : value)));
+}
+
+/** A step's name as a node shows it: only when it is not what the node says anyway (the op's id). */
+export const nameOf = (name: string | undefined, id: string) => (name === undefined || name === id ? {} : { name });
 
 /** A call's node's own: its step's state (of its own kind), and its place in the source. */
 const own = <S extends CallStep>(step: S): Pick<S, "state"> & { span?: Span } => ({
@@ -27,9 +46,14 @@ const own = <S extends CallStep>(step: S): Pick<S, "state"> & { span?: Span } =>
  * way past it, is a lane marked "otherwise". A workflow's outline is drawn this way, and a run's
  * ledger once runGraph has made it into steps. A call's node has its step's `span`, and an
  * operation's or a sleep's its step's name when it is not the default (the operation's id,
- * `DEFAULT_SLEEP_NAME`).
+ * `DEFAULT_SLEEP_NAME`). A company operation is a box (`cluster` with its `op`), labelled with its
+ * step's name, holding the calls inside it as a chain: a run's step's `calls`, else those of its
+ * entry in `ops` (the config's operations by id), the operation's outline.
  */
-export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS): Graph {
+export function outlineGraph(
+  outline: readonly Step[],
+  { ends = OUTLINE_ENDS, ops }: { ends?: Ends; ops?: ReadonlyMap<string, OpEntry> } = {},
+): Graph {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   let count = 0;
@@ -51,21 +75,27 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
     ];
     // Its body runs from the box back to the box, so an edge to the box goes on inside it, and
     // one from it starts where the body ends. An empty body is one edge from the box to itself.
-    const cluster = (label: string, body: readonly Step[]) => {
-      const id = add({ id: idOf("cluster", undefined), kind: "cluster", label, ...inside }, from);
+    const cluster = (label: string, body: readonly Step[], { key, ...box }: OpBox = {}) => {
+      const id = add({ id: idOf("cluster", key), kind: "cluster", label, ...box, ...inside }, from);
       for (const tail of chain(body, [id], id)) join(tail, id);
       return [id];
     };
     for (const step of steps) {
       switch (step.kind) {
-        case "op":
+        case "op": {
+          const calls = step.calls ?? callsIn(ops?.get(step.id));
+          const name = nameOf(step.name, step.id);
+          if (calls) {
+            from = cluster(step.name ?? step.id, calls, { key: step.key, op: { id: step.id, ...name }, ...own(step) });
+            break;
+          }
           from = [
             add(
               {
                 id: idOf("op", step.key),
                 kind: "op",
                 label: step.id,
-                ...(step.name && step.name !== step.id && { name: step.name }),
+                ...name,
                 ...(step.ops && { ops: step.ops }),
                 ...inside,
                 ...own(step),
@@ -74,6 +104,7 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
             ),
           ];
           break;
+        }
         case "approval": {
           const label = step.title === undefined ? "approval" : `“${step.title}”`;
           from = [add({ id: idOf("approval", step.key), kind: "approval", label, ...inside, ...own(step) }, from)];

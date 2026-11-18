@@ -1,8 +1,9 @@
-import type { OpEntry } from "sanoma/workflows/describe";
+import type { ConfigDescription, OpEntry } from "sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
+import { useCallback } from "react";
 import { z } from "zod";
 import { CALLBACK_ERRORS, type CallbackErrorReason, type ScenarioEntry } from "../../api.ts";
 import {
@@ -22,6 +23,7 @@ import { Credentials } from "../../components/credentials.tsx";
 import { Connections } from "../../components/connections.tsx";
 import { ScenarioErrors } from "../../components/scenario.tsx";
 import { type ScenarioRoles, scenarioRoles } from "../../graph/scenario-graph.ts";
+import { callersOf } from "../../lib/operations.ts";
 import { configQuery, connectorNamed, credentialsQuery, scenariosNaming, scenariosQuery } from "../../queries.ts";
 
 /** Where an OAuth callback sends the person back: the attempt to follow on its card, or why none. */
@@ -58,9 +60,22 @@ export const Route = createFileRoute("/connectors/$vendor")({
 function ConnectorPage() {
   const { vendor: id } = Route.useParams();
   const callback = Route.useSearch();
+  const select = useCallback(
+    (config: ConfigDescription) => {
+      const connector = connectorNamed(id)(config)!;
+      return {
+        ...connector,
+        callers: callersOf(
+          config,
+          connector.ops.map((op) => op.id),
+        ),
+      };
+    },
+    [id],
+  );
   const {
-    data: { vendor, ops, workflows, resourceTypes },
-  } = useSuspenseQuery({ ...configQuery(), select: (config) => connectorNamed(id)(config)! });
+    data: { vendor, ops, resourceTypes, callers },
+  } = useSuspenseQuery({ ...configQuery(), select });
   const { data: scenarios } = useSuspenseQuery(scenariosQuery());
   const resourceOps = new Set(resourceTypes.flatMap((r) => r.ops));
   const workflowOps = ops.filter((op) => !resourceOps.has(op.id));
@@ -104,7 +119,7 @@ function ConnectorPage() {
           </>
         )}
       </Region>
-      <UsedBy workflows={workflows} />
+      <UsedBy {...callers} />
     </>
   );
 }

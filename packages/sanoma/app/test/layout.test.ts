@@ -8,6 +8,10 @@ import { absolute, DRIFT_SHAPE } from "./graph-helpers.ts";
 const op = (id: string) => ({ kind: "op", id }) as const;
 const loop = (...body: Step[]): Step => ({ kind: "repeat", label: "repeat", body });
 
+/** A company operation's box holding `calls`, laid out alone. */
+const opBox = (calls: Step[]) =>
+  layout(outlineGraph([{ kind: "op", id: "operations.quote.run", calls }])).boxes.get("cluster:0")!;
+
 const text = ({ x, y }: Point) => `(${x}, ${y})`;
 const same = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
 
@@ -238,6 +242,14 @@ describe("layout", () => {
     expect(route[0]!.y).toBeGreaterThan(box.y + CLUSTER_HEADER);
     expect(route[0]!.y).toBeLessThan(box.y + box.height);
     expect(routeProblems(graph)).toEqual([]);
+  });
+
+  it("makes a company operation's box at least an operation's width, empty (held) or holding one call", () => {
+    expect(opBox([]).width).toBeGreaterThanOrEqual(NODE_SIZE.op.width);
+    expect(opBox([op("data.shop.customers.get")]).width).toBeGreaterThan(NODE_SIZE.op.width);
+    expect(routeProblems(outlineGraph([{ kind: "op", id: "operations.quote.run", calls: [op("a.b.get")] }]))).toEqual(
+      [],
+    );
   });
 
   it("refuses an edge between nodes in different boxes, naming it", () => {

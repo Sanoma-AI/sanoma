@@ -17,7 +17,7 @@ import { annotateGraph } from "../graph/scenario-graph.ts";
 import { type GraphNode, nodeAt } from "../graph/types.ts";
 import { useReducedMotion } from "../lib/motion.ts";
 import { nodesByRecord } from "../lib/records.ts";
-import { sourceQuery, workflowFile } from "../queries.ts";
+import { configQuery, opsById, sourceQuery, workflowFile } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import { CodePanel, FLOAT, FLOAT_CARD, FLOAT_ROOM, GraphPanel, Nothing, Notice, Region, TipButton } from "./common.tsx";
 import { type InspectedRun, Inspector, type SourceText } from "./inspector.tsx";
@@ -43,7 +43,7 @@ type Tab = "code" | "ledger";
  * A click on a node, in the code, or a ledger row's "Show in graph" selects the node: the graph
  * rings it, the code marks its lines, the inspector shows it, and while the Ledger tab is open
  * the ledger scrolls to its record. A workflow's graph marks what `scenario`, when given, seeds
- * and expects. Without an outline (it could not be read, or the config has no such workflow) the
+ * and expects, and draws each company operation it calls as a box holding the calls inside it. Without an outline (it could not be read, or the config has no such workflow) the
  * code says why; with no run either, there is nothing to draw, and that says why instead.
  */
 export function WorkflowView({
@@ -68,11 +68,13 @@ export function WorkflowView({
   const at = run?.at ?? 0;
   // The page's one graph: GraphPanel draws it, a click in the code finds its node in it, and a
   // ledger row its node. A poll that changed nothing keeps the ledger and summary, so the graph.
+  // The config's operations: a company operation's box holds the calls its outline has.
+  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   const graph = useMemo(() => {
     if (ledger && summary) return runGraph(ledger, summary, at, steps);
-    const drawn = steps && outlineGraph(steps);
+    const drawn = steps && outlineGraph(steps, { ops });
     return drawn && scenario ? annotateGraph(drawn, scenario) : drawn;
-  }, [ledger, summary, at, steps, scenario]);
+  }, [ledger, summary, at, steps, scenario, ops]);
   const nodeOf = useMemo(() => (graph && ledger ? nodesByRecord(graph.nodes, ledger) : undefined), [graph, ledger]);
   const titles = useMemo(() => new Map(run?.approvals.map((a) => [a.id, a.title])), [run?.approvals]);
   const inspected = useMemo<InspectedRun | undefined>(

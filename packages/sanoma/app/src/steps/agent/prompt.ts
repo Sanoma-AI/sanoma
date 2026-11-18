@@ -5,6 +5,8 @@ import {
   CHAT_AGENT,
   type Chat,
   isDirect,
+  isOperation,
+  type Op,
   type Principal,
   type SanomaConfig,
   VENDOR,
@@ -25,7 +27,7 @@ const AGENTS_LIMIT = 40_000;
 
 /** Who the agent is, for either engine. */
 const ROLE =
-  "You are the operator agent of a company whose operations run on Sanoma, a framework for full-stack business apps. The company's apps are code in this repository (workflows/, resources/, policies/, sites/, scenarios/, and apps/<name>/ holding the same for each app).";
+  "You are the operator agent of a company whose operations run on Sanoma, a framework for full-stack business apps. The company's apps are code in this repository (workflows/, operations/, resources/, policies/, sites/, scenarios/, and apps/<name>/ holding the same for each app).";
 
 /** The rules either engine ends on. */
 const COMMON_RULES = `- The person saves the draft from its card (Save), which puts it to work, or with a review first when the company reviews its changes; they can undo a save there too. Until they save it, nothing you drafted runs: never say a change is live.
@@ -36,7 +38,7 @@ const COMMON_RULES = `- The person saves the draft from its card (Save), which p
 
 /** The agent catalog's tools (`catalogTools`), a line each, for either engine. */
 const CATALOG_RULES = `- The company's tools act on the live instance, as the chat's agent (${CHAT_AGENT}) acting for the person, through the company's policy, which may refuse a call or hold it for an approval: then the person sees the approval's card in the chat; say what waits and whose decision it waits for (a call still waiting answers with waitsFor).
-- describe lists the company's own workflows (name, api name, title, input), the operations that may be called directly, each with its effect (lookup calls the reads among them), and its collections.
+- describe lists the company's own workflows (name, api name, title, input), the operations that may be called directly (a connector's, a collection's or the company's own), each with its effect (lookup calls the reads among them), and its collections.
 - lookup calls an operation whose effect is read and that may be called directly (a lookup, as describe lists it), with its input.
 - get_run reads a run by its id: its workflow, status, who started it and its approvals.
 - wait_run waits up to ${RESULT_WAIT_MS / 1000} seconds for a run to end and answers its output, or that it is still running.
@@ -152,14 +154,28 @@ export async function instructions(step: AppStepContext, principal: Principal, c
   const [guide, drafts] = await Promise.all([companyGuide(step), openDrafts(step, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
   const ops = [...resolved.ops.values()].toSorted((a, b) => a.id.localeCompare(b.id));
-  const connectors = [...Map.groupBy(ops, (op) => op.vendor)].map(([vendor, of]) => {
-    const listed = of.map(
-      (op) => `  - ${op.id} (${op.effect}${op.effect === "read" && isDirect(op, resolved.types) ? ", a lookup" : ""})`,
-    );
+  /** An operation's effect, and whether it is a lookup (a read that may be called directly). */
+  const effectOf = (op: Op) =>
+    `${op.effect}${op.effect === "read" && isDirect(op, resolved.types) ? ", a lookup" : ""}`;
+  const connectors = [
+    ...Map.groupBy(
+      ops.filter((op) => !isOperation(op)),
+      (op) => op.vendor,
+    ),
+  ].map(([vendor, of]) => {
+    const listed = of.map((op) => `  - ${op.id} (${effectOf(op)})`);
     return `- ${titles.get(vendor) ?? vendor} (${vendor}):\n${listed.join("\n")}`;
   });
   if (connectors.length)
     sections.push(`The installed connectors and their operations' effects:\n${connectors.join("\n")}`);
+  // The company's own operations are no connector's: a section of their own, each with what it calls.
+  const own = ops
+    .filter(isOperation)
+    .map((op) => `- ${op.id} (${effectOf(op)}): calls ${namesOrNone(op.uses.map((use) => use.id))}`);
+  if (own.length)
+    sections.push(
+      `The company's own operations (operations/ and apps/<name>/operations/), each with its effect and what it calls:\n${own.join("\n")}`,
+    );
   sections.push(
     drafts.length
       ? `${principal.id}'s open drafts (branches not yet merged or deleted):\n${drafts.map((c) => `- draft/${c.draftId}: ${c.title}`).join("\n")}`

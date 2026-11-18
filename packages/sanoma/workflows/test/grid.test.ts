@@ -1,7 +1,14 @@
 import { withFake } from "sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { columnPrincipal, describeConfig, permissionsGrid, readPeople } from "../src/describe.ts";
+import {
+  columnPrincipal,
+  describeConfig,
+  type PermissionsRow,
+  permissionsGrid,
+  previewRequests,
+  readPeople,
+} from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import {
   allowAll,
@@ -13,6 +20,12 @@ import {
   resolveConfig,
   type SanomaConfig,
 } from "../src/index.ts";
+import { customers as crmCustomers } from "./fixtures/company-apps/apps/crm/resources/data.ts";
+import score from "./fixtures/company-apps/apps/crm/operations/score.ts";
+import { customers as shopCustomers } from "./fixtures/company-apps/apps/shop/resources/data.ts";
+import quote from "./fixtures/company-apps/operations/quote.ts";
+import companyApps from "./fixtures/company-apps/sanoma.config.ts";
+import offer from "./fixtures/company-apps/workflows/offer.ts";
 import { rootWith } from "./harness.ts";
 
 // The Permissions grid (`permissionsGrid`): what the policy would answer each group, as the app's
@@ -76,6 +89,10 @@ const site = { name: "www", public: true as const, pages: [], calls: [], problem
 
 /** The grid under `policy`, beside a public site. */
 const gridOf = (policy: Policy) => permissionsGrid({ policy }, { ...description, sites: [site] });
+
+/** Each row's id, a row with rows under it as `{ id: [their ids] }`. */
+const ids = (rows: readonly PermissionsRow[]): unknown[] =>
+  rows.map((row) => (row.ops ? { [row.id]: ids(row.ops) } : row.id));
 
 describe("permissionsGrid", () => {
   const hold = {
@@ -200,6 +217,72 @@ describe("permissionsGrid", () => {
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
+    ]);
+  });
+
+  it("gives a company with no operations of its own the grid it had before their calls were nested", () => {
+    const allowed = Array.from({ length: 3 }, () => ({ answer: "allow" }));
+    const direct = [
+      "sanoma.apps.list",
+      "sanoma.connection.activate",
+      "sanoma.connection.authorize",
+      "sanoma.connection.bind",
+      "sanoma.connection.configure",
+      "sanoma.connection.create",
+      "sanoma.connection.disconnect",
+      "sanoma.connection.prepare",
+      "sanoma.connection.refresh",
+      "sanoma.connection.revoke",
+      "sanoma.connection.test",
+      "sanoma.run.inspect",
+      "sanoma.storeMigration.cancel",
+      "sanoma.storeMigration.plan",
+      "shop.refunds.list",
+    ];
+    // Strict: no row gains `ops`, not even an empty list, but a workflow's.
+    expect(gridOf(allowAll)).toStrictEqual({
+      groups: [null, "agents", "finance", "visitors", "anonymous"],
+      workflows: [
+        {
+          id: "refund",
+          title: "Refund",
+          cells: [...allowed, ...visitorDenied],
+          ops: [{ id: "shop.refunds.create", cells: [...allowed, { answer: "allow" }, { answer: "allow" }] }],
+        },
+      ],
+      ops: direct.map((id) => ({ id, cells: [...allowed, ...visitorDenied] })),
+    });
+  });
+
+  it("puts the calls inside a company operation under its row, wherever its row is", () => {
+    const apps = describeConfig({
+      ...companyApps,
+      workflows: [offer],
+      operations: [quote, score],
+      collections: [crmCustomers, shopCustomers],
+    });
+    const grid = permissionsGrid({ policy: allowAll }, apps);
+    expect(ids(grid.workflows)).toEqual([
+      {
+        offer: [
+          { "operations.quote.run": ["data.shop.customers.get"] },
+          { "operations.crm.score.run": ["data.crm.customers.get"] },
+        ],
+      },
+    ]);
+    // Both may be called directly, so each has a row of its own too, its calls under it there.
+    expect(ids(grid.ops).filter((row) => typeof row !== "string")).toEqual([
+      { "operations.crm.score.run": ["data.crm.customers.get"] },
+      { "operations.quote.run": ["data.shop.customers.get"] },
+    ]);
+    // Each row is asked as the run form asks it: the operation, then each call inside it.
+    const offerEntry = apps.workflows.find((wf) => wf.name === "offer")!;
+    expect(previewRequests(offerEntry, new Map(apps.ops.map((op) => [op.id, op]))).map((r) => r.action.id)).toEqual([
+      "workflow:offer",
+      "operations.quote.run",
+      "data.shop.customers.get",
+      "operations.crm.score.run",
+      "data.crm.customers.get",
     ]);
   });
 
