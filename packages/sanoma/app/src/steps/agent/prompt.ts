@@ -42,7 +42,7 @@ const CATALOG_RULES = `- The company's tools act on the live instance, as the ch
 - lookup calls an operation whose effect is read and that may be called directly (a lookup, as describe lists it), with its input.
 - get_run reads a run by its id: its workflow, status, who started it and its approvals.
 - wait_run waits up to ${RESULT_WAIT_MS / 1000} seconds for a run to end and answers its output, or that it is still running or waits for an approval.
-- start_run starts a workflow with its input, when the person asks you to: drift checks the declared resources against their vendors, changing nothing; apply makes them so, after an admin approves. It runs the company's merged workflows on the live instance: your draft's code is not in them until the person saves it.`;
+- start_run starts a workflow with its input, when the person asks you to: drift checks the declared resources against their vendors and plan says what apply would do, both changing nothing; apply makes them so, after an admin approves. It runs the company's merged workflows on the live instance: your draft's code is not in them until the person saves it.`;
 
 const RULES = `${ROLE}
 

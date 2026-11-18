@@ -36,7 +36,7 @@ import { failure, freshDatabase, pending, rootWith, useApp, waitFor } from "./ha
 // start whatever it says.
 
 /** The startable built-ins that only read: the one constant to change when a built-in comes to read only. */
-const READ_ONLY_BUILT_INS = ["drift"];
+const READ_ONLY_BUILT_INS = ["drift", "plan"];
 
 const PEOPLE = `import { sanoma } from "sanoma/resources";
 
@@ -111,6 +111,9 @@ describe("an agent's start of a built-in, with no policy files", () => {
   it("holds none of a read-only built-in, a person's start, the runtime's agents' or an agent's start of a company workflow", async () => {
     const drift = await app.client.drift({ startedBy: bot });
     expect((await app.client.driftReport(drift)).resources.length).toBeGreaterThan(0);
+    const planned = await app.client.start("plan", {}, { startedBy: bot });
+    await app.client.result(planned);
+    expect(await app.client.approvals(planned)).toEqual([]);
     for (const startedBy of ["bo", "host-check", "schedule"]) {
       const runId = await app.client.apply({}, { startedBy });
       await app.client.applyReport(runId);
@@ -293,6 +296,7 @@ describe("the startable built-ins", () => {
     const policy = cedarPolicy(full, policies, people);
     const inputs: Record<string, unknown> = {
       apply: { only: [sending], answers: {} },
+      plan: { only: [sending] },
       drift: {},
       adopt: { runId: "r1", id: sending, paths: ["name"] },
       patch: { at: { file: "resources/mail.ts", export: "sending" }, fields: { name: "example.org", n: 1, on: true } },

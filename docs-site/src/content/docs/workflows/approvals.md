@@ -15,7 +15,7 @@ A policy hold's approval also carries the held call: its `op`, its parsed `input
 
 The policy decides every run's start too, the runtime's workflows' as the company's, as the action `workflow:<name>` with the input as its context, before `client.start` queues it, twice when an agent acts for someone (see [People](/policies/people/)). A visitor starts none of the runtime's workflows. The internal workflows (`call`, `chat`, `change`, `connect`, `follow`, `login-code`, `reshape`, `save-draft`) are started by Sanoma alone, never through `client.start`: a start of one is `invalid_input`, whatever the policy says, and their runs read as any other's.
 
-One rule is the runtime's own: once the company's policy allows it, a declared agent's start of one of the runtime's workflows that does not only read (`apply`, say; `drift` only reads) waits for an approval by the group `admin`, with the reason `sanoma:agents-wait-for-admin`. A company `@hold` on the same start comes first. With no `admin` group declared, the start is refused, saying so. A company lifts the rule with a `permit` for agents that the start satisfies:
+One rule is the runtime's own: once the company's policy allows it, a declared agent's start of one of the runtime's workflows that does not only read (`apply`, say; `drift` and `plan` only read) waits for an approval by the group `admin`, with the reason `sanoma:agents-wait-for-admin`. A company `@hold` on the same start comes first. With no `admin` group declared, the start is refused, saying so. A company lifts the rule with a `permit` for agents that the start satisfies:
 
 ```cedar
 @id("agents-apply")
