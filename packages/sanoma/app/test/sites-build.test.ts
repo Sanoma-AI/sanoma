@@ -763,6 +763,60 @@ describe("a company's app with its sites", () => {
     expect((await at(startRun, "hello.localhost", { method: "POST", headers: SAME_ORIGIN })).status).toBe(404);
   });
 
+  it("answers /api/call on a public host as cloudRun calls it: the api token it carries, else the site's visitor, in JSON", async () => {
+    // A copy whose policy lets the visitors (an api token is one) start hello, as sanoma-ops's lets its Cloud tokens.
+    const permitted = company({
+      "policies/tokens.cedar":
+        'permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:hello", resource);\n',
+    });
+    const copy = await startApp(defineConfig({ ...config, root: permitted }), { port: 0, distDir: result.distDir });
+    const client = await SanomaClient.connect(config);
+    try {
+      const minted = await client.tokens.mint({ subject: "visitor:cloud:caller", groups: ["visitors"] });
+      const revoked = await client.tokens.mint({ subject: "visitor:cloud:gone", groups: ["visitors"] });
+      await client.tokens.revoke({ id: revoked.id });
+      const port = new URL(copy.url).port;
+      /** `<method> /api/call` on hello's host with `headers` and `body`: its status, type and JSON. */
+      const call = async (
+        headers: Record<string, string>,
+        body: unknown = { name: "hello.start", input: { who: "Ada" } },
+        method = "POST",
+      ) => {
+        const res = await rawGet(new URL("/api/call", copy.url).href, `hello.localhost:${port}`, {
+          method,
+          headers: { "content-type": "application/json", ...headers },
+          ...(method === "POST" && { body: JSON.stringify(body) }),
+        });
+        return { status: res.status, type: res.headers["content-type"], body: JSON.parse(res.body) as unknown };
+      };
+      const json = expect.stringMatching(/^application\/json/);
+      // cloudRun's flow: a start with the bearer and no Origin, then its result, as the token.
+      const bearer = { authorization: `Bearer ${minted.token}` };
+      const started = await call(bearer);
+      expect(started).toMatchObject({ status: 200, type: json, body: { runId: expect.any(String) } });
+      const { runId } = started.body as { runId: string };
+      expect((await client.run(runId))?.startedBy).toMatchObject({ id: `token:${minted.id}` });
+      expect(await call(bearer, { name: "hello.result", input: { runId } })).toEqual({
+        status: 200,
+        type: json,
+        body: { greeting: "hello Ada" },
+      });
+      for (const token of ["sca_unknown", revoked.token]) {
+        expect(await call({ authorization: `Bearer ${token}` })).toMatchObject({ status: 401, type: json });
+      }
+      // No token: checked for CSRF as a page's request, then the site's visitor, here anonymous.
+      expect(await call({})).toMatchObject({ status: 403, type: json, body: { error: expect.any(String) } });
+      const own = await call({ origin: `http://hello.localhost:${port}` });
+      expect(own).toMatchObject({ status: 200, type: json, body: { runId: expect.any(String) } });
+      expect((await client.run((own.body as { runId: string }).runId))?.startedBy).toEqual({ id: "anonymous" });
+      // Any other method is the route's 405, never a page of the site's.
+      expect(await call(bearer, undefined, "GET")).toMatchObject({ status: 405, type: json });
+    } finally {
+      await client.close();
+      await copy.close();
+    }
+  });
+
   it("sends a GET or HEAD for /sites/<name>/… on the site's own host to its path there, the query kept", async () => {
     for (const [path, location] of [
       ["/sites/hello/posts/hello?ref=app&x=1", "/posts/hello?ref=app&x=1"],
