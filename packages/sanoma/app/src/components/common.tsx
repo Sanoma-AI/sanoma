@@ -45,7 +45,8 @@ import type { OpEntry, SiteEntry } from "sanoma/workflows/describe";
 import { approverLabel, CALL_WORKFLOW, OPERATIONS_VENDOR, type Tier } from "sanoma/workflows/shared";
 import { toast } from "sonner";
 import { errorBodyOf } from "../api.ts";
-import { appBehindQuery, configQuery, opHome, runLink, RUNS_KEY, type SiteCaller } from "../queries.ts";
+import { opHome } from "../lib/operations.ts";
+import { appBehindQuery, configQuery, runLink, RUNS_KEY, type SiteCaller } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
 import {

@@ -26,6 +26,9 @@ function callsIn(op: OpEntry | undefined): Step[] | undefined {
   return JSON.parse(JSON.stringify(outline.nodes, (key, value: unknown) => (key === "span" ? undefined : value)));
 }
 
+/** A step's name as a node shows it: only when it is not what the node says anyway (the op's id). */
+export const nameOf = (name: string | undefined, id: string) => (name === undefined || name === id ? {} : { name });
+
 /** A call's node's own: its step's state (of its own kind), and its place in the source. */
 const own = <S extends CallStep>(step: S): Pick<S, "state"> & { span?: Span } => ({
   ...(step.state && { state: step.state }),
@@ -81,8 +84,8 @@ export function outlineGraph(
       switch (step.kind) {
         case "op": {
           const calls = step.calls ?? callsIn(ops?.get(step.id));
+          const name = nameOf(step.name, step.id);
           if (calls) {
-            const name = step.name && step.name !== step.id ? { name: step.name } : {};
             from = cluster(step.name ?? step.id, calls, { key: step.key, op: { id: step.id, ...name }, ...own(step) });
             break;
           }
@@ -92,7 +95,7 @@ export function outlineGraph(
                 id: idOf("op", step.key),
                 kind: "op",
                 label: step.id,
-                ...(step.name && step.name !== step.id && { name: step.name }),
+                ...name,
                 ...(step.ops && { ops: step.ops }),
                 ...inside,
                 ...own(step),

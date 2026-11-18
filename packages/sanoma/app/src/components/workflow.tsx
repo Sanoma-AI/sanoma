@@ -58,7 +58,6 @@ export const WorkflowSections = memo(function WorkflowSections({ workflow }: { w
   const {
     data: { ops, sites },
   } = useSuspenseQuery({ ...configQuery(), select });
-  const fields = useMemo(() => fieldsOf(workflow.input), [workflow.input]);
   return (
     <>
       <Starts workflow={workflow} />
@@ -94,15 +93,7 @@ export const WorkflowSections = memo(function WorkflowSections({ workflow }: { w
       </Section>
       <Separator />
       <Section title="Input">
-        {fields ? (
-          fields.length === 0 ? (
-            <None>No fields.</None>
-          ) : (
-            <InputFields fields={fields} />
-          )
-        ) : (
-          <Json value={workflow.input} />
-        )}
+        <SchemaFields schema={workflow.input} />
       </Section>
       <Separator />
       <Section title="Used by">
@@ -115,8 +106,15 @@ export const WorkflowSections = memo(function WorkflowSections({ workflow }: { w
 const kindName = (f: Field): string =>
   f.kind === "array" ? `list of ${kindName(f.item)}` : f.kind === "json" ? "JSON" : f.kind;
 
+/** A JSON Schema's fields as a list (`InputFields`), "No fields." for an object's with none, or the schema itself when it is not an object's. */
+export function SchemaFields({ schema }: { schema: Record<string, unknown> }) {
+  const fields = useMemo(() => fieldsOf(schema), [schema]);
+  if (!fields) return <Json value={schema} />;
+  return fields.length === 0 ? <None>No fields.</None> : <InputFields fields={fields} />;
+}
+
 /** A form's fields as a list, each with its kind, whether it is required, and what it says. */
-export function InputFields({ fields }: { fields: Field[] }) {
+function InputFields({ fields }: { fields: Field[] }) {
   return (
     <ItemGroup>
       {fields.map((field) => (

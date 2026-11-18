@@ -25,15 +25,8 @@ import {
   VendorLogo,
 } from "../../components/common.tsx";
 import { Logo } from "../../components/logo.tsx";
-import {
-  availableConnectorsQuery,
-  callersOf,
-  companyOps,
-  configQuery,
-  connectorsOf,
-  credentialsQuery,
-  siteCallers,
-} from "../../queries.ts";
+import { callersOf, companyOps } from "../../lib/operations.ts";
+import { availableConnectorsQuery, configQuery, connectorsOf, credentialsQuery, siteCallers } from "../../queries.ts";
 import { SecretStorage } from "../../components/connections.tsx";
 
 export const Route = createFileRoute("/connectors/")({

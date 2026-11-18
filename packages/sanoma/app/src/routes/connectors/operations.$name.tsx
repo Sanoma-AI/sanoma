@@ -2,14 +2,13 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import type { ConfigDescription } from "sanoma/workflows/describe";
 import { FunctionIcon } from "@phosphor-icons/react/dist/csr/Function";
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
 import {
   CodePanel,
   CrumbHeader,
   effectBadge,
-  Json,
   loadCode,
   None,
   Notice,
@@ -19,17 +18,9 @@ import {
   Region,
   UsedBy,
 } from "../../components/common.tsx";
-import { InputFields } from "../../components/workflow.tsx";
-import { fieldsOf } from "../../form/schema.ts";
-import {
-  callersOf,
-  companyOpNamed,
-  configQuery,
-  operationFile,
-  opsById,
-  siteCallers,
-  sourceQuery,
-} from "../../queries.ts";
+import { SchemaFields } from "../../components/workflow.tsx";
+import { callersOf, companyOpNamed, operationFile } from "../../lib/operations.ts";
+import { configQuery, opsById, siteCallers, sourceQuery } from "../../queries.ts";
 
 // `/connectors/operations/<name>`: one of the company's own operations (`defineOperation`), listed
 // under Yours on the Connectors page. The runtime refuses a connector of the vendor `operations`,
@@ -133,15 +124,10 @@ function OperationPage() {
   );
 }
 
-/**
- * A JSON Schema's fields, each with its kind; the schema itself when it is not an object's, and
- * "Not declared." when it says nothing (an operation with no `output`).
- */
+/** A JSON Schema's fields (`SchemaFields`), or "Not declared." when it says nothing (an operation with no `output`). */
 function Fields({ schema }: { schema: Record<string, unknown> }) {
-  const fields = useMemo(() => fieldsOf(schema), [schema]);
   if (Object.keys(schema).every((key) => key === "$schema")) return <None>Not declared.</None>;
-  if (!fields) return <Json value={schema} />;
-  return fields.length === 0 ? <None>No fields.</None> : <InputFields fields={fields} />;
+  return <SchemaFields schema={schema} />;
 }
 
 /** The operation's file, as it is now, under its path from the company's root. */

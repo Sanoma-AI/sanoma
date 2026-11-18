@@ -14,8 +14,8 @@ import { starterName } from "../api.ts";
 import type { GraphNode, GraphNodeKind } from "../graph/types.ts";
 import { spanLines } from "../lib/lines.ts";
 import { recordsFor } from "../lib/records.ts";
-import { operationName } from "../lib/names.ts";
-import { configQuery, operationFile, opsById, sourceQuery } from "../queries.ts";
+import { opHome, operationFile } from "../lib/operations.ts";
+import { configQuery, opsById, sourceQuery } from "../queries.ts";
 import { ApprovalDecision, ApprovalDetails } from "./approval.tsx";
 import {
   ApprovalStatusBadge,
@@ -223,9 +223,7 @@ function NodeFacts({ node, text, onLines }: { node: GraphNode; text: SourceText;
           </Fact>
           {op?.vendor === OPERATIONS_VENDOR ? (
             <Fact label="File">
-              <Link to="/connectors/operations/$name" params={{ name: operationName(op.id) }}>
-                {operationFile(op)}
-              </Link>
+              <Link {...opHome({ vendors }, op)!}>{operationFile(op)}</Link>
             </Fact>
           ) : (
             op && (

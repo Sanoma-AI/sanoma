@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { OPERATIONS_VENDOR } from "sanoma/workflows/shared";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { answerWords, columnLabel, type Group } from "#/lib/grid-diff.ts";
-import { operationName } from "#/lib/names.ts";
+import { operationName } from "#/lib/operations.ts";
 import { PREVIEW_TONE } from "#/lib/tone.ts";
 import { cn } from "#/lib/utils.ts";
 import { ToneBadge } from "./kit.tsx";
@@ -119,7 +119,7 @@ function Line<R extends TableRowOf<R>>({
   linkRow,
 }: RowsProps<R> & { row: R; under: R | undefined; depth: number }) {
   const linked = linkRow?.(row) ?? true;
-  const own = kind === "op" && row.id.startsWith(`${OPERATIONS_VENDOR}.`);
+  const own = row.id.startsWith(`${OPERATIONS_VENDOR}.`);
   return (
     <TableRow id={kind === "op" && depth === 0 ? row.id : undefined}>
       <TableHead scope="row" className={cn("font-normal", INDENT[depth])}>

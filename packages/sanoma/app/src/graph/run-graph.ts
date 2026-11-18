@@ -3,14 +3,11 @@ import type { OutlineNode } from "sanoma/workflows/describe";
 import { fitsOp, flatten, isEnded, OPERATIONS_VENDOR } from "sanoma/workflows/shared";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
-import { type Ends, outlineGraph } from "./outline-graph.ts";
+import { type Ends, nameOf, outlineGraph } from "./outline-graph.ts";
 import type { CallStep, Graph, Step } from "./types.ts";
 
 type OpStep = Extract<Step, { kind: "op" }>;
 type AllStep = Extract<Step, { kind: "all" }>;
-
-/** A step's name as a node shows it: only when it is not what the node says anyway (the op's id). */
-const nameOf = (name: string | undefined, id: string) => (name === undefined || name === id ? {} : { name });
 
 /** A company operation's step holds the calls made inside it (`calls`), none yet. */
 const callsOf = (op: string) => (op.startsWith(`${OPERATIONS_VENDOR}.`) ? { calls: [] } : {});
@@ -70,18 +67,24 @@ export function runGraph(
   };
 
   /**
-   * Adds the step inside the company operation call it was made within (`within`, that call's
-   * `seq`). Its box is that call's step, made here on its first record inside when the call has
-   * no record of its own yet: placed at the operation's node, the outline's op node that the
-   * record's `node` is under (`<operation's node>.0.<path>`), as a member of its `ctx.all`.
+   * Adds an operation call's step as `place` does, or, made within a company operation's call
+   * (`within`, that call's `seq`), inside that call's step, its box. The box is made here on its
+   * first record inside when the call has no record of its own yet: placed at the operation's
+   * node, the outline's op node that the record's `node` is under (`<operation's node>.0.<path>`),
+   * as a member of its `ctx.all`.
    */
-  const inside = (step: OpStep, within: number, node: string | undefined, group: LedgerGroup | undefined) => {
+  const placeCall = (
+    step: OpStep,
+    { within, node, group }: { within?: number; node?: string; group?: LedgerGroup },
+  ) => {
+    if (within === undefined) return place(step, node, group);
     let box = ops.get(within);
     if (!box) {
-      const at = nodes.find((n) => n.kind === "op" && node?.startsWith(`${n.path}.0.`));
-      const id = at?.kind === "op" ? at.id : OPERATIONS_VENDOR;
-      const name = at?.kind === "op" ? at.name : undefined;
-      box = { kind: "op", id, ...nameOf(name, id), key: `op:${within}`, state: { tone: ended ? "off" : "active" } };
+      const at = nodes.find(
+        (n): n is Extract<OutlineNode, { kind: "op" }> => n.kind === "op" && !!node?.startsWith(`${n.path}.0.`),
+      );
+      const id = at?.id ?? OPERATIONS_VENDOR;
+      box = { kind: "op", id, ...nameOf(at?.name, id), key: `op:${within}`, state: { tone: ended ? "off" : "active" } };
       ops.set(within, box);
       place(box, at?.path, group);
     }
@@ -110,8 +113,7 @@ export function runGraph(
           ...callsOf(record.op),
         };
         ops.set(record.seq, step);
-        if (record.within === undefined) place(step, record.node, record.group);
-        else inside(step, record.within, record.node, record.group);
+        placeCall(step, record);
         break;
       }
       case "approval.requested": {
@@ -133,8 +135,7 @@ export function runGraph(
               ...callsOf(record.op),
             };
             ops.set(record.opSeq, step);
-            if (record.within === undefined) place(step, record.node, record.group);
-            else inside(step, record.within, record.node, record.group);
+            placeCall(step, record);
           }
         } else {
           const tone = ended && status === "pending" ? "off" : APPROVAL_TONE[status];

@@ -21,8 +21,8 @@ import { DataGrid } from "../../../components/grid/grid.tsx";
 import { STAGED_FIRST } from "../../../components/grid/staged.tsx";
 import { RecordForm } from "../../../components/record-form.tsx";
 import { RecordHistory } from "../../../components/record-history.tsx";
+import { callersOf } from "../../../lib/operations.ts";
 import {
-  callersOf,
   closeRecord,
   collectionNamed,
   configQuery,
