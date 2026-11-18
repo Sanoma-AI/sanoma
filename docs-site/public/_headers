@@ -1,0 +1,4 @@
+# Cloudflare's static assets: Astro's build output under /_astro (scripts, styles, fonts) is named
+# by content hash, so a browser may keep it for a year instead of asking again on every page.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -1,0 +1,12 @@
+---
+// Starlight's head, then the fonts from astro.config.mjs's `fonts`: each family's @font-face and
+// its size-matched fallback, with the Latin files of the two families every page shows preloaded,
+// so text does not swap fonts as each page loads. The monospace font loads when a page uses it.
+import Default from "@astrojs/starlight/components/Head.astro";
+import { Font } from "astro:assets";
+---
+
+<Default><slot /></Default>
+<Font cssVariable="--font-plex-sans" preload={[{ subset: "latin" }]} />
+<Font cssVariable="--font-fraunces" preload={[{ subset: "latin" }]} />
+<Font cssVariable="--font-plex-mono" />
