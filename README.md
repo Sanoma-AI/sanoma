@@ -290,6 +290,7 @@ Contributions are accepted under the [Developer Certificate of Origin](https://d
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
 | [`packages/`](packages/AGENTS.md)                                        | Core workspace packages                                                                                                              |
 | [`sanoma`](packages/sanoma/README.md)                                    | The bin a company repo runs, checks and exports itself with; what its workflows import                                               |
+| [`docs-site`](docs-site/README.md)                                       | The docs site (docs.sanoma.work): the guides for writing a company repo, in `src/content/docs`, and the connectors' reference        |
 | [`sanoma/workflows`](packages/sanoma/workflows/README.md)                | Define connectors and workflows, run them durably on DBOS, and lint them                                                             |
 | [`sanoma/app`](packages/sanoma/app/README.md)                            | Web UI over a config, started with `startApp(config)`                                                                                |
 | [`sanoma/init`](packages/sanoma/README.md#template-files)                | The company template's files with a company's own name, slug and founder, for `sanoma init`, workflows and sites                     |

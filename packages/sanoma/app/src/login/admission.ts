@@ -1,12 +1,16 @@
 import { errorCode, errorMessage, type PeopleResource, type Principal } from "sanoma/workflows";
-import { admit, type DeclaredPeople } from "sanoma/workflows/describe";
+import { admit, clientActing, type DeclaredPeople } from "sanoma/workflows/describe";
 import { ACTOR_COOKIE, ACTOR_KEY } from "../api.ts";
 import type { AdmittingLogin, LoginProvider } from "../context.ts";
 import { escapeHtml, smallPage, wantsJson } from "./page.ts";
 
 // Admission is declaration: whoever a login says is asking is let in only as a person the data
 // files declare (`sanoma.person`), matched by what the login vouches for, and acts as declared
-// (`admit`). An agent never signs in. One wrapper for every login, so no provider can forget it.
+// (`admit`). An agent never signs in: an OAuth client a person signed in (`LoginIdentity.client`,
+// the staff login's bearer at `/mcp`) acts as the agent that stands for it (the one the files
+// declare for it, else a built-in client's built-in agent while the company accepts it), for that
+// person (`clientActing`), checked against the files on every request. One wrapper for every
+// login, so no provider can forget it.
 
 /** What `admitting` admits by: the declared people, and the problems reading them. */
 type Declared = Pick<DeclaredPeople, "problems"> & { people: readonly PeopleResource[] };
@@ -28,7 +32,10 @@ export function admitting(login: LoginProvider, people: () => Declared | Promise
         const identity = await login.resolveActor(request);
         if (!identity) return {};
         try {
-          return { admitted: admit(identity, await people(), true) };
+          const { client, ...person } = identity;
+          const declared = await people();
+          const admitted = admit(person, declared, true);
+          return { admitted: client === undefined ? admitted : clientActing(client, admitted.id, declared) };
         } catch (e) {
           if (errorCode(e) === "not_admitted") return { why: (e as Error).message };
           // Who is asking could not be read: refused, saying why, rather than every request failing.

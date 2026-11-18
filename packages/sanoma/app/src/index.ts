@@ -39,6 +39,7 @@ import { liveSnapshot } from "./snapshot-build.ts";
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
 export type { IngressRoute } from "./handler.ts";
+export { agentAddressAt, agentAddressFrom } from "sanoma/workflows";
 export { type MakeStaffLogin, type StaffSocial, staffLogin } from "./login/staff.ts";
 export { loopbackLogin } from "./loopback.ts";
 export type { AppBundle, AppBundleContext, AppBundleEnv, AppBundleModule, AppHost } from "./app-bundle.ts";
@@ -76,7 +77,7 @@ export interface AppOptions {
   /**
    * The company's own OAuth clients (its GitHub App's), given to each public site's login
    * (`LoginContext.social`), which then offers them to visitors. The staff login takes its own
-   * (`staffLogin(make, social)`).
+   * (`staffLogin(make, social, address)`).
    */
   social?: SocialClients;
   /**
@@ -88,6 +89,12 @@ export interface AppOptions {
    * reads webhooks (`remoteWebhook`).
    */
   ingress?: readonly IngressRoute[];
+  /**
+   * For a config with a `router`: the agents' router's master secret (`SANOMA_ROUTER_SECRET`,
+   * which `sanoma serve` reads with `routerOptionsFrom`), and what it forwards with instead of
+   * `fetch` (`AppHandlerOptions.router`).
+   */
+  router?: { secret?: string; fetch?: typeof fetch };
   /**
    * Called right after each change a worker must run that the app makes commits: a run's start
    * (drift, apply and a held call are starts) and an approval's decision; never for a read
@@ -190,6 +197,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       sites,
       ...(options.domains && { domains: options.domains }),
       ...(options.ingress && { ingress: options.ingress }),
+      ...(options.router && { router: options.router }),
       entry: responder.entry,
       files: responder.files,
       ...(responder.stylesheet && { stylesheet: responder.stylesheet }),
@@ -217,7 +225,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       });
     });
     // The staff login, once there is a client and the files it admits by; a login that cannot start stops the app.
-    await given.open?.(app.context);
+    await given.open?.(app.context, live);
   } catch (err) {
     if (server.listening) await new Promise((done) => server.close(done));
     await responder.close();

@@ -1,3 +1,4 @@
+import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
@@ -6,12 +7,17 @@ import { type AppOptions, type IngressRoute, staffLogin, startApp } from "sanoma
 import { appSteps } from "sanoma/app/steps";
 import { betterAuthStaffLogin, prepareBetterAuthStaff } from "sanoma/better-auth";
 import {
+  type AgentAddress,
+  agentAddressFrom,
   deploymentKey,
   errorMessage,
   GITHUB_APP,
   isLoopback,
+  NO_AGENT_ADDRESS,
   type ResolvedConfig,
+  type ResolvedRouter,
   resolveConfig,
+  routerOptionsFrom,
   SanomaClient,
   type SanomaConfig,
   superviseWorker,
@@ -99,7 +105,7 @@ async function appStart(
   config: SanomaConfig,
   { port, log, dev = false, resolved = resolveConfig(config) }: ServeOptions,
 ): Promise<AppOptions> {
-  const options = { port, ...(await appOptions(secretsOf(config))) };
+  const options = { port, ...(await appOptions(secretsOf(config), resolved.router)) };
   // For an editor and the sites' types only: a checkout it cannot write still serves.
   await writeGenerated(
     rootOf(config),
@@ -228,17 +234,42 @@ export function parseDomains(value: string | undefined): Record<string, string> 
  * `SANOMA_SIGNING_KEY`, with GitHub as a method when `SANOMA_GITHUB_CLIENT_ID` and
  * `SANOMA_GITHUB_CLIENT_SECRET` are both set, in the environment or in the stored secrets
  * (`readSecrets`), where creating the GitHub App on the app's connect page put them; the same
- * client goes to the public sites' logins (`social`), for visitors. An empty value is the same as
- * unset. A mistake in them is a UsageError.
+ * client goes to the public sites' logins (`social`), for visitors; with an agent address in the
+ * environment (`agentAddressFrom`: a router's, `SANOMA_AGENT_URL` with `SANOMA_COMPANY` and
+ * `SANOMA_ROUTER_SECRET`, this company's own secret there, else `SANOMA_HOSTNAME`, else
+ * `SANOMA_HOST_URL`), the staff login is the agent surface's authorization server for that one
+ * address, and without one serves no OAuth, which is said once on stderr. With the config's
+ * `router`, on any host, what it is served with (`routerOptionsFrom`: `SANOMA_ROUTER_SECRET`
+ * is then its master secret; a hostname that is `SANOMA_HOSTNAME` or a site's domain is
+ * refused); a config without one reads nothing of it. An empty value is the same as unset. A
+ * mistake in them is a UsageError.
  */
 export async function appOptions(
   readSecrets?: ReadSecrets,
-): Promise<Pick<AppOptions, "host" | "login" | "domains" | "social">> {
+  router?: ResolvedRouter,
+): Promise<Pick<AppOptions, "host" | "login" | "domains" | "social" | "router">> {
   const env = process.env;
   const domains = parseDomains(env.SANOMA_DOMAINS);
   const host = env.SANOMA_APP_HOST || undefined;
-  const options = { host, ...(domains && { domains }) };
+  let routing: AppOptions["router"];
+  try {
+    routing = router && routerOptionsFrom(router, env, domains);
+  } catch (err) {
+    throw new UsageError(errorMessage(err));
+  }
+  const options = { host, ...(domains && { domains }), ...(routing && { router: routing }) };
   if (host === undefined || isLoopback(host)) return options;
+  let address: AgentAddress | undefined;
+  try {
+    address = agentAddressFrom(env);
+  } catch (err) {
+    throw new UsageError(errorMessage(err));
+  }
+  // Once for the process: a reload reads the variables again.
+  if (!address && !saidNoAddress) {
+    saidNoAddress = true;
+    console.error(`${NO_AGENT_ADDRESS}. People sign in as before.`);
+  }
   try {
     deploymentKey("SANOMA_SIGNING_KEY");
   } catch (err) {
@@ -257,8 +288,20 @@ export async function appOptions(
     throw new UsageError(`GitHub sign-in needs ${GITHUB.join(", ")}: ${missing.join(", ")} not set`);
   }
   const social = clientId && clientSecret ? { github: { clientId, clientSecret } } : undefined;
-  return { ...options, login: staffLogin(betterAuthStaffLogin, social), social };
+  // A client's metadata document fetched as Node can: the name resolved once, every address it
+  // has a public one, that address pinned, no redirect followed (the Worker cannot, and does less).
+  const login = staffLogin(
+    (context) => betterAuthStaffLogin(context, { fetchClientMetadata: fetchClientMetadataResource }),
+    social,
+    address,
+  );
+  return { ...options, login, social };
 }
+
+/** Whether this process said already that it has no agent address (`appOptions`). */
+let saidNoAddress = false;
+/** Lets it be said again: for a test, which runs in one process. */
+export const resetNotices = () => void (saidNoAddress = false);
 
 /** How long a reload waits after it is asked (`WorkerOptions.reload`): the save that asked it ends first. */
 const RELOAD_MS = 1_000;

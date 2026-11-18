@@ -30,10 +30,30 @@ export interface AppBundleEnv {
   DATABASE: { connectionString: string };
   /**
    * The app's own hostname: the staff's pages are served there, and a public site's on its domain
-   * (`SANOMA_DOMAINS`); a request for any other host answers 404. Unset, every host that is no
-   * site's domain is the app's.
+   * (`SANOMA_DOMAINS`); a request for any other host answers 404. It is the instance's agent
+   * address too (`agentAddressFrom`): agents sign in at `https://<hostname>/mcp`. Unset, every
+   * host that is no site's domain is the app's, and its agent address is `SANOMA_HOST_URL`'s.
    */
   SANOMA_HOSTNAME?: string;
+  /**
+   * The Worker's own URL (its workers.dev URL, which the Cloudflare host binds on every upload,
+   * for the wakeup): the instance's agent address when it has no `SANOMA_HOSTNAME`
+   * (`agentAddressFrom`). With neither, the staff login serves no OAuth for `/mcp`.
+   */
+  SANOMA_HOST_URL?: string;
+  /**
+   * Behind a router (`agentAddressFrom`, read before the two above): the router's agent surface
+   * (`https://mcp.sanoma.example/mcp`), which is then this instance's agent address, and this
+   * company's id there. With `SANOMA_ROUTER_SECRET`.
+   */
+  SANOMA_AGENT_URL?: string;
+  SANOMA_COMPANY?: string;
+  /**
+   * The secret a router sends with what it forwards: on a company behind one, what its staff
+   * login believes the caller's address by; on an instance whose config has a `router`, what
+   * that router forwards with, and without which it forwards nothing.
+   */
+  SANOMA_ROUTER_SECRET?: string;
   /** `<site>=<hostname>,…`: the public sites' domains (`domainsText`). */
   SANOMA_DOMAINS?: string;
   /** The deployment's signing key, each login's key derived from it (`deploymentKey`). */

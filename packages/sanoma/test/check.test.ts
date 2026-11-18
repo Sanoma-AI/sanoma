@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "sanoma/testing";
-import { resolveConfig } from "sanoma/workflows";
+import { BUILT_IN_CLIENTS, resolveConfig } from "sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { check } from "../src/check.ts";
 import { type Loaded, loadConfig } from "../src/config.ts";
@@ -133,6 +133,50 @@ export default defineWorkflow({
     }
   }, 180_000);
 
+  it("refuses a router whose collection the company lacks or whose hostname is none, and passes one it can serve", async () => {
+    const copies: string[] = [];
+    /** A fixture copy with a collection of companies, and `router` in its config: a copy each, since Node imports a config once. */
+    const withRouter = (router: string) => {
+      const own = copyFixture();
+      copies.push(own);
+      const configFile = join(own, "sanoma.config.ts");
+      writeFileSync(
+        configFile,
+        readFileSync(configFile, "utf8").replace("connectors: [ghost],", `connectors: [ghost],\n  router: ${router},`),
+      );
+      mkdirSync(join(own, "resources"));
+      writeFileSync(
+        join(own, "resources/data.ts"),
+        'import { collection } from "sanoma/data";\n\nexport const companies = collection({ name: "companies", key: "slug", fields: { slug: "text", url: "text", status: { enum: ["pending", "live"] } } });\n',
+      );
+      return own;
+    };
+    try {
+      // As the bin resolves the config before it checks: a config that does not resolve is its error.
+      await expect(
+        loadIn(withRouter('{ hostname: "mcp.acme.example", companies: { collection: "customers" } }')),
+      ).rejects.toThrow(
+        'The config\'s `router.companies.collection`, "customers", is no collection of this company: declare it in resources/data.ts (it has companies)',
+      );
+      await expect(
+        loadIn(withRouter('{ hostname: "https://mcp.acme.example/mcp", companies: { collection: "companies" } }')),
+      ).rejects.toThrow('The config\'s `router.hostname`, "https://mcp.acme.example/mcp", is not a hostname');
+      const loaded = await loadIn(
+        withRouter(
+          '{ hostname: "mcp.acme.example", companies: { collection: "companies", live: { field: "status", is: "live" } } }',
+        ),
+      );
+      expect(loaded.resolved.router).toEqual({
+        hostname: "mcp.acme.example",
+        companies: { collection: "companies", url: "url", live: { field: "status", is: ["live"] } },
+      });
+      const result = await check(loaded, { databaseUrl, log: () => undefined });
+      expect(result).toEqual({ ok: true, problems: [], warnings: [], grid: expect.any(Object) });
+    } finally {
+      for (const own of copies) rmSync(own, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it("passes a company of apps: each app's workflows, collections, policies and scenarios, named by its folder", async () => {
     const own = copyFixture(fileURLToPath(new URL("../workflows/test/fixtures/company-apps/", import.meta.url)));
     try {
@@ -242,13 +286,23 @@ export const finance = sanoma.group({ name: "finance", members: [ada, claudeCode
       );
       const warning =
         "resources/people.ts#claudeCode: warning: resources/people.ts#claudeCode acts for whoever names it and is in the group finance: through it, whoever that is acts in that group too";
-      expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toMatchObject({
+      // The agent's id is the built-in Claude Code agent's, and it declares another client than
+      // Claude Code's own: that client is refused on a host while it does, a warning too.
+      const taken = expect.stringMatching(
+        /^resources\/people\.ts#claudeCode: warning: resources\/people\.ts#claudeCode has the id "claude-code", the id of Sanoma's built-in agent for Claude Code \(https:\/\/claude\.ai\/oauth\/claude-code-client-metadata\), without declaring that client: Claude Code is refused on a host while it does/,
+      );
+      const logged: string[] = [];
+      expect(await check(await loadIn(own), { databaseUrl, log: (line) => logged.push(line) })).toMatchObject({
         ok: false,
         problems: [
           'resources/people.ts#twin: resources/people.ts#twin declares the client "claude-code", which resources/people.ts#claudeCode declares: give each agent its own',
         ],
-        warnings: [warning],
+        warnings: [warning, taken],
       });
+      expect(logged.filter((line) => line.startsWith("built-in client: "))).toEqual([
+        "built-in client: Claude (https://claude.ai/oauth/mcp-oauth-client-metadata): accepted, as the built-in agent claude-ai",
+        "built-in client: Claude Code (https://claude.ai/oauth/claude-code-client-metadata): refused, since the agent claude-code has its built-in agent's id",
+      ]);
       // One client each: a warning alone, which does not fail the check.
       writeFileSync(
         people,
@@ -260,8 +314,37 @@ export const finance = sanoma.group({ name: "finance", members: [ada, claudeCode
       expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toMatchObject({
         ok: true,
         problems: [],
-        warnings: [warning],
+        warnings: [warning, taken],
       });
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("logs what the people's files make of each built-in client: one turned off, one replaced, neither a problem nor a warning", async () => {
+    const own = copyFixture();
+    const [claude, claudeCode] = BUILT_IN_CLIENTS.map((b) => b.client);
+    try {
+      mkdirSync(join(own, "resources"), { recursive: true });
+      writeFileSync(
+        join(own, "resources/people.ts"),
+        `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada" });
+export const noClaude = sanoma.agent({ id: "claude-ai", off: true });
+export const ours = sanoma.agent({ id: "our-claude", client: "${claudeCode}", onBehalfOf: ada });
+`,
+      );
+      const logged: string[] = [];
+      expect(await check(await loadIn(own), { databaseUrl, log: (line) => logged.push(line) })).toMatchObject({
+        ok: true,
+        problems: [],
+        warnings: [],
+      });
+      expect(logged.filter((line) => line.startsWith("built-in client: "))).toEqual([
+        `built-in client: Claude (${claude}): turned off`,
+        `built-in client: Claude Code (${claudeCode}): accepted, as the declared agent our-claude`,
+      ]);
     } finally {
       rmSync(own, { recursive: true, force: true });
     }

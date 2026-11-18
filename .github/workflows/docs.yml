@@ -1,4 +1,4 @@
-# The format check for pull requests that ci.yml skips, so a badly formatted doc cannot reach main,
+# The format check for pull requests that ci.yml skips (README.md, AGENTS.md and the docs' pages), so a badly formatted doc cannot reach main,
 # where it would fail CI and hold up a release.
 name: Docs
 on:
@@ -6,6 +6,7 @@ on:
     paths:
       - "**/README.md"
       - "**/AGENTS.md"
+      - "docs-site/src/content/docs/**"
 
 jobs:
   format:

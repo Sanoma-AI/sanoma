@@ -74,6 +74,7 @@ import {
   makersOf,
   type Op,
   checkConnector,
+  routerSecretFrom,
   setupOf,
   VENDOR,
   withSetup,
@@ -90,6 +91,7 @@ import {
   CHANGE_WORKFLOW,
   CHAT_WORKFLOW,
   DATA_VENDOR,
+  DOMAIN_NAME,
   FOLLOW_WORKFLOW,
   IMPORT_WORKFLOW,
   CONNECT_WORKFLOW,
@@ -97,6 +99,7 @@ import {
   LOGIN_CODE_WORKFLOW,
   RESHAPE_WORKFLOW,
   errorMessage,
+  siteAtHostname,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
@@ -191,6 +194,13 @@ export interface SanomaConfig {
    */
   wakeup?: true;
   /**
+   * Serve the agents' router on one more hostname of this instance's app (`Router`): the one
+   * address every company it lists is reached at by agents over MCP, each company still its own
+   * sign-in authority. With `SANOMA_ROUTER_SECRET`, its master secret, in the app's environment
+   * (`routerOptionsFrom`).
+   */
+  router?: Router;
+  /**
    * How the staff and visitor logins send a sign-in code: `sender`, an operation of a connector in
    * `connectors` with the effect `send` that takes `{ from, to, subject, text }`, such as
    * `resend.emails.send`, and `from`, the address codes are sent from (`login@acme.example` or
@@ -199,6 +209,46 @@ export interface SanomaConfig {
    * runtime's agent `login` runs; without it, nobody signs in by code.
    */
   login?: Login;
+}
+
+/**
+ * The config's `router`: the agents' router this instance's app serves (the app's `agent-router.ts`),
+ * stateless: it verifies nothing, signs nothing and keeps no credential or session. It answers
+ * on `hostname` alone, ahead of every login, and sends each request on to the company its
+ * authorization code, refresh token or access token names, by that company's id.
+ */
+export interface Router {
+  /**
+   * The hostname the router answers at, over HTTPS (`mcp.sanoma.example`): its issuer is
+   * `https://<hostname>` and its agent surface `https://<hostname>/mcp`, which each company
+   * behind it has as its agent address (`SANOMA_AGENT_URL`).
+   */
+  hostname: string;
+  /** The companies it routes to: records of one of this company's collections. */
+  companies: {
+    /**
+     * The collection's name (`resources/data.ts`). A record's key is the company's id (letters,
+     * digits, `-` and `_`: a record with any other key is never routed to), looked up exactly.
+     */
+    collection: string;
+    /**
+     * The field holding the company's base URL, an https origin with no path, user or query
+     * (`https://acme.sanoma.example`); a record with any other is not routed to. Default `url`.
+     * Whoever may write the collection says where each company's agents' traffic goes.
+     */
+    url?: string;
+    /**
+     * Which records are routed to: those whose `field` is `is` (one of them, for a list), such as
+     * `{ field: "status", is: "live" }`. Without it, every record with a URL.
+     */
+    live?: { field: string; is: string | readonly string[] };
+  };
+}
+
+/** The config's `router`, checked (`checkRouter`): its hostname in lower case, its fields named. */
+export interface ResolvedRouter {
+  hostname: string;
+  companies: { collection: string; url: string; live?: { field: string; is: readonly string[] } };
 }
 
 /** The config's `login`: the operation sign-in codes are sent with, and the address they are sent from. */
@@ -237,6 +287,8 @@ export interface ResolvedConfig {
   applyQueueName: string;
   /** The config's `login`, checked (`checkLogin`); the built-in `login-code` workflow sends through its `sender`, from its `from`. */
   login?: Login;
+  /** The config's `router`, checked (`checkRouter`): the app serves the agents' router on its hostname. */
+  router?: ResolvedRouter;
   /**
    * The operations the connectors declare, by id, the built-in `sanoma.change.*` (`changeOps`, in
    * every config) and the runtime's own a workflow may use (`sanoma`, runtime-ops.ts, in every
@@ -613,6 +665,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: sending a sign-in code, when the config names how.
   const login = config.login && checkLogin(config.login, ops, drivers, name);
   if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, name));
+  const router = config.router === undefined ? undefined : checkRouter(config.router, collections);
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   const bundled = rootSnapshot(root);
   return {
@@ -634,6 +687,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     queueName: `sanoma:${appName}`,
     applyQueueName: `sanoma:${appName}:apply`,
     ...(login && { login }),
+    ...(router && { router }),
     ops,
     drivers,
     driversByVendor,
@@ -704,6 +758,100 @@ function checkLogin(
       `The config's \`login.sender\`, ${op.id}, does not take an email as { from, to, subject, text } with \`login.from\`: ${fix}`,
     );
   return { sender: op, from };
+}
+
+/**
+ * The config's `router`, as the config's collections have it: refused unless `hostname` is a
+ * hostname (no scheme, port or path), `companies.collection` names a collection of the config,
+ * its `url` field (default `url`) is a field of that collection, and `live`, when given, names
+ * one of its fields and at least one value.
+ */
+function checkRouter(router: unknown, collections: ReadonlyMap<string, Collection>): ResolvedRouter {
+  const example =
+    '`router: { hostname: "mcp.acme.example", companies: { collection: "companies", live: { field: "status", is: "live" } } }`';
+  const { hostname, companies } = (router ?? {}) as { hostname?: unknown; companies?: unknown };
+  if (typeof hostname !== "string" || !DOMAIN_NAME.test(hostname.trim().toLowerCase())) {
+    throw new Error(
+      `The config's \`router.hostname\`, ${JSON.stringify(hostname)}, is not a hostname: write the one the router answers at over HTTPS, with no scheme, port or path, as in ${example}`,
+    );
+  }
+  const {
+    collection,
+    url = "url",
+    live,
+  } = (companies !== null && typeof companies === "object" ? companies : {}) as {
+    collection?: unknown;
+    url?: unknown;
+    live?: unknown;
+  };
+  if (typeof collection !== "string" || !collection) {
+    throw new Error(
+      `The config's \`router.companies.collection\` is not set: name the collection that lists the companies, as in ${example}`,
+    );
+  }
+  const listed = collections.get(collection);
+  if (!listed) {
+    const known = [...collections.keys()];
+    throw new Error(
+      `The config's \`router.companies.collection\`, ${JSON.stringify(collection)}, is no collection of this company: declare it in resources/data.ts` +
+        (known.length ? ` (it has ${known.join(", ")})` : ""),
+    );
+  }
+  const field = (name: unknown, what: string): string => {
+    if (typeof name !== "string" || !Object.hasOwn(listed.fields, name)) {
+      throw new Error(
+        `The config's \`${what}\`, ${JSON.stringify(name)}, is no field of the collection ${collection}: it has ${Object.keys(listed.fields).join(", ")}`,
+      );
+    }
+    return name;
+  };
+  const checked: ResolvedRouter = {
+    hostname: hostname.trim().toLowerCase(),
+    companies: { collection, url: field(url, "router.companies.url") },
+  };
+  if (live !== undefined) {
+    const { field: by, is } = (live !== null && typeof live === "object" ? live : {}) as {
+      field?: unknown;
+      is?: unknown;
+    };
+    const values: unknown[] = Array.isArray(is) ? is : [is];
+    if (!values.length || !values.every((value) => typeof value === "string" && value)) {
+      throw new Error(
+        `The config's \`router.companies.live.is\` is not a value or a list of them: write what a routed company's ${String(by)} is, as in ${example}`,
+      );
+    }
+    checked.companies.live = { field: field(by, "router.companies.live.field"), is: values as string[] };
+  }
+  return checked;
+}
+
+/**
+ * What a launcher serves a config's `router` with, from its environment: the one rule for the
+ * `sanoma` bin and the Worker. The master secret (`SANOMA_ROUTER_SECRET`, `routerSecretFrom`),
+ * left out when the variable is unset, and then the router forwards nothing. Throws, saying
+ * why, and then the launcher serves no router (the bin fails its start; the Worker logs it):
+ * for a hostname that is the app's own (`SANOMA_HOSTNAME`) or a public site's domain
+ * (`domains`, `SANOMA_DOMAINS` read), where the router would answer in the app's or the site's
+ * place, and for a secret that is none.
+ */
+export function routerOptionsFrom(
+  { hostname }: Pick<ResolvedRouter, "hostname">,
+  env: { SANOMA_HOSTNAME?: string; SANOMA_ROUTER_SECRET?: string },
+  domains: Readonly<Record<string, string>> = {},
+): { secret?: string } {
+  if (env.SANOMA_HOSTNAME?.trim().toLowerCase() === hostname) {
+    throw new Error(
+      `The config's \`router.hostname\`, ${hostname}, is SANOMA_HOSTNAME, the app's own hostname: give the router a hostname of its own, such as mcp.${hostname}`,
+    );
+  }
+  const site = siteAtHostname(hostname, domains);
+  if (site !== undefined) {
+    throw new Error(
+      `The config's \`router.hostname\`, ${hostname}, is the domain of the public site ${site} (SANOMA_DOMAINS): give the router a hostname of its own`,
+    );
+  }
+  const secret = routerSecretFrom(env);
+  return { ...(secret !== undefined && { secret }) };
 }
 
 /**

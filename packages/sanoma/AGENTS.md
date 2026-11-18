@@ -4,6 +4,7 @@ This package owns the `sanoma` bin a company repo runs, checks and exports itsel
 
 ## Read when needed
 
+- The guides are the docs site's pages, [`docs-site/src/content/docs`](../../docs-site/src/content/docs), served at docs.sanoma.work ([docs-site](../../docs-site/README.md)); the package does not ship them. The READMEs keep each moved section's heading with a line naming its page.
 - [README](README.md): the commands, [Postgres](README.md#postgres), [`.env.example`](README.md#envexample), [the lint](README.md#the-lint), [sites](README.md#sites), [generated files](README.md#generated-files) and [dev mode](README.md#dev-mode).
 - [Source map](src/AGENTS.md): one module per concern, the bin on top.
 - [Test map](test/AGENTS.md): the fixture repo and how the tests wire it.

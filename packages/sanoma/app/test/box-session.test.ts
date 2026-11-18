@@ -309,7 +309,7 @@ describe("personBox", () => {
       warnings: [],
     });
     const step = { resolved, by, signal: new AbortController().signal } as unknown as ChatTurnContext;
-    const turn = { step, chat: { id: "c" } as Chat, messages: [] };
+    const turn = { step, chat: { id: "c" } as Chat, messages: [], message: "m" };
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       for (const stream of [harnessEngine("pi")(turn), acpEngine("copilot")(turn)]) {
