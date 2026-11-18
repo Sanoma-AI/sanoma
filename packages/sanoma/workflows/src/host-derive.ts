@@ -7,7 +7,7 @@ import { databaseUrlSecret } from "./database.ts";
 import { statusesOf } from "./env.ts";
 import type { Driver } from "./op.ts";
 import type { DeclaredResource, ResourceProblem } from "./description.ts";
-import { runtimeImage, sourceKeyId } from "./host.ts";
+import { type HostSpec, ROUTER_SECRET, routingProblems, runtimeImage, sourceKeyId } from "./host.ts";
 import type { Bindings } from "./lockfile.ts";
 import { type Resource, valueAt } from "./resource.ts";
 import { secret, type Secret, type Secrets } from "./secret.ts";
@@ -58,6 +58,13 @@ export interface HostFacts {
   origin?: string;
   /** Each public site's domain, by site name (`siteDomains`). */
   domains: Readonly<Record<string, string>>;
+  /** The hostname of the agents' router the config serves (`router.hostname`), when it serves one. */
+  router?: string;
+  /**
+   * True when a host is given `ROUTER_SECRET` (`needsRouterSecret`) and it has no value where
+   * apply runs: the host cannot be given it, as a binding given to the hosts with none.
+   */
+  routerSecretUnset?: boolean;
   /** True when the config keeps its secrets in the built-in store, which `SANOMA_SECRETS_KEY` unlocks. */
   builtInStore: boolean;
   /**
@@ -185,6 +192,14 @@ export function wokenBy(
   });
 }
 
+/**
+ * Whether a host is given `ROUTER_SECRET`: it serves the config's router (its type takes
+ * `inputs.router`, and the config has one at `router`) or declares the one it is behind (`inputs.agents`).
+ */
+const needsRouterSecret = ({ inputs }: HostSpec, desired: Record<string, unknown>, router: string | undefined) =>
+  (inputs.router !== undefined && router !== undefined) ||
+  (inputs.agents !== undefined && valueAt(desired, inputs.agents) != null);
+
 /** Sets `value` at the dotted `path` of `into`, making the objects on the way. */
 function setAt(into: Record<string, unknown>, path: string, value: unknown) {
   const keys = path.split(".");
@@ -213,6 +228,9 @@ const nameOf = (repository: string) =>
  * - `source`, left out: the one repository its own data file declares (a reference to it, of a
  *   type its `source` names), else the repository the app runs from (`origin`);
  * - `domains`: each public site's domain (`siteDomains`);
+ * - the config's router's hostname (`inputs.router`), and among `secrets`, always, `ROUTER_SECRET`
+ *   for a host that serves that router (its master secret) or declares one it is behind
+ *   (`inputs.agents`: this company's own secret there);
  * - `secrets` (unless it binds its own bootstrap), markers only: the declared `database`'s URL as
  *   `SANOMA_DATABASE_URL`, the runtime's keys (the signing key the config binds, else the host's
  *   own, generated at its create; the encryption key with the built-in store), the source key for
@@ -231,7 +249,10 @@ const nameOf = (repository: string) =>
  * Problems: a host with no `database`, a name (none to tell, or another host's), an image or a
  * source that cannot be told, a credential its vendor's driver reads from this machine's
  * environment that nothing binds, a binding given to it (`host: true`) with no value where apply
- * runs, a private repository it has no deploy key for, two hosts that would attach the sites' domains.
+ * runs, a private repository it has no deploy key for, two hosts that would attach the sites'
+ * domains, two that would serve the config's router, a router's hostname that is the host's own
+ * or a site's and a host that serves the router and is declared behind one (`routingProblems`),
+ * and a router's secret with no value where apply runs.
  */
 export function deriveHosts(
   resources: DeclaredResource[],
@@ -252,6 +273,20 @@ export function deriveHosts(
       problems.push({
         ...r.at,
         message: `${r.at.export}: ${attaching.length} hosts would attach the public sites' domains: declare one host that derives, the production one`,
+      });
+    }
+  }
+  // One host serves the config's router: two would each attach its hostname and answer for it.
+  const routing = resources.filter((r) => {
+    const host = types.get(`${r.vendor}.${r.type}`)?.host;
+    return host?.derives && host.inputs.router !== undefined;
+  });
+  if (routing.length > 1 && facts.router !== undefined) {
+    for (const r of routing) {
+      out.leftOut?.add(r.id);
+      problems.push({
+        ...r.at,
+        message: `${r.at.export}: ${routing.length} hosts would serve the config's router at ${facts.router}: a config with \`router\` takes one host that derives (declare the others from a company, a config, without it)`,
       });
     }
   }
@@ -323,6 +358,17 @@ export function deriveHosts(
       setAt(desired, inputs.domains, { ...facts.domains });
     }
 
+    if (inputs.router !== undefined && facts.router !== undefined) {
+      setAt(desired, inputs.router, facts.router);
+      const said = routingProblems({
+        router: facts.router,
+        hostname: inputs.hostname === undefined ? undefined : valueAt(desired, inputs.hostname),
+        domains: facts.domains,
+        agents: inputs.agents === undefined ? undefined : valueAt(desired, inputs.agents),
+      });
+      for (const message of said) problem(message);
+    }
+
     if (spec.bindsBootstrap || inputs.secrets === undefined) {
       if (blocked) out.leftOut?.add(r.id);
       continue;
@@ -344,6 +390,16 @@ export function deriveHosts(
       : secret(HOST_SIGNING_KEY, { generate: true });
     if (facts.builtInStore) secrets.SANOMA_SECRETS_KEY = secret("SANOMA_SECRETS_KEY");
     if (keyed) secrets[SOURCE_KEY] = secret(SOURCE_KEY);
+    // The router's secret, always: its master for a host that serves the config's router, this
+    // company's own for one declared behind a router. With no value, the host is left out rather
+    // than deployed without it: an apply from a machine that cannot read it would unbind it.
+    if (needsRouterSecret(spec, desired, facts.router)) {
+      secrets[ROUTER_SECRET] = secret(ROUTER_SECRET);
+      if (facts.routerSecretUnset)
+        problem(
+          `${ROUTER_SECRET} has no value where apply runs, so the host cannot be given it: store it, or bind it in sanoma.config.ts, \`secrets: { bindings: { ${ROUTER_SECRET}: { env: "${ROUTER_SECRET}" } } }\`, and set that variable (${inputs.agents !== undefined && valueAt(desired, inputs.agents) != null ? "this company's own secret at the router it is behind" : "the master secret of the router it serves"})`,
+        );
+    }
     const wakeup = wokenBy(r, resources, types);
     if (wakeup) {
       secrets[WAKEUP_TOKEN] = secret(WAKEUP_TOKEN);
@@ -467,6 +523,8 @@ export async function hostFacts(options: {
   /** The config's secret bindings: whether it binds `SANOMA_SIGNING_KEY`, and those given to the hosts (`host: true`). */
   bindings?: SecretConfiguration["bindings"];
   sender?: string;
+  /** The hostname of the agents' router the config serves (`router.hostname`), when it serves one. */
+  router?: string;
   mint: boolean;
   /** A sandbox run's: its calls resolve no stored value, so a binding given to the hosts with none is no problem. */
   sandbox?: boolean;
@@ -492,7 +550,9 @@ export async function hostFacts(options: {
   );
   const delivered = Object.values(hostEnvironment);
   // Only what the store holds: a marker for a name it does not would fail the host's deploy.
-  const held = await stored([...statuses.map((c) => c.name), ...delivered]);
+  // The router's secret, read only when a host is given it.
+  const routed = hosts.some((h) => needsRouterSecret(typeOf(h)!.host!, h.desired, options.router));
+  const held = await stored([...statuses.map((c) => c.name), ...delivered, ...(routed ? [ROUTER_SECRET] : [])]);
   const hostEnvironmentUnset = reading && !options.sandbox ? delivered.filter((name) => !held.has(name)) : [];
   const carried = new Map<string, string[]>();
   const unbound = new Map<string, string[]>();
@@ -526,6 +586,8 @@ export async function hostFacts(options: {
     ...(version !== undefined && { version }),
     ...(origin !== undefined && { origin }),
     domains,
+    ...(options.router !== undefined && { router: options.router }),
+    ...(routed && reading && !options.sandbox && !held.has(ROUTER_SECRET) && { routerSecretUnset: true }),
     builtInStore: options.builtInStore,
     carried,
     ...(unbound.size > 0 && { unbound }),

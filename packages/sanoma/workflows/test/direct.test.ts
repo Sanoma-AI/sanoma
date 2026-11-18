@@ -105,6 +105,12 @@ describe("isDirect", () => {
       true,
     ],
     ["a resource type's read", { id: "acme.widget.get", vendor: "acme", resource: "widget", effect: "read" }, false],
+    // A workflow's step only, for now: a page does not call one.
+    [
+      "a company operation's read",
+      { id: "operations.quote.run", vendor: "operations", resource: "quote", effect: "read" },
+      false,
+    ],
   ] as const)("is %s: %o", (_, op, direct) => {
     expect(isDirect(op, types)).toBe(direct);
   });

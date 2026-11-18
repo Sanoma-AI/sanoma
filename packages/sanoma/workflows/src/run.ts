@@ -96,7 +96,7 @@ export interface WorkerState {
    * and each worker's config says what it runs. Scenarios name them too.
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
-  /** Each workflow's outline, by name: read once when the worker starts, every run is held to it (`call_not_in_outline`). */
+  /** Each workflow's outline, by name, and each company operation's, by id: read once when the worker starts, every run is held to it (`call_not_in_outline`). */
   outlines: Map<string, WorkflowOutline>;
   /**
    * Starts a run of the workflow `name` as `runId` (an id the run already has returns it): how a

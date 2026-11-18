@@ -2,7 +2,7 @@
 import "@tanstack/react-start/server-only";
 import { calculatePKCECodeChallenge, generateRandomCodeVerifier, generateRandomState } from "oauth4webapi";
 import { errorMessage, type Principal, sameSecret } from "sanoma/workflows";
-import { isLoopback, slugged } from "sanoma/workflows/shared";
+import { cloudSlugOf, isLoopback, slugged } from "sanoma/workflows/shared";
 import { ApiError, INFRA, type SanomaSignIn } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { companyOf } from "../lib/names.ts";
@@ -67,12 +67,13 @@ function pendingOf(stored: string | undefined): Pending | undefined {
 }
 
 /**
- * The company's slug at Sanoma Cloud, its address `<slug>.sanoma.work`: the name `infra.ts`'s host
- * declares, else one made of the company's name.
+ * The company's slug at Sanoma Cloud, `<slug>` of its address `<slug>.sanoma.work`: the slug of
+ * the `hostname` `infra.ts`'s host declares, else one made of the company's name.
  */
-export const slugOf = ({ snapshot }: Pick<AppContext, "snapshot">) => {
-  const declared = snapshot.description.resources.find((r) => r.id === `${INFRA}#host`)?.desired.name;
-  return typeof declared === "string" ? declared : slugged(snapshot.description.name).slice(0, 40).replace(/-+$/, "");
+const slugOf = ({ snapshot }: Pick<AppContext, "snapshot">) => {
+  const { hostname } = snapshot.description.resources.find((r) => r.id === `${INFRA}#host`)?.desired ?? {};
+  const declared = typeof hostname === "string" ? cloudSlugOf(hostname) : undefined;
+  return declared ?? slugged(snapshot.description.name).slice(0, 40).replace(/-+$/, "");
 };
 
 /**

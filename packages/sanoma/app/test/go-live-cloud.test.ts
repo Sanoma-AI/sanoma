@@ -24,12 +24,13 @@ import { appSteps } from "../src/steps/index.ts";
 import { pageApi } from "./page-api.ts";
 
 // Going live on Sanoma Cloud end to end, on the Cloud's fake, from a company the template made
-// (`infra.ts` declaring the Cloud's database and host, named `acme`) with nothing but a first
-// commit: the built-in `go-live-cloud` on a worker given the app's steps, called as Hosting calls
-// it. Refused without a Cloud token; the address checked at the Cloud; a new address written and
-// committed; the repository made in the Cloud's account through the run's `ctx` (a bare
-// repository here stands in for GitHub's), `origin` set to it and `main` pushed; the database and
-// the host applied, a host that does not start failing the run, Retry going live. Needs Postgres.
+// (`infra.ts` declaring the Cloud's database and host, at `acme.sanoma.work`) with nothing but a
+// first commit: the built-in `go-live-cloud` on a worker given the app's steps, called as Hosting
+// calls it. Refused without a Cloud token; the address checked at the Cloud; a new address written
+// and committed; the company and its repository made in the Cloud's account through the run's
+// `ctx` (a bare repository here stands in for GitHub's), `origin` set to it and `main` pushed; the
+// database and the host applied, both bound to the company's id, a host that does not start
+// failing the run, Retry at yet another address going live there. Needs Postgres.
 
 const databaseUrl = testDatabaseUrl("go_live_cloud");
 const dir = mkdtempSync(join(tmpdir(), "sanoma-go-live-cloud-"));
@@ -57,6 +58,8 @@ git("add", "--all");
 git("commit", "--quiet", "-m", "First");
 
 const fake = fakeCloud({ owner: "sanoma-test", taken: ["taken"] });
+/** The id the fake gives the company going live makes: one token, one company. */
+const COMPANY = "fake-company-1";
 
 // A database of its own, made again for each run of the file: a run an earlier one left would be the latest.
 beforeAll(async () => {
@@ -119,7 +122,7 @@ describe("going live on Sanoma Cloud", () => {
     await expect(goLive({})).rejects.toMatchObject({
       body: { error: expect.stringContaining("Sign in to Sanoma first, on Hosting, or paste a Cloud token there") },
     });
-    expect(fake.state.companies).toEqual({});
+    expect(fake.state.company).toBeUndefined();
     expect(git("remote")).toBe("");
     expect(git("log", "-1", "--format=%s")).toBe("First");
     // A run that failed before its apply is what Hosting shows: Go live failed, and why.
@@ -148,30 +151,31 @@ describe("going live on Sanoma Cloud", () => {
     await expect(goLive({ address: "acme-co" })).rejects.toMatchObject({
       body: { error: expect.stringContaining("Apply did not finish") },
     });
-    // The address written in the file and committed, as the person who went live.
+    // The address written in the file and committed, as the person who went live: the host's alone.
     const infra = readFileSync(join(root, INFRA), "utf8");
-    expect(infra).toContain('cloud.database({ name: "acme-co" })');
-    expect(infra).toContain('name: "acme-co"');
+    expect(infra).toContain('cloud.database({ region: "us-east" })');
     expect(infra).toContain('hostname: "acme-co.sanoma.work"');
+    expect(infra).not.toMatch(/\bname:/);
     expect(git("log", "-1", "--format=%an|%s", "--", INFRA)).toBe("alice via Sanoma|Go live at acme-co.sanoma.work");
     // The repository the Cloud's account made, `origin`, and `main` there.
     expect(git("config", "remote.origin.url")).toBe("https://github.com/sanoma-test/acme-co.git");
-    expect(fake.state.companies["acme-co"]?.repository).toMatchObject({ owner: "sanoma-test", name: "acme-co" });
-    // The database made and bound; the host not.
+    expect(fake.state.company).toMatchObject({
+      id: COMPANY,
+      slug: "acme-co",
+      repository: { owner: "sanoma-test", name: "acme-co" },
+    });
+    // The database made and bound to the company's id; the host not.
     const { bindings } = readLockfile(root);
-    expect(bindings[`${INFRA}#store`]).toMatchObject({ type: "cloud.database", id: "acme-co" });
+    expect(bindings[`${INFRA}#store`]).toMatchObject({ type: "cloud.database", id: COMPANY });
     expect(bindings[`${INFRA}#host`]).toBeUndefined();
     const state = await companyState(await now());
     expect(state).toMatchObject({ state: "failed", run: { workflow: "go-live-cloud", status: "failed" } });
     expect(state.run?.error).toContain("did not start");
-    // Its address cannot change now that its database is made.
-    await expect(goLive({ address: "acme-two" })).rejects.toMatchObject({
-      body: { error: expect.stringContaining("its address cannot change now") },
-    });
   });
 
-  it("goes live on Retry: the host made at its address, the run's repository call in the ledger, never the token", async () => {
-    const { runId } = (await goLive({})) as { runId: string };
+  it("goes live on Retry at another address: the host made and moved there, one id bound twice, never the token", async () => {
+    // The database is bound by the company's id, so the address still changes: a rename.
+    const { runId } = (await goLive({ address: "acme-two" })) as { runId: string };
     expect(runId).toMatch(/:apply$/);
     const head = git("rev-parse", "main");
     const pushed = execFileSync("git", ["rev-parse", "main"], {
@@ -180,9 +184,18 @@ describe("going live on Sanoma Cloud", () => {
     }).trim();
     // What apply committed after the push is the checkout's; what went live is on the remote.
     expect(git("merge-base", "--is-ancestor", pushed, head)).toBe("");
+    // The database and the host bound to the one company's id, which kept its repository's name.
     const { bindings } = readLockfile(root);
-    expect(bindings[`${INFRA}#host`]).toMatchObject({ type: "cloud.host", id: "acme-co" });
-    expect(fake.state.companies["acme-co"]).toMatchObject({ database: {}, host: {}, repository: {} });
+    expect(bindings[`${INFRA}#store`]).toMatchObject({ type: "cloud.database", id: COMPANY });
+    expect(bindings[`${INFRA}#host`]).toMatchObject({ type: "cloud.host", id: COMPANY });
+    expect(fake.state.company).toMatchObject({
+      id: COMPANY,
+      slug: "acme-two",
+      database: {},
+      host: {},
+      repository: { name: "acme-co" },
+    });
+    expect(readFileSync(join(root, INFRA), "utf8")).toContain('hostname: "acme-two.sanoma.work"');
     const state = await companyState(await now());
     expect(state.state).toBe("live");
     expect((await goLiveProgress(await now())).replaces).toBe(false);

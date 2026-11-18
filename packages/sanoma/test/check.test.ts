@@ -177,11 +177,20 @@ export default defineWorkflow({
     }
   }, 180_000);
 
-  it("passes a company of apps: each app's workflows, collections, policies and scenarios, named by its folder", async () => {
+  it("passes a company of apps: each app's workflows, operations, collections, policies and scenarios, named by its folder", async () => {
     const own = copyFixture(fileURLToPath(new URL("../workflows/test/fixtures/company-apps/", import.meta.url)));
     try {
       const loaded = await loadIn(own);
-      expect(loaded.config.workflows?.map((w) => w.name)).toEqual(["introduce", "crm.follow-up", "shop.follow-up"]);
+      expect(loaded.config.workflows?.map((w) => w.name)).toEqual([
+        "introduce",
+        "offer",
+        "crm.follow-up",
+        "shop.follow-up",
+      ]);
+      expect(loaded.config.operations?.map((op) => op.id)).toEqual([
+        "operations.quote.run",
+        "operations.crm.score.run",
+      ]);
       expect(loaded.config.collections?.map((c) => c.name)).toEqual(["crm.customers", "shop.customers"]);
       const log: string[] = [];
       const result = await check(loaded, { databaseUrl, log: (l) => log.push(l) });
@@ -190,11 +199,16 @@ export default defineWorkflow({
       expect(result.grid!.workflows.map((w) => [w.id, w.ops.map((op) => op.id)])).toEqual([
         ["crm.follow-up", ["data.crm.customers.get", "data.crm.customers.save"]],
         ["introduce", ["data.shop.customers.get", "data.crm.customers.save"]],
+        ["offer", ["operations.quote.run", "operations.crm.score.run"]],
         ["shop.follow-up", ["data.shop.customers.get"]],
       ]);
       // The site under apps/crm/sites builds at /sites/crm/pipeline, and its tsc writes sites/tsconfig.json.
-      expect(log).toEqual(expect.arrayContaining(["build crm/pipeline", "oxlint workflows sites apps"]));
+      expect(log).toEqual(expect.arrayContaining(["build crm/pipeline", "oxlint workflows operations sites apps"]));
       expect(log).toContain("passed apps/crm/scenarios/follow-up.feature › A customer is followed up");
+      // A workflow using the company's operations, its scenario over the calls they make.
+      expect(log).toContain(
+        "passed scenarios/offer.feature › A shop customer the CRM knows gets the lower price and a score",
+      );
       expect(readFileSync(join(own, ".sanoma/schema.cedarschema"), "utf8")).toContain(
         'action "data.crm.customers.save"',
       );

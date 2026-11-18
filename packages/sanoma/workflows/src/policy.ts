@@ -29,7 +29,9 @@ export interface PolicyCall {
   actor: Principal;
   /**
    * The run so far: a copy of its approvals, including those the policy asked for earlier.
-   * A policy request has `requestedBy: "policy"` and the `op` it held.
+   * A policy request has `requestedBy: "policy"` and the `op` it held. `workflow` is the run's
+   * workflow, or for a call a company operation's body makes, that operation's id
+   * (`operations.<name>.run`): the rules read only whether it is the built-in `call`.
    */
   run: { id: string; workflow: string; approvals: readonly ApprovalState[] };
   /** For a collection's `save` or `delete`: the record as it was, when there was one. */

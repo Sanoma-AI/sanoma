@@ -35,7 +35,7 @@ import {
   type SelfStop,
   stopWhenIdle,
 } from "./deadlines.ts";
-import type { WorkflowDefinition } from "./define.ts";
+import type { Operation, WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorCode, errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
@@ -50,7 +50,7 @@ import {
   type WorkerState,
   type WorkflowOutline,
 } from "./run.ts";
-import type { DatabasePreparation } from "./op.ts";
+import { type DatabasePreparation, isOperation } from "./op.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
 import { approverLabel, errorMessage, oneAtATime, RENEWAL_AGENT, WORKFLOW_ACTION } from "./shared.ts";
@@ -286,7 +286,11 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
     ledger: ledger.store,
     secrets: storedSecrets,
     workflows: resolved.workflows,
-    outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
+    outlines: new Map([
+      ...[...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)] as const),
+      // Each company operation's, by its id: its body's calls are placed in it (`operationCall`).
+      ...[...resolved.ops.values()].filter(isOperation).map((op) => [op.id, outlineOf(op)] as const),
+    ]),
     // `registered` is filled below, before any run starts: every name of this config's is registered then.
     startRun: async (name, runId, args) => {
       const fn = registered.get(name) as unknown as ((args: RunArgs) => Promise<unknown>) | undefined;
@@ -495,15 +499,15 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
 }
 
 /**
- * The workflow's outline, read from its file, which every run is held to. A workflow whose
- * outline cannot be read does not start: nothing could say where its calls are.
+ * The workflow's outline, or a company operation's, read from its file, which every run is held
+ * to. A workflow or an operation whose outline cannot be read does not start: nothing could say
+ * where its calls are.
  */
-function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
+function outlineOf(wf: WorkflowDefinition<any, any> | Operation): WorkflowOutline {
   const { outline, source } = outlineWithSource(wf, readSource(wf.file));
   if ("error" in outline) {
-    throw new Error(
-      `Workflow "${wf.name}" cannot be outlined, so its runs could not be held to its code: ${outline.error}`,
-    );
+    const what = isOperation(wf) ? `Operation "${wf.id}"` : `Workflow "${wf.name}"`;
+    throw new Error(`${what} cannot be outlined, so its runs could not be held to its code: ${outline.error}`);
   }
   return { file: outline.file, lineStarts: lineStartsOf(source!), calls: callsOf(outline.nodes) };
 }

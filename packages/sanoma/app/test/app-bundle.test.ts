@@ -147,6 +147,18 @@ export default defineWorkflow({
 });
 `;
 
+/** The company's own operation, a file of operations/: the bundle imports it as it imports a workflow. */
+const TIDY = `import { defineOperation, z } from "sanoma";
+
+export default defineOperation({
+  name: "tidy",
+  description: "Tidies a name for the nightly run",
+  input: z.object({ name: z.string() }),
+  uses: [],
+  run: async (_ctx, { name }) => name.trim(),
+});
+`;
+
 /** A component of the members site that calls `api`, on a click. */
 const GREET = `import { api } from "sanoma/site";
 
@@ -174,6 +186,7 @@ function company(): { repo: string; config: ReturnType<typeof defineConfig> } {
   write(join(repo, "resources", "people.ts"), PEOPLE);
   write(join(repo, "workflows", "nightly.ts"), NIGHTLY);
   write(join(repo, "workflows", "render-invoice.ts"), INVOICE);
+  write(join(repo, "operations", "tidy.ts"), TIDY);
   write(join(repo, "sites", "members", "components", "greet.tsx"), GREET);
   write(join(repo, "sites", "members", "routes", "greet.tsx"), GREET_PAGE);
   // The agents' router, on a hostname of its own, over a collection that lists the companies.
@@ -211,6 +224,8 @@ let worker: Awaited<ReturnType<typeof unstable_startWorker>>;
 let appless: Awaited<ReturnType<typeof unstable_startWorker>>;
 /** The same upload declared without a hostname: no `SANOMA_HOSTNAME`, its own URL in `SANOMA_HOST_URL`. */
 let unnamed: Awaited<ReturnType<typeof unstable_startWorker>>;
+/** The same upload behind a router, with the bindings `cloudflare.host` writes for `agents: { url, company, secret }`. */
+let routed: Awaited<ReturnType<typeof unstable_startWorker>>;
 
 type Worker = Awaited<ReturnType<typeof unstable_startWorker>>;
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -390,7 +405,7 @@ beforeAll(async () => {
     SANOMA_ROUTER_SECRET: ROUTER_SECRET,
   };
   const { SANOMA_HOSTNAME: _hostname, ...withoutHostname } = vars;
-  [worker, appless, unnamed] = await Promise.all([
+  [worker, appless, unnamed, routed] = await Promise.all([
     start("wrangler.json", { ...vars, DATABASE: { connectionString: databaseUrl } }),
     start("wrangler-appless.json", vars),
     start("wrangler-unnamed.json", {
@@ -400,12 +415,22 @@ beforeAll(async () => {
       SANOMA_HOST_URL: `${WORKERS_DEV}/`,
       DATABASE: { connectionString: databaseUrl },
     }),
+    start("wrangler-routed.json", {
+      ...withoutHostname,
+      // As the Cloudflare host binds them: its own URL always, the router's `/mcp`, this company's
+      // id there, and this company's own secret, which the router's operator derives from its master.
+      SANOMA_HOST_URL: WORKERS_DEV,
+      SANOMA_AGENT_URL: `https://${ROUTER_HOSTNAME}/mcp`,
+      SANOMA_COMPANY: "acme",
+      SANOMA_ROUTER_SECRET: await routerSecretFor(ROUTER_SECRET, "acme"),
+      DATABASE: { connectionString: databaseUrl },
+    }),
   ]);
-  await Promise.all([worker.ready, appless.ready, unnamed.ready]);
+  await Promise.all([worker.ready, appless.ready, unnamed.ready, routed.ready]);
 }, 300_000);
 
 afterAll(async () => {
-  await Promise.all([worker?.dispose(), appless?.dispose(), unnamed?.dispose()]);
+  await Promise.all([worker?.dispose(), appless?.dispose(), unnamed?.dispose(), routed?.dispose()]);
   for (const dir of temporary) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -473,6 +498,8 @@ describe("buildAppBundle", () => {
   it("carries the workflow files' workflows and what a connector reads of its package, as Node loads them", () => {
     const code = bundle.modules.map(({ content }) => Buffer.from(content, "base64").toString()).join("\n");
     expect(code).toContain('tidied: "nightly"');
+    // The operations' files' operations, as the workflows'.
+    expect(code).toContain("Tidies a name for the nightly run");
     // Only package.json says it.
     expect(code).toContain("Fixture login");
     // A workflow that renders an invoice, without the PDF renderer (`OPTIONAL`).
@@ -659,6 +686,23 @@ describe("buildAppBundle", () => {
     // The token is that address's: the Worker with a hostname, on the same tables and keys, refuses it.
     const elsewhere = await listTools(secure, `https://${HOSTNAME}`, { authorization: `Bearer ${access_token}` });
     expect(elsewhere.status).toBe(401);
+  });
+
+  it("takes a router's address from the three bindings the Cloudflare host writes for a company behind one", async () => {
+    const app = WORKERS_DEV;
+    const routerUrl = `https://${ROUTER_HOSTNAME}`;
+    const at = through(() => routed);
+    // The 401 sends a client to the router's metadata, not to this Worker's own URL, which it also holds.
+    const challenged = await listTools(at, app, {});
+    expect(challenged.status).toBe(401);
+    expect(challenged.headers.get("www-authenticate")).toBe(
+      `Bearer resource_metadata="${routerUrl}/.well-known/oauth-protected-resource/mcp"`,
+    );
+    // Its own RFC 9728 document names the router's `/mcp` as the resource and the router as its issuer.
+    expect(await (await at(`${app}/.well-known/oauth-protected-resource/mcp`)).json()).toMatchObject({
+      resource: `${routerUrl}/mcp`,
+      authorization_servers: [routerUrl],
+    });
   });
 
   it("answers a page of a site with a login from the assets, whoever asks, and renders one that imports a call on each request", async () => {

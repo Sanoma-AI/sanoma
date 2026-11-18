@@ -186,11 +186,11 @@ test("the list says whether each company is Local or Live, and runs here, a live
   mkdirSync(join(live, "resources", "sanoma"), { recursive: true });
   writeFileSync(
     join(live, "resources", "sanoma.lock.json"),
-    JSON.stringify({ "resources/sanoma/infra.ts#host": { type: "cloud.host", id: "maple" } }),
+    JSON.stringify({ "resources/sanoma/infra.ts#host": { type: "cloud.host", id: "c1" } }),
   );
   writeFileSync(
     join(live, "resources", "sanoma", "infra.ts"),
-    `export const host = cloud.host({ name: "maple", hostname: "maple.sanoma.work" });\n`,
+    `export const host = cloud.host({ hostname: "maple.sanoma.work" });\n`,
   );
   mkdirSync(join(work, "user-data"));
   writeFileSync(

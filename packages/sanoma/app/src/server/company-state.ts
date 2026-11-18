@@ -4,7 +4,7 @@ import type { SanomaClient } from "sanoma/workflows";
 import { DRIFT_WORKFLOW, GO_LIVE_CLOUD_WORKFLOW, GO_LIVE_HOST_WORKFLOW } from "sanoma/workflows/shared";
 import type { CompanyState } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { companyStateOf, hostAt } from "../lib/company-state.ts";
+import { companyStateOf, declaredHostOf, hostAt } from "../lib/company-state.ts";
 import { answers, appliedHost, goLiveRunOf, KEYS } from "./go-live.ts";
 
 // The facts a company's state is read from (`companyStateOf`): the lockfile's bindings and
@@ -64,18 +64,17 @@ async function healthy(app: AppContext, host: { url: string; wakeUrl?: string })
  */
 export async function companyState(app: AppContext, { force = false } = {}): Promise<CompanyState> {
   const { snapshot, resolved, client, place } = app;
-  const declaredHost = snapshot.description.resources.find((r) => r.id === KEYS.host);
-  const type = declaredHost && resolved.types.get(`${declaredHost.vendor}.${declaredHost.type}`);
+  const declaredHost = declaredHostOf(snapshot.description.resources, resolved.types);
   const run = await goLiveRun(client);
   const facts = {
     bound: snapshot.bound,
     place,
-    declared: type?.host ? (type.host.bindsBootstrap ? "cloud" : "own") : null,
+    declared: declaredHost?.place ?? null,
     repository: snapshot.repository?.remote !== undefined || snapshot.bound.includes(KEYS.repo),
     run,
   } as const;
   if (!force) return companyStateOf(facts);
-  const hostname = declaredHost?.desired.hostname;
+  const hostname = declaredHost?.resource.desired.hostname;
   const [applied, checked] = await Promise.all([appliedHost(client), checkedHost(client)]);
   const at = hostAt({ applied, checked, hostname: typeof hostname === "string" ? hostname : undefined });
   return companyStateOf({ ...facts, host: at && { url: at.url, healthy: await healthy(app, at) } });

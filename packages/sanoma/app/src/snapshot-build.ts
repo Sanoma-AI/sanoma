@@ -9,6 +9,7 @@ import {
   errorMessage,
   filesUnder,
   hostRootFacts,
+  isOperation,
   kindDirs,
   readRootSnapshot,
   type ResolvedConfig,
@@ -109,9 +110,10 @@ async function made(config: SanomaConfig, resolved: ResolvedConfig, options: Sna
     }
   };
   const sources: Record<string, string> = {};
-  for (const workflow of full.workflows) {
-    if (!("file" in workflow.outline)) continue;
-    const file = workflow.outline.file;
+  // Each workflow's file, and each company operation's.
+  for (const { outline } of [...full.workflows, ...full.ops]) {
+    if (outline === undefined || !("file" in outline)) continue;
+    const file = outline.file;
     const found = text(file);
     if (found !== undefined) sources[file] = found.replaceAll("\r\n", "\n");
   }
@@ -184,7 +186,10 @@ export async function scenariosOf(resolved: ResolvedConfig): Promise<ScenariosRe
   }
 }
 
-/** The repository's remote, its credentials left out, and each workflow's file in it. A remote git cannot read is none, logged. */
+/**
+ * The repository's remote, its credentials left out, and each workflow's files in it: its own and
+ * its company operations'. A remote git cannot read is none, logged.
+ */
 async function repositoryOf(resolved: ResolvedConfig, source: Source | undefined) {
   if (!source) return undefined;
   const remote = await Promise.resolve(source.remoteUrl?.()).catch((err: unknown) => {
@@ -192,7 +197,10 @@ async function repositoryOf(resolved: ResolvedConfig, source: Source | undefined
     return undefined;
   });
   const workflows = Object.fromEntries(
-    [...resolved.workflows.values()].map((wf) => [wf.name, relative(source.root, wf.file).split(sep).join("/")]),
+    [...resolved.workflows.values()].map((wf) => [
+      wf.name,
+      [wf, ...wf.uses.filter(isOperation)].map(({ file }) => relative(source.root, file).split(sep).join("/")),
+    ]),
   );
   return { ...(remote && { remote: withoutCredentials(remote) }), workflows };
 }

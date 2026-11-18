@@ -187,7 +187,7 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
       });
       // The card as our loop's run_checks writes it: the draft's diff and its checks in alice's box.
       const { grid: _, ...checks } = await checkDraft(
-        { source, resolved: resolveConfig(config), by: { id: "alice" }, client, loopbackLogin: true },
+        { source, config, resolved: resolveConfig(config), by: { id: "alice" }, client, loopbackLogin: true },
         { id: "rules" },
       );
       const card = { draft: "rules", branch: draft.branch, ...(await source.diff!("rules")), checks };

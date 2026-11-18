@@ -473,10 +473,17 @@ export const INFRA = "resources/sanoma/infra.ts";
 
 /**
  * What a live instance, or one with a login provider, lacks with no sandbox declared, for the
- * coding agents, which would otherwise run inside it: said by the chat's refusal (`NO_BOX`) and the
- * Hosting page.
+ * coding agents, which would otherwise run inside it: said by the chat's refusal (`noBox`), its
+ * Connect your agent card and the Hosting page. On Sanoma Cloud (`cloud`, a host that binds its own
+ * bootstrap: `CompanyState.declared`), the Cloud's boxes, which the company's Cloud token opens;
+ * elsewhere Agent37's, on the company's own key.
  */
-export const DECLARE_BOX = `Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: declare one in ${INFRA} (\`export const box = agent37.instance({})\`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY`;
+export const declareBox = (cloud: boolean) =>
+  `Coding agents work in a box of their own on a live instance, or one people sign in to, and this company declares none: ${
+    cloud
+      ? `declare Sanoma Cloud's agent box in ${INFRA} (\`export const box = cloud.sandbox({})\`): Sanoma Cloud runs it, with nothing to set`
+      : `declare one in ${INFRA} (\`export const box = agent37.instance({})\`, with the agent37 connector in sanoma.config.ts) and set AGENT37_API_KEY`
+  }`;
 
 /**
  * Why a host of type `hostType` that stops when idle has no Wakeup, `wakes` being the connected

@@ -6,7 +6,7 @@ import { readPolicyFiles } from "./cedar.ts";
 import { recordSchemaOf } from "./collection.ts";
 import { decideCall } from "./call.ts";
 import { connectorsOf, type ResolvedConfig, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
-import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
+import { type Builtin, jsonSchemaOf, type Operation, opIdsOf, type Use, type WorkflowDefinition } from "./define.ts";
 import {
   CAPABILITIES,
   type CollectionEntry,
@@ -22,7 +22,7 @@ import { codeMail } from "./login-code.ts";
 import { lintWorkflow } from "./lint.ts";
 import { fresh, stampOf, stampsOf } from "./load.ts";
 import { LOCKFILE } from "./lockfile.ts";
-import { VENDOR, type VendorInfo } from "./op.ts";
+import { isOperation, VENDOR, type VendorInfo } from "./op.ts";
 import { outlineWithSource } from "./outline.ts";
 import { APPS_DIR, kindDirs } from "./paths.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
@@ -37,6 +37,7 @@ import {
   errorMessage,
   LOGIN_AGENT,
   LOGIN_CODE_WORKFLOW,
+  OPERATIONS_VENDOR,
   type PeopleResource,
   principalOf,
   problemLine,
@@ -45,7 +46,7 @@ import {
   STORAGE_PROBLEMS,
 } from "./shared.ts";
 import { readSites, type SiteEntry, siteDomains } from "./sites.ts";
-import { sourceKeyIds } from "./host.ts";
+import { routingProblems, sourceKeyIds } from "./host.ts";
 
 // `sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
@@ -157,13 +158,18 @@ export function liveDescription(config: SanomaConfig): () => ConfigDescription {
     return { description, stamps: new Map([...extra, ...stampsOf(root)]) };
   };
   let now = described();
-  // The workflows as the config imported them, which the worker runs: their outlines and sources
-  // from the first description, never a file edited since.
+  // The workflows and the company's operations as the config imported them, which the worker runs:
+  // their outlines and sources from the first description, never a file edited since.
+  // The config is the same object each time, so its operations are the same ones, in place.
   const { workflows } = now.description;
+  const operations = new Map(
+    now.description.ops.filter((op) => op.vendor === OPERATIONS_VENDOR).map((op) => [op.id, op]),
+  );
   return () => {
     if (!fresh(now.stamps)) {
       now = described(now.description);
       now.description.workflows = workflows;
+      now.description.ops = now.description.ops.map((op) => operations.get(op.id) ?? op);
     }
     return now.description;
   };
@@ -237,6 +243,26 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     }))
     .toSorted((a, b) => a.name.localeCompare(b.name));
 
+  const read = memoised(readSource);
+  const lint = memoised((file: SourceFile) => lintWorkflow(file));
+  /**
+   * A workflow's or a company operation's code, read from its file: the file, its outline, what is
+   * wrong in it (none for a built-in) and its text.
+   */
+  const codeOf = (def: WorkflowDefinition<any, any> | Operation, builtin: boolean) => {
+    const file = read(def.file);
+    const { outline, source, found } = outlineWithSource(def, file);
+    // What the lint does not report: the file unread, or no workflow of this name in it.
+    const own = "error" in outline && !found && (typeof file === "string" || !file.problems.length);
+    const problems = builtin
+      ? []
+      : [
+          ...(typeof file === "string" ? [] : lint(file)),
+          ...(own ? [{ line: 1, column: 1, message: outline.error }] : []),
+        ];
+    return { file: def.file, outline, problems, ...(source === undefined ? {} : { source }) };
+  };
+
   const ops: OpEntry[] = [...resolved.ops.values()].map((op) => ({
     ...policyOpOf(op),
     idempotent: op.idempotent,
@@ -245,23 +271,17 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     direct: isDirect(op, resolved.types),
     input: toJsonSchema(op.input, `${op.id} input`, "input", refs),
     output: toJsonSchema(op.output, `${op.id} output`, "output", refs),
+    // A company operation's own code, as a workflow's.
+    ...(isOperation(op) && {
+      ...(op.app !== undefined && { app: op.app }),
+      ops: opIdsOf(op),
+      ...codeOf(op, false),
+    }),
   }));
   ops.sort((a, b) => a.id.localeCompare(b.id));
 
-  const read = memoised(readSource);
-  const lint = memoised((file: SourceFile) => lintWorkflow(file));
   const workflows: WorkflowEntry[] = [...resolved.workflows.values()].map((wf) => {
-    const file = read(wf.file);
-    const { outline, source, found } = outlineWithSource(wf, file);
-    // What the lint does not report: the file unread, or no workflow of this name in it.
-    const own = "error" in outline && !found && (typeof file === "string" || !file.problems.length);
     const builtin = BUILT_IN_WORKFLOWS.has(wf.name);
-    const problems = builtin
-      ? []
-      : [
-          ...(typeof file === "string" ? [] : lint(file)),
-          ...(own ? [{ line: 1, column: 1, message: outline.error }] : []),
-        ];
     return {
       name: wf.name,
       ...(wf.app !== undefined && { app: wf.app }),
@@ -271,10 +291,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
       ops: opIdsOf(wf),
       builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),
-      file: wf.file,
-      outline,
-      problems,
-      ...(source === undefined ? {} : { source }),
+      ...codeOf(wf, builtin),
     };
   });
   workflows.sort((a, b) => a.name.localeCompare(b.name));
@@ -347,6 +364,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
         resources,
         sites,
         resolved.root === undefined ? {} : siteDomains(resolved.root),
+        resolved.router?.hostname,
       ),
       ...loginProblems(resolved, dataFiles.resources),
       ...connectionStorageProblems(resolved),
@@ -434,18 +452,25 @@ function appClashes(
  * public sites' own, `declaredDomains`) names that is not a public site, each domain it gives more
  * than one site, and a domain that is the host's `hostname` too, or another host's hostname or
  * domain, at the host's declaration: the app serves only a public site at a domain, one site at
- * each, and itself at another, and one host holds each.
+ * each, and itself at another, and one host holds each. For a config that serves the agents'
+ * router at `router` (`router.hostname`), at each host that attaches it (its type's
+ * `host.inputs.router`): what `routingProblems` says of the two (the router's hostname being
+ * the host's own or a site's, the host declared behind a router too), and another host's
+ * hostname or domain being the router's.
  */
 function domainProblems(
   declared: readonly DeclaredResource[],
   types: ReadonlyMap<string, Resource>,
   sites: readonly SiteEntry[],
   declaredDomains: Readonly<Record<string, string>>,
+  router?: string,
 ): ResourceProblem[] {
   const isPublic = new Set(sites.filter((site) => site.public).map((site) => site.name));
   const problems: ResourceProblem[] = [];
   // Each hostname a host serves the app at, and each host's domains, lowercased: one host attaches each.
   const hostnames: [string, DeclaredResource][] = [];
+  /** The hosts that serve the config's router: they attach its hostname. */
+  const routing: DeclaredResource[] = [];
   const held = new Map<string, Set<DeclaredResource>>();
   const hold = (name: string, resource: DeclaredResource) =>
     held.set(name.toLowerCase(), (held.get(name.toLowerCase()) ?? new Set()).add(resource));
@@ -470,6 +495,11 @@ function domainProblems(
     }
     const site = typeof hostname === "string" ? siteAtHostname(hostname, domains) : undefined;
     if (site) messages.push(`${hostname as string} is the app's hostname and the domain of ${site}`);
+    if (router !== undefined && inputs?.router !== undefined) {
+      routing.push(resource);
+      const agents = inputs.agents === undefined ? undefined : valueAt(resource.desired, inputs.agents);
+      messages.push(...routingProblems({ router, hostname, domains, agents }));
+    }
     problems.push(...messages.map((message) => ({ ...resource.at, message })));
     for (const [, domain] of named) hold(domain as string, resource);
     if (typeof hostname === "string") {
@@ -483,13 +513,41 @@ function domainProblems(
     const message = `${hostname} is the app's hostname here and is served by ${others.map((o) => o.id).join(", ")} too`;
     problems.push({ ...resource.at, message });
   }
+  for (const resource of routing) {
+    const others = [...(held.get(router!.toLowerCase()) ?? [])].filter((other) => other !== resource);
+    if (others.length === 0) continue;
+    const message = `${router} is the config's \`router.hostname\`, which this host attaches, and is served by ${others.map((o) => o.id).join(", ")} too`;
+    problems.push({ ...resource.at, message });
+  }
   return problems;
 }
 
 /**
+ * For a config that serves the agents' router at `router`, each declared host whose type takes
+ * no router (no `host.inputs.router`: `docker.container`, a host that binds its own bootstrap):
+ * it neither attaches the router's hostname nor is given its master secret, so whoever runs it
+ * routes the hostname to it and sets `SANOMA_ROUTER_SECRET` there. A warning, never a problem:
+ * `sanoma check` says it beside the people's and the sites'.
+ */
+export function routerWarnings(
+  declared: readonly Pick<DeclaredResource, "vendor" | "type" | "at">[],
+  types: ReadonlyMap<string, Pick<Resource, "host">>,
+  router: string | undefined,
+): ResourceProblem[] {
+  if (router === undefined) return [];
+  return declared.flatMap((resource) => {
+    const host = types.get(`${resource.vendor}.${resource.type}`)?.host;
+    if (!host || host.inputs.router !== undefined) return [];
+    const message = `the config serves the agents' router at ${router}, which this host's type, ${resource.vendor}.${resource.type}, does not set up: route ${router} to it and set SANOMA_ROUTER_SECRET, the router's master secret, in its environment yourself`;
+    return [{ ...resource.at, message }];
+  });
+}
+
+/**
  * A site's `api` names each workflow `apiNameOf(name)` beside the vendors' operations and the
- * collections (`api.data`), so a workflow whose name comes out as another's, a vendor's id or
- * `data` is a problem, at 1:1 of its file. A built-in is never the one renamed.
+ * collections (`api.data`), and `operations` is kept for the company's operations, so a workflow
+ * whose name comes out as another's, a vendor's id, `data` or `operations` is a problem, at 1:1 of
+ * its file. A built-in is never the one renamed.
  */
 function addApiNameProblems(workflows: WorkflowEntry[], vendors: ReadonlySet<string>) {
   for (const wf of workflows) {
@@ -500,11 +558,13 @@ function addApiNameProblems(workflows: WorkflowEntry[], vendors: ReadonlySet<str
       ? `as workflow ${others.map((other) => `"${other.name}"`).join(" and ")} is`
       : api === DATA_VENDOR
         ? "which is the collections'"
-        : vendors.has(api)
-          ? `which is the vendor ${api}'s operations`
-          : api === "then"
-            ? "which a promise would take for its own"
-            : undefined;
+        : api === OPERATIONS_VENDOR
+          ? "which is kept for the company's operations"
+          : vendors.has(api)
+            ? `which is the vendor ${api}'s operations`
+            : api === "then"
+              ? "which a promise would take for its own"
+              : undefined;
     if (taken) wf.problems.push({ line: 1, column: 1, message: apiNameProblem(api, taken) });
   }
 }

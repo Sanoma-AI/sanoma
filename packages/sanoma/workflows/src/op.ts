@@ -1,15 +1,15 @@
 import type { Pool } from "pg";
-import type { Principal } from "./define.ts";
+import type { Operation, Principal } from "./define.ts";
 import type { Authentication, CallAuthentication } from "./authentication.ts";
 import type { ConnectionSnapshot } from "./connection.ts";
 import type { HarnessV1 } from "@ai-sdk/harness";
 import type { ProviderV4 } from "@ai-sdk/provider";
-import type { z } from "zod";
+import { z } from "zod";
 import type { Fake } from "./fake.ts";
 import type { SandboxBackend, SandboxContext } from "./sandbox-contract.ts";
 import type { Secrets } from "./secret.ts";
 import type { RemoteHalf } from "./source.ts";
-import { DOMAIN_NAME, hostnameUrl, instanceUrl } from "./shared.ts";
+import { DOMAIN_NAME, hostnameUrl, instanceUrl, OPERATIONS_VENDOR } from "./shared.ts";
 import type { Steps } from "./steps.ts";
 
 /**
@@ -766,6 +766,35 @@ const ROUTED_RULES = {
 };
 
 /**
+ * Why `value` breaks the rule of one part of a routed address (its `url`, its `company`, its
+ * `secret`), said after what names the value, or undefined: the rules `routedAgentAddress` and
+ * `agentAddressFrom` refuse by, for what checks a part alone. Never says a secret.
+ */
+export const routedProblem = (part: keyof typeof ROUTED_RULES, value: unknown): string | undefined =>
+  ROUTED_RULES[part](value);
+
+/** A string schema refusing what `routedProblem` does for `part`, in its words after `what`. */
+const routedPart = (part: "url" | "company", what: (value: string) => string) =>
+  z.string().superRefine((value, ctx) => {
+    const problem = routedProblem(part, value);
+    if (problem) ctx.addIssue({ code: "custom", message: `${what(value)}: ${problem}` });
+  });
+
+/**
+ * A company behind a router as a host's declaration says it (`HostSpec.inputs.agents`): the
+ * router's agent surface and this company's id there, the launchers' `SANOMA_AGENT_URL` and
+ * `SANOMA_COMPANY`. Its secret there is no part of it: the stored `SANOMA_ROUTER_SECRET`.
+ */
+export const routedAgentsSchema = z.object({
+  url: routedPart("url", (url) => `${JSON.stringify(url)} is not a router's agent surface`).describe(
+    "The router's agent surface, `https://mcp.acme.example/mcp`: the instance's `SANOMA_AGENT_URL`",
+  ),
+  company: routedPart("company", (company) => `${JSON.stringify(company)} is no company's id at a router`).describe(
+    "This company's id in the router's list: the instance's `SANOMA_COMPANY`",
+  ),
+});
+
+/**
  * The agent address of a company behind a router whose agent surface is `url`
  * (`https://mcp.sanoma.example/mcp`): the router's origin as the issuer, `url` as the resource.
  * Throws, saying why, for what is not a router's `/mcp` as it is compared, a company's id that
@@ -1074,6 +1103,14 @@ export const setupOf = (connector: Connector<any, any>): ConnectorSetup => conne
 
 export function isOp(x: unknown): x is Op {
   return typeof x === "object" && x !== null && (x as Op).kind === "op";
+}
+
+/**
+ * Whether `x` is a company operation (`defineOperation`): an operation of the vendor `operations`
+ * with a body of its own. Read by property, so a copy of this package reads another's.
+ */
+export function isOperation(x: unknown): x is Operation {
+  return isOp(x) && x.vendor === OPERATIONS_VENDOR && typeof (x as Operation).run === "function";
 }
 
 /**

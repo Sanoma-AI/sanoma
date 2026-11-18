@@ -25,6 +25,8 @@ export {
   companyPrefix,
   DISCOVERY_CACHE,
   routedAgentAddress,
+  routedAgentsSchema,
+  routedProblem,
   ROUTER_CLIENT_IP_HEADER,
   ROUTER_SECRET_HEADER,
   ROUTER_SECRET_MIN,
@@ -46,6 +48,7 @@ export {
   DriverError,
   type Effect,
   isOp,
+  isOperation,
   isSvgElement,
   INVITE_SECONDS,
   type KeyAgent,
@@ -69,6 +72,7 @@ export {
 export { SanomaPackageField, vendorInfo } from "./vendor-info.ts";
 export { CLOUD_TOKEN, cloudRun, type CloudRunOptions } from "./cloud-run.ts";
 export {
+  defineOperation,
   defineWorkflow,
   Principal,
   type ApprovalRequest,
@@ -81,6 +85,7 @@ export {
   type StartedBy,
   type StepOptions,
   type Trigger,
+  type Operation,
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
@@ -273,7 +278,16 @@ export {
   type SourceHost,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
-export { RUNTIME_IMAGE, RUNTIME_PORT, runtimeImage, sourceKeyId, UNNAMED, wakeUrlOf } from "./host.ts";
+export {
+  ROUTER_SECRET,
+  routingProblems,
+  RUNTIME_IMAGE,
+  RUNTIME_PORT,
+  runtimeImage,
+  sourceKeyId,
+  UNNAMED,
+  wakeUrlOf,
+} from "./host.ts";
 export {
   cloneUrl,
   deriveHosts,

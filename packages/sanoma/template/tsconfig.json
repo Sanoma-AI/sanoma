@@ -4,10 +4,12 @@
     "sanoma.config.ts",
     "secrets.ts",
     "workflows",
+    "operations",
     "resources",
     "scenarios",
     "apps/*/app.ts",
     "apps/*/workflows",
+    "apps/*/operations",
     "apps/*/resources",
     "apps/*/scenarios"
   ]

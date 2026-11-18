@@ -76,6 +76,12 @@ export const APPLY_WORKFLOW = "apply";
  */
 export const DATA_VENDOR = "data";
 
+/**
+ * The vendor of the company's own operations, `operations.<name>.run` (`defineOperation`, a file
+ * of `operations/`): `operations.<app>.<name>.run` in an app's. No connector may take it.
+ */
+export const OPERATIONS_VENDOR = "operations";
+
 /** The one operation of a collection that stands for others: `saveMany`, each entry a `save` or `delete`. */
 export const BATCH = "saveMany";
 export const isBatch = (op: Pick<OpEntry, "vendor" | "name">): boolean =>
@@ -215,6 +221,21 @@ export const hostnameUrl = (hostname: string): string => `https://${hostname}`;
 /** The site whose domain is also the app's `hostname`, compared in lower case; undefined when none is. */
 export const siteAtHostname = (hostname: string, domains: Readonly<Record<string, unknown>>): string | undefined =>
   Object.entries(domains).find(([, domain]) => typeof domain === "string" && same(domain, hostname))?.[0];
+
+/**
+ * What else is served at the hostname of the config's router, compared in lower case: `{ app }`
+ * when it is the app's own `hostname`, `{ site }` when it is that public site's domain, undefined
+ * when it is the router's alone. Where it is another's, the app serves no router there.
+ */
+export function routerHostnameTaken(
+  router: string,
+  hostname: string | null | undefined,
+  domains: Readonly<Record<string, unknown>> = {},
+): { app: true; site?: never } | { site: string; app?: never } | undefined {
+  if (same(router, hostname?.trim() || undefined)) return { app: true };
+  const site = siteAtHostname(router, domains);
+  return site === undefined ? undefined : { site };
+}
 
 /** The domains `domainsText` wrote, by site name; throws for a pair that is not `<site>=<hostname>`, or a site named twice. */
 export function domainsOf(text: string): Record<string, string> {
@@ -697,13 +718,24 @@ export const GO_LIVE_WORKFLOW = "go-live";
 export const GO_LIVE_HOST_WORKFLOW = "go-live-host";
 export const GO_LIVE_CLOUD_WORKFLOW = "go-live-cloud";
 
+/** Addresses under sanoma.work no company may take: Sanoma's own and the ones kept for it, as sanoma-ops keeps them. */
+const CLOUD_RESERVED = ["www", "app", "api", "mail", "admin", "docs", "status", "cloud", "internal"];
 /**
- * A company's slug at Sanoma Cloud, its address `<slug>.sanoma.work`, as sanoma-ops's sign-up
- * checks it: lower case letters, digits and dashes, a dash at neither end, one of them or 3 to 40.
+ * A company's slug at Sanoma Cloud, its address `<slug>.sanoma.work`, as sanoma-ops's sign-up and
+ * rename check it: 3 to 40 lower case letters, digits and single dashes, a dash at neither end, and
+ * none of `CLOUD_RESERVED` (each a whole slug, so the pattern holds inside `CLOUD_HOSTNAME` too).
  */
-export const CLOUD_SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
+export const CLOUD_SLUG = new RegExp(
+  `^(?!(?:${CLOUD_RESERVED.join("|")})(?![a-z0-9-]))(?![a-z0-9-]*--)[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$`,
+);
 /** `CLOUD_SLUG` in words. */
-export const CLOUD_SLUG_RULE = "lower case letters, digits and dashes, a dash at neither end: one of them, or 3 to 40";
+export const CLOUD_SLUG_RULE = `3 to 40 lower case letters, digits and single dashes, a dash at neither end, and not one Sanoma keeps (${CLOUD_RESERVED.join(", ")})`;
+/** A company's address at Sanoma Cloud, `<slug>.sanoma.work` (`CLOUD_SLUG`): its first group is the slug. */
+export const CLOUD_HOSTNAME = new RegExp(`^(${CLOUD_SLUG.source.slice(1, -1)})\\.sanoma\\.work$`);
+/** The address at Sanoma Cloud whose slug is `slug`. */
+export const cloudHostnameOf = (slug: string) => `${slug}.sanoma.work`;
+/** The slug of an address at Sanoma Cloud (`CLOUD_HOSTNAME`), or undefined for any other hostname. */
+export const cloudSlugOf = (hostname: string): string | undefined => CLOUD_HOSTNAME.exec(hostname)?.[1];
 export const CONNECT_EXISTING_WORKFLOW = "connect-existing";
 
 /**

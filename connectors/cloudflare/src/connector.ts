@@ -1,5 +1,6 @@
 import {
   compareDeclared,
+  routedAgentsSchema,
   RUNTIME_PORT,
   UNNAMED,
   type Connector,
@@ -85,9 +86,9 @@ const containerSchema = z.object({
 });
 
 /**
- * `cloudflare.host`'s fields: the decisions a data file makes (`name`, `hostname`, `database`),
- * and what apply fills when it is left out (`image`, `source`, `ref`, `port`) or always
- * (`revision`, `secrets`, `domains`), which a data file never declares (`deriveHosts`).
+ * `cloudflare.host`'s fields: the decisions a data file makes (`name`, `hostname`, `database`,
+ * `agents`), and what apply fills when it is left out (`image`, `source`, `ref`, `port`) or always
+ * (`revision`, `secrets`, `domains`, `routerHostname`), which a data file never declares (`deriveHosts`).
  */
 const hostSchema = containerSchema.extend({
   name: containerSchema.shape.name
@@ -130,6 +131,18 @@ const hostSchema = containerSchema.extend({
   domains: containerSchema.shape.domains.describe(
     "Each public site's domain, by site name, never declared: from `defineSite({ public: true, domain })`",
   ),
+  agents: routedAgentsSchema
+    .nullish()
+    .describe(
+      "The router this company is behind, `{ url, company }`: its agents connect at the router's `/mcp`, and apply gives the host this company's own secret there, stored as `SANOMA_ROUTER_SECRET`. Never on the instance that serves that router",
+    ),
+  routerHostname: z
+    .string()
+    .regex(DOMAIN_NAME)
+    .nullish()
+    .describe(
+      "The hostname of the agents' router this company serves, never declared: the config's `router.hostname`, attached to the Worker as a custom domain",
+    ),
 });
 
 /** The host contract both types meet, of which `cloudflare.host` derives what it is not told. */
@@ -198,6 +211,13 @@ export const container = defineResource({
  * (`image`, `source` and `ref` are overrides), the image's port, every public site's domain, and
  * as secrets its database's URL, its keys, the source key it clones with (whose public half apply
  * declares on the repository) and the credentials it deploys itself with: names only, never a value.
+ *
+ * The agents' router, either side of it. `agents: { url, company }` puts the company behind one:
+ * the Worker's `SANOMA_AGENT_URL` and `SANOMA_COMPANY`. A config that serves one
+ * (`router.hostname`) has apply fill `routerHostname`, attached beside `hostname`. Either way
+ * apply gives the host the stored `SANOMA_ROUTER_SECRET` among its secrets: this company's own
+ * at the router it is behind, or the master of the one it serves. Not both: the one variable
+ * would hold two secrets.
  */
 export const host = defineResource({
   vendor: "cloudflare",
@@ -231,6 +251,8 @@ export const host = defineResource({
       secrets: "secrets",
       domains: "domains",
       hostname: "hostname",
+      router: "routerHostname",
+      agents: "agents",
     },
     revision: "revision",
     outputs: container.host!.outputs,

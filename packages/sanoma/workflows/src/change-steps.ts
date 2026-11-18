@@ -25,6 +25,7 @@ import { type Field, recordsOps } from "./collection.ts";
 import type { ColumnType, ReshapeChange, ReshapeInput } from "./description.ts";
 import type { DriftReport } from "./drift.ts";
 import { warn } from "./log.ts";
+import { isOperation } from "./op.ts";
 import { inside } from "./paths.ts";
 import { peopleSources, readPeople } from "./resources.ts";
 import { runNow, type Run } from "./run.ts";
@@ -147,12 +148,15 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
           const [{ files }, draft] = await Promise.all([source.diff(id), source.draft(id)]);
           const touches = touchesOf(files);
           const touched = new Set(touches);
-          // The waiting runs of a workflow whose file the change edits, which a publish cannot move.
+          // The waiting runs of a workflow whose file the change edits, or the file of a company
+          // operation it uses (whose code is the workflow's version too), which a publish cannot move.
           const edited = [...run.state.workflows]
-            .filter(([, wf]) => {
-              const path = wf.file === undefined ? undefined : pathIn(source.root, wf.file);
-              return path !== undefined && touched.has(path);
-            })
+            .filter(([, wf]) =>
+              [wf, ...wf.uses.filter(isOperation)].some(({ file }) => {
+                const path = file === undefined ? undefined : pathIn(source.root, file);
+                return path !== undefined && touched.has(path);
+              }),
+            )
             .map(([name]) => name);
           const pending = edited.length
             ? await DBOS.listWorkflows({

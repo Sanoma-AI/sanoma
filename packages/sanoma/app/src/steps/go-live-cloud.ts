@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppStepContext, CloudReady, GoLiveCloudInput, PushCloudInput } from "sanoma/workflows";
 import { formatOptions, loadDataFiles, readLockfile, setFields } from "sanoma/workflows/describe";
+import { cloudHostnameOf, cloudSlugOf } from "sanoma/workflows/shared";
 import { INFRA } from "../api.ts";
 import { accountOf, KEYS } from "../server/go-live.ts";
 import { CLOUD_TOKEN, CLOUD_TOKEN_PATTERN } from "../server/sanoma-sign-in.ts";
@@ -15,17 +16,14 @@ import { rootOf, written } from "./writes.ts";
 // repository in the Cloud's account (its own operation, through `ctx`), `origin` set to it and
 // `main` pushed; then the run applies the database and the host and waits for them.
 
-/** The address a host's slug names at Sanoma Cloud. */
-const hostnameOf = (slug: string) => `${slug}.sanoma.work`;
-
 /**
  * What must hold before going live on Sanoma Cloud, and the address: `infra.ts` declares a
  * database (`store`) and a host in a vendor's account (`host`, whose type offers its `account`'s
  * operations, `cloud.host`), the host is not bound (live, or made by another run), the Cloud token
  * is stored, and the worker has a repository to push. A new `address` is written into the file
- * (`name` of both, the host's `hostname`) and committed, unless the database is made already, whose
- * name cannot change. What the run then needs: the slug, the operation that makes the repository,
- * and whether `origin` names one.
+ * (the host's `hostname`) and committed: the company is bound by its id, so a database made
+ * already keeps it, and the host's create moves the company there. What the run then needs: the
+ * slug, the operation that makes the repository, and whether `origin` names one.
  */
 export async function goLiveCloud(step: AppStepContext, { address }: GoLiveCloudInput): Promise<CloudReady> {
   const { client, source, resolved } = step;
@@ -51,22 +49,16 @@ export async function goLiveCloud(step: AppStepContext, { address }: GoLiveCloud
     throw new Error("Sign in to Sanoma first, on Hosting, or paste a Cloud token there");
   }
   if (!source?.pushOrigin || !source.remoteUrl) throw new Error("The worker has no repository to push from");
-  const declared = host.desired.name;
-  if (typeof declared !== "string" || !declared) {
-    throw new Error(`${INFRA}'s host declares no name: declare its slug, as name`);
-  }
+  const { hostname } = host.desired;
+  const declared = typeof hostname === "string" ? cloudSlugOf(hostname) : undefined;
+  if (!declared) throw new Error(`${INFRA}'s host declares no address: declare its hostname, <slug>.sanoma.work`);
   let slug = declared;
   if (address !== undefined && address !== declared) {
-    if (bindings[KEYS.store]) {
-      throw new Error(`The database is made already, for ${hostnameOf(declared)}: its address cannot change now`);
-    }
     slug = address;
     await step.serially(async () => {
-      const options = formatOptions(root);
       const text = await readFile(join(root, INFRA), "utf8");
-      const named = store!.desired.name === undefined ? text : await setFields(text, "store", { name: slug }, options);
-      const hosted = await setFields(named, "host", { name: slug, hostname: hostnameOf(slug) }, options);
-      await written(step, INFRA, hosted, `Go live at ${hostnameOf(slug)}`);
+      const hosted = await setFields(text, "host", { hostname: cloudHostnameOf(slug) }, formatOptions(root));
+      await written(step, INFRA, hosted, `Go live at ${cloudHostnameOf(slug)}`);
     });
   }
   return { slug, account: account.repository, origin: (await source.remoteUrl()) !== undefined };

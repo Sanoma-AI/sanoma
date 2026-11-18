@@ -489,6 +489,7 @@ describe("a workflow's name in a site's api", () => {
         renamed("outboundNext"),
         renamed("ghost"),
         renamed("data"),
+        renamed("operations"),
         renamed("then"),
       ],
     });
@@ -511,6 +512,10 @@ describe("a workflow's name in a site's api", () => {
       ["go-live", []],
       ["go-live-cloud", []],
       ["go-live-host", []],
+      [
+        "operations",
+        [[1, 1, "A site calls this workflow api.operations, which is kept for the company's operations: rename it"]],
+      ],
       [
         "outbound-next",
         [[1, 1, 'A site calls this workflow api.outboundNext, as workflow "outboundNext" is: rename it']],

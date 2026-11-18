@@ -19,8 +19,8 @@ export interface CloudRunOptions {
   runTimeoutMs?: number;
 }
 
-/** An api refusal's body, as the app answers one: `{ error, code? }`. */
-const Problem = z.object({ error: z.string(), code: z.string().optional() });
+/** An api refusal's body, as the app answers one: `{ error, code?, runId? }`, `runId` a failed run's. */
+const Problem = z.object({ error: z.string(), code: z.string().optional(), runId: z.string().optional() });
 
 /** A start's answer. */
 const Started = z.object({ runId: z.string().min(1) });
@@ -30,7 +30,9 @@ const Started = z.object({ runId: z.string().min(1) });
  * run fails the call. Over the public api at `SANOMA_CLOUD_URL` (www.sanoma.work unless set),
  * `POST /api/call` with the token as a bearer: `<workflow>.start` (with `id` when given), then
  * `<workflow>.result` (20 s per request, `run_running` until the run ends). Failures are
- * `DriverError`s (`run_running` kept as the `vendorCode`), never saying the token.
+ * `DriverError`s (`run_running` kept as the `vendorCode`), never saying the token: a failed run's
+ * in the workflow's own words, which it writes for the person who reads them, any other's saying
+ * where it failed (`Sanoma Cloud: <workflow>: …`).
  */
 export async function cloudRun(
   workflow: string,
@@ -73,7 +75,9 @@ export async function cloudRun(
       res.status === 401
         ? `${CLOUD_TOKEN} was refused: it is unknown or revoked`
         : (problem?.error ?? (res.ok ? "the answer is not JSON" : `HTTP ${res.status}`));
-    throw new DriverError(`Sanoma Cloud: ${workflow}: ${why}`, {
+    // A run that failed (`runFailure`'s 422) refused in its own words.
+    const refused = res.status === 422 && problem?.runId !== undefined;
+    throw new DriverError(refused ? why : `Sanoma Cloud: ${workflow}: ${why}`, {
       retryable: retryableStatus(res.status),
       status: res.status,
       ...(problem?.code && { vendorCode: problem.code }),

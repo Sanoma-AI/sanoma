@@ -17,14 +17,19 @@ import { customers as shopCustomers } from "./fixtures/company-apps/apps/shop/re
 import followUp from "./fixtures/company-apps/apps/crm/workflows/follow-up.ts";
 import thank from "./fixtures/company-apps/apps/shop/workflows/follow-up.ts";
 import introduce from "./fixtures/company-apps/workflows/introduce.ts";
+import offer from "./fixtures/company-apps/workflows/offer.ts";
+import quote from "./fixtures/company-apps/operations/quote.ts";
+import score from "./fixtures/company-apps/apps/crm/operations/score.ts";
 
 // The company-apps fixture: two apps, crm and shop, that both declare `customers` and a
-// `follow-up`, and the company's own workflow between them. Its workflows and collections as the
-// launcher finds them (`loadConfig`, in the sanoma package).
+// `follow-up`, and the company's own workflows between them, one using its operations (the root's
+// `quote`, the CRM's `score`). Its workflows, operations and collections as the launcher finds
+// them (`loadConfig`, in the sanoma package).
 const root = fileURLToPath(new URL("./fixtures/company-apps/", import.meta.url));
 const config = {
   ...fixture,
-  workflows: [followUp, thank, introduce],
+  workflows: [followUp, thank, introduce, offer],
+  operations: [quote, score],
   collections: [crmCustomers, shopCustomers],
 };
 
@@ -44,6 +49,13 @@ describe("apps", () => {
       undefined,
     ]);
     expect(apiNameOf(followUp.name)).toBe("crmFollowUp");
+    // An operation in an app's folder is named with it: `operations.crm.score.run`.
+    expect([quote.id, quote.app, score.id, score.app]).toEqual([
+      "operations.quote.run",
+      undefined,
+      "operations.crm.score.run",
+      "crm",
+    ]);
     expect(appOfFile(followUp.file)).toBe("crm");
     // A package's file is no company's, whatever its path.
     expect(appOfFile(fileURLToPath(import.meta.url))).toBeUndefined();
@@ -164,8 +176,23 @@ describe("apps", () => {
     expect(own.map(({ name, app, problems }) => ({ name, app, problems }))).toEqual([
       { name: "crm.follow-up", app: "crm", problems: [] },
       { name: "introduce", app: undefined, problems: [] },
+      { name: "offer", app: undefined, problems: [] },
       { name: "shop.follow-up", app: "shop", problems: [] },
     ]);
+    // The company's operations, each with its app, its code and its outline, as a workflow's.
+    const operations = description.ops.filter((op) => op.vendor === "operations");
+    expect(operations.map(({ id, app, ops, problems, direct }) => ({ id, app, ops, problems, direct }))).toEqual([
+      { id: "operations.crm.score.run", app: "crm", ops: ["data.crm.customers.get"], problems: [], direct: false },
+      { id: "operations.quote.run", app: undefined, ops: ["data.shop.customers.get"], problems: [], direct: false },
+    ]);
+    expect(operations[1]!.outline).toMatchObject({ nodes: [{ kind: "op", id: "data.shop.customers.get" }] });
+    expect(operations[1]!.source).toContain("defineOperation");
+    expect(description.workflows.find((w) => w.name === "offer")!.outline).toMatchObject({
+      nodes: [
+        { kind: "op", id: "operations.quote.run" },
+        { kind: "branch", cases: [[{ kind: "op", id: "operations.crm.score.run" }], []] },
+      ],
+    });
     const outline = own[0]!.outline;
     expect("nodes" in outline && outline.nodes.map((n) => (n.kind === "op" ? n.id : n.kind))).toEqual([
       "data.crm.customers.get",
@@ -221,6 +248,7 @@ describe("apps", () => {
     const { scenarios, errors } = await loadScenarios(resolveConfig(config));
     expect(errors).toEqual([]);
     expect(scenarios.map(({ file, name, workflow }) => [file, name, workflow])).toEqual([
+      ["scenarios/offer.feature", "A shop customer the CRM knows gets the lower price and a score", "offer"],
       ["apps/crm/scenarios/follow-up.feature", "A customer is followed up", "crm.follow-up"],
       ["apps/crm/scenarios/follow-up.feature", "Someone unknown is left alone", "crm.follow-up"],
     ]);
