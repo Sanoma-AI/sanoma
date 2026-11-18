@@ -38,7 +38,7 @@ import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { applyAheadOf, invalid } from "./core.ts";
 import { declaredEmail } from "./people.ts";
-import { CLOUD_TOKEN, slugOf } from "./sanoma-sign-in.ts";
+import { CLOUD_TOKEN } from "./sanoma-sign-in.ts";
 import { secretValues } from "./secrets.ts";
 import { WAKEUP_URL } from "./setup.ts";
 
@@ -406,7 +406,7 @@ export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{
   const account = accountOf(app, app.snapshot.infra ?? "");
   if (account) {
     try {
-      return (await cloudCall(app, account.invite, { slug: slugOf(app), email })) as { url: string };
+      return (await cloudCall(app, account.invite, { email })) as { url: string };
     } catch (err) {
       throw new ApiError(502, { error: `Sanoma Cloud did not mint an invite (${errorMessage(err)})` });
     }

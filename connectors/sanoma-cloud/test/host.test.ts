@@ -25,6 +25,9 @@ import { fakeCloud } from "../src/fake.ts";
 // does). The host binds its own bootstrap, so it is given no secrets. Drift is the built-in
 // workflow over a data file that declares the host, bound in the lockfile.
 
+/** The id the fake gives the token's company. */
+const COMPANY = "fake-company-1";
+
 let n = 0;
 const call = (opId: string): CallContext => ({
   idempotencyKey: `${opId}:${++n}`,
@@ -38,7 +41,7 @@ describe("cloud.host meets the Host contract on the fake", () => {
   const databaseUrl = testDatabaseUrl("sanoma_cloud_host");
   const repo = testRepository();
   const root = mkdtempSync(join(tmpdir(), "sanoma-cloud-host-"));
-  const declared = { name: "company", source: repo.url, ref: "main" };
+  const declared = { hostname: "company.sanoma.work", source: repo.url, ref: "main" };
   const config: SanomaConfig = {
     workflows: [...hostCheckWorkflows],
     connectors: [hostCheck],
@@ -47,6 +50,8 @@ describe("cloud.host meets the Host contract on the fake", () => {
     databaseUrl,
   };
   const fake = fakeCloud({
+    // The token's company, as the wizard's token is for one from the start.
+    slug: "company",
     // It stops itself soon once idle, so the checks of its end take seconds.
     start: ({ revision }) =>
       inProcessHost(config, databaseUrl, { stopCheckMs: 500 })({ port: 0, revision, secrets: {} }),
@@ -67,7 +72,7 @@ describe("cloud.host meets the Host contract on the fake", () => {
       `import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";\n\n` +
         `export const host = cloud.host(${JSON.stringify(declared)});\n\nexport default [host];\n`,
     );
-    writeLockfile(root, { "resources/hosts.ts#host": { type: "cloud.host", id: declared.name } });
+    writeLockfile(root, { "resources/hosts.ts#host": { type: "cloud.host", id: COMPANY } });
     client = await SanomaClient.connect(config);
   });
 
@@ -83,10 +88,10 @@ describe("cloud.host meets the Host contract on the fake", () => {
   /** Apply, as it runs for a host: the revision from the ref, then a plan, then the change it names. */
   async function apply() {
     const desired = { ...declared, revision: await resolveRevision(repo.url, declared.ref) };
-    const plan = (await op("plan")({ id: declared.name, desired })) as { action: string };
+    const plan = (await op("plan")({ id: COMPANY, desired })) as { action: string };
     if (plan.action === "none")
-      return ((await op("read")({ id: declared.name })) as { state: Record<string, unknown> }).state;
-    const done = await op(plan.action === "create" ? "create" : "update")({ id: declared.name, desired });
+      return ((await op("read")({ id: COMPANY })) as { state: Record<string, unknown> }).state;
+    const done = await op(plan.action === "create" ? "create" : "update")({ id: COMPANY, desired });
     return (done as { state: Record<string, unknown> }).state;
   }
 
@@ -94,9 +99,9 @@ describe("cloud.host meets the Host contract on the fake", () => {
     const results = await checkHost({
       type: host,
       apply,
-      stop: async () => void (await op("delete")({ id: declared.name })),
-      suspend: () => fake.stop(declared.name),
-      running: async () => fake.running(declared.name),
+      stop: async () => void (await op("delete")({ id: COMPANY })),
+      suspend: () => fake.stop(),
+      running: async () => fake.running(),
       client,
       secrets: [],
       commit: repo.commit,
@@ -119,9 +124,9 @@ describe("cloud.host meets the Host contract on the fake", () => {
       { name: "a new commit shows as drift that apply clears", ok: true },
       { name: "no secret is in the ledger", ok: true },
     ]);
-    // The company kept its address across a close and a sign-up, and its host runs the last commit.
-    expect(Object.keys(fake.state.companies)).toEqual(["company"]);
-    expect(fake.state.companies.company!.host?.revision).toBe(await resolveRevision(repo.url, "main"));
+    // The company kept its id and its address across a close and a sign-up, and its host runs the last commit.
+    expect(fake.state.company).toMatchObject({ id: COMPANY, slug: "company" });
+    expect(fake.state.company!.host?.revision).toBe(await resolveRevision(repo.url, "main"));
   });
 
   it("is a host that binds its own bootstrap, and takes no secrets", () => {
@@ -134,11 +139,31 @@ describe("cloud.host meets the Host contract on the fake", () => {
   });
 });
 
-describe("cloud.host's slug", () => {
-  it("is its name, else the first label of domains.app, else its repository's name", () => {
-    expect(host({ name: "acme", source: "acme/acme-ops", ref: "main" }).name).toBe("acme");
-    const app = { app: "acme-co.sanoma.work" };
-    expect(host({ source: "acme/acme-ops", ref: "main", domains: app }).name).toBe("acme-co");
-    expect(host({ source: "https://github.com/Acme/Acme_Ops.git", ref: "main" }).name).toBe("acme-ops");
+describe("cloud.host's address", () => {
+  it("moves with its hostname, in place: the same company and host, at another address", async () => {
+    const fake = fakeCloud({ slug: "acme", taken: ["taken"] });
+    const op = (name: string, input: object) => fake.driver.ops[`host.${name}`]!(input, call(`cloud.host.${name}`));
+    const desired = { hostname: "acme.sanoma.work", source: "https://github.com/acme/acme-ops.git", revision: "r1" };
+    try {
+      expect(await op("create", { desired })).toMatchObject({ id: COMPANY, state: { hostname: "acme.sanoma.work" } });
+      const renamed = { ...desired, hostname: "acme-co.sanoma.work" };
+      expect(await op("plan", { id: COMPANY, desired: renamed })).toMatchObject({
+        action: "update",
+        replace: [],
+        planned: { id: COMPANY, hostname: "acme-co.sanoma.work" },
+      });
+      expect(await op("update", { id: COMPANY, desired: renamed })).toMatchObject({
+        id: COMPANY,
+        state: { id: COMPANY, hostname: "acme-co.sanoma.work", revision: "r1" },
+      });
+      expect(fake.state.company).toMatchObject({ id: COMPANY, slug: "acme-co", host: { revision: "r1" } });
+      // Someone else's address is refused, and the company stays where it was.
+      await expect(
+        op("update", { id: COMPANY, desired: { ...desired, hostname: "taken.sanoma.work" } }),
+      ).rejects.toThrow("taken.sanoma.work is taken");
+      expect(fake.state.company?.slug).toBe("acme-co");
+    } finally {
+      await fake.close();
+    }
   });
 });

@@ -200,12 +200,12 @@ describe("declareName, declareSlug and slugOf", () => {
     expect(() => declareName("export default {};\n", "Acme")).toThrow("has no `export default defineConfig({`");
   });
 
-  it("writes the company's slug for the template's, and refuses a file without it", () => {
-    const text = 'export const host = cloud.host({ name: "company", hostname: "company.sanoma.work" });\n';
+  it("writes the company's address for the template's, only there, and refuses a file without it", () => {
+    const text = 'export const host = cloud.host({ hostname: "company.sanoma.work", database: store }); // "company"\n';
     expect(declareSlug(text, "maple-$&")).toBe(
-      'export const host = cloud.host({ name: "maple-$&", hostname: "maple-$&.sanoma.work" });\n',
+      'export const host = cloud.host({ hostname: "maple-$&.sanoma.work", database: store }); // "company"\n',
     );
-    expect(() => declareSlug("export {};\n", "maple")).toThrow('names no "company"');
+    expect(() => declareSlug("export {};\n", "maple")).toThrow('names no "company.sanoma.work"');
   });
 
   it("makes a slug the Cloud takes of any name, else of the directory's", () => {

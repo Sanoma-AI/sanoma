@@ -15,6 +15,9 @@ import { cloud } from "../src/index.ts";
 // apply makes the database on the fake, and a suspend drops every connection to the stand-in, as
 // a Neon compute's does.
 
+/** The id the fake gives the token's company. */
+const COMPANY = "fake-company-1";
+
 let n = 0;
 const call = (opId: string): CallContext => ({
   idempotencyKey: `${opId}:${++n}`,
@@ -26,7 +29,8 @@ const call = (opId: string): CallContext => ({
 
 describe("cloud.database meets the Database contract", () => {
   const db = fakeDatabase("sanoma_cloud_kit");
-  const fake = fakeCloud();
+  // The token's company, as the wizard's token is for one from the start.
+  const fake = fakeCloud({ slug: "acme" });
   const op = (name: string, input: object) =>
     fake.driver.ops[`database.${name}`]!(input, call(`cloud.database.${name}`));
   let client: SanomaClient;
@@ -45,12 +49,12 @@ describe("cloud.database meets the Database contract", () => {
   });
 
   it("passes every check against the fake, with the test Postgres as its database", { timeout: 120_000 }, async () => {
-    const desired = { name: "acme", region: "eu-central" };
+    const desired = { region: "eu-central" };
     const apply = async () => {
-      const plan = (await op("plan", { id: "acme", desired })) as { action: string };
+      const plan = (await op("plan", { id: COMPANY, desired })) as { action: string };
       if (plan.action === "create")
         return ((await op("create", { desired })) as { state: Record<string, unknown> }).state;
-      return ((await op("read", { id: "acme" })) as { state: Record<string, unknown> }).state;
+      return ((await op("read", { id: COMPANY })) as { state: Record<string, unknown> }).state;
     };
     const results = await checkDatabase({
       type: database,
@@ -66,7 +70,7 @@ describe("cloud.database meets the Database contract", () => {
       { name: "a queued run drains", ok: true },
       { name: "a queued run drains after a suspend and a wake", ok: true },
     ]);
-    expect(fake.state.companies.acme?.database).toEqual({ id: "fake-db-1", region: "eu-central" });
+    expect(fake.state.company?.database).toEqual({ id: "fake-db-2", region: "eu-central" });
   });
 
   it("is a database type in a config, whose storeUrl stores nothing: the host binds the URL", async () => {
@@ -78,7 +82,7 @@ describe("cloud.database meets the Database contract", () => {
     });
     const secrets = memorySecrets();
     const stored = await fake.driver.ops["database.storeUrl"]!(
-      { id: "acme", export: "store" },
+      { id: COMPANY, export: "store" },
       { ...call("cloud.database.storeUrl"), secrets },
     );
     expect(stored).toMatchObject({ stored: false });
@@ -91,7 +95,7 @@ describe("cloud.database meets the Database contract", () => {
 });
 
 describe("Sanoma Cloud in a data file", () => {
-  it("declares the database and the host the wizard writes, which the config reads with no problem", () => {
+  it("declares the database and the host as the template does, which the config reads with no problem", () => {
     const root = mkdtempSync(join(tmpdir(), "sanoma-cloud-declared-"));
     mkdirSync(join(root, "resources", "sanoma"), { recursive: true });
     writeFileSync(
@@ -100,11 +104,7 @@ describe("Sanoma Cloud in a data file", () => {
         'import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";',
         "",
         'export const store = cloud.database({ region: "us-east" });',
-        "export const host = cloud.host({",
-        '  source: "https://github.com/acme/acme-ops.git",',
-        '  ref: "main",',
-        '  domains: { app: "acme.sanoma.work" },',
-        "});",
+        'export const host = cloud.host({ hostname: "acme.sanoma.work", database: store });',
         "export default [store, host];",
         "",
       ].join("\n"),
@@ -120,7 +120,7 @@ describe("Sanoma Cloud in a data file", () => {
       expect(problems).toEqual([]);
       expect(resources.map((r) => [r.id, r.vendor, r.type, r.name])).toEqual([
         ["resources/sanoma/infra.ts#store", "cloud", "database", "store"],
-        ["resources/sanoma/infra.ts#host", "cloud", "host", "acme"],
+        ["resources/sanoma/infra.ts#host", "cloud", "host", "host"],
       ]);
     } finally {
       rmSync(root, { recursive: true, force: true });

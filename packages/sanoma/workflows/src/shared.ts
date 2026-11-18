@@ -704,6 +704,12 @@ export const GO_LIVE_CLOUD_WORKFLOW = "go-live-cloud";
 export const CLOUD_SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
 /** `CLOUD_SLUG` in words. */
 export const CLOUD_SLUG_RULE = "lower case letters, digits and dashes, a dash at neither end: one of them, or 3 to 40";
+/** A company's address at Sanoma Cloud, `<slug>.sanoma.work` (`CLOUD_SLUG`): its first group is the slug. */
+export const CLOUD_HOSTNAME = new RegExp(`^(${CLOUD_SLUG.source.slice(1, -1)})\\.sanoma\\.work$`);
+/** The address at Sanoma Cloud whose slug is `slug`. */
+export const cloudHostnameOf = (slug: string) => `${slug}.sanoma.work`;
+/** The slug of an address at Sanoma Cloud (`CLOUD_HOSTNAME`), or undefined for any other hostname. */
+export const cloudSlugOf = (hostname: string): string | undefined => CLOUD_HOSTNAME.exec(hostname)?.[1];
 export const CONNECT_EXISTING_WORKFLOW = "connect-existing";
 
 /**

@@ -1,5 +1,6 @@
 // By hand, against a real sanoma-ops: the resource operations of `cloud.database` and
-// `cloud.host` through the real driver, for a scratch company, and the Database kit's run checks
+// `cloud.host` through the real driver, for the scratch company the token is for (one token, one
+// company: a sign-up's, its parts closed), and the Database kit's run checks
 // when the company database's URL is given. Never in CI or the gate: it makes a Neon project and a
 // Cloudflare Worker and container in Sanoma's accounts, and closes both at the end. README,
 // "Running it live", says what it needs:
@@ -67,28 +68,30 @@ async function answers(url: string): Promise<number> {
 }
 
 let failed = false;
-const made = { database: false, host: false };
+/** The company's id, which both parts are bound to, once one is made. */
+const made: { database?: string; host?: string } = {};
 try {
-  const desiredDatabase = { name: SLUG, region: process.env.SANOMA_CLOUD_TEST_REGION ?? "us-east" };
+  const desiredDatabase = { region: process.env.SANOMA_CLOUD_TEST_REGION ?? "us-east" };
   const begun = Date.now();
   const store = await op("database.create", { desired: desiredDatabase });
-  made.database = true;
-  console.log(`database: made ${store.state.id} in ${store.state.region} after ${seconds(Date.now() - begun)}`);
+  made.database = store.id;
+  console.log(`database: made for ${store.id} in ${store.state.region} after ${seconds(Date.now() - begun)}`);
 
-  const desiredHost = { name: SLUG, source: SOURCE, ref: REF, revision: head() };
+  const desiredHost = { hostname: `${SLUG}.sanoma.work`, source: SOURCE, ref: REF, revision: head() };
   const started = Date.now();
   const host = await op("host.create", { desired: desiredHost });
-  made.host = true;
+  made.host = host.id;
+  const id = host.id as string;
   console.log(
     `host: made at ${host.state.url}, revision ${host.state.revision}, after ${seconds(Date.now() - started)}`,
   );
   console.log(`host: /healthz answered 200 after ${seconds(await answers(host.state.url))}`);
 
-  const read = await op("host.read", { id: SLUG });
+  const read = await op("host.read", { id: id });
   if (read.gone || read.state.revision !== desiredHost.revision) {
     throw new Error(`host.read: ${JSON.stringify(read)}`);
   }
-  const plan = await op("host.plan", { id: SLUG, desired: desiredHost });
+  const plan = await op("host.plan", { id: id, desired: desiredHost });
   console.log(`host: plan at the same revision is ${plan.action}`);
   if (plan.action !== "none") failed = true;
 
@@ -100,7 +103,7 @@ try {
     try {
       const results = await checkDatabase({
         type,
-        apply: async () => (await op("database.read", { id: SLUG })).state,
+        apply: async () => (await op("database.read", { id: id })).state,
         url: async () => COMPANY_DB,
         client,
         timeoutMs: 120_000,
@@ -119,9 +122,9 @@ try {
   failed = true;
   console.error(error);
 } finally {
-  if (made.host) await op("host.delete", { id: SLUG }).catch((error) => console.error(`host.delete: ${error}`));
+  if (made.host) await op("host.delete", { id: made.host }).catch((error) => console.error(`host.delete: ${error}`));
   if (made.database) {
-    await op("database.delete", { id: SLUG }).catch((error) => console.error(`database.delete: ${error}`));
+    await op("database.delete", { id: made.database }).catch((error) => console.error(`database.delete: ${error}`));
   }
 }
 process.exit(failed ? 1 : 0);
