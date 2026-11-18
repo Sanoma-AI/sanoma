@@ -27,6 +27,7 @@ export function connectWorkflow(): WorkflowDefinition<any, any> {
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "connect" satisfies typeof CONNECT_WORKFLOW,
     title: "Connect an account",
+    internal: true,
     trigger: "manual",
     input: ConnectInput,
     uses: [connectionOps.connection.exchange, connectionOps.connection.activate],

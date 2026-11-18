@@ -270,8 +270,6 @@ export function stepLabel(step: ToolPart): string {
       return `Read the run ${String(input.runId ?? "")}`;
     case "wait_run":
       return `Waited for the run ${String(input.runId ?? "")}`;
-    case "drift":
-      return `Checked for drift${runEnd(step)}`;
     case "start_run":
       // An error is a start that left no run (the policy's refusal, an input it does not take); a run that started and then failed is an output.
       return step.state === "output-error"

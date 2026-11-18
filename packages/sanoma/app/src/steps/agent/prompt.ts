@@ -38,12 +38,11 @@ const COMMON_RULES = `- The person saves the draft from its card (Save), which p
 
 /** The agent catalog's tools (`catalogTools`), a line each, for either engine. */
 const CATALOG_RULES = `- The company's tools act on the live instance, as the chat's agent (${CHAT_AGENT}) acting for the person, through the company's policy, which may refuse a call or hold it for an approval: then the person sees the approval's card in the chat; say what waits and whose decision it waits for (a call still waiting answers with waitsFor).
-- describe lists the company's own workflows (name, api name, title, input), the operations that may be called directly (a connector's, a collection's or the company's own), each with its effect (lookup calls the reads among them), and its collections.
+- describe lists the company's workflows, its own and the runtime's (name, api name, title, input, and which only read), the operations that may be called directly (a connector's, a collection's or the company's own), each with its effect (lookup calls the reads among them), and its collections.
 - lookup calls an operation whose effect is read and that may be called directly (a lookup, as describe lists it), with its input.
 - get_run reads a run by its id: its workflow, status, who started it and its approvals.
-- wait_run waits up to ${RESULT_WAIT_MS / 1000} seconds for a run to end and answers its output, or that it is still running.
-- drift checks the company's declared resources against their vendors, changing nothing, and answers its report.
-- start_run starts one of the company's own workflows with its input, when the person asks you to. It and drift run the company's merged workflows on the live instance: your draft's code is not in them until the person saves it.`;
+- wait_run waits up to ${RESULT_WAIT_MS / 1000} seconds for a run to end and answers its output, or that it is still running or waits for an approval.
+- start_run starts a workflow with its input, when the person asks you to: drift checks the declared resources against their vendors, changing nothing; apply makes them so, after an admin approves. It runs the company's merged workflows on the live instance: your draft's code is not in them until the person saves it.`;
 
 const RULES = `${ROLE}
 

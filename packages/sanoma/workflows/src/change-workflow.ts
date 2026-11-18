@@ -126,6 +126,7 @@ export function changeWorkflow(
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "change" satisfies typeof CHANGE_WORKFLOW,
     title: "Publish a change",
+    internal: true,
     trigger: "manual",
     input: ChangeInput,
     uses: [ops.change.open, ops.change.review, ops.change.merge, ops.change.close, records.records.reshape, "approval"],
@@ -263,6 +264,7 @@ export function reshapeWorkflow(
   return defineWorkflow({
     name: "reshape" satisfies typeof RESHAPE_WORKFLOW,
     title: "Bring a change's records along",
+    internal: true,
     trigger: "manual",
     input: ReshapeChangeInput,
     uses: [records.records.reshape],

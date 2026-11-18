@@ -83,7 +83,7 @@ function fromOwnOrigin(request: Request): boolean {
   return URL.parse(origin)?.host === new URL(request.url).host;
 }
 
-/** The catalog's six tools, as `actor`: read ones marked `readOnlyHint`, the start `destructiveHint`. */
+/** The catalog's five tools, as `actor`: read ones marked `readOnlyHint`, the start `destructiveHint`. */
 function mcpServer(app: AppContext, actor: Principal): McpServer {
   // `listChanged: false`: the catalog is the same for every request, so nothing invites a listen.
   const server = new McpServer(

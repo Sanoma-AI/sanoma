@@ -622,12 +622,12 @@ describe("the agent catalog in the chat", () => {
   /** The chat's agent acting for Ada, as the run and the ledger keep it. */
   const chatForAda = { id: CHAT_AGENT, groups: ["agents"], onBehalfOf: "ada" };
 
-  it("offers the catalog's six tools beside the loop's, and names each in the system prompt", async () => {
+  it("offers the catalog's five tools beside the loop's, and names each in the system prompt", async () => {
     const id = `catalog-${RUN}`;
     await send(id, [], "Note the visit");
     const call = model.doStreamCalls.findLast((c) => JSON.stringify(c.prompt).includes("Note the visit"))!;
     const offered = (call.tools ?? []).map((t) => t.name);
-    for (const name of ["describe", "lookup", "get_run", "wait_run", "drift", "start_run"]) {
+    for (const name of ["describe", "lookup", "get_run", "wait_run", "start_run"]) {
       expect(offered, name).toContain(name);
       expect(systems.at(-1), name).toMatch(new RegExp(`^- ${name} `, "m"));
     }
@@ -683,7 +683,7 @@ describe("the agent catalog in the chat", () => {
     expect((await testApp.client.run(runId))?.startedBy).toEqual(chatForAda);
   }, 300_000);
 
-  it("refuses the chat's start a forbid on the person refuses them, and any of the runtime's own workflows", async () => {
+  it("refuses the chat's start a forbid on the person refuses them, and an internal workflow", async () => {
     const refused = await send(`bonus-${RUN}`, [], "Give a bonus");
     expect(firstTool(refused)).toMatchObject({
       state: "output-error",
@@ -692,7 +692,7 @@ describe("the agent catalog in the chat", () => {
     const builtIn = await send(`builtin-${RUN}`, [], "Save the draft for me");
     expect(firstTool(builtIn)).toMatchObject({
       state: "output-error",
-      errorText: expect.stringContaining("save-draft is the runtime's own workflow"),
+      errorText: expect.stringContaining("save-draft is internal: only Sanoma itself starts it"),
     });
     const asked = await askedIn(`builtin-${RUN}`, "Save the draft for me");
     expect(await testApp.client.run(catalogCallId(`builtin-${RUN}`, asked, `${RUN}-21-0`))).toBeUndefined();

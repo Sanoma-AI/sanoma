@@ -161,7 +161,7 @@ export type ChatMessage = UIMessage<unknown, ChatData, InferUITools<LoopTools>>;
 
 /**
  * The output a call or a start the policy holds shows until it is decided (the agent catalog's
- * `lookup`, `start_run` and `drift`, `catalogTools`), as any engine writes it: a tool part whose
+ * `lookup` and `start_run`, `catalogTools`), as any engine writes it: a tool part whose
  * output is `{ held: { runId } }`, which the chat draws as the approval's card.
  */
 export interface HeldOutput {
@@ -181,7 +181,7 @@ export interface StillHeld extends HeldOutput {
 }
 
 /**
- * What the chat's `start_run` and `drift` answer, whoever writes it (the tool as it runs, or
+ * What the chat's `start_run` answers, whoever writes it (the tool as it runs, or
  * `settle` from the run a call left; `runOutput` in `server/catalog.ts` builds every one but the
  * first): held, shown at once; still held past the wait; or the run by its id and status, with its
  * output once it finished and its error once it failed or was cancelled. A run that started and

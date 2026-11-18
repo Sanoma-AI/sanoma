@@ -840,14 +840,6 @@ export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   SAVE_DRAFT_WORKFLOW,
 ]);
 
-/** The runtime's own workflow `name` names, by its name or api name (`apiNameOf`); undefined for any other. */
-export const builtInNamed = (name: string): string | undefined =>
-  [...BUILT_IN_WORKFLOWS].find((workflow) => workflow === name || apiNameOf(workflow) === name);
-
-/** Why a start of the built-in `workflow` is refused where an agent starts the company's own (`/mcp`'s `start_run`, `sanoma call`). */
-export const builtInRefusal = (workflow: string): string =>
-  `${workflow} is the runtime's own workflow: the runtime's own workflows are not started here`;
-
 /**
  * The reads of a workflow's runs a site's `api` and `POST /api/call` answer (`<api>.<read>`, the
  * app's `callApi`), beside `.start`: they start nothing, so `sanoma call` sends them no id.
@@ -967,12 +959,12 @@ export const LOGIN_AGENT = "login";
 export const RENEWAL_AGENT = "renewal";
 /**
  * The runtime's agent the in-app chat acts as, on behalf of the person chatting: what its tools
- * call and start (the agent catalog, `/mcp`'s six) is the chat's, for them (`chatAgentActing`), and
+ * call and start (the agent catalog, `/mcp`'s tools) is the chat's, for them (`chatAgentActing`), and
  * never anyone's acting for no one (`admit` refuses it bare). Named `sanoma-chat`, not `chat`, a
  * word a company may well have given a person or an agent already.
  * Unlike the runtime's other agents (`RUNTIME_AGENTS`, which it is not among) it is held to the
- * agent rules (`isDeclaredAgent`): the built-ins it may start (`AGENT_BUILT_INS`) and the policy
- * asked as it and as the person.
+ * agent rules (`isDeclaredAgent`): a built-in's start waits for `admin` (`agentHold`), and the
+ * policy is asked as it and as the person.
  */
 export const CHAT_AGENT = "sanoma-chat";
 /**
@@ -1213,18 +1205,12 @@ export function clientRefusal(client: string, standing: ClientRefused, company =
 /**
  * True for a principal the agent rules bind: in `agents`, not a visitor, and a declared agent, a
  * built-in client's agent (`BUILT_IN_CLIENTS`) or the in-app chat's (`CHAT_AGENT`), the one agent
- * of the runtime's they bind; the others (`RUNTIME_AGENTS`) are exempt. Such an agent starts no built-in workflow but those in
- * `AGENT_BUILT_INS` and `call`, and those through the start policy; acting for a person, it is
+ * of the runtime's they bind; the others (`RUNTIME_AGENTS`) are exempt. Its start of a built-in
+ * workflow that is not read-only waits for `admin` (`agentHold`); acting for a person, it is
  * asked about as itself and as the person (`cedarPolicy`'s `authorize`).
  */
 export const isDeclaredAgent = (p: Pick<Principal, "id" | "groups">): boolean =>
   !isVisitor(p) && (p.groups?.includes(AGENTS) ?? false) && !RUNTIME_AGENTS.includes(p.id);
-
-/** The built-in workflows a declared agent (`isDeclaredAgent`) may start, its start decided by the policy: drift, which changes nothing. */
-export const AGENT_BUILT_INS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW]);
-
-/** Why a declared agent's start of another built-in is refused (`policy_denied`), in the client and the app's `callApi` alike. */
-export const AGENT_BUILT_IN_REFUSAL = `an agent starts none of the runtime's own workflows but ${[...AGENT_BUILT_INS].join(", ")}`;
 
 /** True when the data files declare a person, agent or group: then only a declared principal is admitted. */
 export const declaresPeople = (resources: readonly PeopleResource[]): boolean =>

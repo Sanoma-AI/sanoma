@@ -34,6 +34,7 @@ import {
   shapeOf,
 } from "./schema.ts";
 import {
+  AGENTS,
   ANONYMOUS,
   approverLabel,
   approverOf,
@@ -53,7 +54,8 @@ import {
 // A company's policies in Cedar (`policies/**/*.cedar`), decided with `@cedar-policy/cedar-wasm`
 // against the schema of its resolved config (`schemaOf`). Allow is the default: the runtime adds
 // the one `permit` for people and agents, so a company's policies are `forbid`s, each a hold when
-// it carries `@hold(...)` and a deny otherwise, and the `permit`s that let visitors in.
+// it carries `@hold(...)` and a deny otherwise, the `permit`s that let visitors in, and those for
+// agents, which lift the runtime's rule on an agent's start of a built-in (`agentHold` in `call.ts`).
 
 /** Where a company's policies are, under its root. */
 export const POLICIES_DIR = "policies";
@@ -75,8 +77,8 @@ export interface CedarPolicySource {
   title?: string;
   /** `@reason(...)`: the message of its deny. */
   reason?: string;
-  /** Whom a `permit` is for, when its principal is exactly `in Sanoma::Group::"visitors"` or `== Sanoma::Principal::"anonymous"`. */
-  scope?: typeof VISITORS | typeof ANONYMOUS;
+  /** Whom a `permit` is for, when its principal is exactly `in Sanoma::Group::"visitors"`, `in Sanoma::Group::"agents"` or `== Sanoma::Principal::"anonymous"`. */
+  scope?: typeof VISITORS | typeof AGENTS | typeof ANONYMOUS;
 }
 
 /** What is wrong in the policies, at a file, line and column when Cedar says where. */
@@ -185,20 +187,21 @@ export function loadPolicies(files: readonly { file: string; text: string }[]): 
   return { policies, problems };
 }
 
-/** A permit's `scope`: whom its principal names, when that is exactly the visitors or `anonymous`. */
+/** A permit's `scope`: whom its principal names, when that is exactly the visitors, the agents or `anonymous`. */
 function scopeOf(principal: PolicyJson["principal"]): Pick<CedarPolicySource, "scope"> {
   if (!("entity" in principal) || !("id" in principal.entity)) return {};
   const { op, entity } = principal;
   const is = ({ type, id }: { type: string; id: string }) => entity.type === type && entity.id === id;
   if (op === "in" && is(uid("Group", VISITORS))) return { scope: VISITORS };
+  if (op === "in" && is(uid("Group", AGENTS))) return { scope: AGENTS };
   if (op === "==" && is(uid("Principal", ANONYMOUS))) return { scope: ANONYMOUS };
   return {};
 }
 
 /**
  * The policies checked against the schema of the resolved config (`validate`, strict), and what
- * Cedar cannot check: a `permit` for anyone but the visitors or `anonymous` (the runtime's is the
- * only one for people and agents), and a `@hold` naming neither a declared group, nor a declared
+ * Cedar cannot check: a `permit` for anyone but the visitors, the agents or `anonymous` (the
+ * runtime's is the only one for people), and a `@hold` naming neither a declared group, nor a declared
  * person, nor `on-behalf-of`. In the order written, each at its
  * file, line and column, once per place: a policy scoped to every action fails the same way for each.
  */
@@ -232,8 +235,9 @@ export function validatePolicies(
         ours.push({
           ...place,
           message:
-            'a permit is allowed only for visitors: its principal must be `in Sanoma::Group::"visitors"` or ' +
-            '`== Sanoma::Principal::"anonymous"`; for people and agents every call no forbid refuses is allowed already',
+            'a permit is allowed only for visitors or agents: its principal must be `in Sanoma::Group::"visitors"`, ' +
+            '`in Sanoma::Group::"agents"` or `== Sanoma::Principal::"anonymous"`; for people every call no forbid ' +
+            "refuses is allowed already",
         });
       } else if (p.hold !== undefined) {
         ours.push({ ...place, message: "a permit holds nothing: write the @hold on a forbid" });

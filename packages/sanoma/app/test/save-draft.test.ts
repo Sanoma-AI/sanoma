@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { startTestWorker } from "sanoma/testing";
 import { errorCode, memoryLedger, resolveConfig, SanomaClient, type SanomaConfig, type Worker } from "sanoma/workflows";
-import { SAVE_DRAFT_WORKFLOW, undoDraftOf } from "sanoma/workflows/shared";
+import { undoDraftOf } from "sanoma/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { localGitSource } from "../../src/source.ts";
 import { gitIdentity } from "../../test/git.ts";
@@ -72,13 +72,9 @@ async function drafted(id: string, title: string, files: Record<string, string>,
 /** The save run `runId`'s output, once it ends. */
 const outcome = async (runId: string) => client.result(runId).catch((err: unknown) => err);
 
-/** Starts the undo of `sha` by the chat `chat` as `startedBy` directly, past the app's own check; `n` (`~2`) runs it again. */
-const undo = (sha: string, chat: string, startedBy: string, n = "") =>
-  client.start(
-    SAVE_DRAFT_WORKFLOW,
-    { id: undoDraftOf(sha), title: "Undo", undo: sha, chat },
-    { startedBy, runId: `save:${undoDraftOf(sha)}${n}` },
-  );
+/** Starts the undo of `sha` by the chat `chat` as `startedBy` through the client, past the app's own check. */
+const undo = (sha: string, chat: string, startedBy: string) =>
+  client.saveDraft({ id: undoDraftOf(sha), title: "Undo", undo: sha, chat }, { startedBy });
 
 describe("saving a chat's draft without a remote", () => {
   let revision = "";
@@ -169,7 +165,7 @@ describe("saving a chat's draft without a remote", () => {
     expect(await outcome(await undo(first, "welcome", "alice"))).toMatchObject({
       message: `${first.slice(0, 7)} is not a commit your chat welcome saved`,
     });
-    expect(await outcome(await undo(revision, "welcome", "ada", "~9"))).toMatchObject({
+    expect(await outcome(await undo(revision, "welcome", "ada"))).toMatchObject({
       message: "No draft of yours is welcome",
     });
     expect(git("rev-parse", "main")).toBe(before);

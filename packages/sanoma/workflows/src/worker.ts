@@ -282,6 +282,7 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
     collections: resolved.collections,
     steps: resolved.steps,
     policy: resolved.policy,
+    ...(resolved.policies && { policies: resolved.policies }),
     ...(resolved.root !== undefined && { root: resolved.root }),
     ledger: ledger.store,
     secrets: storedSecrets,
@@ -709,10 +710,9 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
       const action = `${WORKFLOW_ACTION}${wf.name}`;
       /** The policy's answer to this start, in a step; a deny fails the run. */
       const decide = async () => {
-        const decision = await DBOS.runStep(
-          async () => decideStart(state.policy, wf.name, parsed, startedBy, run.approvals),
-          { name: `policy:${action}` },
-        );
+        const decision = await DBOS.runStep(async () => decideStart(state, wf, parsed, startedBy, run.approvals), {
+          name: `policy:${action}`,
+        });
         if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
         return decision;
       };
@@ -738,7 +738,7 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
       if (sandbox !== undefined) {
         // Imported here, so a live worker never loads the Gherkin parser or faker.
         const { seedSandbox } = await import("./sandbox.ts");
-        await seedSandbox(run, sandbox, parsed);
+        await seedSandbox(run, sandbox);
       }
       output = await currentRun.run(run, () => wf.run(buildCtx(wf, run), parsed));
     } finally {

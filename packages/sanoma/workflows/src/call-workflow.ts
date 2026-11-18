@@ -36,6 +36,7 @@ export function callWorkflow(
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "call" satisfies typeof CALL_WORKFLOW,
     title: "Call an operation",
+    internal: true,
     trigger: "manual",
     input: CallInput,
     uses,

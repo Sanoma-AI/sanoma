@@ -203,13 +203,13 @@ describe("the chat's catalog tools", () => {
     expect((await testApp.client.run(started.runId))?.startedBy).toEqual(chatFor("bo"));
   }, 120_000);
 
-  it("refuse every one of the runtime's own workflows, however it is written", async () => {
-    const bo = toolsFor("bo", `c-builtins-${RUN}`);
-    for (const workflow of ["save-draft", "saveDraft", "call", "chat", "drift", "apply", "login-code", "loginCode"]) {
+  it("refuse an internal workflow, by its name or api name", async () => {
+    const bo = toolsFor("bo", `c-internal-${RUN}`);
+    for (const workflow of ["save-draft", "saveDraft", "call", "change"]) {
       await expect(
         outputs(bo.start_run.execute!({ workflow, input: {} }, options(`b-${workflow}`))),
         workflow,
-      ).rejects.toThrow(/the runtime's own workflow/);
+      ).rejects.toThrow(/is internal: only Sanoma itself starts it/);
     }
   }, 120_000);
 
@@ -238,7 +238,7 @@ describe("the chat's catalog tools", () => {
 
   it("are described as the chat has them: no id to send again, and a hold an output, not an error", () => {
     const bo = toolsFor("bo", `c-described-${RUN}`);
-    for (const name of ["lookup", "drift", "start_run"] as const) {
+    for (const name of ["lookup", "start_run"] as const) {
       const { description } = bo[name];
       expect(description, name).not.toMatch(/the same id|error names/);
       expect(description, name).toContain("waiting for approval");
@@ -271,7 +271,7 @@ describe("the chat's catalog tools", () => {
 
   it("show a drift the policy holds at once, not after the result's wait", async () => {
     const bo = toolsFor("bo", `c-drift-${RUN}`, "m1", 600_000);
-    const generator = bo.drift.execute!({}, options("d1")) as AsyncGenerator<unknown>;
+    const generator = bo.start_run.execute!({ workflow: "drift", input: {} }, options("d1")) as AsyncGenerator<unknown>;
     const started = Date.now();
     expect((await generator.next()).value).toEqual({ held: { runId: catalogCallId(`c-drift-${RUN}`, "m1", "d1") } });
     expect(Date.now() - started).toBeLessThan(10_000);
@@ -298,10 +298,12 @@ describe("the chat's catalog tools", () => {
     setTimeout(() => waiting.abort(), 200);
     await expect(outputs(bo.wait_run.execute!({ runId }, options("s2", waiting.signal)))).rejects.toThrow(/abort/i);
     expect(Date.now() - started).toBeLessThan(3000);
-    // Unstopped, it answers that the run is running once its wait is over.
+    // Unstopped, it answers that the run is still held, and for whom, once its wait is over.
     expect(await lastOf(bo.wait_run.execute!({ runId, waitMs: 300 }, options("s3")))).toEqual({
+      held: { runId },
       runId,
-      status: "running",
+      status: "waiting for approval",
+      waitsFor: ["bo"],
     });
   }, 120_000);
 });

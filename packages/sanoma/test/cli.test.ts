@@ -347,11 +347,14 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
     return (runs.json as { runId: string; startedBy?: { id: string } }[]).find((r) => r.runId === runId)?.startedBy;
   };
 
-  it("describes the company's own workflows as JSON, on one line, and nothing else on stdout", async () => {
+  it("describes the company's workflows as JSON, on one line, and nothing else on stdout", async () => {
     const described = await sanoma(["describe", ...at()]);
     expect(described.code, described.stderr).toBe(0);
     expect(described.stdout.trimEnd().split("\n")).toHaveLength(1);
-    expect(described.json.workflows.map((wf: { name: string }) => wf.name)).toEqual(["hello"]);
+    const workflows = described.json.workflows as { name: string; builtin?: true }[];
+    // The company's own, and the runtime's it may start, none of them internal.
+    expect(workflows.filter((wf) => !wf.builtin).map((wf) => wf.name)).toEqual(["hello"]);
+    expect(workflows.map((wf) => wf.name)).not.toContain("save-draft");
   });
 
   it("starts a workflow, printing its run, and reads the run's failure, exiting 1", async () => {
@@ -369,17 +372,15 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
     expect(await startedBy(runId)).toMatchObject({ id: "ada" });
   });
 
-  it("names the input's issues, and refuses the runtime's own workflows however written, exiting 2", async () => {
+  it("names the input's issues, and the server's refusal of an internal workflow however written, exiting 1", async () => {
     const invalid = await sanoma(["call", "hello", "--input", '{"title":""}', ...at()]);
     expect(invalid.code).toBe(1);
     expect(invalid.stderr).toMatch(/\(invalid_input\)/);
     expect(invalid.stderr).toMatch(/^ {2}title: /m);
-    for (const name of ["change", "go-live", "goLive", "goLive.start", "login-code", "drift.start"]) {
+    for (const name of ["change", "change.start", "saveDraft", "saveDraft.start"]) {
       const refused = await sanoma(["call", name, ...at()]);
-      expect(refused.code, name).toBe(2);
-      expect(refused.stderr, name).toMatch(
-        /is the runtime's own workflow: the runtime's own workflows are not started here/,
-      );
+      expect(refused.code, name).toBe(1);
+      expect(refused.stderr, name).toMatch(/is internal: only Sanoma itself starts it \(invalid_input\)/);
     }
   });
 
@@ -422,7 +423,7 @@ export const claudeCode = sanoma.agent({ id: "claude-code", client: "claude-code
     // SANOMA_APP_PORT is 0 here: only the file says where.
     const found = await sanoma(["describe", "--as", "ada"]);
     expect(found.code, found.stderr).toBe(0);
-    expect(found.json.workflows).toHaveLength(1);
+    expect(found.json.workflows.filter((wf: { builtin?: true }) => !wf.builtin)).toHaveLength(1);
     // Another directory, whose file names an app that crashed: the port in the environment, then.
     const other = copyFixture();
     try {

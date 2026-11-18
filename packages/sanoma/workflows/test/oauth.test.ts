@@ -10,6 +10,7 @@ import { workflowStatus } from "../src/db/dbos.ts";
 import {
   AuthenticationError,
   authenticationCredentials,
+  dbosClient,
   defineAuthentication,
   defineConnection,
   defineConnector,
@@ -24,6 +25,7 @@ import {
 } from "../src/index.ts";
 import { lazyDb } from "../src/db.ts";
 import { secret } from "../src/secret.ts";
+import { rootWith } from "./harness.ts";
 
 // OAuth consent end to end over a controllable provider (msw): its authorization endpoint is the
 // test's own "consent", which mints a code for the challenge the consent URL carries; its token
@@ -190,8 +192,9 @@ afterEach(async (test) => {
 async function withRuntime(
   body: (client: SanomaClient) => Promise<void>,
   store: SecretStore = memorySecretStore(),
+  root?: string,
 ): Promise<void> {
-  const cfg = config(store);
+  const cfg = { ...config(store), ...(root !== undefined && { root }) };
   const worker = await startWorker(cfg);
   const client = await SanomaClient.connect(cfg);
   try {
@@ -298,6 +301,23 @@ describe("OAuth consent", () => {
     });
   }, 60_000);
 
+  it("starts the exchange under a policy that forbids every start: the callback's start is the runtime's own", async () => {
+    const root = rootWith({
+      "policies/none.cedar": `forbid (principal, action in Sanoma::Action::"start", resource);\n`,
+    });
+    await withRuntime(
+      async (client) => {
+        const started = await authorize(client);
+        const { runId } = await client.receiveConnection("acme", started.attempt, consent(started.url), {
+          actor: "alice",
+        });
+        expect((await settled(client, runId))?.status).toBe("finished");
+      },
+      memorySecretStore(),
+      root,
+    );
+  }, 60_000);
+
   it("fails the exchange when the verifier is not the one the code was issued for (PKCE)", async () => {
     await withRuntime(async (client) => {
       const started = await authorize(client);
@@ -344,11 +364,20 @@ describe("OAuth consent", () => {
         .from(connectionAttempts)
         .where(sql`${connectionAttempts.id} = ${late.attempt}`);
       const runId = `connect:${late.attempt}`;
-      await client.start(
-        "connect",
-        { target: held!.target, requestId: held!.requestId, attempt: late.attempt },
-        { startedBy: "alice", runId },
-      );
+      // Enqueued as the callback would, past it: `connect` is internal, which no start from outside makes.
+      const { queueName, appName } = resolveConfig(config());
+      const raw = await dbosClient(databaseUrl, appName);
+      try {
+        await raw.enqueue(
+          { queueName, workflowName: "connect", workflowID: runId, applicationName: appName },
+          {
+            input: { target: held!.target, requestId: held!.requestId, attempt: late.attempt },
+            startedBy: { id: "alice" },
+          },
+        );
+      } finally {
+        await raw.destroy();
+      }
       expect((await settled(client, runId))?.status).toBe("failed");
       expect(await client.connectionAttempt(late.attempt, { actor: "alice" })).toMatchObject({
         state: "failed",
@@ -365,7 +394,10 @@ describe("OAuth consent", () => {
   it("ends an attempt whose connect run could not start, its code dropped", async () => {
     await withRuntime(async (client) => {
       const started = await authorize(client);
-      vi.spyOn(client, "start").mockRejectedValueOnce(new Error("queue down"));
+      // The client's own start of the run, which asks no policy.
+      vi.spyOn(client as unknown as { queue(): Promise<string> }, "queue").mockRejectedValueOnce(
+        new Error("queue down"),
+      );
       await expect(
         client.receiveConnection("acme", started.attempt, consent(started.url), { actor: "alice" }),
       ).rejects.toThrow("queue down");

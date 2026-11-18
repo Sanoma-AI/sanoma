@@ -4,8 +4,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
   ACTOR_HEADER,
   AGENT_HEADER,
-  builtInNamed,
-  builtInRefusal,
   CALL_ID,
   DESCRIBE_CALL,
   errorMessage,
@@ -59,8 +57,7 @@ export async function describeCommand(options: CallOptions): Promise<number> {
 /**
  * `sanoma call <name>`: a workflow started (by its api name, or `<api>.start`), a run read
  * (`<api>.result`, asked again while the run is running, up to `RESULT_DEADLINE_MS`), or an
- * operation called by its id, as `POST /api/call` takes them; the answer as JSON on stdout. The
- * runtime's own workflows are refused, as `/mcp`'s `start_run` refuses them; their runs' reads are not.
+ * operation called by its id, as `POST /api/call` takes them; the answer as JSON on stdout.
  */
 export async function callCommand(name: string, options: CallOptions): Promise<number> {
   let input: unknown;
@@ -71,9 +68,6 @@ export async function callCommand(name: string, options: CallOptions): Promise<n
       throw new UsageError(`--input is not JSON: ${errorMessage(err)}`);
     }
   }
-  // A built-in, by its name or api name, with or without `.start`.
-  const builtIn = builtInNamed(name.endsWith(".start") ? name.slice(0, -".start".length) : name);
-  if (builtIn) throw new UsageError(builtInRefusal(builtIn));
   return request(name, input, options);
 }
 

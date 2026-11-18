@@ -325,10 +325,10 @@ describe("the change workflow", () => {
     await app.client.result(runId);
   });
 
-  it("is started only by openChange, which names its run", async () => {
+  it("is started only by openChange, which names its run: it is internal", async () => {
     await expect(
       app.client.start("change", { id: "side", title: "Side door" }, { startedBy: "alice" }),
-    ).rejects.toMatchObject({ code: "invalid_input" });
+    ).rejects.toMatchObject({ code: "invalid_input", message: "change is internal: only Sanoma itself starts it" });
   });
 
   it("publishes a saved change as its drafter at the head saved when the policy lets them decide it, and asks Publish otherwise", async () => {

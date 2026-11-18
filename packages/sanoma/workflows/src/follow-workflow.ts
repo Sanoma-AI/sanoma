@@ -66,6 +66,7 @@ export function followWorkflow(steps: FollowSteps): WorkflowDefinition<any, any>
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "follow" satisfies typeof FOLLOW_WORKFLOW,
     title: "Follow the repository's host",
+    internal: true,
     trigger: "manual",
     input: RemoteEventSchema,
     uses: [],

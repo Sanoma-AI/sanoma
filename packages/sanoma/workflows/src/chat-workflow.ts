@@ -55,6 +55,7 @@ export function chatWorkflow(steps: ChatSteps): WorkflowDefinition<any, any> {
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "chat" satisfies typeof CHAT_WORKFLOW,
     title: "A chat turn",
+    internal: true,
     trigger: "manual",
     input: ChatTurnInput,
     uses: [],
