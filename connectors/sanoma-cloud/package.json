@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-sanoma-cloud",
-  "version": "0.11.24",
+  "version": "0.11.25",
   "description": "Sanoma Cloud for Sanoma: the company's database, host and agent boxes in Sanoma's own accounts, declared like any other",
   "keywords": [
     "connector",
