@@ -11,20 +11,30 @@ export const byTitle = (a: string, b: string) => a.localeCompare(b, "en");
 /** A company operation's name, as its page and the Connectors page show it: its id less `operations.` and `.run` (`quote`, `crm.score`). */
 export const operationName = (id: string) => id.slice(OPERATIONS_VENDOR.length + 1, -".run".length);
 
+/** The config's operations by id, for `select`: built once per config, not on every render. */
+export const opsById = (config: Pick<ConfigDescription, "ops">) => new Map(config.ops.map((op) => [op.id, op]));
+
+/**
+ * What a workflow calling these operations reaches: each, and the calls inside a company
+ * operation among them (its `ops`).
+ */
+export const opsReached = (ops: ReadonlyMap<string, OpEntry>, ids: readonly string[]) =>
+  ids.flatMap((id) => [id, ...(ops.get(id)?.ops ?? [])]);
+
 /** A vendor a workflow calls, by id, and its title (its id when the config gives none). */
 export type CalledVendor = { id: string; title: string };
 
 /**
- * The outside vendors these operations are from, each once, sorted by title: those a connector
- * brings (`config.vendors`), never the built-in `sanoma` and `data`, which call nothing outside. A
- * company operation's are those of the calls inside it (its `ops`).
+ * The outside vendors these operations reach (`opsReached`), each once, sorted by title: those a
+ * connector brings (`config.vendors`), never the built-in `sanoma` and `data`, which call nothing
+ * outside.
  */
 export const vendorsCalling = (
   config: Pick<ConfigDescription, "vendors">,
   ops: ReadonlyMap<string, OpEntry>,
   ids: readonly string[],
 ): CalledVendor[] =>
-  [...new Set(ids.flatMap((id) => [id, ...(ops.get(id)?.ops ?? [])]).flatMap((id) => ops.get(id)?.vendor ?? []))]
+  [...new Set(opsReached(ops, ids).flatMap((id) => ops.get(id)?.vendor ?? []))]
     .flatMap((id) => {
       const vendor = config.vendors[id];
       return vendor ? [{ id, title: vendor.title }] : [];
@@ -71,14 +81,16 @@ export function opHome(
 }
 
 /**
- * What calls one of these operations itself: the workflows that name one in `uses`, sorted by
- * title, the built-ins left out (`call` may call every direct operation), and the company's own
- * operations that name one in `uses`, by name. A page adds the sites' files (`siteCallers`).
+ * What calls one of these operations: the workflows that reach one (`opsReached`: in `uses`, or
+ * through a company operation's), sorted by title, the built-ins left out (`call` may call every
+ * direct operation), and the company's own operations that name one in `uses`, by name. A page
+ * adds the sites' files (`siteCallers`).
  */
 export function callersOf(config: Pick<ConfigDescription, "ops" | "workflows">, ids: readonly string[]) {
   const called = new Set(ids);
+  const ops = opsById(config);
   const workflows = config.workflows
-    .filter((wf) => !wf.builtin && wf.ops.some((op) => called.has(op)))
+    .filter((wf) => !wf.builtin && opsReached(ops, wf.ops).some((op) => called.has(op)))
     .toSorted((a, b) => byTitle(a.title ?? a.name, b.title ?? b.name));
   const operations = companyOps(config).filter((op) => op.ops?.some((id) => called.has(id)));
   return { workflows, operations };

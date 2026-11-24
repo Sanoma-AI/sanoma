@@ -4,7 +4,8 @@ import { useMemo } from "react";
 import { CardDescription } from "#/components/ui/card.tsx";
 import { useActor } from "../actor.ts";
 import { previewRequests, willAsk } from "../lib/preview.ts";
-import { configQuery, opsById, previewQuery } from "../queries.ts";
+import { opsById } from "../lib/operations.ts";
+import { configQuery, previewQuery } from "../queries.ts";
 
 /**
  * What the policy will do on a run of `workflow` started by you, ahead of the start (`willAsk`):

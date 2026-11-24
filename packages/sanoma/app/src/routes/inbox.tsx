@@ -26,12 +26,12 @@ import {
   When,
 } from "../components/common.tsx";
 import { type Entry, useDecided, useInbox } from "../lib/inbox.ts";
+import { opsById } from "../lib/operations.ts";
 import {
   approvalKey,
   configQuery,
   type InboxFilter,
   InboxSearch,
-  opsById,
   recentRunsQuery,
   runLink,
   settledAt,

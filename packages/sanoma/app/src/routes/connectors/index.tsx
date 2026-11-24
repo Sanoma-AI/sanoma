@@ -112,7 +112,7 @@ function Installed() {
   if (connectors.length === 0) return <Nothing title="This config has no connectors" />;
   return (
     <ItemGroup>
-      {connectors.map(({ id, vendor, ops, workflows }) => (
+      {connectors.map(({ id, vendor, ops, callers }) => (
         <LinkItem key={id} variant="outline">
           <Link to="/connectors/$vendor" params={{ vendor: id }}>
             <ItemMedia>
@@ -126,7 +126,7 @@ function Installed() {
                 {vendor.package && <TierBadge tier={connectorTier(vendor.package)} />}
               </ItemTitle>
               <ItemDescription>
-                {plural(ops.length, "operation")} · used by {plural(workflows.length, "workflow")}
+                {plural(ops.length, "operation")} · used by {plural(callers.workflows.length, "workflow")}
                 {credentials[id] && ` · ${configured(credentials[id])}`}
               </ItemDescription>
             </ItemContent>

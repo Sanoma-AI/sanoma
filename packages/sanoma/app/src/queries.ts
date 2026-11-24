@@ -81,7 +81,7 @@ import {
 } from "./functions.ts";
 import type { UntypedApi } from "./api-client.ts";
 import type { ColumnChange } from "./components/grid/plan.ts";
-import { byTitle, vendorsCalling } from "./lib/operations.ts";
+import { byTitle, callersOf, opsById, vendorsCalling } from "./lib/operations.ts";
 import { api } from "./site-api.ts";
 
 /**
@@ -152,9 +152,6 @@ export async function refreshColumns(
 export const workflowFile = (workflow: Pick<WorkflowEntry, "outline">): string | undefined =>
   "file" in workflow.outline ? workflow.outline.file : undefined;
 
-/** The config's operations by id, for `select`: built once per config, not on every render. */
-export const opsById = (config: ConfigDescription) => new Map(config.ops.map((op) => [op.id, op]));
-
 /** The vendors the workflow's operations call, sorted by title: for `select`. None for a workflow the config does not have. */
 export const vendorsOf = (name: string) => (config: ConfigDescription) =>
   vendorsCalling(config, opsById(config), workflowNamed(name)(config)?.ops ?? []);
@@ -166,19 +163,19 @@ export const vendorsByWorkflow = (config: ConfigDescription) => {
 };
 
 /**
- * Each vendor, sorted by title, with its operations (in `ops`' order) and the workflows that may
- * call one of them: for `select`.
+ * Each vendor, sorted by title, with its operations (in `ops`' order) and what calls one of them
+ * (`callersOf`), which its card counts and its page lists: for `select`.
  */
 export const connectorsOf = (config: ConfigDescription) =>
   Object.entries(config.vendors)
     .map(([id, vendor]) => {
       const ops = config.ops.filter((op) => op.vendor === id);
-      const ids = new Set(ops.map((op) => op.id));
-      const workflows = config.workflows
-        .filter((wf) => wf.ops.some((op) => ids.has(op)))
-        .map(({ name, title }) => ({ name, title }));
+      const callers = callersOf(
+        config,
+        ops.map((op) => op.id),
+      );
       const resourceTypes = config.resourceTypes.filter((type) => type.vendor === id);
-      return { id, vendor, ops, workflows, resourceTypes };
+      return { id, vendor, ops, callers, resourceTypes };
     })
     .toSorted((a, b) => byTitle(a.vendor.title, b.vendor.title));
 

@@ -19,7 +19,8 @@ import {
   plural,
   SiteLink,
 } from "../../components/common.tsx";
-import { configQuery, lastRunsQuery, opsById, scenariosQuery } from "../../queries.ts";
+import { opsById } from "../../lib/operations.ts";
+import { configQuery, lastRunsQuery, scenariosQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/apps/$name")({
   // The root route loads the config; each workflow's last run and the scenarios fill two of the

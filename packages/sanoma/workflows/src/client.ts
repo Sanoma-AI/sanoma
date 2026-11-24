@@ -59,7 +59,7 @@ import {
   ReshapeChangeInput,
 } from "./change.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
-import { isDirect } from "./direct.ts";
+import { isDirect, notDirect } from "./direct.ts";
 import {
   ApprovalPendingError,
   type ErrorInfo,
@@ -556,10 +556,7 @@ export class SanomaClient {
       parseOrThrow(z.string().min(1).optional(), options.id, "`id` must be a non-empty string") ?? randomUUID();
     const { ops, types } = this.config;
     const op = ops.get(opId);
-    if (!op || !isDirect(op, types)) {
-      const why = op ? "it is a workflow's to call: start one that uses it" : "no connector or collection declares it";
-      throw new SanomaError("invalid_input", `${opId} cannot be called directly: ${why}`, { op: opId });
-    }
+    if (!op || !isDirect(op, types)) throw notDirect(opId, op, types);
     const parsed = inputOf(op, input);
     const connection = isOperation(op)
       ? undefined

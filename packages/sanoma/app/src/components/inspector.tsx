@@ -14,8 +14,8 @@ import { starterName } from "../api.ts";
 import type { GraphNode, GraphNodeKind } from "../graph/types.ts";
 import { spanLines } from "../lib/lines.ts";
 import { recordsFor } from "../lib/records.ts";
-import { opHome, operationFile } from "../lib/operations.ts";
-import { configQuery, opsById, sourceQuery } from "../queries.ts";
+import { opHome, operationFile, opsById } from "../lib/operations.ts";
+import { configQuery, sourceQuery } from "../queries.ts";
 import { ApprovalDecision, ApprovalDetails } from "./approval.tsx";
 import {
   ApprovalStatusBadge,

@@ -6,7 +6,8 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
-import { configQuery, nextFiresQuery, opsById, siteCallers } from "../queries.ts";
+import { opsById } from "../lib/operations.ts";
+import { configQuery, nextFiresQuery, siteCallers } from "../queries.ts";
 import { BUILTIN_ICON, ItemHeading, Json, None, Notice, OpItem, Section, UsedByList, UtcTime } from "./common.tsx";
 
 // A workflow's pieces, as a workflow's own page shows them.

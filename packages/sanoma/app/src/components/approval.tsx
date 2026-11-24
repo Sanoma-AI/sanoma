@@ -26,7 +26,8 @@ import { type DecideRequest, errorBodyOf } from "../api.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { asChangeRef } from "../lib/changes.ts";
 import { decideFn } from "../functions.ts";
-import { configQuery, opsById, RUNS_KEY, runLink, runQuery } from "../queries.ts";
+import { opsById } from "../lib/operations.ts";
+import { configQuery, RUNS_KEY, runLink, runQuery } from "../queries.ts";
 import { ApplyPlanView } from "./apply-plan.tsx";
 import { ChangeGlance } from "./change-glance.tsx";
 import {
