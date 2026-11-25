@@ -15,6 +15,7 @@
     "paths": {
       // Before the bare pattern: TypeScript takes the first of two patterns with equal prefixes.
       "@sanoma-ai/connector-supabase/vault": ["./connectors/supabase/src/vault.ts"],
+      "@sanoma-ai/connector-sanoma-cloud/boxes": ["./connectors/sanoma-cloud/src/boxes.ts"],
       "@sanoma-ai/connector-*/fake": ["./connectors/*/src/fake.ts"],
       "@sanoma-ai/connector-*/driver": ["./connectors/*/src/driver.ts"],
       "@sanoma-ai/connector-*/resources": ["./connectors/*/src/resources.ts"],

@@ -210,15 +210,16 @@ export interface RunDetail {
    * those that did not load), or the scenarios could not be read at all.
    */
   checksError?: string;
-  /** For a queued apply, the apply it waits for: one runs at a time (`ApplyAhead`). */
-  ahead?: ApplyAhead;
+  /** For a queued run, the run it waits for: one apply runs at a time, and one per starter of a workflow with `oneAtATime` (`RunAhead`). */
+  ahead?: RunAhead;
 }
 
 /**
- * The apply that a queued apply waits for, as the page names it: live applies run one at a time
- * across the company's workers, so a second waits until this one ends.
+ * The run that a queued run waits for, as the page names it: live applies run one at a time across
+ * the company's workers, and a starter's runs of a workflow with `oneAtATime` one after another,
+ * so a second waits until this one ends.
  */
-export type ApplyAhead = Pick<RunSummary, "runId" | "status" | "startedBy" | "createdAt">;
+export type RunAhead = Pick<RunSummary, "runId" | "status" | "startedBy" | "createdAt">;
 
 /**
  * A scenario as the page lists it: what it says and the input its run starts with, not how the
@@ -548,7 +549,7 @@ export interface GoLiveRun {
   results?: ApplyResult[];
   error?: string;
   /** For a queued apply, the apply it waits for. */
-  ahead?: ApplyAhead;
+  ahead?: RunAhead;
 }
 
 /**

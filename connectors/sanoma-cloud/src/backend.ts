@@ -1,6 +1,7 @@
 import { DriverError, RUNNER_PROTOCOL, runnerBox, type SandboxBackend } from "sanoma/workflows";
 import type { z } from "zod";
-import { BOX_INPUTS, boxProblem, type CloudApi } from "./operations.ts";
+import { BOX_INPUTS, boxProblem } from "./boxes.ts";
+import type { CloudApi } from "./operations.ts";
 
 // The `Sandbox` backend on Sanoma Cloud: the company's boxes are Agent37 instances in Sanoma's
 // account, whose key only sanoma-ops holds. Its `cloud-box-*` workflows, started with the company's

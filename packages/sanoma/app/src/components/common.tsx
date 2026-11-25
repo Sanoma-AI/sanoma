@@ -42,9 +42,9 @@ import { cn, plural } from "#/lib/utils.ts";
 import { Logo } from "#/components/logo.tsx";
 import { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry, SiteEntry } from "sanoma/workflows/describe";
-import { approverLabel, CALL_WORKFLOW, OPERATIONS_VENDOR, type Tier } from "sanoma/workflows/shared";
+import { APPLY_WORKFLOW, approverLabel, CALL_WORKFLOW, OPERATIONS_VENDOR, type Tier } from "sanoma/workflows/shared";
 import { toast } from "sonner";
-import { errorBodyOf } from "../api.ts";
+import { errorBodyOf, type RunAhead, runName, starterName } from "../api.ts";
 import { opHome } from "../lib/operations.ts";
 import { appBehindQuery, configQuery, runLink, RUNS_KEY, type SiteCaller } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
@@ -871,3 +871,27 @@ export const ShortId = ({ id, className }: { id: string; className?: string }) =
     {shortId(id)}
   </code>
 );
+
+/**
+ * Why a run has not started: one apply runs at a time, and one run of a workflow with `oneAtATime`
+ * per starter, so a queued one names the run it waits for (`ahead`); an apply a worker on a new
+ * version cancelled says so. Nothing for any other run.
+ */
+export function RunAheadNotice({
+  workflow,
+  status,
+  ahead,
+}: Pick<RunSummary, "workflow" | "status"> & { ahead?: RunAhead }) {
+  const apply = workflow === APPLY_WORKFLOW;
+  if (apply && status === "cancelled")
+    return <Notice>Cancelled when the worker restarted on a new version. Apply again.</Notice>;
+  if (!ahead) return null;
+  return (
+    <Notice>
+      {apply ? "One apply runs at a time." : "One run at a time per starter."} This one starts when{" "}
+      <Link {...runLink({ ...ahead, workflow })}>{runName(ahead.runId)}</Link> ({ahead.status}, started{" "}
+      <When at={ahead.createdAt} /> by {starterName(ahead)}) ends.
+      {ahead.status === "waiting" && " It waits for a person in the Inbox."}
+    </Notice>
+  );
+}

@@ -321,6 +321,14 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
    * field, and into each item of a list it holds.
    */
   readonly opaque?: readonly string[];
+  /**
+   * `"per starter"`: the runs one starter (`ctx.startedBy`: a person, an api token, an agent for
+   * whom it acts, every anonymous visitor as one) starts of it run one after another, in the order
+   * they were started; another starter's runs never wait for them. A run waits as `queued`, on the
+   * engine's queue, behind the one ahead of it, a start held for an approval keeping its place.
+   * Not with a schedule, whose runs are the runtime's.
+   */
+  readonly oneAtATime?: "per starter";
   /** Only the runtime starts it, through the client's own methods; a company workflow may not set it. */
   readonly internal?: true;
   /**
@@ -442,6 +450,14 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
   ) {
     throw new Error(
       `Workflow "${def.name}": opaque lists paths of its output, names joined by dots, such as ["url", "box.token"]`,
+    );
+  }
+  if (def.oneAtATime !== undefined && def.oneAtATime !== "per starter") {
+    throw new Error(`Workflow "${def.name}": oneAtATime is "per starter", or left out`);
+  }
+  if (def.oneAtATime !== undefined && def.trigger !== "manual") {
+    throw new Error(
+      `Workflow "${def.name}": oneAtATime keeps each starter's runs one after another, and a schedule's runs are the runtime's: leave out one or the other`,
     );
   }
   // A scheduled run starts with no input of its own.

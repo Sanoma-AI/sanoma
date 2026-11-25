@@ -5,7 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import type { Db } from "./db.ts";
 import { wakeup as wakeupRow } from "./db/company.ts";
-import type { ResolvedConfig } from "./config.ts";
+import { limitedQueues, type ResolvedConfig } from "./config.ts";
 import { warn } from "./log.ts";
 import type { CallContext, DriverFn, Op } from "./op.ts";
 import type { Secrets } from "./secret.ts";
@@ -90,24 +90,28 @@ export function deadlineRegistry(): DeadlineRegistry {
 }
 
 /** The worker `idle` asks about: the app, the version it runs, and its queues. */
-export type IdleScope = Pick<ResolvedConfig, "appName" | "version" | "queueName" | "applyQueueName">;
+export type IdleScope = Pick<
+  ResolvedConfig,
+  "appName" | "version" | "queueName" | "applyQueueName" | "oneAtATimeQueueName"
+>;
 
 /**
  * True when a run on `queue` (none for a run started outside a queue) is this worker's to run: on
- * the app's queue or the apply queue, or on one of DBOS's, where recovery puts runs.
+ * one of the app's queues, or on one of DBOS's, where recovery puts runs.
  */
 export const onOwnQueue = (
   queue: string | undefined,
-  { queueName, applyQueueName }: Pick<IdleScope, "queueName" | "applyQueueName">,
-): boolean => !queue || queue === queueName || queue === applyQueueName || queue.startsWith("_dbos_");
+  scope: Pick<IdleScope, "queueName" | "applyQueueName" | "oneAtATimeQueueName">,
+): boolean => !queue || queue === scope.queueName || limitedQueues(scope).includes(queue) || queue.startsWith("_dbos_");
 
 /**
  * True when nothing this worker would run can run within `horizonMs`: no run of its is executing
  * or replaying; none of its version is queued (or queued without one, while it is the latest) on
  * its queues or DBOS's own (recovery queues there); each PENDING run of its version is blocked in
  * a wrapped wait; and the next deadline is past the horizon. A run of another version or queue
- * is not this worker's to run, so it never holds the worker up; nor does an apply queued behind
- * one PENDING, which cannot start until that one ends (an apply waiting for its plan's approval).
+ * is not this worker's to run, so it never holds the worker up; nor does a run queued behind one
+ * PENDING in its place, which cannot start until that one ends: an apply behind an apply waiting
+ * for its plan's approval, a run of a workflow with `oneAtATime` behind its starter's.
  */
 export async function idle(deadlines: Deadlines, scope: IdleScope, horizonMs: number): Promise<boolean> {
   if (deadlines.busy > 0) return false;
@@ -126,8 +130,11 @@ export async function idle(deadlines: Deadlines, scope: IdleScope, horizonMs: nu
     )
   )
     return false;
-  const applying = ours.some((r) => r.queueName === scope.applyQueueName && r.status === "PENDING");
-  const queued = ours.filter((r) => r.status !== "PENDING" && !(applying && r.queueName === scope.applyQueueName));
+  // A place is a limited queue's, and on a partitioned one its partition's.
+  const placeOf = (r: (typeof runs)[number]) => JSON.stringify([r.queueName, r.queuePartitionKey ?? null]);
+  const limited = limitedQueues(scope);
+  const taken = new Set(ours.filter((r) => r.status === "PENDING" && limited.includes(r.queueName!)).map(placeOf));
+  const queued = ours.filter((r) => r.status !== "PENDING" && !taken.has(placeOf(r)));
   if (queued.some((r) => r.applicationVersion === scope.version)) return false;
   // DBOS gives a run queued without a version to the app's latest version.
   if (!queued.some((r) => !r.applicationVersion)) return true;

@@ -107,3 +107,30 @@ export default defineWorkflow({
 The operation the field comes from declares it `opaque` too (`box.open` here), or the value sits in that operation's `op.called` record.
 
 `<api>.result` answers the run's output as it is to the run's starter: the same principal, and for an agent, acting for the same person. An opaque field is only readable by a starter with an identity: a signed-in person or visitor, an API token, or an agent acting for a person; every visitor who is not signed in is one `anonymous`, so their own run's field is hidden from them too. Every other read shows each `opaque` field as `"<url>"`: `.result` asked by anyone else, `.latest`, `.ledger`, the app's run page and `/mcp`'s `wait_run`. `defineWorkflow` refuses a path that is not names joined by dots. A workflow declares no output schema, so `sanoma check` cannot tell a path the output never has: such a path hides nothing. The real output stays in the database's record of the run, which `client.result(runId)` reads for code on the server.
+
+## One run at a time per starter
+
+`oneAtATime: "per starter"` makes the runs of a workflow that one starter starts run one after another, in the order they were started. Runs started by someone else never wait for them. Use it when a run reads something and then acts on it, such as counting a company's boxes before it opens another, so two runs started together cannot both act on the same count.
+
+```ts
+export default defineWorkflow({
+  name: "box-open",
+  trigger: "manual",
+  input: z.object({ name: z.string() }),
+  uses: [boxes.box.list, boxes.box.open],
+  oneAtATime: "per starter",
+  run: async (ctx, { name }) => {
+    const open = await ctx.boxes.box.list({});
+    if (open.length >= 3) throw new Error("Three boxes are open already");
+    return ctx.boxes.box.open({ name });
+  },
+});
+```
+
+The starter is who `ctx.startedBy` names: a person, an API token (`token:<id>`, each token its own starter), a signed-in visitor, or an agent together with the person it acts for. Every visitor who is not signed in is the one `anonymous`, so all of their runs of the workflow wait for each other. The key is never a field of the input.
+
+A run waiting for an earlier one is `queued`. Its page in the app says which run it waits for, and over `/mcp`, `get_run` names that run in `after` and `wait_run` answers `{ runId, status: "queued", after }`. The engine's queue keeps the order, in Postgres: a run that is waiting on an approval or a sleep keeps its place, and so does a start the policy holds for an approval, until it is decided and the run ends. A worker that stops while it is idle and wakes again, or restarts, picks up where it left off: the earlier run resumes first, and the ones behind it keep waiting.
+
+Each version of the company's code keeps its own order. After a deploy, a run waiting on the old version stays queued for that version's worker, as any company run queued on an older version does, and the starter's new runs on the new version do not wait for it.
+
+A sandbox run calls fakes and does not wait. `defineWorkflow` refuses `oneAtATime` on a scheduled workflow, since its runs are started by the runtime's `schedule` agent, and refuses any value but `"per starter"`.

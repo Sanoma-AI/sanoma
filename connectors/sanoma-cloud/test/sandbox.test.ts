@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { BOX_INPUTS, boxProblem } from "@sanoma-ai/connector-sanoma-cloud/boxes";
 import { checkSandbox } from "sanoma/testing/sandbox";
 import { type CallContext, memorySecrets, RUNNER_PROTOCOL } from "sanoma/workflows";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -52,6 +54,18 @@ const nowhere = (protocol = RUNNER_PROTOCOL) => ({
 });
 
 describe("cloud.sandbox's backend", () => {
+  it("exports the box input rules from an entry of their own, which imports no driver", () => {
+    const { exports } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    expect(exports["./boxes"]).toEqual({ types: "./dist/boxes.d.ts", default: "./dist/boxes.js" });
+    const source = readFileSync(new URL("../src/boxes.ts", import.meta.url), "utf8");
+    expect([...source.matchAll(/^import .* from "(.+)";$/gm)].map((m) => m[1])).toEqual(["zod"]);
+    expect(boxProblem(BOX_INPUTS.open, { name: "sanoma-acme-ada", hosts: HOSTS })).toBeUndefined();
+    expect(boxProblem(BOX_INPUTS.open, { name: "Ada", hosts: [] })).toBe(
+      "name is no box name: lowercase letters, digits, - and _; hosts Too small: expected array to have >=1 items",
+    );
+    expect(boxProblem(BOX_INPUTS.name, { name: "a/b" })).toMatch(/^name is no box name/);
+  });
+
   it("passes the sandbox conformance kit on the fake Cloud", async () => {
     const results = await checkSandbox({
       backend: fake.sandbox(),

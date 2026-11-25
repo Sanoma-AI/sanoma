@@ -123,6 +123,14 @@ Its boxes run `agent37-base`; `AGENT37_TEST_IMAGE` names another template of the
 
 ## Testing
 
-`@sanoma-ai/connector-agent37/fake` is the fake the connector carries: an Agent37 whose key works and which holds no instances, so the instance type's operations answer at once, and whose `box` operations keep boxes as records in memory (their links reach nothing). It opens no sandbox; the testing package's `fakeSandbox` does, on this machine.
+`@sanoma-ai/connector-agent37/fake` is the fake the connector carries: an Agent37 whose key works and which holds no instances, so the instance type's operations answer at once, and whose `box` operations keep boxes as records in memory (their links reach nothing). It opens no sandbox; the testing package's `fakeSandbox` does, on this machine. `fakeAgent37({ instanceLimit })` keeps at most that many boxes awake at once, refusing to wake one more with `409` `instance_limit_reached` as Agent37 does; no limit by default, and a scenario sets one with the step below.
+
+## Steps
+
+The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#steps-a-connector-ships) (`agent37Steps`, attached with `withSetup`), which a company's scenario can use beside the generic ones.
+
+| Keyword | Step                                                      | What it does                                                                                                                                                               |
+| ------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Given   | `Agent37's workspace keeps at most {int} instances awake` | The fake's limit of awake instances (`instanceLimit`): a `box.open` that would wake one more fails with `409` `instance_limit_reached`; `0` makes every box not awake busy |
 
 License: FSL-1.1-ALv2.

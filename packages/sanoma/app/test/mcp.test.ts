@@ -395,7 +395,7 @@ describe("lookup", () => {
     });
     const waited = await waitFor(
       () => tool("wait_run", { runId, waitMs: 0 }),
-      (answer) => answer.structuredContent.status !== "running",
+      (answer) => !["queued", "running"].includes(answer.structuredContent.status),
     );
     expect(waited.isError).toBeFalsy();
     expect(waited.structuredContent).toEqual({ runId, status: "waiting for approval", waitsFor: ["lead"] });
@@ -609,7 +609,7 @@ describe("a declared agent acting for the person, named in x-sanoma-agent", () =
     const { runId } = (await tool("start_run", { workflow: "apply", input: {} }, { agent })).structuredContent;
     const held = await waitFor(
       async () => (await tool("wait_run", { runId, waitMs: 0 }, { agent })).structuredContent,
-      (answer: any) => answer.status !== "running",
+      (answer: any) => !["queued", "running"].includes(answer.status),
     );
     expect(held).toEqual({ runId, status: "waiting for approval", waitsFor: ["group admin"] });
     // Asked again with the full wait, it answers at once: the wait would end only on a decision.

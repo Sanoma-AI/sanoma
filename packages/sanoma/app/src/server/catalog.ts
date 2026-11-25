@@ -5,7 +5,7 @@ import { apiNameOf, approverLabel, DESCRIBE_CALL, heldCallRunId } from "sanoma/w
 import { z } from "zod";
 import { ApiError, asApiError } from "../api.ts";
 import type { LookupOutput, RunOutput, StillHeld } from "../lib/chat.ts";
-import { type CallHost, callApi, noRun, parse, RESULT_WAIT_MS } from "./core.ts";
+import { type CallHost, callApi, noRun, parse, RESULT_WAIT_MS, runAheadOf } from "./core.ts";
 
 // The agent catalog: the five tools an agent is given, as data, and what each does, once. `/mcp`
 // renders it as an MCP server (`server/mcp.ts`), the chat's engines as AI SDK tools
@@ -89,7 +89,10 @@ export const CATALOG = {
   get_run: tool({
     name: "get_run",
     title: "Read a run",
-    description: "A run's workflow, status, who started it, when, its approvals and its error, by its id.",
+    description:
+      "A run's workflow, status, who started it, when, its approvals and its error, by its id. A queued run " +
+      "behind another (one apply runs at a time, and one run per starter of a workflow that runs one at a time) " +
+      "names it in after.",
     input: z.object({ runId: RunId }),
     hint: "read",
   }),
@@ -98,7 +101,8 @@ export const CATALOG = {
     title: "Wait for a run",
     description:
       "Waits for a run to end and answers its output. A run still going when the wait ends is answered " +
-      'with status "running" and its id, to wait for again; one held for an approval, at once, with status ' +
+      'with status "running" and its id, to wait for again, or "queued" while it has not started, with after, ' +
+      "the run it waits for when one is ahead of it; one held for an approval, at once, with status " +
       '"waiting for approval" and waitsFor, whose decision it waits for.',
     input: z.object({ runId: RunId, waitMs: WaitMs }),
     hint: "read",
@@ -115,7 +119,8 @@ export const CATALOG = {
         "Answers the run's id, for get_run and wait_run. Retried with the same id, workflow and input, " +
         "it answers the run already started; the same id for anything else is refused.",
       chat:
-        `Answers the run's id and, when it ends within the wait, its output (status "finished"), else status "running", for wait_run. ` +
+        `Answers the run's id and, when it ends within the wait, its output (status "finished"), else status "running" ` +
+        `("queued" while it has not started, with after, the run it waits for), for wait_run. ` +
         'A run that failed or was cancelled is answered with status "failed" or "cancelled", the run\'s id and its ' +
         `error: it did start, so do not start it again. Held for an approval, ${CHAT_HOLD}.`,
     },
@@ -166,6 +171,12 @@ const waiting = (run: RunSummary): Omit<StillHeld, "held"> => ({
   waitsFor: run.approvals.filter((a) => a.status === "pending").map(({ approver }) => approverLabel(approver)),
 });
 
+/** For a run queued behind another, `after`, the run it waits for (`runAheadOf`); nothing for any other. */
+const behind = async (client: Pick<SanomaClient, "runAhead">, run: RunSummary): Promise<{ after?: string }> => {
+  const ahead = await runAheadOf(client, run);
+  return ahead ? { after: ahead.runId } : {};
+};
+
 /** A run that waits for its approvals, as the chat's tools answer it past their wait: `waiting`, with its card (`held`). */
 export const stillHeld = (run: RunSummary): StillHeld => ({ held: { runId: run.runId }, ...waiting(run) });
 
@@ -174,15 +185,20 @@ export const stillHeld = (run: RunSummary): StillHeld => ({ held: { runId: run.r
  * one function that builds it, for the tool as it runs and for `settle`. Still held while it waits
  * for an approval; its output once it finished (`SanomaClient.result`, the workflow's `opaque` fields
  * real: `run` is the one the chat's own `start_run` started); its error once it failed or
- * was cancelled, an answer and no throw, since the run exists; else that it is running.
+ * was cancelled, an answer and no throw, since the run exists; queued, with the run it waits
+ * behind (`after`); else that it is running.
  */
-export async function runOutput(client: Pick<SanomaClient, "result">, run: RunSummary): Promise<RunOutput> {
+export async function runOutput(
+  client: Pick<SanomaClient, "result" | "runAhead">,
+  run: RunSummary,
+): Promise<RunOutput> {
   const { runId, status } = run;
   if (status === "waiting") return stillHeld(run);
   if (status === "finished") return { runId, status, output: (await client.result(runId)) ?? null };
   if (status === "failed" || status === "cancelled") {
     return { runId, status, error: run.error ?? `Run ${runId} ${status === "cancelled" ? "was cancelled" : "failed"}` };
   }
+  if (status === "queued") return { runId, status, ...(await behind(client, run)) };
   return { runId, status: "running" };
 }
 
@@ -225,8 +241,10 @@ export async function runCatalog(
       }
       return callApi(host, actor, { name: op, input, ...id });
     }
-    case "get_run":
-      return runNamed(host, parse(CATALOG.get_run.input, args, "The input").runId);
+    case "get_run": {
+      const run = await runNamed(host, parse(CATALOG.get_run.input, args, "The input").runId);
+      return { ...run, ...(await behind(host.client, run)) };
+    }
     case "wait_run": {
       // One waiting for an approval is answered at once, saying whose decision it waits for.
       const { runId, waitMs } = parse(CATALOG.wait_run.input, args, "The input");
@@ -239,7 +257,11 @@ export async function runCatalog(
       } catch (err) {
         if (asApiError(err).body.code !== "run_running") throw err;
         const now = await runNamed(host, runId);
-        return now.status === "waiting" ? waiting(now) : { runId, status: "running" };
+        // Not `runOutput`: the chat's answer reads a finished run's opaque fields real, this one never does.
+        if (now.status === "waiting") return waiting(now);
+        return now.status === "queued"
+          ? { runId, status: now.status, ...(await behind(host.client, now)) }
+          : { runId, status: "running" };
       }
     }
     case "start_run": {
