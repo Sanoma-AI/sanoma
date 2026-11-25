@@ -13,12 +13,12 @@ Run `sanoma wakeup` for a standalone service. To serve its routes inside `sanoma
 
 Create an account with `sanoma wakeup account <label>`, which prints `{"id","token"}` on stdout. The programmatic equivalent is `mintAccount(label)` on [`startWakeupService`](/hosting/hosts/#the-wakeup-service). The account token (`swa_…`) manages registrations. Each company mints its own instance token through `/setup` as `SANOMA_WAKEUP_TOKEN`. It starts with `swi_` followed by at least 43 base64url characters.
 
-| Request | Token | Result |
-| --- | --- | --- |
-| `POST /wakeup/instances` with `{ url, token }` | Account | Registers the instance and returns `201 { id }`. Registering the same instance token under the same account updates the URL and returns `200 { id }`. A URL change clears the pending wake. An instance token owned by a different account returns 409. |
-| `GET /wakeup/instances/{id}` | Account | Shows the registration. |
-| `DELETE /wakeup/instances/{id}` | Account | Removes the registration. |
-| `PUT /wakeup/wake` with `{ at }` | Instance | Replaces the deadline and returns 204. The instance sends this before stopping. |
+| Request                                        | Token    | Result                                                                                                                                                                                                                                                  |
+| ---------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /wakeup/instances` with `{ url, token }` | Account  | Registers the instance and returns `201 { id }`. Registering the same instance token under the same account updates the URL and returns `200 { id }`. A URL change clears the pending wake. An instance token owned by a different account returns 409. |
+| `GET /wakeup/instances/{id}`                   | Account  | Shows the registration.                                                                                                                                                                                                                                 |
+| `DELETE /wakeup/instances/{id}`                | Account  | Removes the registration.                                                                                                                                                                                                                               |
+| `PUT /wakeup/wake` with `{ at }`               | Instance | Replaces the deadline and returns 204. The instance sends this before stopping.                                                                                                                                                                         |
 
 A wake resumes the worker if it has stopped. An early or duplicate wake can therefore start an idle worker but cannot start the scheduled work twice merely by waking it. Responses use JSON and `no-store`. An unknown or missing token returns 401, access to another account’s instance returns 403, and an invalid request body returns 400.
 

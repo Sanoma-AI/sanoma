@@ -7,6 +7,8 @@ sidebar:
 
 The ledger is the audit record of a workflow run. It shows who started the run, which operations it called, what the policy decided for each call, which approvals applied, and how the run ended. The app’s run page and `client.ledger(runId)` show the same sequence of events. Each event is a `LedgerRecord`, ordered by `seq`.
 
+## Fields the ledger never holds
+
 Some values must not reach whoever reads the ledger. An operation's `opaque` fields (a resource type's `handle`, an attachment's bytes, a minted token; [resources](/workflows/resources/)) are recorded as `"<name>"` in its `op.called` record, its input and its output. A workflow's `opaque` fields ([writing workflows](/reference/workflow-runtime/#output-for-the-starter-alone)) are recorded the same way in its `run.finished` record. The app's run page shows each such field as "redacted".
 
 ## One run and one target
@@ -35,10 +37,10 @@ Every record carries `v: 1`, the `app` and the `actor`, and one written inside a
 
 The config’s `ledger` option selects the store. Each `LedgerStore` implements `append`, `read`, and `readByTarget`. A store that holds a connection also provides `close`.
 
-| Store | Where it keeps records |
-| --- | --- |
+| Store                         | Where it keeps records                                                                                                                                                     |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `postgresLedger(databaseUrl)` | The default. The worker, app, and other processes share the `sanoma_ledger` table in the configured database alongside the DBOS tables. Each process can use its own disk. |
-| `jsonlLedger(dir)` | One file per run at `<dir>/<runId>.jsonl`, with one JSON record per line. The files can live on disk or in a repo. |
-| `memoryLedger()` | In the current process, for tests. |
+| `jsonlLedger(dir)`            | One file per run at `<dir>/<runId>.jsonl`, with one JSON record per line. The files can live on disk or in a repo.                                                         |
+| `memoryLedger()`              | In the current process, for tests.                                                                                                                                         |
 
 On first use, the Postgres store creates its table and, if needed, the database. The app can therefore read the ledger before a worker has run. With the default store, the worker and client each own a store and close it on `stop` or `client.close()`, respectively. Closing a store permanently ends its connection pool. If the config supplies a store, the config owns its cleanup.

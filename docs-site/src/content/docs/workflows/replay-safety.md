@@ -13,11 +13,11 @@ The linter and config checks inspect source in `workflows/` and `operations/`. A
 
 `sanoma check` runs oxlint with `sanoma/oxlint.json`. Its rules identify the unsupported API and name its `ctx` replacement where applicable.
 
-| Source of variation | What the linter checks |
-| --- | --- |
-| Time | `Date.now()`, `new Date()`, `Date()`, and `performance`. The `sanoma/date` rule allows `new Date(await ctx.now())`. |
-| Randomness, network, and process state | `Math.random`, `crypto`, `fetch`, `WebSocket`, timers, `process`, and `globalThis`. |
-| Concurrency | `Promise.all` and related combinators. Use `ctx.all` to group steps. Workflows cannot race steps. |
+| Source of variation                    | What the linter checks                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Time                                   | `Date.now()`, `new Date()`, `Date()`, and `performance`. The `sanoma/date` rule allows `new Date(await ctx.now())`. |
+| Randomness, network, and process state | `Math.random`, `crypto`, `fetch`, `WebSocket`, timers, `process`, and `globalThis`.                                 |
+| Concurrency                            | `Promise.all` and related combinators. Use `ctx.all` to group steps. Workflows cannot race steps.                   |
 
 Workflow files can import types and the following names from `sanoma/workflows` or the `sanoma` root entry: `defineOperation`, `defineWorkflow`, `mayDecide`, `errorCode`, `z`, and `sanoma` for [runtime operations](/workflows/built-ins/#the-runtimes-own-operations). The `allowImportNames` list lives in `oxlint.json`. The `sanoma` package’s own lint config also restricts subpath imports.
 

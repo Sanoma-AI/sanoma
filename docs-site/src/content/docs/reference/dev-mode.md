@@ -18,10 +18,10 @@ Running `sanoma` in a company repo activates dev mode in either of these cases.
 
 ## Processes
 
-| Process | Behavior |
-| --- | --- |
-| `sanoma serve --dev` | Runs the company in a child process. It serves [local site edits](/sites/developing/) the same way as `sanoma`. |
-| `pnpm run watch` | Runs in each linked package’s directory. For `sanoma`, the watch script runs `tsc -b --watch` for its parts and `vite build --watch` for the app. |
+| Process              | Behavior                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sanoma serve --dev` | Runs the company in a child process. It serves [local site edits](/sites/developing/) the same way as `sanoma`.                                   |
+| `pnpm run watch`     | Runs in each linked package’s directory. For `sanoma`, the watch script runs `tsc -b --watch` for its parts and `vite build --watch` for the app. |
 
 ## Restarts
 

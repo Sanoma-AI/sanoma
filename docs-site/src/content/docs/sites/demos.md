@@ -36,6 +36,7 @@ function Demo() {
 - `mount(element, { path, exit })` resolves to the unmount. `path` is the page shown first, as the app has it (`/sites/<site>/…`, an app's site's `/sites/<app>/<site>/…`; the first site's home unless given), on a history of the demo's own: the host's URL and history never move. `exit` is called with the path a link leads to outside the sites (an app page's) instead of going there. Each mount starts from the world again. A `mount` called on an element while an earlier one there still seeds wins: the earlier renders nothing.
 
   A page may mount several demos, but `api` is one: the runtime of the last `mount` seeded and still mounted answers it. Mount at most one demo whose pages call `api`.
+
 - `demo.css` holds Tailwind's theme and utilities, the kit's look and the sites' own stylesheets (a route's `import css from "../style.css?url"` too), never preflight, every rule scoped to the element (`[data-sanoma-demo]`, which `mount` sets on it). The element is the demo's document: it has the light theme's background, type and colour, and the kit's dark styles stay off, whatever the host's theme. A site's `toast` shows at the window's corner, as in the app (at a transformed element's, when one is around the demo), with the stylesheet Sonner adds to the page's head.
 
   Its rules are in Tailwind's layers, which a host's unlayered rules for `h1`, `a` or `button` win over: keep those in layers.

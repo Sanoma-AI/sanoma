@@ -13,10 +13,10 @@ For managed Cloud configuration, `import { managedKmsStore } from "sanoma/secret
 
 ## Bootstrap keys
 
-| Deployment input | Purpose |
-| --- | --- |
+| Deployment input     | Purpose                                                                                                                                                                                                                                                                                                                            |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SANOMA_SIGNING_KEY` | Signs sessions and authorization state. Preserve it between restarts. Replacing it invalidates signed sessions and pending authorization state. On a host it also protects staff token keys. See [how to clear those keys](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/better-auth/README.md#agents-signing-in). |
-| `SANOMA_SECRETS_KEY` | Encrypts rows in the built-in Postgres store. An external store uses its provider’s bootstrap identity. |
+| `SANOMA_SECRETS_KEY` | Encrypts rows in the built-in Postgres store. An external store uses its provider’s bootstrap identity.                                                                                                                                                                                                                            |
 
 Each key is an independent random 32-byte value encoded as base64. Supply the variable or its `_FILE` counterpart, with the base64 value in the mounted file. Conflicting sources, unreadable files, and malformed values fail before startup without printing the value. On first local start the launcher generates missing keys in the ignored `.env` file, creating the file with mode `0600`. With an external store it generates only the signing key.
 
@@ -35,7 +35,6 @@ The managed Cloud [runtime identity broker](https://github.com/Sanoma-AI/sanoma/
 In the trusted control plane, configure `identityProvisioning: { databaseUrl: secret("IDENTITY_WRITER_URL") }` to use `sanoma.identity.enroll`, `.retire` and `.revoke` under policy. A company's runtime bearer has no expiry: a deploy replaces it with a new generation and retires the old one, and closing the company or a leak revokes it. The restricted enrollment-writer URL is entered under that name on the app's Hosting page (Connect) and read from the store when an enrollment operation first uses it, never at config load.
 
 Until it is stored, the page lists it as missing and enrollment fails with "the enrollment writer is not set". Each client and worker owns its lazy writer pool; company runtimes and the broker do not receive it. See [provisioning operations](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/CLOUD-IDENTITY.md#provisioning-operations) for setup, rotation and the caller-owned adapter option.
-
 
 ## Secrets
 

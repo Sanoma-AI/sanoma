@@ -7,29 +7,28 @@ sidebar:
 
 Open the app at your company’s address. If this is your first visit, [sign in to your company](/using-the-app/sign-in/).
 
-| What do you need to do? | Where to start |
-| --- | --- |
-| Start a workflow or find out why a run stopped | [Start and inspect a workflow run](/using-the-app/runs/) |
-| Decide a request waiting on you | [Review an approval](/using-the-app/approvals/) |
-| Add rows from a spreadsheet | [Import records from a CSV](/using-the-app/import-records/) |
-| Check an agent’s edits before they reach the company | [Review a draft change](/using-the-app/changes/) |
-| Share a local company with teammates | [Put your company online](/using-the-app/go-live/) |
+| What do you need to do?                              | Where to start                                              |
+| ---------------------------------------------------- | ----------------------------------------------------------- |
+| Start a workflow or find out why a run stopped       | [Start and inspect a workflow run](/using-the-app/runs/)    |
+| Decide a request waiting on you                      | [Review an approval](/using-the-app/approvals/)             |
+| Add rows from a spreadsheet                          | [Import records from a CSV](/using-the-app/import-records/) |
+| Check an agent’s edits before they reach the company | [Review a draft change](/using-the-app/changes/)            |
+| Share a local company with teammates                 | [Put your company online](/using-the-app/go-live/)          |
 
 The app opens on **Home**. Open **Inbox** for approvals or **Workflows** for a workflow’s graph, code, and runs. Each [company site](/sites/overview/#sites) has a tile. Setup includes **People**, **Hosting**, **Connectors**, and **Apps**. **Data** appears when the company has collections or sites. **Permissions** appears when the repo has policies in `policies/*.cedar`.
 
 The badge at the foot of the sidebar shows the company’s state. Hover over it to see the database host. The app derives the badge from existing facts, so viewing it leaves an idle host asleep.
 
-| Badge | Meaning |
-| --- | --- |
-| **Local** | The company runs on this computer. |
-| **Going live…** | Deployment is in progress. |
-| **Go live failed** | The last deployment run or its host step failed. |
-| **Live** | The host is bound, or you’re viewing the hosted instance. The local copy then shows **Live · drafting copy**. |
+| Badge              | Meaning                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| **Local**          | The company runs on this computer.                                                                            |
+| **Going live…**    | Deployment is in progress.                                                                                    |
+| **Go live failed** | The last deployment run or its host step failed.                                                              |
+| **Live**           | The host is bound, or you’re viewing the hosted instance. The local copy then shows **Live · drafting copy**. |
 
 Older links still resolve. `/resources` opens `/hosting` with its `?resource=` selection. `/setup` and its subpages open the corresponding Hosting pages. `/runs` opens All runs and `/runs/<id>` opens the run under its workflow. `/start?workflow=<name>` opens New run for that workflow or reports an unknown workflow. `/start` alone opens `/workflows`.
 
 ## Screen directory
-
 
 ### Workflows and runs
 

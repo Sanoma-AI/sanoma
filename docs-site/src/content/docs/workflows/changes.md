@@ -15,6 +15,7 @@ A review remote lets Sanoma check a specific revision before merging a draft. Wi
   Without a remote a connector reviews changes on, its step merges the draft at `head`, the commit the card showed, into `main` as one commit titled as the chat and closes the draft, in one git write (`Source.merge`: a squash in the checkout naming the run in a `Sanoma-Save` trailer, refused once the draft moved on from that commit, while the checkout has uncommitted changes, or when the two conflict), pushes `main` to `origin` when there is one (a push it refuses is the output's `notPushed`; the save stands), and has the worker load the files again and start on them (`WorkerOptions.reload`, which `sanoma serve` gives; elsewhere the saved code runs once the instance starts again, which its output's `running` says).
 
   A change to the rules waits for `admin` here too: someone outside it is refused (`not_approver`), since nothing would review it. A save run again after its merge (a worker stopped under it) answers with that commit (`Source.saved`). With such a remote, Save opens the draft's change as saved at that head (`ChangeInput.save`, refused once the draft has moved on): in a round planned at that head, when the policy lets its drafter decide Publish (allowed, or held for a group where nobody else could), the run gives that Publish itself; otherwise Publish waits as asked.
+
 - **Undo** reverts what a save of the person's chat put on `main` (`chat`, which the step checks: `SanomaClient.savedAs`): a draft of its own, `undo-<sha>` (`undoDraftOf`), with the revert committed on it (`Source.revert`), saved the same way.
 
 ## Review and publish
@@ -24,6 +25,7 @@ A review remote lets Sanoma check a specific revision before merging a draft. Wi
   Each round pushes the branch and opens its pull request into `main` (`sanoma.change.open`), runs `sanoma check` on the draft in the box of the person it is by (the app's `AppSteps.check`, so a worker without the app's steps fails it), with its Permissions grid, works out the facts the policy decides the merge on ([Policies](/policies/policies/)), asks the policy about the merge ahead, and sets the `sanoma` commit status on the head, linking the change's page (`sanoma.change.review`): pending, or failure while the checks fail or the policy denies.
 
   Then it asks one approval, **Publish the change**, covering `sanoma.change.merge`, of whom the policy's hold names, else of the person who drafted it. A deny waits instead, until something happens to the change.
+
 - **The review.** The app's Changes section, in the bar when the repository has a remote, lists the changes. A change's page shows where it is, its branch at the head it last planned, its pull request, the files it edits by kind, the Permissions grid of `main` against the branch's, and Publish. The Inbox shows Publish as any approval, with the change linked.
 - **New commits** on the draft start a new round at the new head. The agent tells the change after it commits, which withdraws Publish; a push to the branch on the host, told by its webhook, is read when Publish is decided, which then plans again instead of merging. An approval given in an earlier round lifts no hold on the new head.
 - **Publish**, approved, squash-merges the pull request at the head the round planned, titled `<title> (#<number>)`, sets the status to success and deletes the branch (`sanoma.change.merge`); a head that moved meanwhile is planned again, and a merge the host refuses waits.
@@ -35,6 +37,7 @@ A review remote lets Sanoma check a specific revision before merging a draft. Wi
   Then the deploy: the checkout follows `main` (a fast-forward, skipped while another branch is checked out, the checkout has uncommitted changes or its `main` has commits the remote's lacks; when it moved, the worker loads the files again and starts on them, `WorkerOptions.reload`), apply runs on the declared hosts the lockfile binds (none before going live, whose apply makes them) as the run `<run>:deploy`, drift reads them back as `<run>:verify`, and the draft is closed.
 
   The page says Published, with the merge commit and what the deploy did. The change run outlives the deploy's restart of the worker on the merged code ([Versions](/hosting/versions/)).
+
 - **Reject** on Publish closes the pull request and the change. A pull request merged on the host deploys as Publish does, and one closed there closes the change: the run checks either on the host before it believes it.
 
 ### Permission to publish

@@ -24,8 +24,7 @@ export default defineWorkflow({
   trigger: "manual",
   input: z.object({ title: z.string().min(1) }),
   uses: [ghost.post.create],
-  run: (ctx, { title }) =>
-    ctx.ghost.post.create({ title, html: "<p>Ready for review.</p>" }),
+  run: (ctx, { title }) => ctx.ghost.post.create({ title, html: "<p>Ready for review.</p>" }),
 });
 ```
 

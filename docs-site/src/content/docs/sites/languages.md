@@ -50,6 +50,7 @@ function Blog() {
 - **The page.** On the site's own host, `<html lang>` is the page's language (`useLocale()` gives it, for `Intl`'s formats, on either host; the app's host keeps `en`, its chrome's), and each page under `{-$locale}` in more than one language links to itself in each, `<link rel="alternate" hreflang>` with absolute URLs at `siteOrigin()` (the site's domain when it has one), and to its default as `x-default` when it is in that; the [sitemap](/sites/public-sites/) lists it once per language with the same alternates.
 
   A page is in every language, but a content page (one the sitemap lists per entry) only in those its entry is in, as its loader reads it: a post with no translation shows its original under each prefix, and a translation alone (`only.fr.md`, no `only.md`) is in French only.
+
 - **A switcher** is the site's own component: `useLocales()` gives the page on screen in each language it is in, `{ locale, href, current }`, in the site's order, `href` its path on this host.
 
 ```tsx

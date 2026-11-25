@@ -9,15 +9,15 @@ sidebar:
 
 A host is a writable resource that runs the company, such as a container, a Render service, or a Fly app. Use `defineResource({ …, writable: true, host })`. The `host` contract (`HostSpec`) maps input names to dotted paths in the resource’s fields.
 
-| Host field | Contract |
-| --- | --- |
-| `inputs` | Maps `source`, `ref`, `secrets`, and `port`. A host can also accept `domains` and `hostname`. Each mapping must name an existing field. The `secrets` field must be write-only. |
-| `domains` | Maps public site names to domains. The host passes them to the app as `SANOMA_DOMAINS`. `describeConfig` reports a nonpublic site or a shared domain at the declaration, for example `sanoma.example is the domain of both www and docs`. |
-| `hostname` | The app’s own hostname. It must differ from all site domains and other hostnames. With it, the host reports `https://<hostname>` as `url` and the vendor URL as `wakeUrl`. A wake can reach the vendor while the custom domain’s DNS or certificate is pending. Without a hostname, `url` is the vendor URL. `wakeUrlOf(outputs)` falls back to `url`. |
-| `router` and `agents` | Where supported, apply fills `router` with the configured [router hostname](/start/agents-over-mcp/#a-router-one-mcp-for-many-companies). To put a company behind a router, set `agents` to `{ url, company }` (`routedAgentsSchema`). `cloudflare.host` supports both fields. |
-| `revision` | Apply fills this field with the resolved commit. A data file names the branch. |
-| `capabilities` | Describes `lifetime`, `publicUrl`, `buildsFromGit`, and `staticEgress`. The `HostLifetime` is `long-lived` or `stops-on-exit`. With `stops-on-exit`, the process exits when the worker goes idle and the host starts the instance again on a wake. |
-| `outputs(state)` | Returns `{ url, wakeUrl?, revision?, healthy }`. |
+| Host field            | Contract                                                                                                                                                                                                                                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `inputs`              | Maps `source`, `ref`, `secrets`, and `port`. A host can also accept `domains` and `hostname`. Each mapping must name an existing field. The `secrets` field must be write-only.                                                                                                                                                                        |
+| `domains`             | Maps public site names to domains. The host passes them to the app as `SANOMA_DOMAINS`. `describeConfig` reports a nonpublic site or a shared domain at the declaration, for example `sanoma.example is the domain of both www and docs`.                                                                                                              |
+| `hostname`            | The app’s own hostname. It must differ from all site domains and other hostnames. With it, the host reports `https://<hostname>` as `url` and the vendor URL as `wakeUrl`. A wake can reach the vendor while the custom domain’s DNS or certificate is pending. Without a hostname, `url` is the vendor URL. `wakeUrlOf(outputs)` falls back to `url`. |
+| `router` and `agents` | Where supported, apply fills `router` with the configured [router hostname](/start/agents-over-mcp/#a-router-one-mcp-for-many-companies). To put a company behind a router, set `agents` to `{ url, company }` (`routedAgentsSchema`). `cloudflare.host` supports both fields.                                                                         |
+| `revision`            | Apply fills this field with the resolved commit. A data file names the branch.                                                                                                                                                                                                                                                                         |
+| `capabilities`        | Describes `lifetime`, `publicUrl`, `buildsFromGit`, and `staticEgress`. The `HostLifetime` is `long-lived` or `stops-on-exit`. With `stops-on-exit`, the process exits when the worker goes idle and the host starts the instance again on a wake.                                                                                                     |
+| `outputs(state)`      | Returns `{ url, wakeUrl?, revision?, healthy }`.                                                                                                                                                                                                                                                                                                       |
 
 ### Bootstrap credentials
 
@@ -29,13 +29,13 @@ A write-only field may be a map of secrets (`secrets: { SANOMA_DATABASE_URL: sec
 
 For a host with `derives: true`, such as `cloudflare.host` or `cloud.host`, declare the choices specific to the company: its `name`, `hostname`, and `database`. The `inputs.database` field is a write-only reference to the declared database. In the data-file step, `deriveHosts` uses `hostFacts` to fill in the revision and the remaining inputs before planning.
 
-| Input | How apply determines it |
-| --- | --- |
-| `name` | For a type with `inputs.name`, use its bound name when available so a repository rename preserves the host. Otherwise use the repo name normalized to lowercase letters, digits, and dashes. Until the name resolves, the identity is `UNNAMED`. |
-| `image` | For a type that accepts it, use the installed Sanoma version’s runtime image, `runtimeImage(version)` or `ghcr.io/sanoma-ai/runtime:<version>` (`RUNTIME_IMAGE`). |
-| `source` and `ref` | Use the declared repository matching `origin`, then the one identified by `sourceRepository`, then the credential-free `origin` URL (`originUrl`, `cloneUrl`). Resolve the default branch to obtain the revision. |
-| `domains` and `router` | Read `domain` from each public site’s `defineSite({ public: true, domain })`. Use the config’s `router.hostname` for a host with `inputs.router`. |
-| `port` | Use the image port (`RUNTIME_PORT`). |
+| Input                  | How apply determines it                                                                                                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                 | For a type with `inputs.name`, use its bound name when available so a repository rename preserves the host. Otherwise use the repo name normalized to lowercase letters, digits, and dashes. Until the name resolves, the identity is `UNNAMED`. |
+| `image`                | For a type that accepts it, use the installed Sanoma version’s runtime image, `runtimeImage(version)` or `ghcr.io/sanoma-ai/runtime:<version>` (`RUNTIME_IMAGE`).                                                                                |
+| `source` and `ref`     | Use the declared repository matching `origin`, then the one identified by `sourceRepository`, then the credential-free `origin` URL (`originUrl`, `cloneUrl`). Resolve the default branch to obtain the revision.                                |
+| `domains` and `router` | Read `domain` from each public site’s `defineSite({ public: true, domain })`. Use the config’s `router.hostname` for a host with `inputs.router`.                                                                                                |
+| `port`                 | Use the image port (`RUNTIME_PORT`).                                                                                                                                                                                                             |
 
 You can override `image`, `source`, and `ref`. Declaring `port`, `secrets`, `domains`, or the router hostname directly on the derived host is invalid.
 

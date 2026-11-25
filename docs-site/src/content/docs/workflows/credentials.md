@@ -11,14 +11,14 @@ In the config, `SanomaConfig.secrets` selects the store and maps logical names s
 
 The store resolver is used by the worker's `call.secrets`, resource secret resolution, `SanomaClient` reads and mutations, and the app's login/model/remote secret lookup. It does not copy values into `process.env` or fall back to another store. Some shipped connector drivers still declare an `env` schema and read process variables themselves; migrating those drivers and their SDK/bridge sessions to connection-scoped authentication is a separate step. Registering a named connection does not by itself migrate such a driver.
 
-| Client method | Behavior |
-| --- | --- |
-| `client.setCredential(name, value, { by })` | Validates the driver-declared name and writes through its configured binding. |
-| `client.setSecret(name, value, { by })` | Also accepts undeclared logical names. |
-| `client.clearCredential(name, { by })` | Conditionally deletes a declared value. |
-| `client.clearSecret(name, { by })` | Also accepts undeclared names for conditional deletion. |
-| `client.credentials()` | Returns status, location, ownership, and available change metadata. It omits the values. |
-| `client.secrets(names)` | Returns values to trusted server code. |
+| Client method                               | Behavior                                                                                 |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `client.setCredential(name, value, { by })` | Validates the driver-declared name and writes through its configured binding.            |
+| `client.setSecret(name, value, { by })`     | Also accepts undeclared logical names.                                                   |
+| `client.clearCredential(name, { by })`      | Conditionally deletes a declared value.                                                  |
+| `client.clearSecret(name, { by })`          | Also accepts undeclared names for conditional deletion.                                  |
+| `client.credentials()`                      | Returns status, location, ownership, and available change metadata. It omits the values. |
+| `client.secrets(names)`                     | Returns values to trusted server code.                                                   |
 
 Writes and deletions require a writable store and a binding managed by the company. The client and worker validate the provider at startup. You can enter missing connector credentials later.
 
@@ -166,6 +166,7 @@ The flow has three trusted steps and one workflow:
 1. `client.authorizeConnection(target, { actor, id, redirectUri, client? })` runs `sanoma.connection.authorize`, a policy gate that carries metadata only, with `replacesApplication` true when `client` is given, so a policy can hold or deny replacing the OAuth application every account of the connection or rule shares. It then stores the application when `client` is given, or reads the stored one. It makes a single-use state and a PKCE verifier and returns the consent URL, the attempt's opaque ID and its expiry.
 
    The state's hash and the sealed verifier are kept in the `sanoma_connection_attempts` row, bound to the actor, connection, setup request, client ID and redirect URI. They never enter workflow history. `redirectUri` must end in `/connect/<vendor>/callback` (`connectionCallbackPath`).
+
 2. The provider sends the person back. `client.receiveConnection(vendor, attempt, params, { actor })` checks the attempt's actor, state, expiry and vendor and seals the code into the row. It takes a callback once. Then it starts the built-in `connect` workflow (in a config only when a declared connection or rule connects by OAuth) with the attempt's ID alone (run ID `connect:<attempt>`); if that start fails, the attempt ends `unavailable`. A refused callback throws a `CallbackError` whose `reason` is `expired`, `mismatch`, `replayed`, `declined` or `rejected`.
 3. `connect` calls `sanoma.connection.exchange`, which only that workflow may call. It takes the code and verifier once, posts them to the token endpoint and verifies the grant. It checks the declared account and scopes, writes the grant with the store's expected version and returns metadata only. Then `sanoma.connection.activate` verifies the stored grant. Both are ordinary policy decisions and ledger records.
 4. `client.connectionAttempt(attempt, { actor })` reports `waiting`, `exchanging`, `connected` or `failed`, with the problem when it failed and `approval_pending` while a gate waits for approval.

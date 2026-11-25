@@ -6,12 +6,12 @@ Write for the teammate using the company app, the person setting up the company,
 
 Give each page one primary job. Picture the reader at the moment they open it. Are they practising a skill or using it on their own company repo? Do they need an action to take or information to think with? These two questions form the [Diátaxis compass](https://diataxis.fr/compass/). For an introduction, see [GitHub’s guide to developer documentation](https://github.blog/developer-skills/documentation-done-right-a-developers-guide/).
 
-| Form | How to write it | Sanoma example |
-| --- | --- | --- |
-| Tutorial | Choose one repeatable exercise. Tell the learner what to look for after each meaningful step so they can tell whether it worked. | Take a reader from an empty directory to their first running company. |
-| How-to | Guide someone doing a real task in their own repo. Assume familiarity with the tools and give alternatives where their setup affects the next step. | Show how to preview a site edit and which address to open if the site is public. |
-| Explanation | Answer a “why” question. Use one concrete case to show how the parts relate. | Explain why a held call checks both the covered operation and the approver. |
-| Reference | Put the exact name beside its behavior. Present related entries in the same order so readers can compare them. | For each command, give its syntax, what it writes or prints, and when it exits with an error. |
+| Form        | How to write it                                                                                                                                     | Sanoma example                                                                                |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Tutorial    | Choose one repeatable exercise. Tell the learner what to look for after each meaningful step so they can tell whether it worked.                    | Take a reader from an empty directory to their first running company.                         |
+| How-to      | Guide someone doing a real task in their own repo. Assume familiarity with the tools and give alternatives where their setup affects the next step. | Show how to preview a site edit and which address to open if the site is public.              |
+| Explanation | Answer a “why” question. Use one concrete case to show how the parts relate.                                                                        | Explain why a held call checks both the covered operation and the approver.                   |
+| Reference   | Put the exact name beside its behavior. Present related entries in the same order so readers can compare them.                                      | For each command, give its syntax, what it writes or prints, and when it exits with an error. |
 
 For an existing page, start with one passage where the reader could get stuck. If a procedure pauses to explain a design decision, keep the condition that affects the next step and link to the reasoning. A single paragraph can be a complete improvement. See the [Diátaxis editing workflow](https://diataxis.fr/how-to-use-diataxis/).
 

@@ -35,12 +35,15 @@ permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"
 - **The schema**, namespace `Sanoma`: `Principal` in `Group` (an enum of the declared groups, `agents` and `visitors`, so a misspelt group fails validation), with `onBehalfOf`; each operation's id an action in its effect's group (`effect:money`), on a `Target` (its `target`, else its id; a collection's in `Collection::"<name>"`), with `context.input` from its input schema and, for a collection's save or delete, `context.before`; `sanoma.change.merge` on a `Change` instead, whose attributes are the change's facts; `workflow:<name>` in the group `start`, on a `Workflow`, with the run's input.
 
   `schemaText` prints it; the `sanoma` bin writes it to `.sanoma/schema.cedarschema`.
+
 - **A hold** is a `forbid` with `@hold("<group>" | "<person id>" | "on-behalf-of")`: the call waits for that approver (`on-behalf-of`: whom the agent acts for), with `@title` as the approval's title. The runtime lifts it once an approval addressed to that approver and covering the operation is approved (`approvedFor`), so a workflow's own `ctx.approval` to the same approver, covering the operation, lets it through. Several holds on one call or start are asked one at a time, in the order written: once one is approved, the policy is asked again.
 
   **A deny** is a `forbid` without `@hold`, with `@reason` as its message (else `Refused by <id>`). A policy's id is its `@id`, else `<file>#<n>`; a decision's `reasons` carry the ids into the ledger.
+
 - **Where it runs**: before every operation call, a run's node, a [direct call](/workflows/direct-calls/) and [apply](/workflows/resources/#apply)'s changes (`decideCall`), and before a run starts (see [Approvals](/workflows/approvals/)). `policy.preview(requests)` asks the same with the input unknown, through Cedar's partial evaluation: `allow`, `hold` with its approver, `deny`, or `depends` on the input, each with the rule behind it; the app's run form and Permissions page show it.
 
   A request with `inRun: true` asks about an operation inside a run, not a direct call, which only a visitor's answer tells apart.
+
 - **A change** to the company's repository is decided on its merge, `sanoma.change.merge`, one of four operations of the built-in connector `sanoma` (`changeOps`: `sanoma.change.open`, `.review`, `.merge` and `.close`, effect `write`) that every config has and only the built-in `change` workflow may call, so a policy names it in every repo.
 
   The connector's fifth operation, `sanoma.apps.list` (`APPS_LIST`, a read), lists the apps on GitHub (the repositories with the topic `sanoma-app`) with Sanoma's claims about each (`claims.ts`: tier, review, blocked commits, the solutions holding it); a page calls it directly, as the person, so the policy decides it like any direct call, and every config has the built-in `call` workflow for it.
@@ -52,6 +55,7 @@ permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"
   Before any policy, the runtime's own rule (`runtimeHold`): a merge of a change to the rules (`rules`: a policy, the root's or an app's, a people file, or a company file `main`'s people files import, `peopleSources`) waits for the group `admin`, with the reason `sanoma:rules-wait-for-admin`, under `allowAll` too, and is denied while no data file declares `admin`; the people are the running instance's, so a change cannot add its author to `admin`.
 
   The company's policy is asked once an approval addressed to `admin` covering the merge lifts it. The template's `policies/changes.cedar` holds every change for `admin`.
+
 - **Problems** (a file that does not parse, two policies with one id, a template, what Cedar's strict validation finds, a `permit` for anyone but the visitors, the agents or `anonymous`, or with a `@hold`, a `@hold` naming no declared group or person, `visitors` among them) are `resolveConfig`'s `policyProblems`, one line each, `file:line:col: <policy id>: <message>`. While there are any, the policy refuses every call, start and preview ("The policies do not hold: …"): a repo never runs on part of its rules.
 
   `describeConfig(config).policy` carries them as `problems`; `startWorker` warns with them (unless `quiet`), `startApp` lists them and its pages say the policies do not hold, `sanoma check` reports them and runs no scenario, and the `sanoma` bin starts nothing.

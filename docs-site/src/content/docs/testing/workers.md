@@ -110,7 +110,6 @@ import config from "../sanoma.config.ts";
 await describeScenarios({ ...config, ledger: memoryLedger() }, { databaseUrl: testDatabaseUrl("scenarios") });
 ```
 
-
 Await `describeScenarios` at the top level. It starts one test app on `options.databaseUrl` for the suite and stops it afterward. Pass `memoryLedger()` to keep test writes out of a configured project ledger.
 
 Each feature in the root or an app becomes a test group, with one sandbox run per scenario. The runner sends the specified approvals and reports each failed expectation. A feature that cannot load gets a failing test named for the file. A root demo world gets a separate test that seeds its fakes. If the configured root has neither scenarios nor a world, registration throws.

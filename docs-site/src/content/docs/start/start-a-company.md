@@ -22,14 +22,14 @@ npx sanoma init --name "Maple Street Studio" --you "Dana Reyes" --email dana@map
 
 `sanoma init` copies the package’s `template/` into an empty directory. Existing dotfiles are allowed. Running `sanoma` there without options also initializes and starts the company.
 
-| File or directory | What you’ll find |
-| --- | --- |
-| `sanoma.config.ts` | The app’s Anthropic chat model, Resend for sign-in codes (`login.sender`), GitHub, Sanoma Cloud, and coding-agent connectors for Codex (OpenAI), OpenCode, and Pi. Claude Code and Copilot come with the Anthropic and GitHub connectors. |
-| `resources/data.ts` | The Outbound board where the example `record-lead` workflow saves a lead. The template also includes the workflow’s scenario. |
-| `resources/people.ts` | Your person declaration in the `admin` group. |
-| `policies/policy.cedar` and `policies/changes.cedar` | Sending or publishing waits for `admin` approval. So does every change. |
-| `resources/sanoma/infra.ts` | The Sanoma Cloud database and host the company will use when it goes live. Until then, a merge deploys nothing. |
-| `secrets.ts` | Bootstrap key bindings and an environment binding for `SANOMA_CLOUD_TOKEN` when set, as it is on a host. |
+| File or directory                                    | What you’ll find                                                                                                                                                                                                                          |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sanoma.config.ts`                                   | The app’s Anthropic chat model, Resend for sign-in codes (`login.sender`), GitHub, Sanoma Cloud, and coding-agent connectors for Codex (OpenAI), OpenCode, and Pi. Claude Code and Copilot come with the Anthropic and GitHub connectors. |
+| `resources/data.ts`                                  | The Outbound board where the example `record-lead` workflow saves a lead. The template also includes the workflow’s scenario.                                                                                                             |
+| `resources/people.ts`                                | Your person declaration in the `admin` group.                                                                                                                                                                                             |
+| `policies/policy.cedar` and `policies/changes.cedar` | Sending or publishing waits for `admin` approval. So does every change.                                                                                                                                                                   |
+| `resources/sanoma/infra.ts`                          | The Sanoma Cloud database and host the company will use when it goes live. Until then, a merge deploys nothing.                                                                                                                           |
+| `secrets.ts`                                         | Bootstrap key bindings and an environment binding for `SANOMA_CLOUD_TOKEN` when set, as it is on a host.                                                                                                                                  |
 
 The template also sets up the resource directory structure, `AGENTS.md`, and `.env.example`. Sanoma derives the package name from the directory name. The app displays `--name` when supplied and the package name otherwise. For the host address, `<slug>.sanoma.work`, Sanoma removes accents from the name, lowercases it, and replaces runs of other characters with dashes. It uses the directory name the same way if the company name yields no slug.
 

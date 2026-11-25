@@ -19,12 +19,12 @@ The method returns the decided approval when the run reads the decision. If the 
 
 ## Errors and retries
 
-| Code | When it occurs |
-| --- | --- |
-| `already_decided` | The approval already has a decision. If a concurrent decision reached the run first, the error identifies who decided and how. |
-| `run_ended` | The run finished, failed, or was cancelled. |
-| `no_pending_approval` | The run has no matching pending request. |
-| `run_not_found` | The run ID does not exist. |
-| `not_approver` | The sender cannot decide this approval. The run also checks the sender when it reads the message and records a refusal as `approval.refused`. |
+| Code                  | When it occurs                                                                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `already_decided`     | The approval already has a decision. If a concurrent decision reached the run first, the error identifies who decided and how.                |
+| `run_ended`           | The run finished, failed, or was cancelled.                                                                                                   |
+| `no_pending_approval` | The run has no matching pending request.                                                                                                      |
+| `run_not_found`       | The run ID does not exist.                                                                                                                    |
+| `not_approver`        | The sender cannot decide this approval. The run also checks the sender when it reads the message and records a refusal as `approval.refused`. |
 
 Each message has an ID. Supply `message.id` to reuse it when retrying a send. The approval scopes the idempotency key, so a retry with that ID queues one message. The run records the winning ID in `decidedWith` and publishes the decision on `decisionEventOf(approvalId)`.

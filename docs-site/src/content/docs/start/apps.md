@@ -42,11 +42,11 @@ The people are the company's: an app's data files declare none (`readPeople` ref
 
 Taking or updating an app merges Git history into a company draft through `Source` (the package supplies `localGitSource`).
 
-| Method | Behavior |
-| --- | --- |
+| Method                                       | Behavior                                                                                                                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `draft.take({ url, ref?, folder?, author })` | Fetches a public company repo over HTTPS and merges its history in one merge commit. If the source has several `apps/<folder>/` directories, supply `folder`. |
-| `draft.update({ folder, author })` | Merges new default-branch commits from the URL in the published `app.ts`. |
-| `source.behind(folder)` | Fetches and counts those new commits. |
+| `draft.update({ folder, author })`           | Merges new default-branch commits from the URL in the published `app.ts`.                                                                                     |
+| `source.behind(folder)`                      | Fetches and counts those new commits.                                                                                                                         |
 
 Update and behind checks require shared history with the checkout. `appSourceOf` reports an invalid or throwing `app.ts` and identifies apps with no source as the company’s own. Sanoma reads `app.ts` from `main`. Publish a newly taken app before updating it.
 
