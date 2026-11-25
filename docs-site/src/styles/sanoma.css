@@ -51,6 +51,17 @@ h4,
   letter-spacing: -0.01em;
 }
 
+/* The homepage links the entire Starlight card. */
+.card-grid > a {
+  display: grid;
+  color: inherit;
+  text-decoration: none;
+}
+
+.card-grid > a:is(:hover, :focus-visible) .title {
+  text-decoration: underline;
+}
+
 /* The connector reference (src/components/Schema.astro, src/pages/reference/connectors). */
 .operation-meta {
   display: flex;

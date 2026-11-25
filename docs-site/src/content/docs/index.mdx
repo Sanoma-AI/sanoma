@@ -3,28 +3,28 @@ title: Sanoma
 description: "Set up a company, use its app, or build workflows, sites, and connectors in its repository."
 ---
 
-import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+import { Card, CardGrid } from "@astrojs/starlight/components";
 
 Sanoma runs the workflows and sites defined in your company’s repository. Teammates use the company app to start runs, review approvals, and see what happened.
 
 ## Start here
 
 <CardGrid>
-  <LinkCard
-    title="Set up a company"
-    href="/start/setup/"
-    description="Start in a new or existing repository, then run the sample workflow in a sandbox."
-  />
-  <LinkCard
-    title="Use your company’s app"
-    href="/start/the-app/"
-    description="Sign in, find a workflow, or decide a request waiting in your Inbox."
-  />
-  <LinkCard
-    title="Build with Sanoma"
-    href="/build/overview/"
-    description="Write a workflow, create a site, or add support for a vendor."
-  />
+  <a href="/start/setup/" aria-label="Set up a company">
+    <Card title="Set up a company" icon="rocket">
+      Start in a new or existing repository, then run the sample workflow in a sandbox.
+    </Card>
+  </a>
+  <a href="/start/the-app/" aria-label="Use your company’s app">
+    <Card title="Use your company’s app" icon="window">
+      Sign in, find a workflow, or decide a request waiting in your Inbox.
+    </Card>
+  </a>
+  <a href="/build/overview/" aria-label="Build with Sanoma">
+    <Card title="Build with Sanoma" icon="code-branch">
+      Write a workflow, create a site, or add support for a vendor.
+    </Card>
+  </a>
 </CardGrid>
 
 ## Where things are
