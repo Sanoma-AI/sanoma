@@ -172,7 +172,8 @@ export const stillHeld = (run: RunSummary): StillHeld => ({ held: { runId: run.r
 /**
  * What the chat's `start_run` answers for the run `run`, just read (`RunOutput`): the
  * one function that builds it, for the tool as it runs and for `settle`. Still held while it waits
- * for an approval; its output once it finished (`SanomaClient.result`); its error once it failed or
+ * for an approval; its output once it finished (`SanomaClient.result`, the workflow's `opaque` fields
+ * real: `run` is the one the chat's own `start_run` started); its error once it failed or
  * was cancelled, an answer and no throw, since the run exists; else that it is running.
  */
 export async function runOutput(client: Pick<SanomaClient, "result">, run: RunSummary): Promise<RunOutput> {

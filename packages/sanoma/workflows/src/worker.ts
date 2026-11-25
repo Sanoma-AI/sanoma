@@ -53,7 +53,15 @@ import {
 import { type DatabasePreparation, isOperation } from "./op.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
-import { APPLY_WORKFLOW, approverLabel, errorMessage, oneAtATime, RENEWAL_AGENT, WORKFLOW_ACTION } from "./shared.ts";
+import {
+  APPLY_WORKFLOW,
+  approverLabel,
+  errorMessage,
+  hideOpaque,
+  oneAtATime,
+  RENEWAL_AGENT,
+  WORKFLOW_ACTION,
+} from "./shared.ts";
 import { renewWhenDue } from "./renewal.ts";
 
 export interface Worker {
@@ -763,7 +771,8 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
     }
     throw err;
   }
-  await write(run, entry(run, { type: "run.finished", output }));
+  // The run's starter reads its opaque fields from `.result`, DBOS's copy; the ledger never holds them.
+  await write(run, entry(run, { type: "run.finished", output: hideOpaque(output, wf.opaque) }));
   // Once its outcome is recorded, before DBOS records it, so a page that reads the run ended reads its last checks.
   await recordSandboxChecks(run);
   return output;

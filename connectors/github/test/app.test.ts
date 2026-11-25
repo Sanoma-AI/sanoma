@@ -130,6 +130,20 @@ describe("the operations through the App", () => {
     expect(bearers()).toEqual(["Bearer ghs_recorded"]);
   });
 
+  it.skipIf(live)("reads the default branch's head, waiting for a repository just generated to fill", async () => {
+    play("app-head-default");
+    const input = { installation: 7, repository: "acme/acme-ops" };
+    expect(await call(githubDriver(), "repository.head", input)).toEqual({
+      sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    });
+    // The repository for its default branch, then that branch until the template's copy lands.
+    expect(sent.slice(1).map((s) => `${s.method} ${s.path}`)).toEqual([
+      "GET /repos/acme/acme-ops",
+      "GET /repos/acme/acme-ops/branches/main",
+      "GET /repos/acme/acme-ops/branches/main",
+    ]);
+  });
+
   it.skipIf(live)("tries a branch's head again while the repository is empty, as one just generated is", async () => {
     play("app-head-empty");
     const input = { installation: 7, repository: "acme/acme-ops", branch: "main" };
@@ -346,6 +360,26 @@ describe("fakeGithubApp", () => {
     await expect(
       call(fake.driver, "repository.head", { ...head, repository: "Sanoma-AI/company-template" }),
     ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("keeps a repository generated empty until a call waits for the copy, with slowCopy", async () => {
+    const fake = fakeGithub();
+    fake.app.update((state) => void (state.slowCopy = true));
+    await call(fake.driver, "repository.generate", generate);
+    const repository = { installation: 7, repository: "acme/acme-ops" };
+    const empty = { status: 409, retryable: true, vendorCode: "no_branch" };
+    // A read that does not wait answers as GitHub does for an empty repository.
+    await expect(call(fake.driver, "repository.head", { ...repository, branch: "main" })).rejects.toMatchObject(empty);
+    await expect(
+      call(fake.driver, "repository.files", { ...repository, paths: ["package.json"], ref: "main" }),
+    ).rejects.toMatchObject(empty);
+    // The default branch's head waits for it, and answers the generated commit, which the starter is read at.
+    const { sha } = await call(fake.driver, "repository.head", repository);
+    expect(sha).toBe(fake.app.state.repositories["acme/acme-ops"]!.branches.main!.sha);
+    const starter = fake.app.state.repositories[FAKE_TEMPLATE]!.branches.main!.files;
+    expect(await call(fake.driver, "repository.files", { ...repository, paths: ["package.json"], ref: sha })).toEqual({
+      "package.json": starter["package.json"],
+    });
   });
 
   it("reads files at the default branch, a branch or a commit, leaving out a file not there", async () => {

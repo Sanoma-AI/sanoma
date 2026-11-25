@@ -25,8 +25,10 @@ import {
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
   DESCRIBE_CALL,
+  hideOpaque,
   RUN_READS,
   isVisitor,
+  sameActor,
   flatten,
   LOGIN_CODE_WORKFLOW,
   notLoaded,
@@ -779,8 +781,9 @@ export type CallHost = Pick<AppContext, "client" | "resolved"> & { snapshot: Pic
  * answers `agentDescription`. Anything else is `invalid_input`. A visitor (`isVisitor`) calls no
  * built-in workflow, reads no description and reads only the result of a run it started: its other
  * reads are `policy_denied`. Every other start is the client's (`SanomaClient.start`: an internal
- * workflow refused, the policy asked). `signal`, when given, ends `.result`'s wait early, with its
- * reason (a chat turn's stop).
+ * workflow refused, the policy asked). The workflow's `opaque` output fields are `"<name>"` in
+ * every read but `.result` as the run's starter (`sameActor`). `signal`, when given, ends
+ * `.result`'s wait early, with its reason (a chat turn's stop).
  */
 export async function callApi(
   app: CallHost,
@@ -826,11 +829,13 @@ export async function callApi(
         }
         await sleep(RESULT_POLL_MS, undefined, { signal });
       }
+      let output: unknown;
       try {
-        return await client.result(runId);
+        output = await client.result(runId);
       } catch (err) {
         throw run.status === "finished" ? err : runFailure(run, err);
       }
+      return sameActor(run.startedBy, actor) ? output : hideOpaque(output, resolved.workflows.get(workflow)?.opaque);
     }
     case "latest":
       return client.latest(workflow);
@@ -966,7 +971,7 @@ async function runOf(
   startedBy?: Principal,
 ): Promise<RunSummary> {
   const run = await client.run(runId);
-  if (run?.workflow !== workflow || (startedBy && run.startedBy?.id !== startedBy.id))
+  if (run?.workflow !== workflow || (startedBy && !sameActor(run.startedBy, startedBy)))
     throw new ApiError(404, { error: `No run ${runId} of ${workflow}`, code: "run_not_found" });
   return run;
 }

@@ -104,6 +104,7 @@ import {
   errorMessage,
   FOLLOW_WORKFLOW,
   heldCallRunId,
+  hideOpaque,
   HOST_CHECK_AGENT,
   isBatch,
   isEnded,
@@ -115,6 +116,7 @@ import {
   refusalOf,
   type RunStatus,
   RESHAPE_WORKFLOW,
+  sameActor,
   SAVE_DRAFT_WORKFLOW,
   type Saved,
   SCHEDULE_AGENT,
@@ -863,7 +865,8 @@ export class SanomaClient {
   }
 
   /**
-   * The newest finished run of the workflow, with its output and when it finished; null when it
+   * The newest finished run of the workflow, with its output and when it finished, the workflow's
+   * `opaque` fields as `"<name>"` (it answers whoever asks, not the run's starter); null when it
    * has none. One query, whatever the app's runs.
    */
   async latest(workflow: string): Promise<{ runId: string; output: unknown; at: number } | null> {
@@ -876,7 +879,9 @@ export class SanomaClient {
       loadInput: false,
       loadOutput: true,
     });
-    return row ? { runId: row.workflowID, output: row.output, at: row.updatedAt ?? row.createdAt } : null;
+    if (!row) return null;
+    const output = hideOpaque(row.output, this.config.workflows.get(workflow)?.opaque);
+    return { runId: row.workflowID, output, at: row.updatedAt ?? row.createdAt };
   }
 
   /** Records that the declared `person` signed in to the staff login, by `method`: a ledger record outside any run. */
@@ -2138,13 +2143,6 @@ const asJson = (v: unknown): unknown => (v === undefined ? undefined : JSON.pars
 
 /** True when the two are the same JSON, whatever the order of their keys. */
 const sameJson = (a: unknown, b: unknown): boolean => isDeepStrictEqual(asJson(a), asJson(b));
-
-/**
- * True when `stored` is `actor`: one id, acting for the same person (one agent acts for several
- * people). Their groups aside: those are the people files' at the time, which may change.
- */
-const sameActor = (stored: Pick<Principal, "id" | "onBehalfOf"> | undefined, actor: Principal): boolean =>
-  stored?.id === actor.id && stored.onBehalfOf === actor.onBehalfOf;
 
 /** A secret's value as `SanomaClient.secrets` reads it, and where from. */
 export interface StoredSecret {

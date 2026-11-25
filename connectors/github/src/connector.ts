@@ -205,8 +205,13 @@ const appSpecs = {
     head: {
       effect: "read",
       idempotent: true,
-      description: "Read the commit a branch is at, through an installation of the GitHub App",
-      input: z.object({ installation, repository: fullName, branch: z.string().min(1) }),
+      description:
+        "Read the commit a branch is at, through an installation of the GitHub App; the default branch's when left out, waited for while a repository just generated fills from its template",
+      input: z.object({
+        installation,
+        repository: fullName,
+        branch: z.string().min(1).optional().describe("The branch; the default branch when left out"),
+      }),
       output: z.object({ sha: z.string().describe("The branch's head commit") }),
       target: ({ repository }: { repository: string }) => repository,
     },

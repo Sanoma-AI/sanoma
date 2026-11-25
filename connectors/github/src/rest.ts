@@ -74,6 +74,14 @@ function parseJson(text: string): unknown {
 export const limited = ({ status, headers }: Reply) =>
   status === 429 || (status === 403 && (headers.get("x-ratelimit-remaining") === "0" || headers.has("retry-after")));
 
+/** The 409 GitHub answers for an empty repository, as one just generated is until its template's copy lands: tried again. */
+export const emptyRepository = (repository: string) =>
+  new DriverError(`github: ${repository} is empty until its template's copy lands`, {
+    retryable: true,
+    status: 409,
+    vendorCode: "no_branch",
+  });
+
 /** GitHub's answer as a `DriverError`, its message GitHub's own; retryable on a rate limit or a server error. */
 export function failed(method: string, path: string, reply: Reply, vendorCode?: string): DriverError {
   const said = typeof reply.body?.message === "string" ? reply.body.message : `status ${reply.status}`;

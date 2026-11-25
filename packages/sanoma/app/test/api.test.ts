@@ -127,6 +127,16 @@ const refuse = defineWorkflow({
   run: async (ctx, { id }) => ctx.acme.customer.close({ id }),
 });
 
+/** A box's link, for its starter alone: a workflow with an opaque field in its output. */
+const box = defineWorkflow({
+  name: "box",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [],
+  opaque: ["url"],
+  run: async () => ({ url: "https://box.test/?sig=abc", expiresAt: "2026-11-25T13:00:00Z" }),
+});
+
 /** A lead and what acme calls it: a company operation a page may call. */
 const lookup = defineOperation({
   name: "lookup",
@@ -169,7 +179,7 @@ const relabel = defineOperation({
 });
 
 const config: SanomaConfig = {
-  workflows: [outboundNext, refuse],
+  workflows: [outboundNext, refuse, box],
   operations: [lookup, peek, relabel, note],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
@@ -312,6 +322,26 @@ describe("callFn", () => {
     expect(await call({ name: "call.ledger", input: { runId } })).toMatchObject({
       status: 404,
       body: { code: "run_not_found" },
+    });
+  });
+
+  it("answers a workflow's opaque output fields to the run's starter alone, and as `<name>` to every other read", async () => {
+    const link = { url: "https://box.test/?sig=abc", expiresAt: "2026-11-25T13:00:00Z" };
+    const hidden = { ...link, url: "<url>" };
+    const id = crypto.randomUUID();
+    await call({ name: "box.start", id });
+    expect(await call({ name: "box.result", input: { runId: id } })).toEqual({ body: link });
+    expect(await call({ name: "box.result", input: { runId: id } }, "lead")).toEqual({ body: hidden });
+    expect((await call({ name: "box.latest" })).body).toEqual({ runId: id, output: hidden, at: expect.any(Number) });
+    const ledger = (await call({ name: "box.ledger", input: { runId: id } })).body as { type: string }[];
+    expect(ledger.find((r) => r.type === "run.finished")).toMatchObject({ output: hidden });
+    // An agent's run is the starter's for the person it acted for, not for another it acts for.
+    const forAda = { id: "claude-code", onBehalfOf: "ada" };
+    const agents = crypto.randomUUID();
+    await visit({ name: "box.start", id: agents }, forAda);
+    expect(await visit({ name: "box.result", input: { runId: agents } }, forAda)).toEqual({ body: link });
+    expect(await visit({ name: "box.result", input: { runId: agents } }, { ...forAda, onBehalfOf: "lead" })).toEqual({
+      body: hidden,
     });
   });
 

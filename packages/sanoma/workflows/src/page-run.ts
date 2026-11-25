@@ -47,6 +47,7 @@ import {
   CALL_ID,
   DATA_VENDOR,
   errorMessage,
+  hideOpaque,
   isEnded,
   type RunStatus,
 } from "./shared.ts";
@@ -416,7 +417,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
     run.done = (async () => {
       try {
         const output = await wf.run(ctxOf(wf, run, runner), parsed);
-        write(run, { type: "run.finished", output });
+        write(run, { type: "run.finished", output: hideOpaque(output, wf.opaque) });
         run.status = "finished";
         return output;
       } catch (err) {
@@ -511,7 +512,7 @@ export async function pageRuntime(options: PageRuntimeOptions): Promise<PageRunt
         }
         case "latest": {
           const run = runsOf(wf.name).find((r) => r.status === "finished");
-          return run ? { runId: run.id, output: await run.done, at: run.updatedAt! } : null;
+          return run ? { runId: run.id, output: hideOpaque(await run.done, wf.opaque), at: run.updatedAt! } : null;
         }
         case "runs": {
           const { limit = 20 } = parseOrThrow(RunsLimit, input ?? {}, "The input");

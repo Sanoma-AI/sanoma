@@ -363,8 +363,8 @@ const REDACTED = "\uE000";
 
 /**
  * Each field the ledger never shows as `REDACTED`: a field, at any depth, that holds its own name as
- * `"<name>"`, as the runtime records an operation's `opaque` field and a sign-in mail's body
- * (`recorded`), so any other string that looks like one is left as it is.
+ * `"<name>"`, as the runtime records an operation's and a workflow's `opaque` fields and a sign-in
+ * mail's body (`hideOpaque`), so any other string that looks like one is left as it is.
  */
 function redact(this: unknown, key: string, field: unknown): unknown {
   return !Array.isArray(this) && field === `<${key}>` ? REDACTED : field;
