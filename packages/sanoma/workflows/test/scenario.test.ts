@@ -1505,6 +1505,7 @@ describe("Cucumber", () => {
   it("reads a connector's step that seeds an object no operation makes, as a resource step's seed", async () => {
     const hooks = defineSteps("acme", ({ given }) => {
       given("an Acme hook {string}", (name: string) => ({ resource: "acme.hook", name, fields: { on: true } }));
+      given("a hook of no vendor", () => ({ resource: "hook." as const, name: "h", fields: {} }));
     });
     const text = `Feature: A\n  Scenario: S\n    Given an Acme hook "h1"\n    When announce runs\n`;
     const [scenario] = await parseFeature(text, "scenarios/x.feature", { ...scope, steps: [...scope.steps, hooks] });
@@ -1518,6 +1519,10 @@ describe("Cucumber", () => {
         fields: { on: true },
       },
     ]);
+    const withHooks = { ...scope, steps: [...scope.steps, hooks] };
+    expect(
+      await thrown(`Feature: A\n  Scenario: S\n    Given a hook of no vendor\n    When announce runs\n`, withHooks),
+    ).toContain(`a seed's resource is <vendor>.<type>, not "hook."`);
   });
 
   it("refuses an operation's own test step in a scenario of a workflow", async () => {

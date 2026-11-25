@@ -760,6 +760,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
             const connection = seed.connection && { connection: seed.connection };
             if ("resource" in seed) {
               const [vendor = "", type = ""] = seed.resource.split(/\.(.*)/);
+              if (!vendor || !type) throw new Error(`a seed's resource is <vendor>.<type>, not "${seed.resource}"`);
               return [{ resource: seed.resource, vendor, type, name: seed.name, fields: seed.fields, ...connection }];
             }
             const op = opNamed(seed.op);

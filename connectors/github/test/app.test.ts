@@ -453,7 +453,8 @@ describe("fakeGithubApp", () => {
     const read = await call(fake.driver, "repository.files", { ...at, paths });
     // The installed `sanoma`'s template, its `gitignore` as `.gitignore`, as `sanoma init` writes it.
     expect(Object.keys(read).toSorted()).toEqual([".gitignore", "resources/people.ts", INFRA, "sanoma.config.ts"]);
-    expect(read[".gitignore"]).toBe(readFileSync(new URL(import.meta.resolve("sanoma/template/gitignore")), "utf8"));
+    const template = new URL(".", import.meta.resolve("sanoma/template/package.json"));
+    expect(read[".gitignore"]).toBe(readFileSync(new URL("gitignore", template), "utf8"));
     expect(declareFounder(read["resources/people.ts"], { id: "ada", github: "acme" })).toContain(
       'export const founder = sanoma.person({ id: "ada", github: "acme" });',
     );
@@ -491,8 +492,8 @@ describe("fakeGithubApp", () => {
       await call(fake.driver, "repository.generate", { ...generate, installation: 11, owner: "ada" }),
     ).toMatchObject({ fullName: "ada/acme-ops" });
     expect(() => install(13, "team", "x", "all")).toThrow("on a user or an organization, not a team");
-    expect(() => install(13, "user", "x", "some")).toThrow("all or selected repositories, not some");
     expect(() => copy.put("installation", "13", { account: { login: "x" } })).toThrow("repositorySelection");
+    expect(() => install(13, "user", "x", "some")).toThrow("all or selected repositories, not some");
     expect(fake.app.state.installations[13]).toBeUndefined();
     fake.reset();
     expect(fake.app.state.installations[11]).toBeUndefined();
