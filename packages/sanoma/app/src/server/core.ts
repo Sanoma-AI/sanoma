@@ -21,6 +21,7 @@ import {
   SanomaError,
 } from "sanoma/workflows";
 import {
+  ANONYMOUS,
   apiNameOf,
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
@@ -782,7 +783,7 @@ export type CallHost = Pick<AppContext, "client" | "resolved"> & { snapshot: Pic
  * built-in workflow, reads no description and reads only the result of a run it started: its other
  * reads are `policy_denied`. Every other start is the client's (`SanomaClient.start`: an internal
  * workflow refused, the policy asked). The workflow's `opaque` output fields are `"<name>"` in
- * every read but `.result` as the run's starter (`sameActor`). `signal`, when given, ends
+ * every read but `.result` as the run's starter (`sameActor`), never `anonymous`. `signal`, when given, ends
  * `.result`'s wait early, with its reason (a chat turn's stop).
  */
 export async function callApi(
@@ -835,7 +836,9 @@ export async function callApi(
       } catch (err) {
         throw run.status === "finished" ? err : runFailure(run, err);
       }
-      return sameActor(run.startedBy, actor) ? output : hideOpaque(output, resolved.workflows.get(workflow)?.opaque);
+      // Every visitor not signed in is one `anonymous`: none of them is told apart as the starter.
+      const starter = actor.id !== ANONYMOUS && sameActor(run.startedBy, actor);
+      return starter ? output : hideOpaque(output, resolved.workflows.get(workflow)?.opaque);
     }
     case "latest":
       return client.latest(workflow);

@@ -97,6 +97,7 @@ permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workf
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"operations.lookup.run", resource);
 
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"operations.note.run", resource);
+permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"workflow:box", resource);
 
 @reason("not for agents")
 forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"operations.peek.run", resource)
@@ -341,6 +342,12 @@ describe("callFn", () => {
     await visit({ name: "box.start", id: agents }, forAda);
     expect(await visit({ name: "box.result", input: { runId: agents } }, forAda)).toEqual({ body: link });
     expect(await visit({ name: "box.result", input: { runId: agents } }, { ...forAda, onBehalfOf: "lead" })).toEqual({
+      body: hidden,
+    });
+    // Every visitor not signed in is one `anonymous`, so its own start's result is hidden too: anyone with the id could ask.
+    const anonymous = crypto.randomUUID();
+    await visit({ name: "box.start", id: anonymous }, ANONYMOUS_PRINCIPAL);
+    expect(await visit({ name: "box.result", input: { runId: anonymous } }, ANONYMOUS_PRINCIPAL)).toEqual({
       body: hidden,
     });
   });

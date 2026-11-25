@@ -59,7 +59,9 @@ export default defineWorkflow({
 });
 ```
 
-`<api>.result` answers the run's output as it is to the run's starter: the same principal, and for an agent, acting for the same person. Every other read shows each `opaque` field as `"<url>"`: `.result` asked by anyone else, `.latest`, `.ledger`, the app's run page and `/mcp`'s `wait_run`. `defineWorkflow` refuses a path that is not names joined by dots. A workflow declares no output schema, so `sanoma check` cannot tell a path the output never has: such a path hides nothing. The real output stays in the database's record of the run, which `client.result(runId)` reads for code on the server.
+The operation the field comes from declares it `opaque` too (`box.open` here), or the value sits in that operation's `op.called` record.
+
+`<api>.result` answers the run's output as it is to the run's starter: the same principal, and for an agent, acting for the same person. An opaque field is only readable by a starter with an identity: a signed-in person or visitor, an API token, or an agent acting for a person; every visitor who is not signed in is one `anonymous`, so their own run's field is hidden from them too. Every other read shows each `opaque` field as `"<url>"`: `.result` asked by anyone else, `.latest`, `.ledger`, the app's run page and `/mcp`'s `wait_run`. `defineWorkflow` refuses a path that is not names joined by dots. A workflow declares no output schema, so `sanoma check` cannot tell a path the output never has: such a path hides nothing. The real output stays in the database's record of the run, which `client.result(runId)` reads for code on the server.
 
 ## Describing the vendor
 

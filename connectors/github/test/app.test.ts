@@ -3,7 +3,7 @@ import { declareFounder, declareName, declareSlug, INFRA } from "sanoma/init";
 import { live, replay } from "sanoma/testing/replay";
 import { type Driver, memorySecrets } from "sanoma/workflows";
 import type { ResourceFake } from "sanoma/workflows/fake";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { githubDriver } from "../src/driver.ts";
 import { FAKE_TEMPLATE, fakeGithub } from "../src/fake.ts";
 import { github } from "../src/index.ts";
@@ -133,9 +133,13 @@ describe("the operations through the App", () => {
   it.skipIf(live)("reads the default branch's head, waiting for a repository just generated to fill", async () => {
     play("app-head-default");
     const input = { installation: 7, repository: "acme/acme-ops" };
-    expect(await call(githubDriver(), "repository.head", input)).toEqual({
-      sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
-    });
+    // The wait between tries passes at once, after the empty repository's 409.
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const head = call(githubDriver(), "repository.head", input);
+    await vi.waitUntil(() => sent.length === 3);
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.useRealTimers();
+    expect(await head).toEqual({ sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" });
     // The repository for its default branch, then that branch until the template's copy lands.
     expect(sent.slice(1).map((s) => `${s.method} ${s.path}`)).toEqual([
       "GET /repos/acme/acme-ops",
