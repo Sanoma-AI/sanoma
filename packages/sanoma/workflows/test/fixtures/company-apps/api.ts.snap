@@ -80,7 +80,7 @@ interface CompanyApi {
     collection: string;
     mapping: ({
       field: string;
-      values?: Record<string, unknown>;
+      values?: Record<string, string>;
     } | null)[];
     rows: string[][];
     people?: string[];
@@ -92,7 +92,7 @@ interface CompanyApi {
       export: string;
     };
     fields: Record<string, unknown>;
-    rename?: Record<string, unknown>;
+    rename?: Record<string, string | null>;
     plan?: {
       collection: string;
       changes: unknown[];

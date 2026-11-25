@@ -39,7 +39,7 @@ export function generateApi(description: ConfigDescription): { source: string; p
   for (const wf of description.workflows) {
     const taken = wf.problems.filter((p) => p.message.startsWith(API_NAME_PROBLEM));
     if (taken.length) problems.push(...taken.map((p) => problemLine({ file: wf.file, ...p })));
-    else members.push(workflowMember(wf));
+    else members.push(workflowMember(wf, refs));
   }
   // The ops are sorted by id, so by vendor and then resource.
   const direct = description.ops.filter((op) => op.direct && op.vendor !== DATA_VENDOR);
@@ -77,7 +77,7 @@ export function generateApi(description: ConfigDescription): { source: string; p
     "// The types of `api` from sanoma/site: what a site may call, as the person on the page.",
     'import type { CollectionApi, OpFn, WorkflowFn } from "sanoma/site";',
     ...description.collections.map(
-      (c) => `\n${jsdoc(`A record of ${c.title ?? c.name}.`)}type ${recordName(c)} = ${typeOf(c.record)};`,
+      (c) => `\n${jsdoc(`A record of ${c.title ?? c.name}.`)}type ${recordName(c)} = ${typeOf(c.record, refs)};`,
     ),
     "",
     `interface CompanyApi ${block(members)}`,
@@ -131,11 +131,11 @@ async function writeChanged(file: string, text: string): Promise<boolean> {
   return true;
 }
 
-const workflowMember = (wf: WorkflowEntry) =>
+const workflowMember = (wf: WorkflowEntry, refs: Refs) =>
   member(
     `${wf.title ?? wf.name}: the workflow \`${wf.name}\`${wf.builtin ? ", built in" : ""}.`,
     apiNameOf(wf.name),
-    `WorkflowFn<${typeOf(wf.input)}, unknown>`,
+    `WorkflowFn<${typeOf(wf.input, refs)}, unknown>`,
   );
 
 /** An operation's member: its input and its output typed from their schemas (`unknown` for one it does not declare). */
@@ -161,12 +161,13 @@ const recordName = (c: CollectionEntry) =>
 
 /**
  * A JSON Schema as a TypeScript type, for the kinds a start form draws (`fieldsOf` in the app):
- * strings (a date-time among them), numbers, integers, booleans, enums and constants, objects and
- * arrays, each property with its description, and unions of those, `null` among them (a
- * collection's date, a date or a date-time; a nullable field), and a `$ref` to a schema of `refs`
- * as that schema; anything else is `unknown`.
+ * strings (a date-time among them), numbers, integers, booleans, enums and constants, objects
+ * (one with no `properties` a record of its `additionalProperties`) and arrays, each property with
+ * its description, and unions of those, `null` among them (a collection's date, a date or a
+ * date-time; a nullable field), and a `$ref` to a schema of `refs` as that schema; anything else
+ * is `unknown`.
  */
-const typeOf = (schema: unknown, refs: Refs = new Map()): string => union(alternatives(schema, refs));
+const typeOf = (schema: unknown, refs: Refs): string => union(alternatives(schema, refs));
 
 /** One type of several: `unknown` when any is. */
 function union(types: string[]): string {
@@ -199,11 +200,16 @@ function alternatives(schema: unknown, refs: Refs): string[] {
     case "null":
       return ["null"];
     case "array": {
-      const item = typeOf(schema.items, refs);
-      return [new Set(alternatives(schema.items, refs)).size > 1 && item !== "unknown" ? `(${item})[]` : `${item}[]`];
+      const items = alternatives(schema.items, refs);
+      const item = union(items);
+      return [new Set(items).size > 1 && item !== "unknown" ? `(${item})[]` : `${item}[]`];
     }
     case "object":
-      return [isObject(schema.properties) ? objectType(schema, refs) : "Record<string, unknown>"];
+      return [
+        isObject(schema.properties)
+          ? objectType(schema, refs)
+          : `Record<string, ${typeOf(schema.additionalProperties, refs)}>`,
+      ];
     default:
       return ["unknown"];
   }

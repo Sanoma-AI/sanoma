@@ -91,7 +91,7 @@ interface CompanyApi {
     collection: string;
     mapping: ({
       field: string;
-      values?: Record<string, unknown>;
+      values?: Record<string, string>;
     } | null)[];
     rows: string[][];
     people?: string[];
@@ -107,7 +107,7 @@ interface CompanyApi {
       export: string;
     };
     fields: Record<string, unknown>;
-    rename?: Record<string, unknown>;
+    rename?: Record<string, string | null>;
     plan?: {
       collection: string;
       changes: unknown[];
@@ -184,6 +184,8 @@ interface CompanyApi {
         customer: {
           id: string;
         } | null;
+        /** Each tax on the total, in cents, by its name. */
+        taxes: Record<string, number>;
       }>;
     };
   };

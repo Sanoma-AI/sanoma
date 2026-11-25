@@ -80,12 +80,14 @@ const price = defineOperation({
     total: z.number().describe("What the items cost, in cents."),
     currency: z.enum(["EUR", "USD"]),
     customer: z.object({ id: z.string() }).nullable(),
+    taxes: z.record(z.string(), z.number()).describe("Each tax on the total, in cents, by its name."),
   }),
   uses: [customers.get],
   run: async (ctx, { id, items }) => ({
     total: items * 900,
     currency: "EUR" as const,
     customer: (await ctx.data.customers.get({ key: id })) && { id },
+    taxes: { VAT: items * 189 },
   }),
 });
 
@@ -141,10 +143,8 @@ describe("generateApi", () => {
       vendor: "forge",
       type: "repo",
       title: "Repo",
-      identity: "name",
-      schema: z.object({ name: z.string().describe("The repository's name."), url: z.string().nullish() }),
+      schema: z.object({ name: z.string(), url: z.string().nullish() }),
       fields: { immutable: ["name"], vendorOwned: ["url"], writeOnly: [] },
-      find: ({ name }) => name,
     });
     const forge = defineConnector(
       "forge",
@@ -158,7 +158,7 @@ describe("generateApi", () => {
           },
         },
       },
-      { title: "Forge", package: "@forge/sanoma-connector" },
+      { package: "@forge/sanoma-connector" },
     );
     const description = describeConfig({ ...config, connectors: [forge] });
     // The description refers to the state rather than repeating it.
@@ -169,7 +169,6 @@ describe("generateApi", () => {
         q: string;
       }, {
         repos: {
-          /** The repository's name. */
           name: string;
           url?: string | null;
         }[];
@@ -224,7 +223,10 @@ export async function page() {
   // A company operation's output, as its \`output\` declares it: no cast.
   const quoted = await api.operations.price.run({ id, items: 2 });
   const total: number = quoted.total;
-  const typed: Equal<typeof quoted, { total: number; currency: "EUR" | "USD"; customer: { id: string } | null }> = true;
+  const typed: Equal<
+    typeof quoted,
+    { total: number; currency: "EUR" | "USD"; customer: { id: string } | null; taxes: Record<string, number> }
+  > = true;
   // @ts-expect-error: not a field of its output
   quoted.discount;
   // @ts-expect-error: a currency is one of two
