@@ -8,6 +8,7 @@ import { z } from "zod";
 import { collection } from "../src/collection.ts";
 import { describeConfig, generateApi, writeApi } from "../src/describe.ts";
 import { defineConnector, defineDriver, defineOperation, defineWorkflow, withSetup } from "../src/index.ts";
+import { defineResource } from "../src/resource.ts";
 import companyApps from "./fixtures/company-apps/sanoma.config.ts";
 import score from "./fixtures/company-apps/apps/crm/operations/score.ts";
 import { customers as crmCustomers } from "./fixtures/company-apps/apps/crm/resources/data.ts";
@@ -70,11 +71,30 @@ const orders = collection({
   fields: { id: "text", customer: { link: "customers" }, extra: { type: "json", optional: true } },
 });
 
+/** A company operation a page may call, whose output is declared. */
+const price = defineOperation({
+  name: "price",
+  description: "What some items cost a customer",
+  input: z.object({ id: z.string(), items: z.number() }),
+  output: z.object({
+    total: z.number().describe("What the items cost, in cents."),
+    currency: z.enum(["EUR", "USD"]),
+    customer: z.object({ id: z.string() }).nullable(),
+  }),
+  uses: [customers.get],
+  run: async (ctx, { id, items }) => ({
+    total: items * 900,
+    currency: "EUR" as const,
+    customer: (await ctx.data.customers.get({ key: id })) && { id },
+  }),
+});
+
 const config = {
   ...outbound,
   connectors: [acme],
   workflows: [...(outbound.workflows ?? []), plan],
   collections: [...(outbound.collections ?? []), customers, orders],
+  operations: [price],
 };
 
 describe("generateApi", () => {
@@ -111,6 +131,49 @@ describe("generateApi", () => {
     expect(source).toMatch(/operations: \{\n[\s\S]*quote: \{\n[\s\S]*run: OpFn<\{/);
     expect(source).toMatch(/crm: \{\n[\s\S]*score: \{\n[\s\S]*run: OpFn<\{\n\s+email: string;/);
     expect(source).not.toContain("relabel");
+    // Neither declares an output, so a page gets `unknown` from each.
+    expect(source).toMatch(/quote: \{\n[\s\S]*?items: number;\n\s+\}, unknown>;/);
+    expect(source).toMatch(/score: \{\n[\s\S]*?email: string;\n\s+\}, unknown>;/);
+  });
+
+  it("types an operation's output that holds a resource type's state as that state", () => {
+    const forgeRepo = defineResource({
+      vendor: "forge",
+      type: "repo",
+      title: "Repo",
+      identity: "name",
+      schema: z.object({ name: z.string().describe("The repository's name."), url: z.string().nullish() }),
+      fields: { immutable: ["name"], vendorOwned: ["url"], writeOnly: [] },
+      find: ({ name }) => name,
+    });
+    const forge = defineConnector(
+      "forge",
+      {
+        repo: forgeRepo,
+        search: {
+          find: {
+            effect: "read",
+            input: z.object({ q: z.string() }),
+            output: z.object({ repos: z.array(forgeRepo.schema) }),
+          },
+        },
+      },
+      { title: "Forge", package: "@forge/sanoma-connector" },
+    );
+    const description = describeConfig({ ...config, connectors: [forge] });
+    // The description refers to the state rather than repeating it.
+    expect(description.ops.find((op) => op.id === "forge.search.find")?.output).toMatchObject({
+      properties: { repos: { items: { $ref: "sanoma:resource-type/forge.repo" } } },
+    });
+    expect(generateApi(description).source).toContain(`      find: OpFn<{
+        q: string;
+      }, {
+        repos: {
+          /** The repository's name. */
+          name: string;
+          url?: string | null;
+        }[];
+      }>;`);
   });
 
   it("is deterministic: the same description gives the same text", () => {
@@ -156,7 +219,16 @@ export async function page() {
   await api.outboundNext.start({ company: "x" });
   const leads = await api.data.outbound.list({ order: "-lastTouched" });
   const exact: Equal<typeof leads, Saved<Outbound>[]> = true;
-  await api.acme.customer.get({ id: "c1", include: ["orders"] });
+  const customer = await api.acme.customer.get({ id: "c1", include: ["orders"] });
+  const id: string = customer.id;
+  // A company operation's output, as its \`output\` declares it: no cast.
+  const quoted = await api.operations.price.run({ id, items: 2 });
+  const total: number = quoted.total;
+  const typed: Equal<typeof quoted, { total: number; currency: "EUR" | "USD"; customer: { id: string } | null }> = true;
+  // @ts-expect-error: not a field of its output
+  quoted.discount;
+  // @ts-expect-error: a currency is one of two
+  const yen: typeof quoted.currency = "JPY";
   await api.planLaunch({
     title: "Launch",
     at: "2026-10-20T09:00:00Z",
@@ -182,7 +254,7 @@ export async function page() {
   await api.data.outbound.save({ record: { company: "x", contact: "y", stage: "lunch", owner: "ada" } });
   // @ts-expect-error: a vendor's write is not called directly
   await api.acme.customer.rename({ id: "c1", name: "Acme" });
-  return exact;
+  return [exact, typed, total, yen];
 }
 `,
       "tsconfig.json": JSON.stringify({

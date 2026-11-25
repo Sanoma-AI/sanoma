@@ -20,6 +20,9 @@ export const apiNameProblem = (api: string, taken: string) => `${API_NAME_PROBLE
 
 type Schema = Record<string, unknown>;
 
+/** The schemas a `$ref` may name, by their `$id`: each resource type's state. */
+type Refs = ReadonlyMap<unknown, unknown>;
+
 /**
  * `.sanoma/api.ts` for a description: one record type per collection, and `CompanyApi` (not `Api`,
  * which inside `declare module "sanoma/site"` is the module's own), one member per
@@ -32,6 +35,7 @@ type Schema = Record<string, unknown>;
 export function generateApi(description: ConfigDescription): { source: string; problems: string[] } {
   const problems: string[] = [];
   const members: string[] = [];
+  const refs: Refs = new Map(description.resourceTypes.map(({ schema }) => [schema.$id, schema]));
   for (const wf of description.workflows) {
     const taken = wf.problems.filter((p) => p.message.startsWith(API_NAME_PROBLEM));
     if (taken.length) problems.push(...taken.map((p) => problemLine({ file: wf.file, ...p })));
@@ -45,7 +49,7 @@ export function generateApi(description: ConfigDescription): { source: string; p
     const byApp = Map.groupBy(ops, (op) => op.app);
     const resources = (own: OpEntry[]) =>
       [...Map.groupBy(own, (op) => op.resource)].map(([resource, those]) =>
-        member(undefined, writtenName({ ...those[0]!, name: resource }), block(those.map(opMember))),
+        member(undefined, writtenName({ ...those[0]!, name: resource }), block(those.map((op) => opMember(op, refs)))),
       );
     const nested = [
       ...resources(byApp.get(undefined) ?? []),
@@ -134,11 +138,12 @@ const workflowMember = (wf: WorkflowEntry) =>
     `WorkflowFn<${typeOf(wf.input)}, unknown>`,
   );
 
-const opMember = (op: OpEntry) =>
+/** An operation's member: its input and its output typed from their schemas (`unknown` for one it does not declare). */
+const opMember = (op: OpEntry, refs: Refs) =>
   member(
     `${op.description ? `${op.description}\n\n` : ""}\`${op.id}\`, a ${op.effect}.`,
     op.name,
-    `OpFn<${typeOf(op.input)}, unknown>`,
+    `OpFn<${typeOf(op.input, refs)}, ${typeOf(op.output, refs)}>`,
   );
 
 const collectionDoc = (c: CollectionEntry) =>
@@ -158,9 +163,10 @@ const recordName = (c: CollectionEntry) =>
  * A JSON Schema as a TypeScript type, for the kinds a start form draws (`fieldsOf` in the app):
  * strings (a date-time among them), numbers, integers, booleans, enums and constants, objects and
  * arrays, each property with its description, and unions of those, `null` among them (a
- * collection's date, a date or a date-time; a nullable field); anything else is `unknown`.
+ * collection's date, a date or a date-time; a nullable field), and a `$ref` to a schema of `refs`
+ * as that schema; anything else is `unknown`.
  */
-const typeOf = (schema: unknown): string => union(alternatives(schema));
+const typeOf = (schema: unknown, refs: Refs = new Map()): string => union(alternatives(schema, refs));
 
 /** One type of several: `unknown` when any is. */
 function union(types: string[]): string {
@@ -169,17 +175,18 @@ function union(types: string[]): string {
 }
 
 /** The types a schema allows, one per alternative. */
-function alternatives(schema: unknown): string[] {
+function alternatives(schema: unknown, refs: Refs): string[] {
   if (!isObject(schema)) return ["unknown"];
+  if ("$ref" in schema) return alternatives(refs.get(schema.$ref), refs);
   if ("const" in schema && !isObject(schema.const) && !Array.isArray(schema.const)) {
     return [JSON.stringify(schema.const)];
   }
   if (Array.isArray(schema.enum) && schema.enum.length && schema.enum.every((v) => v === null || !isObject(v))) {
     return schema.enum.map((v) => JSON.stringify(v));
   }
-  if (Array.isArray(schema.anyOf) && schema.anyOf.length) return schema.anyOf.flatMap(alternatives);
+  if (Array.isArray(schema.anyOf) && schema.anyOf.length) return schema.anyOf.flatMap((one) => alternatives(one, refs));
   if (Array.isArray(schema.type) && schema.type.length) {
-    return schema.type.flatMap((type) => alternatives({ ...schema, type }));
+    return schema.type.flatMap((type) => alternatives({ ...schema, type }, refs));
   }
   switch (schema.type) {
     case "string":
@@ -192,21 +199,21 @@ function alternatives(schema: unknown): string[] {
     case "null":
       return ["null"];
     case "array": {
-      const item = typeOf(schema.items);
-      return [new Set(alternatives(schema.items)).size > 1 && item !== "unknown" ? `(${item})[]` : `${item}[]`];
+      const item = typeOf(schema.items, refs);
+      return [new Set(alternatives(schema.items, refs)).size > 1 && item !== "unknown" ? `(${item})[]` : `${item}[]`];
     }
     case "object":
-      return [isObject(schema.properties) ? objectType(schema) : "Record<string, unknown>"];
+      return [isObject(schema.properties) ? objectType(schema, refs) : "Record<string, unknown>"];
     default:
       return ["unknown"];
   }
 }
 
-function objectType(schema: Schema): string {
+function objectType(schema: Schema, refs: Refs): string {
   const required = new Set(Array.isArray(schema.required) ? schema.required : []);
   const lines = Object.entries(schema.properties as Schema).map(([name, prop]) => {
     const doc = isObject(prop) && typeof prop.description === "string" ? jsdoc(prop.description) : "";
-    return `${doc}${key(name)}${required.has(name) ? "" : "?"}: ${typeOf(prop)};`;
+    return `${doc}${key(name)}${required.has(name) ? "" : "?"}: ${typeOf(prop, refs)};`;
   });
   // An object that takes other keys too.
   if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) {
