@@ -100,7 +100,17 @@ All seven are idempotent, so a call that fails retryably is tried again: a try a
 
 The App needs, on the accounts it is installed on: **Contents: write** (the commit), **Administration: write** (deploy keys, and generate until the narrower permission is granted), **Repository creation: write** (generate; a GitHub App permission since 2026-10-13) and **Metadata: read**. Whether an installation token may generate a repository under a personal account, not only an organization, is what #513's first step checks live.
 
-The fake answers these from `fake.app` (`fakeGithubApp`), an in-memory GitHub with its own state: installation 7 on the personal account `acme` (account id 7), 9 on the organization `acme-inc` (account id 9), and the template `Sanoma-AI/company-template`; a token it mints (`ghs_…`, good for an hour) is the same for the same installation, repository and permissions. Its faults (`failNext` and the others) reach the operations through the App by their ids too.
+The fake answers these from `fake.app` (`fakeGithubApp`), an in-memory GitHub with its own state: installation 7 on the personal account `acme` (account id 7), 9 on the organization `acme-inc` (account id 9), and the template `Sanoma-AI/company-template`, whose `main` holds the starter `sanoma init` copies, read from the installed `sanoma`'s `template/` (its `gitignore` as `.gitignore`), so `declareFounder`, `declareName` and `declareSlug` from `sanoma/init` work on what `repository.files` reads of a repository generated from it; a token it mints (`ghs_…`, good for an hour) is the same for the same installation, repository and permissions. Its faults (`failNext` and the others) reach the operations through the App by their ids too. `fake.put("installation", "11", { account, repositorySelection })` installs the App as a person does on GitHub's pages, what the step below seeds.
+
+## Steps
+
+The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/workflows/README.md#steps-a-connector-ships) (`githubSteps`, attached with `withSetup`):
+
+| Keyword | Step                                                                              | What it does                                                                                                                                                                                                                                                  |
+| ------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Given   | `a GitHub App installation {int} on the {word} {string} with {word} repositories` | Installs the App on the run's fake under that id: on the `user` or `organization` of that login (its account id the installation's), with `all` or `selected` repositories. `Given a GitHub App installation 11 on the user "ada" with selected repositories` |
+
+It seeds an object no operation makes, so it is a step for a sandbox run (a workflow's scenario), not an operation's own test.
 
 ## Resource types
 

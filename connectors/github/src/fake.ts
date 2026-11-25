@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type FixtureError, tfFake, type TfFakeOptions, type TfFakeState } from "sanoma/internal/bridge/fake";
 import { DriverError } from "sanoma/workflows";
 import type { z } from "zod";
@@ -35,11 +38,14 @@ export interface FakeAppRepository {
   keys: { id: number; title: string; key: string; readOnly: boolean }[];
 }
 
+/** An installation of the App, as the fake keeps one: the account it is on and which repositories it covers. */
+export type FakeInstallation = Omit<z.output<typeof githubApp.installation.get.output>, "id">;
+
 export interface FakeGithubAppState extends Record<string, unknown> {
   /** Counts up, for ids made in order. */
   seq: number;
   /** The App's installations, by id. */
-  installations: Record<number, Omit<z.output<typeof githubApp.installation.get.output>, "id">>;
+  installations: Record<number, FakeInstallation>;
   /** The repositories, by `<owner>/<name>`. */
   repositories: Record<string, FakeAppRepository>;
 }
@@ -58,8 +64,25 @@ const fail = (where: string, status: number, message: string, errors: string[] =
 export const FAKE_TEMPLATE = "Sanoma-AI/company-template";
 
 /**
+ * The starter `sanoma init` copies, the installed `sanoma`'s `template/`, as a repository holds it:
+ * each file's path and text, its `gitignore` as `.gitignore` (npm drops a package's `.gitignore`).
+ */
+function starterFiles(): Record<string, string> {
+  const root = fileURLToPath(new URL(".", import.meta.resolve("sanoma/template/package.json")));
+  return Object.fromEntries(
+    readdirSync(root, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => {
+        const path = relative(root, join(entry.parentPath, entry.name)).split(sep).join("/");
+        return [path === "gitignore" ? ".gitignore" : path, readFileSync(join(entry.parentPath, entry.name), "utf8")];
+      }),
+  );
+}
+
+/**
  * The operations through the App, over an in-memory GitHub: installation 7 on the personal account
- * `acme`, 9 on the organization `acme-inc`, and the public template `Sanoma-AI/company-template` (`main`, a README). An installation
+ * `acme`, 9 on the organization `acme-inc`, and the public template `Sanoma-AI/company-template`
+ * (`main`, the starter `sanoma init` copies, from the installed `sanoma`). An installation
  * reaches the repositories of its own account; a commit's SHA is the same for the same parent,
  * message and files; a token minted (`ghs_…`, good for an hour) is the same for the same
  * installation, repository and permissions.
@@ -79,7 +102,7 @@ export function fakeGithubApp(options: FakeOptions = {}) {
             id: 1,
             private: false,
             defaultBranch: "main",
-            branches: { main: { sha: shaOf("template"), files: { "README.md": "# Company\n" } } },
+            branches: { main: { sha: shaOf("template"), files: starterFiles() } },
             keys: [],
           },
         },
@@ -212,13 +235,15 @@ export function fakeGithubApp(options: FakeOptions = {}) {
  *
  * The operations through the App answer from `app` (`fakeGithubApp`), with its own state,
  * logging into the same `calls`; the faults (`failNext` and the others) reach either by its id.
+ * `put("installation", id, { account, repositorySelection })` installs the App, as a person does
+ * on GitHub's pages: what `githubSteps`' installation step seeds.
  */
 export function fakeGithub(options: FakeGithubOptions = {}) {
   const fake = tfFake(githubTf, { missingReply, ...options });
   const app = fakeGithubApp({ calls: fake.calls });
   // Named by owner as the driver's calls are; the fake's own objects are held by the provider's
   // import ids (`sanoma`, `sanoma:main`), what `put`, `override` and `remove` take.
-  const { driver, reset, failNext, loseReply, rateLimit, hold } = fake;
+  const { driver, reset, put, failNext, loseReply, rateLimit, hold } = fake;
   /** Whether `opId` is one of the operations through the App, whose faults are `app`'s. */
   const ofApp = (opId: string) => Object.hasOwn(app.driver.ops, opId.slice("github.".length));
   return Object.assign(fake, {
@@ -228,6 +253,11 @@ export function fakeGithub(options: FakeGithubOptions = {}) {
       reset();
       app.reset();
     },
+    put: ((type: string, id: string, fields: Record<string, unknown>, copied?: { from?: string }) => {
+      if (type !== "installation") return put(type as never, id, fields as never, copied);
+      const { id: number, ...installation } = githubApp.installation.get.output.parse({ ...fields, id: Number(id) });
+      app.update((state) => void (state.installations[number] = installation));
+    }) as typeof put & ((type: "installation", id: string, fields: FakeInstallation) => void),
     failNext: (opId: string, err?: unknown) =>
       ofApp(opId) ? app.failNext(opId as never, err) : failNext(opId as never, err),
     loseReply: (opId: string) => (ofApp(opId) ? app.loseReply(opId as never) : loseReply(opId as never)),

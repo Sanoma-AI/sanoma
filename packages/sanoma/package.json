@@ -123,6 +123,7 @@
       "default": "./invoices/dist/pdf.js"
     },
     "./tsconfig.json": "./tsconfig.base.json",
+    "./template/*": "./template/*",
     "./workflows": {
       "sanoma-source": "./workflows/src/index.ts",
       "types": "./workflows/dist/index.d.ts",

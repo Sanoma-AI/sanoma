@@ -4,6 +4,7 @@ import { githubOps } from "./connector.ts";
 import { githubDriver } from "./driver.ts";
 import { fakeGithub } from "./fake.ts";
 import { githubRemote } from "./remote.ts";
+import { githubSteps } from "./steps.ts";
 
 /**
  * GitHub resources, read through the `integrations/github` OpenTofu provider: each type has a
@@ -12,12 +13,13 @@ import { githubRemote } from "./remote.ts";
  * `.commit`, `.files`, `.head`, `.addDeployKey`, `.token`), each on an installation token minted when called. It carries its
  * live driver (`githubDriver`, on the default bridge), its fake (`fakeGithub`), of which each
  * sandbox run makes its own, and its remote half (`githubRemote`): a repository's pull requests,
- * the `sanoma` status, the rules on a branch and the App's webhooks. And Copilot (`copilot`), a
- * coding agent the chat runs on a person's own plan.
+ * the `sanoma` status, the rules on a branch and the App's webhooks; its steps for Gherkin tests
+ * (`githubSteps`). And Copilot (`copilot`), a coding agent the chat runs on a person's own plan.
  */
 export const github = withSetup(githubOps, {
   driver: githubDriver,
   fake: fakeGithub,
   remote: () => githubRemote,
   agent: copilot,
+  steps: githubSteps,
 });
