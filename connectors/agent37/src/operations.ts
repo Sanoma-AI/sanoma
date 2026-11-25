@@ -9,6 +9,14 @@ import { wanted } from "./connector.ts";
 export const noBox = (name: string) =>
   new DriverError(`agent37: there is no box ${name}`, { retryable: false, status: 404, vendorCode: "not_found" });
 
+/** The failure for waking one more instance than the workspace's limit, as Agent37 answers it. */
+export const instanceLimitReached = () =>
+  new DriverError("agent37: the workspace runs as many instances as its limit allows", {
+    retryable: false,
+    status: 409,
+    vendorCode: "instance_limit_reached",
+  });
+
 /** The failure for opening the box `name` in `group` when it is in another group, or none. */
 export const otherGroup = (name: string, group: string) =>
   new DriverError(`agent37: the box ${name} is not in the group ${group}`, {

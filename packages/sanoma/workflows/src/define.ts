@@ -321,6 +321,16 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
    * field, and into each item of a list it holds.
    */
   readonly opaque?: readonly string[];
+  /**
+   * `"one per person"`: the runs of it for one person run one after another, in the order they
+   * were started; another person's runs never wait for them. The person is the one the run is for
+   * (`ctx.startedBy.onBehalfOf` when an agent starts it for someone, else `ctx.startedBy.id`: a
+   * person, a signed-in visitor, an api token, an agent acting for no one), so a person's own run
+   * and their agent's wait for each other. A run waits as `queued`, on the engine's queue, behind
+   * the one ahead of it, a start held for an approval keeping its place. A start by `anonymous`,
+   * every visitor not signed in, is refused. Not with a schedule, whose runs are the runtime's.
+   */
+  readonly concurrency?: "one per person";
   /** Only the runtime starts it, through the client's own methods; a company workflow may not set it. */
   readonly internal?: true;
   /**
@@ -442,6 +452,14 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
   ) {
     throw new Error(
       `Workflow "${def.name}": opaque lists paths of its output, names joined by dots, such as ["url", "box.token"]`,
+    );
+  }
+  if (def.concurrency !== undefined && def.concurrency !== "one per person") {
+    throw new Error(`Workflow "${def.name}": concurrency is "one per person", or left out`);
+  }
+  if (def.concurrency !== undefined && def.trigger !== "manual") {
+    throw new Error(
+      `Workflow "${def.name}": concurrency keeps each person's runs one after another, and a schedule's runs are the runtime's: leave out one or the other`,
     );
   }
   // A scheduled run starts with no input of its own.

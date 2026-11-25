@@ -116,6 +116,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       version: expect.stringMatching(/^sanoma@[0-9a-f]{64}$/),
       queueName: "sanoma:sanoma",
       applyQueueName: "sanoma:sanoma:apply",
+      perPersonQueueName: "sanoma:sanoma:per-person",
     });
     // The config's workflow, drift and apply for the resource type a connector declares
     // (`resend.domain`), the change workflow and its Try again, follow, the app's actions and the chat every config has, and call for the listing of apps.

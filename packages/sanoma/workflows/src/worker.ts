@@ -10,6 +10,7 @@ import { dbosStatusesOf, SanomaClient } from "./client.ts";
 import {
   declaredWakeup,
   envWakeup,
+  heldOffQueue,
   queueFor,
   type ResolvedConfig,
   resolveConfig,
@@ -257,7 +258,6 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
   const reload = options.reload && (() => OUTSIDE_ANY_RUN(options.reload!));
   const state: WorkerState = {
     app: resolved.appName,
-    applyQueueName: resolved.applyQueueName,
     connections: resolved.connections,
     ops: resolved.ops,
     drivers: resolved.drivers,
@@ -304,14 +304,15 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
     startRun: async (name, runId, args) => {
       const fn = registered.get(name) as unknown as ((args: RunArgs) => Promise<unknown>) | undefined;
       if (!fn) throw new Error(`The worker has no workflow "${name}" to start`);
-      // A live apply waits its turn on the apply queue, as the client's do; anything else runs at once.
-      const queueName = queueFor(resolved, name, args);
+      // A live apply, or a run one per person, waits its turn as the client's do (`queueFor`).
+      const placed = queueFor(resolved, name, args, resolved.version);
       // A built-in run's code, as the client's start sets it, so a worker on another version may carry
       // it: a child (a change's apply and drift, a follow's apply) with its parent, which waits for it.
       const builtInCode = resolved.builtInCodes[name];
       return DBOS.startWorkflow(fn, {
         workflowID: runId,
-        ...(queueName && { queueName }),
+        ...(placed && { queueName: placed.queueName }),
+        ...(placed?.queuePartitionKey && { enqueueOptions: { queuePartitionKey: placed.queuePartitionKey } }),
         ...(builtInCode && { workflowAttributes: { builtInCode } }),
       })(args);
     },
@@ -418,9 +419,14 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
       DBOS.registerQueue(resolved.queueName, polling),
       // One live apply at a time: DBOS counts the running ones in Postgres, of every version.
       DBOS.registerQueue(resolved.applyQueueName, { globalConcurrency: 1, ...polling }),
+      // One run at a time in each partition (`queueFor`: a version's runs of a workflow for one person).
+      DBOS.registerQueue(resolved.perPersonQueueName, { partitionConcurrency: 1, ...polling }),
     ]);
     // Built-in runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
-    if (isLatest) await carryBuiltInRuns(resolved, () => secrets.db());
+    if (isLatest) {
+      await carryBuiltInRuns(resolved, () => secrets.db());
+      await freePerPersonPlaces(resolved);
+    }
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
       await applyScheduled(resolved, registered, () => secrets.db());
@@ -619,6 +625,36 @@ async function carryBuiltInRuns(
 }
 
 /**
+ * Cancels each run of other code that holds a person's place on the per-person queue, as
+ * `carryBuiltInRuns` does a stranded apply: no worker of this version runs it (a company run is
+ * never carried), so it would hold the place for good, and a run queued behind it without a
+ * version (the local app's), which this worker would run, would never start. Assumes one live
+ * worker per database; a failure is warned about, and the worker starts.
+ */
+async function freePerPersonPlaces({ appName, version, perPersonQueueName }: ResolvedConfig) {
+  try {
+    const stranded = (
+      await DBOS.listWorkflows({
+        queueName: perPersonQueueName,
+        status: ["PENDING"],
+        applicationName: appName,
+        loadInput: false,
+        loadOutput: false,
+      })
+    )
+      .filter((r) => r.applicationVersion && r.applicationVersion !== version)
+      .map((r) => r.workflowID);
+    if (!stranded.length) return;
+    await DBOS.cancelWorkflows(stranded);
+    warn(
+      `cancelled ${stranded.length} run(s) started on other code, which no worker would run, so the runs queued behind them start: ${stranded.join(", ")}. Start them again.`,
+    );
+  } catch (err) {
+    warn(`freeing the places of runs of other versions on ${perPersonQueueName} failed: ${errorMessage(err)}`);
+  }
+}
+
+/**
  * Warns about unfinished runs this worker will never pick up: started on another version of
  * the app, or queued on another queue (such as the single "sanoma" queue before queues were
  * named per app, or the sandbox queue before sandbox runs went on the app's).
@@ -744,8 +780,8 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
         const decision = await decide();
         next = decision.kind === "approve" ? startHoldOf(wf.name, decision) : undefined;
       }
-      if (hold && queueFor(state, wf.name, { sandbox })) {
-        // Held at its start, it waited off its queue (`queueFor`): approved, it runs as its child there.
+      if (hold && heldOffQueue(wf.name, { sandbox })) {
+        // Held at its start, it waited off its queue (`heldOffQueue`): approved, it runs as its child there.
         const { runId, output: report, error, cause } = await child(run, wf.name, wf.name, input);
         // It fails as its child did, with the child's own error and code.
         if (error !== undefined) throw cause ?? new Error(`${wf.name} did not finish in its run ${runId}: ${error}`);

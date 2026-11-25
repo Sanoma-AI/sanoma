@@ -30,6 +30,8 @@ export default defineWorkflow({
 
 `ghost.post.create` creates a draft by default. You can look up its input fields, defaults, and output in the [Ghost operation reference](/reference/connectors/ghost/).
 
+Runs of a workflow start as soon as they are started, side by side. When one person's runs must not overlap, such as a run that counts what exists before it adds to it, add `concurrency: "one per person"`: the runs for each person, started by them or by an agent for them, then run one after another, in the order they were started. See [One run at a time per person](/reference/workflow-runtime/#one-run-at-a-time-per-person).
+
 ## Test it in a sandbox
 
 Create `scenarios/draft-post/create.feature` with one example.

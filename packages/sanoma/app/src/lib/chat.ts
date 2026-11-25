@@ -183,14 +183,15 @@ export interface StillHeld extends HeldOutput {
 /**
  * What the chat's `start_run` answers, whoever writes it (the tool as it runs, or
  * `settle` from the run a call left; `runOutput` in `server/catalog.ts` builds every one but the
- * first): held, shown at once; still held past the wait; or the run by its id and status, with its
- * output once it finished and its error once it failed or was cancelled. A run that started and
+ * first): held, shown at once; still held past the wait; or the run by its id and status, with the
+ * run it waits behind while queued (`after`), its output once it finished and its error once it failed or was cancelled. A run that started and
  * then failed is an output, never the tool's error, so its id is not lost and it is not started again.
  */
 export type RunOutput =
   | HeldOutput
   | StillHeld
   | { runId: string; status: "running" }
+  | { runId: string; status: "queued"; after?: string }
   | { runId: string; status: "finished"; output: unknown }
   | { runId: string; status: "failed" | "cancelled"; error: string };
 

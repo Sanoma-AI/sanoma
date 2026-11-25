@@ -10,6 +10,7 @@ import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 import { testDatabaseUrl } from "sanoma/testing";
 import { type TestApp, useTestApp } from "sanoma/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "sanoma/workflows/fake";
+import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { sql } from "drizzle-orm";
 import { escapeIdentifier, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach } from "vitest";
@@ -107,6 +108,12 @@ export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs
     if (Date.now() > deadline) throw new Error("timed out waiting");
     await new Promise((r) => setTimeout(r, 100));
   }
+}
+
+/** True once the run has been ENQUEUED a few of its queue's polls (50 ms in the suite): it is not just about to start. */
+export async function stillQueued(dbos: Pick<DBOSClient, "getWorkflow">, runId: string): Promise<boolean> {
+  await new Promise((r) => setTimeout(r, 500));
+  return (await dbos.getWorkflow(runId))?.status === "ENQUEUED";
 }
 
 export const inSeconds = (s: number) => new Date(Date.now() + s * 1000).toISOString();

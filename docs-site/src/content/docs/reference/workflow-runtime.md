@@ -107,3 +107,33 @@ export default defineWorkflow({
 The operation the field comes from declares it `opaque` too (`box.open` here), or the value sits in that operation's `op.called` record.
 
 `<api>.result` answers the run's output as it is to the run's starter: the same principal, and for an agent, acting for the same person. An opaque field is only readable by a starter with an identity: a signed-in person or visitor, an API token, or an agent acting for a person; every visitor who is not signed in is one `anonymous`, so their own run's field is hidden from them too. Every other read shows each `opaque` field as `"<url>"`: `.result` asked by anyone else, `.latest`, `.ledger`, the app's run page and `/mcp`'s `wait_run`. `defineWorkflow` refuses a path that is not names joined by dots. A workflow declares no output schema, so `sanoma check` cannot tell a path the output never has: such a path hides nothing. The real output stays in the database's record of the run, which `client.result(runId)` reads for code on the server.
+
+## One run at a time per person
+
+`concurrency: "one per person"` makes the runs of a workflow for one person run one after another, in the order they were started. Another person's runs never wait for them. Use it when a run reads something and then acts on it, such as counting a company's boxes before it opens another, so two runs started together cannot both act on the same count.
+
+```ts
+export default defineWorkflow({
+  name: "box-open",
+  trigger: "manual",
+  input: z.object({ name: z.string() }),
+  uses: [boxes.box.list, boxes.box.open],
+  concurrency: "one per person",
+  run: async (ctx, { name }) => {
+    const open = await ctx.boxes.box.list({});
+    if (open.length >= 3) throw new Error("Three boxes are open already");
+    return ctx.boxes.box.open({ name });
+  },
+});
+```
+
+The person is the one the run is for: `ctx.startedBy.onBehalfOf` when an agent starts it for someone, such as the chat acting for a person, and otherwise `ctx.startedBy.id`, which is a person, a signed-in visitor, an API token (`token:<id>`, each token its own), or an agent acting for no one. So a run a person starts in the app and a run the chat starts for them wait for each other. The key is never a field of the input. A start by `anonymous`, which every visitor who is not signed in shares, is refused with `policy_denied`, since one visitor's run waiting on an approval would hold up every other visitor's.
+
+A run waiting for an earlier one is `queued`. Its page in the app says which run it waits for, and over `/mcp`, `get_run` names that run in `after` and `wait_run` answers `{ runId, status: "queued", after }`. The engine's queue keeps the order, in Postgres. A run that is waiting on an approval or a sleep keeps its place, and so does a start the policy holds for an approval, until it is decided and the run ends. The next run starts once the one ahead ends in any way: finished, failed or cancelled. Cancelling is cooperative: a cancelled run stops at its next step, so the next run can start while the cancelled one is still inside a step. A worker that stops while it is idle and wakes again, or restarts on the same code, picks up where it left off: the earlier run resumes first, and the ones behind it keep waiting.
+
+Each version of the company's code keeps its own order, since the version is part of the place. A run left unfinished on old code is never run by a worker of new code (company runs are not carried across versions), so when a worker of a new version starts, it cancels each such run that holds a person's place, as it does an apply started on other code, and logs which. What that frees depends on how runs were queued:
+
+- Locally, the app queues runs with no version, and the latest worker runs them. A run that was queued behind the cancelled one starts on the new code.
+- On a deployed instance, the app queues each run for its own version. A run still queued for the old version when the new one starts is never started, as with any run queued for an older version; the person's new runs on the new version do not wait for it.
+
+A sandbox run calls fakes and does not wait. `defineWorkflow` refuses `concurrency` on a scheduled workflow, since its runs are started by the runtime's `schedule` agent, and refuses any value but `"one per person"`.

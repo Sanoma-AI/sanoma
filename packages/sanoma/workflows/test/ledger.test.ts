@@ -355,7 +355,6 @@ const runOn = (ledger: LedgerStore): Run => ({
   outline: { file: "w.ts", lineStarts: [0, 1], calls: [] },
   state: {
     app: "acme",
-    applyQueueName: "sanoma:acme:apply",
     ops: new Map(),
     drivers: new Map(),
     fakes: new Map(),

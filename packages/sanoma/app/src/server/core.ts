@@ -23,7 +23,6 @@ import {
 import {
   ANONYMOUS,
   apiNameOf,
-  APPLY_WORKFLOW,
   CALL_WORKFLOW,
   DESCRIBE_CALL,
   hideOpaque,
@@ -66,7 +65,7 @@ import {
   type HistoryRequest,
   type PermissionsResponse,
   type PreviewQuery,
-  type ApplyAhead,
+  type RunAhead,
   type RunDetail,
   RunsQuery,
   SEALED_SHOWN,
@@ -308,19 +307,23 @@ function sealedShown(record: LedgerRecord): LedgerRecord {
 }
 
 /**
- * The apply that `run`, a queued apply, waits for (`SanomaClient.applyAhead`), as the page names
- * it; undefined for any other run, and once it is the one running.
+ * The run that `run`, queued, waits for (`SanomaClient.runAhead`: an apply ahead of it, or its
+ * person's run ahead of it of a workflow with `concurrency: "one per person"`), as the page names it; undefined for
+ * any other run, and once it is the one running.
  */
-export async function applyAheadOf(client: SanomaClient, run: RunSummary): Promise<ApplyAhead | undefined> {
-  if (run.workflow !== APPLY_WORKFLOW || run.status !== "queued") return undefined;
-  const ahead = await client.applyAhead(run.runId);
+export async function runAheadOf(
+  client: Pick<SanomaClient, "runAhead">,
+  run: RunSummary,
+): Promise<RunAhead | undefined> {
+  if (run.status !== "queued") return undefined;
+  const ahead = await client.runAhead(run.runId);
   return ahead && { runId: ahead.runId, status: ahead.status, startedBy: ahead.startedBy, createdAt: ahead.createdAt };
 }
 
 /** The 404 `run_not_found` for a run there is not: `runDetail`'s, and the agent catalog's. */
 export const noRun = (runId: string) => new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
 
-/** The run with its ledger and approvals, a sandbox run's checks as the worker last ran them, and the apply a queued one waits for; or a 404. */
+/** The run with its ledger and approvals, a sandbox run's checks as the worker last ran them, and the run a queued one waits for; or a 404. */
 export async function runDetail(app: AppContext, runId: string): Promise<RunDetail> {
   const { client, snapshot } = app;
   const run = await client.run(runId);
@@ -336,9 +339,9 @@ export async function runDetail(app: AppContext, runId: string): Promise<RunDeta
       logReadOnce(runId, error, "the checks", err);
       return { error };
     }),
-    applyAheadOf(client, run),
+    runAheadOf(client, run),
   ]);
-  // What every answer has: the run, its approvals, and the apply a queued one waits for.
+  // What every answer has: the run, its approvals, and the run a queued one waits for.
   const base = { run, approvals: run.approvals, ...(ahead && { ahead }) };
   if ("err" in read) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a

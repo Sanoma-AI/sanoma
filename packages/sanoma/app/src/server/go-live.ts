@@ -36,7 +36,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
-import { applyAheadOf, invalid } from "./core.ts";
+import { invalid, runAheadOf } from "./core.ts";
 import { declaredEmail } from "./people.ts";
 import { CLOUD_TOKEN } from "./sanoma-sign-in.ts";
 import { secretValues } from "./secrets.ts";
@@ -370,7 +370,7 @@ export async function goLiveRunOf(client: SanomaClient, run: RunSummary): Promis
   const plan = pending && asApplyPlan(pending.details);
   const report =
     run.workflow === APPLY_WORKFLOW && run.status === "finished" ? await client.applyReport(run.runId) : undefined;
-  const ahead = await applyAheadOf(client, run);
+  const ahead = await runAheadOf(client, run);
   return {
     runId: run.runId,
     workflow: run.workflow,

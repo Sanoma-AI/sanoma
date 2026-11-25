@@ -9,11 +9,13 @@ import {
   runnerBox,
   runnerHealth,
 } from "sanoma/workflows";
+import type { ResourceFake } from "sanoma/workflows/fake";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { BOX, GROUP } from "../src/backend.ts";
 import { agent37Ops } from "../src/connector.ts";
 import { agent37Driver } from "../src/driver.ts";
 import { fakeAgent37 } from "../src/fake.ts";
+import { agent37Steps } from "../src/steps.ts";
 import { fakeAgent37Vendor, KEY } from "./vendor.ts";
 
 // The box operations, which Sanoma's control plane calls with the key, against Agent37 on this
@@ -246,5 +248,39 @@ describe("fakeAgent37's boxes", () => {
       "agent37.box.list",
       "agent37.box.discard",
     ]);
+  });
+
+  it("refuses to wake one more instance than the workspace's limit, as Agent37 does, not to be retried", async () => {
+    const fake = fakeAgent37({ instanceLimit: 1 });
+    const ops = fake.driver.ops;
+    const open = (name: string) => call("box.open", { name, group: "acme", ttl: 60 }, ops);
+    const first = await open("sanoma-one");
+    const refused = await open("sanoma-two").catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(DriverError);
+    expect(refused).toMatchObject({ status: 409, vendorCode: "instance_limit_reached", retryable: false });
+    expect(fake.state.boxes.map((box) => box.name)).toEqual(["sanoma-one"]);
+    // The one awake opens again; asleep, it leaves its place to another.
+    expect((await open("sanoma-one")).id).toBe(first.id);
+    await call("box.sleep", { name: "sanoma-one" }, ops);
+    await open("sanoma-two");
+    await expect(open("sanoma-one")).rejects.toMatchObject({ vendorCode: "instance_limit_reached" });
+  });
+
+  it("takes the limit from its step, as a sandbox run seeds it, and lifts it when removed", async () => {
+    const fake = fakeAgent37();
+    const step = agent37Steps.steps.find((s) => s.kind === "given")!;
+    expect(step.expression).toBe("Agent37's workspace keeps at most {int} instances awake");
+    const seed = step.fn(0) as { resource: string; name: string; fields: Record<string, unknown> };
+    expect(seed).toEqual({ resource: "agent37.workspace", name: "workspace", fields: { instanceLimit: 0 } });
+    const copy: ResourceFake = fake;
+    copy.put("workspace", seed.name, seed.fields);
+    const open = () => call("box.open", { name: "sanoma-busy", group: "acme", ttl: 60 }, fake.driver.ops);
+    await expect(open()).rejects.toMatchObject({ status: 409, vendorCode: "instance_limit_reached" });
+    expect(() => copy.put("workspace", seed.name, { instanceLimit: -1 })).toThrow(/instanceLimit/);
+    expect(() => copy.put("instance", "box-1", {})).toThrow("the workspace's settings alone");
+    copy.remove("workspace", seed.name);
+    await open();
+    fake.reset();
+    expect(fake.state.instanceLimit).toBeUndefined();
   });
 });
