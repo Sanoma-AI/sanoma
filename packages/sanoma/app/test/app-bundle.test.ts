@@ -724,6 +724,22 @@ describe("buildAppBundle", () => {
     expect((await get("https://hello.example/auth/fixture-login/sign-out", { method: "POST" })).status).toBe(404);
   });
 
+  it("answers the app's getActor on a site's host as its visitor, and a server function it does not answer there as not found", async () => {
+    const code = bundle.modules.map(({ content }) => Buffer.from(content, "base64").toString()).join("\n");
+    /** The path of the server function `name` in the bundle, from its table of them. */
+    const path = (name: string) => {
+      const id = new RegExp(`"([0-9a-f]{64})":\\s*\\{\\s*functionName:\\s*"${name}_createServerFn_handler"`).exec(code);
+      expect(id, name).not.toBeNull();
+      return `https://members.example/_serverFn/${id![1]}`;
+    };
+    const headers = { "sec-fetch-site": "same-origin", cookie: "x-fixture-visitor=ada" };
+    const actor = await get(path("getActor"), { headers });
+    expect(actor.status).toBe(200);
+    expect(await actor.text()).toContain('"visitor:fixture-login:ada"');
+    // A read that is not there is the router's not-found, as for any read that finds nothing.
+    expect(await (await get(path("getConfig"), { headers })).text()).toContain('"isNotFound"');
+  });
+
   it("answers 404 for a host that is neither the app's nor a site's domain", async () => {
     expect((await get("https://elsewhere.example/")).status).toBe(404);
   });
