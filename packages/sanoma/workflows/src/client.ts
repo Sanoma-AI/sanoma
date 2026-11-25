@@ -279,8 +279,8 @@ export interface ChangesFilter {
 export interface CallOptions {
   connection?: ConnectionRef;
   /**
-   * Who calls, by id, admitted as `startedBy` is: the policy decides as them, a write's record
-   * names them, and a save's `updatedBy` is their id.
+   * Who calls, by id, admitted as `startedBy` is, an api token with its subject: the policy decides
+   * as them, a write's record names them, and a save's `updatedBy` is their id.
    */
   actor: Principal | string;
   /**
@@ -551,8 +551,10 @@ export class SanomaClient {
    * dropped, as in a run.
    */
   async call(opId: string, input: unknown, options: CallOptions): Promise<unknown> {
-    const actor = await this.admitted(
-      parseOrThrow(PrincipalOrId, options?.actor, '`actor` must be a principal, such as "alice" or { id: "alice" }'),
+    const actor = await this.withSubject(
+      await this.admitted(
+        parseOrThrow(PrincipalOrId, options?.actor, '`actor` must be a principal, such as "alice" or { id: "alice" }'),
+      ),
     );
     const id =
       parseOrThrow(z.string().min(1).optional(), options.id, "`id` must be a non-empty string") ?? randomUUID();
