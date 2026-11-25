@@ -18,10 +18,15 @@ type AnyOp<I = any, O = any> = Op<string, string, string, I, O>;
  * its fields: `$draft.id`. In an operation's own test, a resource type's `create` seeds the object
  * as apply makes it: the type's `afterCreate` calls follow, each polled as apply polls it, the
  * seed's name (else the type's) as the export.
+ *
+ * An object at the vendor that no operation makes (an App's installation, which a person makes on
+ * GitHub's pages) is put in a sandbox run's fake as a resource step's is (`ResourceFake.put`):
+ * `resource` is `<vendor>.<type>`, `name` its id there, `fields` what it holds.
  */
 export type Seed =
   | { op: AnyOp; input: Record<string, unknown>; as?: string; connection?: ConnectionRef }
-  | { op: AnyOp; fault: "failNext" | "rateLimit" | "loseReply"; connection?: ConnectionRef };
+  | { op: AnyOp; fault: "failNext" | "rateLimit" | "loseReply"; connection?: ConnectionRef }
+  | { resource: `${string}.${string}`; name: string; fields: Record<string, unknown>; connection?: ConnectionRef };
 
 /** A call through an operation: what it was given, and what it returned. */
 export interface Call<I, O> {

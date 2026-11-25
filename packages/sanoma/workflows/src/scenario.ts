@@ -757,8 +757,13 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
           kind: "given",
           read: (values) => {
             const seed = def.fn(...values);
-            const op = opNamed(seed.op);
             const connection = seed.connection && { connection: seed.connection };
+            if ("resource" in seed) {
+              const [vendor = "", type = ""] = seed.resource.split(/\.(.*)/);
+              if (!vendor || !type) throw new Error(`a seed's resource is <vendor>.<type>, not "${seed.resource}"`);
+              return [{ resource: seed.resource, vendor, type, name: seed.name, fields: seed.fields, ...connection }];
+            }
+            const op = opNamed(seed.op);
             if ("fault" in seed) return [{ op, fault: seed.fault, ...connection }];
             let input: unknown;
             try {

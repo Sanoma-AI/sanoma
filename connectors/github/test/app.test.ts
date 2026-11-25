@@ -1,10 +1,14 @@
+import { readFileSync } from "node:fs";
+import { declareFounder, declareName, declareSlug, INFRA } from "sanoma/init";
 import { live, replay } from "sanoma/testing/replay";
 import { type Driver, memorySecrets } from "sanoma/workflows";
+import type { ResourceFake } from "sanoma/workflows/fake";
 import { describe, expect, it } from "vitest";
 import { githubDriver } from "../src/driver.ts";
 import { FAKE_TEMPLATE, fakeGithub } from "../src/fake.ts";
 import { github } from "../src/index.ts";
 import { GITHUB_APP_SECRETS } from "../src/rest.ts";
+import { githubSteps } from "../src/steps.ts";
 import { app, scrub, signer } from "./app-keys.ts";
 
 // The operations through the App over replayed replies (`fixtures/app-*.json`), hand-written in the
@@ -295,6 +299,7 @@ describe("the operations through the App", () => {
 describe("fakeGithubApp", () => {
   it("generates from its template, commits on a branch or a new one, and adds a key", async () => {
     const fake = fakeGithub();
+    const starter = structuredClone(fake.app.state.repositories[FAKE_TEMPLATE]!.branches.main!.files);
     expect(await call(fake.driver, "installation.get", { id: 7 })).toEqual({
       id: 7,
       account: { login: "acme", id: 7, type: "User" },
@@ -312,10 +317,10 @@ describe("fakeGithubApp", () => {
     expect((await call(fake.driver, "repository.commit", commit)).sha).toMatch(/^[0-9a-f]{40}$/);
     await call(fake.driver, "repository.commit", { ...commit, branch: "setup" });
     const repo = fake.app.state.repositories["acme/acme-ops"]!;
-    expect(fake.app.state.repositories[FAKE_TEMPLATE]!.branches.main!.files).toEqual({ "README.md": "# Company\n" });
+    expect(fake.app.state.repositories[FAKE_TEMPLATE]!.branches.main!.files).toEqual(starter);
     expect(repo.private).toBe(true);
     expect(repo.branches.setup!.files).toEqual({ ...repo.branches.main!.files });
-    expect(repo.branches.main!.files).toMatchObject({ "README.md": "# Company\n", ...files });
+    expect(repo.branches.main!.files).toEqual({ ...starter, ...files });
     const key = { installation: 7, repository: "acme/acme-ops", title: "host", key: KEY };
     expect(await call(fake.driver, "repository.addDeployKey", key)).toEqual({ id: 3 });
     expect(repo.keys).toEqual([{ id: 3, title: "host", key: KEY, readOnly: true }]);
@@ -347,14 +352,21 @@ describe("fakeGithubApp", () => {
     const fake = fakeGithub();
     await call(fake.driver, "repository.generate", generate);
     const at = { installation: 7, repository: "acme/acme-ops" };
-    const paths = ["README.md", "sanoma.config.ts"];
-    expect(await call(fake.driver, "repository.files", { ...at, paths })).toEqual({ "README.md": "# Company\n" });
-    const { sha } = await call(fake.driver, "repository.commit", { ...at, branch: "setup", message: "Set up", files });
-    expect(await call(fake.driver, "repository.files", { ...at, paths, ref: "setup" })).toEqual({
-      "README.md": "# Company\n",
-      ...files,
+    const paths = ["README.md", ".gitignore"];
+    const { ".gitignore": ignore } = fake.app.state.repositories[FAKE_TEMPLATE]!.branches.main!.files;
+    expect(await call(fake.driver, "repository.files", { ...at, paths })).toEqual({ ".gitignore": ignore });
+    const committed = { "README.md": "# Acme\n" };
+    const { sha } = await call(fake.driver, "repository.commit", {
+      ...at,
+      branch: "setup",
+      message: "Set up",
+      files: committed,
     });
-    expect(await call(fake.driver, "repository.files", { ...at, paths, ref: sha })).toMatchObject(files);
+    expect(await call(fake.driver, "repository.files", { ...at, paths, ref: "setup" })).toEqual({
+      ".gitignore": ignore,
+      ...committed,
+    });
+    expect(await call(fake.driver, "repository.files", { ...at, paths, ref: sha })).toMatchObject(committed);
     await expect(call(fake.driver, "repository.files", { ...at, paths, ref: "nope" })).rejects.toMatchObject({
       status: 422,
     });
@@ -431,5 +443,59 @@ describe("fakeGithubApp", () => {
     fake.reset();
     expect(fake.app.state.repositories["acme/acme-ops"]).toBeUndefined();
     expect(fake.calls).toEqual([]);
+  });
+
+  it("generates from the starter `sanoma init` copies, whose files sign-up declares a company in", async () => {
+    const fake = fakeGithub();
+    await call(fake.driver, "repository.generate", generate);
+    const at = { installation: 7, repository: "acme/acme-ops" };
+    const paths = ["resources/people.ts", "sanoma.config.ts", INFRA, ".gitignore", "gitignore"];
+    const read = await call(fake.driver, "repository.files", { ...at, paths });
+    // The installed `sanoma`'s template, its `gitignore` as `.gitignore`, as `sanoma init` writes it.
+    expect(Object.keys(read).toSorted()).toEqual([".gitignore", "resources/people.ts", INFRA, "sanoma.config.ts"]);
+    const template = new URL(".", import.meta.resolve("sanoma/template/package.json"));
+    expect(read[".gitignore"]).toBe(readFileSync(new URL("gitignore", template), "utf8"));
+    expect(declareFounder(read["resources/people.ts"], { id: "ada", github: "acme" })).toContain(
+      'export const founder = sanoma.person({ id: "ada", github: "acme" });',
+    );
+    expect(declareName(read["sanoma.config.ts"], "Acme")).toContain('export default defineConfig({\n  name: "Acme",\n');
+    expect(declareSlug(read[INFRA], "acme")).toContain('hostname: "acme.sanoma.work"');
+  });
+
+  it("installs the App as the step declares: on a user or an organization, with all or selected repositories", async () => {
+    const fake = fakeGithub();
+    const step = githubSteps.steps.find((s) => s.kind === "given")!;
+    /** The step's seed for these values: an installation, by its id. */
+    const install = (...values: unknown[]) =>
+      step.fn(...values) as { resource: string; name: string; fields: Record<string, unknown> };
+    const seed = install(11, "user", "ada", "selected");
+    expect(seed).toEqual({
+      resource: "github.installation",
+      name: "11",
+      fields: { account: { login: "ada", id: 11, type: "User" }, repositorySelection: "selected" },
+    });
+    // As a sandbox run seeds it: put in the run's fake, by type and id.
+    const copy: ResourceFake = fake;
+    copy.put("installation", seed.name, seed.fields);
+    copy.put("installation", "12", install(12, "organization", "acme-inc", "all").fields);
+    expect(await call(fake.driver, "installation.get", { id: 11 })).toEqual({
+      id: 11,
+      account: { login: "ada", id: 11, type: "User" },
+      repositorySelection: "selected",
+    });
+    expect(await call(fake.driver, "installation.get", { id: 12 })).toMatchObject({
+      account: { login: "acme-inc", type: "Organization" },
+      repositorySelection: "all",
+    });
+    // It reaches its own account's repositories.
+    expect(
+      await call(fake.driver, "repository.generate", { ...generate, installation: 11, owner: "ada" }),
+    ).toMatchObject({ fullName: "ada/acme-ops" });
+    expect(() => install(13, "team", "x", "all")).toThrow("on a user or an organization, not a team");
+    expect(() => copy.put("installation", "13", { account: { login: "x" } })).toThrow("repositorySelection");
+    expect(() => install(13, "user", "x", "some")).toThrow("all or selected repositories, not some");
+    expect(fake.app.state.installations[13]).toBeUndefined();
+    fake.reset();
+    expect(fake.app.state.installations[11]).toBeUndefined();
   });
 });
