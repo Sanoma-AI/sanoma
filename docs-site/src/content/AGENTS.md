@@ -42,7 +42,7 @@ Add troubleshooting when there is a known symptom and a specific recovery. Use a
 - Use sentence case for titles and headings. Name the task (“Start a company”), the thing a reader will look up (“Approvals”), or the question a section answers (“What an approval covers”).
 - Make the frontmatter description useful on its own. Say what the reader can do or what the feature does. Skip openings like “This guide explains…”.
 - Put the answer or first action near the top. Keep the common case together and link to background or uncommon cases where a reader might need them.
-- Use numbered steps for a sequence and a table for a lookup. Use emphasis sparingly and consistently. Read the headings on their own to check that a reader can find a step or answer.
+- Use numbered steps for a sequence and a table for a lookup. Read the headings alone: can you find the action you came for? See [Microsoft’s guidance on scannable content](https://learn.microsoft.com/en-us/style-guide/scannable-content/).
 
 ## Say who does what
 

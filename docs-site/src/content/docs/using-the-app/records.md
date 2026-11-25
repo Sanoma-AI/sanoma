@@ -59,7 +59,7 @@ Check **What will happen** before proposing a conversion. When some values wonâ€
 
 Start column changes from the local app. **Review the change** checks the plan against all records and edits the declaration in `resources/data.ts`. With a review remote, the change goes for review. Without one, Sanoma commits it locally and updates the records.
 
-Check the proposed rename, conversion, or deletion. Choose **Approve and apply** to accept it or **Send back** to request a different conversion choice. After publication, **The records** reports how many values changed.
+Check the proposed rename, conversion, or deletion. Choose **Approve and apply** to accept it. **Send back** rejects and closes the change. To use a different conversion choice, propose a new change. After publication, **The records** reports how many values changed.
 
 If the declaration was published but the records couldnâ€™t be updated, open the linked run. **Try again** reapplies the plan with your permissions and can require approval. Finish a pending rename or removal before reusing its column name. A later schema change can make the original plan inapplicable. **Copy the details** gathers the change and run IDs for troubleshooting. See [how column changes apply](/workflows/collections/#a-column-change).
 
