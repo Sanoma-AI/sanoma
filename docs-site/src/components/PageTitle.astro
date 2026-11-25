@@ -1,10 +1,31 @@
 ---
 import Default from "@astrojs/starlight/components/PageTitle.astro";
-import SectionIcon from "./SectionIcon.astro";
+import { Icon } from "@astrojs/starlight/components";
+import type { StarlightIcon } from "@astrojs/starlight/types";
+
+// A few pages keep older URLs even though the sidebar puts them in a different section.
+const icons: Partial<Record<string, StarlightIcon>> = {
+  start: "rocket",
+  "start/the-app": "window",
+  "start/apps": "code-branch",
+  "start/agents-over-mcp": "code-branch",
+  "using-the-app": "window",
+  build: "code-branch",
+  workflows: "code-branch",
+  "workflows/connectors": "puzzle",
+  "building-connectors": "puzzle",
+  sites: "laptop",
+  policies: "padlock",
+  testing: "approve-check-circle",
+  hosting: "server",
+  reference: "open-book",
+};
+const [, section, page] = Astro.url.pathname.split("/");
+const name = icons[`${section}/${page}`] ?? icons[section];
 ---
 
 <div class="section-heading">
-  <SectionIcon size="0.7em" />
+  {name && <Icon name={name} size="0.7em" color="var(--sl-color-accent)" />}
   <Default />
 </div>
 
