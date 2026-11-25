@@ -32,7 +32,15 @@ import { type Call, callsOf, ctxOf, type CtxRunner, inputOf, opCalled, outputsOf
 import { type Chats, chatStore } from "./chats.ts";
 import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection-driver.ts";
-import { queueFor, type ResolvedConfig, type ResolvedRouter, resolveConfig, type SanomaConfig } from "./config.ts";
+import {
+  limitedQueues,
+  personOf,
+  queueFor,
+  type ResolvedConfig,
+  type ResolvedRouter,
+  resolveConfig,
+  type SanomaConfig,
+} from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import { readStoreMoves, type StoreMove } from "./store-move.ts";
 import {
@@ -85,6 +93,7 @@ import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
 import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
 import {
+  ANONYMOUS,
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
   CHANGE_EVENT,
@@ -135,6 +144,9 @@ const STARTED_BY = '`startedBy` must be a principal, such as "alice" or { id: "a
 
 /** Why a visitor's start of a built-in is refused: the app's own actions on the repository are staff's. */
 const VISITOR_BUILT_IN = "A visitor may not start the runtime's own workflows";
+
+/** Why an anonymous start of a workflow that runs one per person is refused: every visitor not signed in is the one `anonymous`, so one's run would hold up all the others'. */
+const ANONYMOUS_PER_PERSON = "It runs one per person, so its starter must be signed in";
 
 /** A principal, or its id alone. */
 const PrincipalOrId = z.union([
@@ -476,11 +488,13 @@ export class SanomaClient {
       onBehalfOf: startedBy.onBehalfOf,
       builtInCode: this.config.builtInCodes[workflow],
     };
+    // The code the run is for, whose runs it waits its turn among (`queueFor`): the client's `appVersion`, else its config's.
+    const version = this.options.appVersion ?? this.config.version;
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
       .enqueue(
         {
-          queueName: queueFor(this.config, workflow, args) ?? this.config.queueName,
+          ...(queueFor(this.config, workflow, args, version) ?? { queueName: this.config.queueName }),
           workflowName: workflow,
           workflowID: runId,
           applicationName: this.config.appName,
@@ -525,6 +539,9 @@ export class SanomaClient {
     const action = `${WORKFLOW_ACTION}${workflow.name}`;
     const visitor = isVisitor(startedBy);
     if (visitor && BUILT_IN_WORKFLOWS.has(workflow.name)) throw new PolicyDeniedError(action, VISITOR_BUILT_IN);
+    if (workflow.concurrency !== undefined && personOf(startedBy) === ANONYMOUS) {
+      throw new PolicyDeniedError(action, ANONYMOUS_PER_PERSON);
+    }
     // A visitor's start is decided whatever run its id names: a visitor shares an id (`anonymous`) with others.
     if (!visitor && runId !== undefined && (await this.row(runId))) return undefined;
     const decision = decideStart(this.config, workflow, input, startedBy);
@@ -1136,23 +1153,25 @@ export class SanomaClient {
   }
 
   /**
-   * The apply that the apply `runId`, queued, waits for: one runs at a time (`queueFor`), so the
-   * one running (or waiting for a person), else the oldest queued before it. Undefined when
-   * `runId` is not a live apply queued behind another.
+   * The run that `runId` waits behind on a limited queue (`limitedQueues`): of its place's unfinished
+   * runs, the one running or waiting for a person, else the oldest queued before it. Undefined when
+   * `runId` is not queued behind another.
    */
-  async applyAhead(runId: string): Promise<RunSummary | undefined> {
+  async runAhead(runId: string): Promise<RunSummary | undefined> {
     const unfinished = await this.dbos.listWorkflows({
-      workflowName: APPLY_WORKFLOW,
       applicationName: this.config.appName,
+      queueName: limitedQueues(this.config),
       status: dbosStatusesOf("queued", "running"),
-      queueName: this.config.applyQueueName,
       sortDesc: false,
       loadInput: false,
       loadOutput: false,
     });
-    const at = unfinished.findIndex((r) => r.workflowID === runId);
-    if (at < 0 || unfinished[at]!.status !== "ENQUEUED") return undefined;
-    const ahead = unfinished.find((r) => r.status === "PENDING") ?? (at > 0 ? unfinished[0] : undefined);
+    const queued = unfinished.find((r) => r.workflowID === runId);
+    if (queued?.status !== "ENQUEUED") return undefined;
+    const place = unfinished.filter(
+      (r) => r.queueName === queued.queueName && r.queuePartitionKey === queued.queuePartitionKey,
+    );
+    const ahead = place.find((r) => r.status === "PENDING") ?? (place[0] === queued ? undefined : place[0]);
     return ahead && this.summarize(ahead);
   }
 

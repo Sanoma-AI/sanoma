@@ -231,7 +231,13 @@ describe("the deadline registry", () => {
   });
 });
 
-const scope = { appName: "app", version: "app@v2", queueName: "sanoma:app", applyQueueName: "sanoma:app:apply" };
+const scope = {
+  appName: "app",
+  version: "app@v2",
+  queueName: "sanoma:app",
+  applyQueueName: "sanoma:app:apply",
+  perPersonQueueName: "sanoma:app:per-person",
+};
 /** A run of `scope`'s, PENDING on its version and queue, but for what `s` says. */
 const status = (s: Partial<WorkflowStatus>): WorkflowStatus =>
   ({
@@ -287,6 +293,19 @@ describe("idle", () => {
     deadlines.addSource(() => new Date(Date.now() + 30_000));
     expect(await idle(deadlines, scope, 60_000)).toBe(false);
     expect(await idle(deadlines, scope, 10_000)).toBe(true);
+  });
+
+  it("leaves out a run queued one at a time behind its starter's waiting run, never another starter's", async () => {
+    const deadlines = deadlineRegistry();
+    const one = { queueName: scope.perPersonQueueName };
+    const ahead = status({ ...one, queuePartitionKey: "ada" });
+    void deadlines.running(ahead.workflowID, () =>
+      deadlines.waiting(ahead.workflowID, { kind: "approval" }, () => new Promise<void>(() => {})),
+    );
+    listing([ahead, status({ ...one, status: "ENQUEUED", queuePartitionKey: "ada" })]);
+    expect(await idle(deadlines, scope, 60_000)).toBe(true);
+    listing([ahead, status({ ...one, status: "ENQUEUED", queuePartitionKey: "bo" })]);
+    expect(await idle(deadlines, scope, 60_000)).toBe(false);
   });
 
   it("is false while a run is busy, before DBOS is asked", async () => {

@@ -46,8 +46,6 @@ export interface WorkerState {
   connections?: ConnectionRegistry;
   /** The config's `appName`, recorded on every ledger record. */
   app: string;
-  /** The config's `applyQueueName`: what `queueFor` answers a live apply. */
-  applyQueueName: string;
   /** The operations as the config's connectors declare them, by id. */
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers` in config.ts). */

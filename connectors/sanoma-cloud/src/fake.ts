@@ -11,7 +11,8 @@ import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { CLOUD_SLUG, cloudHostnameOf, oneAtATime } from "sanoma/workflows/shared";
 import { cloudBackend } from "./backend.ts";
 import { REGIONS, cloudOps } from "./connector.ts";
-import { BOX_INPUTS, boxProblem, type CloudApi, cloudOperations, type Company } from "./operations.ts";
+import { BOX_INPUTS, boxProblem } from "./boxes.ts";
+import { type CloudApi, cloudOperations, type Company } from "./operations.ts";
 
 /** What `start` runs for a company's host: a runtime answering at `url`, until `stop`. */
 export interface FakeRuntime {

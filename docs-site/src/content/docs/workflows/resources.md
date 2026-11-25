@@ -175,7 +175,7 @@ Each step's result is `done`, `skipped` (unanswered) or `failed` (with `error`; 
 
 One live apply runs at a time for each app on a database. Every apply that is not a sandbox run runs on the apply queue, `sanoma:<appName>:apply`, which DBOS limits to one running run, counted in Postgres over every process and version of the app. This covers an apply started from the app (`client.apply`), a change's deploy, a push to `main` and going live. A second apply waits as `queued` until the first ends, then plans the data files as they are by then.
 
-`client.applyAhead(runId)` names the apply it waits for: the one running or waiting for an approval, else the oldest queued before it. The app shows that apply on the queued run's page and on Hosting. A sandbox apply calls fakes, so it runs on the app's queue and never waits. An apply waiting at its plan's approval keeps its place, so the plan stays true while someone reads it, and the ones behind it do not keep the worker up (`idle`).
+`client.runAhead(runId)` names the apply it waits for: the one running or waiting for an approval, else the oldest queued before it. The app shows that apply on the queued run's page and on Hosting. A sandbox apply calls fakes, so it runs on the app's queue and never waits. An apply waiting at its plan's approval keeps its place, so the plan stays true while someone reads it, and the ones behind it do not keep the worker up (`idle`).
 
 One held at its start (an agent's waits for `admin`, or a company `@hold` on `workflow:apply`) waits on the app's queue instead and keeps no place: once approved, it starts the apply as its child, `<runId>:apply`, on the apply queue, which then waits its turn, and the held run ends with the child's report as its output.
 

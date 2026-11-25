@@ -294,6 +294,11 @@ export interface ResolvedConfig {
    * workers: `sanoma:<appName>:apply` (`queueFor`).
    */
   applyQueueName: string;
+  /**
+   * The DBOS queue every live run of a workflow with `concurrency: "one per person"` is started on,
+   * partitioned by its version, workflow and person, one run at a time in each: `sanoma:<appName>:per-person` (`queueFor`).
+   */
+  perPersonQueueName: string;
   /** The config's `login`, checked (`checkLogin`); the built-in `login-code` workflow sends through its `sender`, from its `from`. */
   login?: Login;
   /** The config's `router`, checked (`checkRouter`): the app serves the agents' router on its hostname. */
@@ -393,20 +398,48 @@ export interface ResolvedConfig {
  */
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
 
+/** Where a run waits its turn: a DBOS queue, and its partition on a partitioned one. */
+export interface Placement {
+  queueName: string;
+  queuePartitionKey?: string;
+}
+
 /**
- * The queue a run of `workflow` must wait on: a live apply's is the apply queue, which runs one at
- * a time across the database's workers, so two never write the hosts at once; anything else, a
- * sandbox apply too (it calls fakes), none (the client queues it on the app's, a run's child runs
- * at once). A run held at its start (`hold`) waits on none, so it never keeps the queue's one place
- * while a person decides: approved, the worker runs it as its child, which waits here (`runOn`).
- * The one rule the client and the worker share.
+ * The queue a run waits its turn on (the one rule the client and the worker share): a live apply,
+ * the apply queue, one at a time across the database's workers; a live run of a workflow with
+ * `concurrency: "one per person"`, the per-person queue in the partition of its version, workflow
+ * and person (`personOf`). Anything else, a sandbox run too, waits on none.
  */
 export const queueFor = (
-  { applyQueueName }: Pick<ResolvedConfig, "applyQueueName">,
+  { applyQueueName, perPersonQueueName, workflows }: QueueScope,
   workflow: string,
-  { sandbox, hold }: Pick<RunArgs, "sandbox" | "hold">,
-): string | undefined =>
-  workflow === APPLY_WORKFLOW && sandbox === undefined && hold === undefined ? applyQueueName : undefined;
+  { sandbox, hold, startedBy }: Pick<RunArgs, "sandbox" | "hold" | "startedBy">,
+  version: string,
+): Placement | undefined => {
+  if (heldOffQueue(workflow, { sandbox })) return hold === undefined ? { queueName: applyQueueName } : undefined;
+  if (sandbox !== undefined || workflows.get(workflow)?.concurrency === undefined) return undefined;
+  return { queueName: perPersonQueueName, queuePartitionKey: JSON.stringify([version, workflow, personOf(startedBy)]) };
+};
+
+/** The person a run is for: the one an agent acts for, else whoever started it. */
+export const personOf = ({ id, onBehalfOf }: RunArgs["startedBy"]): string => onBehalfOf ?? id;
+
+/** What `queueFor` reads of a config: its queues and its workflows. */
+export type QueueScope = Pick<ResolvedConfig, "applyQueueName" | "perPersonQueueName" | "workflows">;
+
+/**
+ * True when a run held at its start waits off its queue: a live apply, so it never keeps the apply
+ * queue's one place while a person decides; approved, the worker runs it as its child, which waits
+ * there (`runOn`). A held run of a workflow with `concurrency` keeps its place, its person's alone.
+ */
+export const heldOffQueue = (workflow: string, { sandbox }: Pick<RunArgs, "sandbox">): boolean =>
+  workflow === APPLY_WORKFLOW && sandbox === undefined;
+
+/** The app's queues that run one at a time in each place: the apply queue, and each partition of the per-person queue. */
+export const limitedQueues = ({
+  applyQueueName,
+  perPersonQueueName,
+}: Pick<ResolvedConfig, "applyQueueName" | "perPersonQueueName">): string[] => [applyQueueName, perPersonQueueName];
 
 /** Returns the config, with the file it is called from as its `file`: its directory is the config's `root`. */
 export function defineConfig(config: SanomaConfig): SanomaConfig {
@@ -723,6 +756,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       ),
     queueName: `sanoma:${appName}`,
     applyQueueName: `sanoma:${appName}:apply`,
+    perPersonQueueName: `sanoma:${appName}:per-person`,
     ...(login && { login }),
     ...(router && { router }),
     ops,
