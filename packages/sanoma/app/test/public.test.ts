@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/api.ts";
 import { publicFront } from "../src/login/public.ts";
 import { publicOnly } from "../src/middleware.ts";
-import { PUBLIC_FNS } from "../src/public-fns.ts";
+import { PUBLIC_FNS, PUBLIC_FNS_FILE } from "../src/public-fns.ts";
 
 // A public site's front door on its own host, and the server functions that host answers.
 
@@ -128,10 +128,7 @@ describe("the server functions a public site's host answers", () => {
   };
 
   it("are callFn and getActor of the app's functions.ts alone: any other is a 404 there, and answers on the app's host", () => {
-    expect([...PUBLIC_FNS]).toEqual([
-      ["callFn", "sanoma/app/src/functions.ts"],
-      ["getActor", "sanoma/app/src/functions.ts"],
-    ]);
+    expect([[...PUBLIC_FNS], PUBLIC_FNS_FILE]).toEqual([["callFn", "getActor"], "/sanoma/app/src/functions.ts"]);
     for (const filename of [installed, checkout, `C:/work/acme/${installed}`]) {
       expect(call("callFn", filename, "hello")).toBe("answered");
       expect(call("getActor", filename, "hello")).toBe("answered");
@@ -151,7 +148,7 @@ describe("the server functions a public site's host answers", () => {
       "node_modules/sanoma/app/src/server/functions.ts",
       "node_modules/other-sanoma/app/src/functions.ts",
     ]) {
-      for (const name of ["callFn", "getActor"]) {
+      for (const name of PUBLIC_FNS) {
         notFound(name, filename);
         expect(call(name, filename)).toBe("answered");
       }
