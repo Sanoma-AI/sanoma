@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/api.ts";
 import { publicFront } from "../src/login/public.ts";
 import { publicOnly } from "../src/middleware.ts";
-import { PUBLIC_FNS } from "../src/public-fns.ts";
+import { PUBLIC_FNS, PUBLIC_FNS_FILE } from "../src/public-fns.ts";
 
 // A public site's front door on its own host, and the server functions that host answers.
 
@@ -107,26 +107,51 @@ describe("the server functions a public site's host answers", () => {
   const server = publicOnly.options.server as unknown as (options: {
     next: () => unknown;
     context: { app: { site?: string } };
-    serverFnMeta: { name: string };
+    serverFnMeta: { name: string; filename: string };
   }) => unknown;
-  const call = (name: string, site?: string) =>
-    server({ next: () => "answered", context: { app: { site } }, serverFnMeta: { name } });
+  /** The app's functions.ts as Start names it from a company's repo: installed by pnpm, and from a checkout. */
+  const installed = "node_modules/.pnpm/sanoma@0.11.26/node_modules/sanoma/app/src/functions.ts";
+  const checkout = "../../sanoma/packages/sanoma/app/src/functions.ts";
+  const call = (name: string, filename: string, site?: string) =>
+    server({ next: () => "answered", context: { app: { site } }, serverFnMeta: { name, filename } });
+  /** That `name` in `filename` is a 404 on hello's host. */
+  const notFound = (name: string, filename: string) => {
+    const thrown = (() => {
+      try {
+        return call(name, filename, "hello");
+      } catch (err) {
+        return err;
+      }
+    })();
+    expect(thrown, `${filename} ${name}`).toBeInstanceOf(ApiError);
+    expect(thrown, `${filename} ${name}`).toMatchObject({ status: 404 });
+  };
 
-  it("are callFn and getActor alone: any other is a 404 there, and answers on the app's host", () => {
-    expect([...PUBLIC_FNS]).toEqual(["callFn", "getActor"]);
-    expect(call("callFn", "hello")).toBe("answered");
-    expect(call("getActor", "hello")).toBe("answered");
+  it("are callFn and getActor of the app's functions.ts alone: any other is a 404 there, and answers on the app's host", () => {
+    expect([[...PUBLIC_FNS], PUBLIC_FNS_FILE]).toEqual([["callFn", "getActor"], "/sanoma/app/src/functions.ts"]);
+    for (const filename of [installed, checkout, `C:/work/acme/${installed}`, "sanoma/app/src/functions.ts"]) {
+      expect(call("callFn", filename, "hello")).toBe("answered");
+      expect(call("getActor", filename, "hello")).toBe("answered");
+    }
     for (const name of ["getConfig", "startRunFn", "setCredentialFn", "goLiveSignInFn", "getRuns"]) {
-      const thrown = (() => {
-        try {
-          return call(name, "hello");
-        } catch (err) {
-          return err;
-        }
-      })();
-      expect(thrown, name).toBeInstanceOf(ApiError);
-      expect(thrown, name).toMatchObject({ status: 404 });
-      expect(call(name)).toBe("answered");
+      notFound(name, installed);
+      expect(call(name, installed)).toBe("answered");
+    }
+  });
+
+  it("refuses a function of the same name in any other file there, and answers it on the app's host", () => {
+    for (const filename of [
+      "sites/hello/routes/index.tsx",
+      "apps/shop/sites/store/functions.ts",
+      "src/functions.ts",
+      "sanoma/app/src/functions.ts.tsx",
+      "node_modules/sanoma/app/src/server/functions.ts",
+      "node_modules/other-sanoma/app/src/functions.ts",
+    ]) {
+      for (const name of PUBLIC_FNS) {
+        notFound(name, filename);
+        expect(call(name, filename)).toBe("answered");
+      }
     }
   });
 });

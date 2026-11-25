@@ -219,6 +219,8 @@ const ROUTED = `router: ${JSON.stringify(router)},`;
 
 const temporary: string[] = [];
 let bundle: AppBundle;
+/** Every module of `bundle` as text, joined. */
+let bundleCode: string;
 let worker: Awaited<ReturnType<typeof unstable_startWorker>>;
 /** The same upload with no DATABASE binding, so the app cannot be made: what answers there needs no app. */
 let appless: Awaited<ReturnType<typeof unstable_startWorker>>;
@@ -327,9 +329,19 @@ async function connectClient(fetch: Fetch, app: string, cookie: string) {
   return { access_token, claims, back };
 }
 
+/** The id of the server function `name` in the bundle, from its table of them. */
+function serverFnId(name: string): string {
+  const id = new RegExp(`"([0-9a-f]{64})":\\s*\\{\\s*functionName:\\s*"${name}_createServerFn_handler"`).exec(
+    bundleCode,
+  )?.[1];
+  if (!id) throw new Error(`no server function ${name} in the bundle`);
+  return id;
+}
+
 beforeAll(async () => {
   const { repo, config } = company();
   bundle = await buildAppBundle(repo, { config, domains: DOMAINS });
+  bundleCode = bundle.modules.map(({ content }) => Buffer.from(content, "base64").toString()).join("\n");
   // What the worker does at its start: the database and the logins' tables prepared (the Worker never prepares them).
   const client = await SanomaClient.connect(config);
   await client.secrets(["SANOMA_NOTHING"]);
@@ -496,16 +508,15 @@ describe("buildAppBundle", () => {
   });
 
   it("carries the workflow files' workflows and what a connector reads of its package, as Node loads them", () => {
-    const code = bundle.modules.map(({ content }) => Buffer.from(content, "base64").toString()).join("\n");
-    expect(code).toContain('tidied: "nightly"');
+    expect(bundleCode).toContain('tidied: "nightly"');
     // The operations' files' operations, as the workflows'.
-    expect(code).toContain("Tidies a name for the nightly run");
+    expect(bundleCode).toContain("Tidies a name for the nightly run");
     // Only package.json says it.
-    expect(code).toContain("Fixture login");
+    expect(bundleCode).toContain("Fixture login");
     // A workflow that renders an invoice, without the PDF renderer (`OPTIONAL`).
-    expect(code).toContain("Render an invoice");
+    expect(bundleCode).toContain("Render an invoice");
     // React-pdf's standard fonts, which only its code names.
-    expect(code).not.toContain("Courier-BoldOblique");
+    expect(bundleCode).not.toContain("Courier-BoldOblique");
   });
 
   it("answers /healthz", async () => {
@@ -722,6 +733,17 @@ describe("buildAppBundle", () => {
     const signOut = await get("https://members.example/auth/fixture-login/sign-out", { method: "POST" });
     expect([signOut.status, signOut.headers.get("set-cookie")]).toEqual([204, "x-fixture-visitor=; Max-Age=0; Path=/"]);
     expect((await get("https://hello.example/auth/fixture-login/sign-out", { method: "POST" })).status).toBe(404);
+  });
+
+  it("answers the app's getActor on a site's host as its visitor, and a server function it does not answer there as not found", async () => {
+    const headers = { "sec-fetch-site": "same-origin", cookie: "x-fixture-visitor=ada" };
+    const actor = await get(`https://members.example/_serverFn/${serverFnId("getActor")}`, { headers });
+    expect(actor.status).toBe(200);
+    expect(await actor.text()).toContain('"visitor:fixture-login:ada"');
+    // A read that is not there is the router's not-found, as for any read that finds nothing.
+    expect(
+      await (await get(`https://members.example/_serverFn/${serverFnId("getConfig")}`, { headers })).text(),
+    ).toContain('"isNotFound"');
   });
 
   it("answers 404 for a host that is neither the app's nor a site's domain", async () => {
