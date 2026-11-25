@@ -1,11 +1,23 @@
 ---
 title: A site's imports
-description: "A site's route file imports createFileRoute from @tanstack/react-router (the route generator rewrites the path there, and only there) and the rest from sanoma/site, which is this package's sanoma/site."
+description: "Find the import for a site route, router helper, workflow call, or UI component."
 sidebar:
   order: 3
 ---
 
-A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `sanoma/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), `defineSite`, `api` with `ApiError` and `errorBodyOf` ([Calling operations and workflows](/sites/calling/)), `content`, the repo's Markdown ([Content](/sites/content/)), a public site's languages, `defineMessages`, `useMessages`, `useLocale` and `useLocales` ([Languages](/sites/languages/)), `siteOrigin` and `siteUrl`, a page's absolute URLs ([Public sites](/sites/public-sites/)), and the pieces that talk to the app, `RunForm` and `useActor` ([The kit and RunForm](/sites/kit/)). How a page looks comes from `sanoma/ui`. `sites/<name>/site.ts`, optional, names the site, and may give it an icon, a [Lucide](https://lucide.dev/icons) icon's name as a literal (`icon: "kanban"`), read without running the file (one that is not a literal is no icon):
+In a route file, import `createFileRoute` from `@tanstack/react-router`. The route generator rewrites the path in that import’s call. Get the other routing helpers from `sanoma/site` so the page uses the app’s router.
+
+| What you need                                         | Exports from `sanoma/site`                                                                                                                                      |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Navigation and routes                                 | `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect`, `notFound`, and their types |
+| Site definition                                       | `defineSite`                                                                                                                                                    |
+| [Operations and workflows](/sites/calling/)           | `api`, `ApiError`, `errorBodyOf`                                                                                                                                |
+| [Markdown in the repo](/sites/content/)               | `content`                                                                                                                                                       |
+| [Languages](/sites/languages/)                        | `defineMessages`, `useMessages`, `useLocale`, `useLocales`                                                                                                      |
+| [Absolute URLs](/sites/public-sites/)                 | `siteOrigin`, `siteUrl`                                                                                                                                         |
+| [Workflow forms and the signed-in actor](/sites/kit/) | `RunForm`, `useActor`                                                                                                                                           |
+
+Import visual components from `sanoma/ui`. To set a title and icon, add the optional `sites/<name>/site.ts`. Use a literal [Lucide icon name](https://lucide.dev/icons), such as `icon: "kanban"`. Sanoma reads the file without running it and omits the icon if its name is computed.
 
 ```ts
 // sites/help/site.ts
@@ -28,4 +40,14 @@ function Home() {
 
 ## What site.ts sets
 
-`title` names the site in the app (its folder's name without one) and `icon` is its tile's icon in the bar, a [Lucide](https://lucide.dev/icons) icon's name (without one, a globe for a public site and a window for one in the app only). A site for visitors rather than people says so in `site.ts`: `defineSite({ title: "Website", public: true, login: "auth0" })`. `public: true` makes it a public site, served at the root of its own host to visitors; `login`, for a public site only, names the connector in `sanoma.config.ts` whose login half signs a visitor in (`withSetup`'s `login`, in [the workflows README](/workflows/writing-workflows/)), and without it every page runs as `anonymous`. `locales`, for a public site with no login, names its languages ([Languages](/sites/languages/)). `sanoma` loads `site.ts` (`defineSite` served by the runtime's loader) and checks its default export, `defineSite({ … })`, against these options: a key it does not take, a value of the wrong kind, a `login` naming no login half or `locales` where they do not apply is a problem `sanoma check` names. A public site is served at the root of its own host too ([Public sites](/sites/public-sites/)).
+Export `defineSite({ … })` as the default from `sites/<name>/site.ts`. For example, `defineSite({ title: "Website", public: true, login: "auth0" })` serves a site for visitors and uses the configured Auth0 connector for sign-in.
+
+| Option    | Effect                                                                                                                                                                                                                     |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`   | Names the site in the app. Defaults to the folder name.                                                                                                                                                                    |
+| `icon`    | Names the tile’s [Lucide icon](https://lucide.dev/icons). The default is a globe for a public site or a window for an app-only site.                                                                                       |
+| `public`  | When true, serves the site at the root of [its own host](/sites/public-sites/).                                                                                                                                            |
+| `login`   | For a public site, names the connector in `sanoma.config.ts` with the visitor [login implementation](/workflows/writing-workflows/) attached through `withSetup`. Without it, pages on the public host run as `anonymous`. |
+| `locales` | Lists the [languages](/sites/languages/) of a public site without a login.                                                                                                                                                 |
+
+The runtime loader supplies `defineSite` when Sanoma loads the file. `sanoma check` reports unknown options, incorrect value types, a login without a matching connector implementation, and locales on an ineligible site.

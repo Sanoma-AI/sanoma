@@ -1,11 +1,15 @@
 ---
 title: Files sanoma writes
-description: "sanoma env keeps .env.example the manual of the variables."
+description: "Find which command writes each company file and which generated files belong in Git."
 sidebar:
   order: 2
 ---
 
-`sanoma env` keeps `.env.example` the manual of the variables: `SANOMA_DATABASE_URL`, `SANOMA_APP_PORT`, `SANOMA_APP_HOST`, `SANOMA_HOSTNAME`, `SANOMA_HOST_URL`, a router's `SANOMA_AGENT_URL`, `SANOMA_COMPANY` and `SANOMA_ROUTER_SECRET`, and the GitHub sign-in variables first, with their defaults, then a block per vendor in the connectors' order, each variable its driver's `env` declares with its `.describe()` text. A required variable is `NAME=`; an optional one is commented out, `# NAME=`, with `Optional.` before its description. The same config gives the same text, which `--check` compares byte for byte. Copy bootstrap inputs to `.env` (ignored by git). Store-backed credential reads use `secrets.bindings` to select an environment variable explicitly; there is no environment-first fallback. Connector pages write to the selected store. Drivers still using their own `env` declarations remain a separate path until migrated to named authentication.
+Use the [generated files table](#generated-files) to check which files to commit.
+
+`sanoma env` writes the environment variable reference to `.env.example`. It lists `SANOMA_DATABASE_URL`, `SANOMA_APP_PORT`, `SANOMA_APP_HOST`, `SANOMA_HOSTNAME`, `SANOMA_HOST_URL`, a router's `SANOMA_AGENT_URL`, `SANOMA_COMPANY` and `SANOMA_ROUTER_SECRET`, and the GitHub sign-in variables first, with their defaults, then a block per vendor in the connectors' order, each variable its driver's `env` declares with its `.describe()` text.
+
+A required variable is `NAME=`; an optional one is commented out, `# NAME=`, with `Optional.` before its description. The same config gives the same text, which `--check` compares byte for byte. Copy bootstrap inputs to `.env` (ignored by git). Store-backed credential reads use `secrets.bindings` to select an environment variable explicitly; there is no environment-first fallback. Connector pages write to the selected store. Drivers still using their own `env` declarations remain a separate path until migrated to named authentication.
 
 ## The lint
 
@@ -17,11 +21,15 @@ sidebar:
 }
 ```
 
-`sanoma/oxlint.json` is self-contained (it extends nothing): `sanoma/workflows`'s rules (the clock, randomness, the network, the environment, the imports a workflow may make, with its plugin inside `sanoma`; data files are held to no lint, since Sanoma loads them and reports what does not load), a site's (client code only: no `*.server.*` file or route `server` handlers, no import of the runtime, a connector, Postgres, DBOS, Node's modules or TanStack Start, where server functions and middleware come from, the app only through `sanoma/site` and `sanoma/ui`, no relative import out of `sites/`, no import by a path from the root (`/…`: a file at a fixed address goes in the site's `public/` folder) or by a `#` import, no `virtual:` module (content comes through `content`), no `process` or `require`; types may be imported from anywhere; `sites/__virtual.ts`, the build's listing, aside) and the rules this repo holds its own code to. Add your own rules beside the `extends`; `sanoma check` leaves an existing file alone.
+`sanoma/oxlint.json` is self-contained (it extends nothing): `sanoma/workflows`'s rules (the clock, randomness, the network, the environment, the imports a workflow may make, with its plugin inside `sanoma`; data files are held to no lint, since Sanoma loads them and reports what does not load), a site's (client code only: no `*.server.*` file or route `server` handlers, no import of the runtime, a connector, Postgres, DBOS, Node's modules or TanStack Start, where server functions and middleware come from, the app only through `sanoma/site` and `sanoma/ui`, no relative import out of `sites/`, no import by a path from the root (`/…`: a file at a fixed address goes in the site's `public/` folder) or by a `#` import, no `virtual:` module (content comes through `content`), no `process` or `require`; types may be imported from anywhere; `sites/__virtual.ts`, the build's listing, aside) and the rules this repo holds its own code to.
+
+Add your own rules beside the `extends`; `sanoma check` leaves an existing file alone.
 
 ## Template files
 
-`sanoma/init` is how `sanoma init` writes a company's own facts into the company template's files, as plain functions over text that a workflow or a site's page can import too (to apply them to a repository's files read with `github.repository.files`, say): `declareFounder(text, creator)` writes the `founder` in `resources/people.ts` as `creator` (a `Creator`: `id`, and `name`, `github` or `email` when known), `declareName(text, name)` writes `name` first in `sanoma.config.ts`, and `declareSlug(text, slug)` puts the company's address, `<slug>.sanoma.work`, in place of the template's `"company.sanoma.work"` in `resources/sanoma/infra.ts` (`INFRA`), the Cloud host's `hostname`. Each throws when the file is not shaped as the template's.
+`sanoma/init` is how `sanoma init` writes a company's own facts into the company template's files, as plain functions over text that a workflow or a site's page can import too (to apply them to a repository's files read with `github.repository.files`, say): `declareFounder(text, creator)` writes the `founder` in `resources/people.ts` as `creator` (a `Creator`: `id`, and `name`, `github` or `email` when known), `declareName(text, name)` writes `name` first in `sanoma.config.ts`, and `declareSlug(text, slug)` puts the company's address, `<slug>.sanoma.work`, in place of the template's `"company.sanoma.work"` in `resources/sanoma/infra.ts` (`INFRA`), the Cloud host's `hostname`.
+
+Each throws when the file is not shaped as the template's.
 
 ## Generated files
 

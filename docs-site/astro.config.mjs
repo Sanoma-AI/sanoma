@@ -65,10 +65,45 @@ export default defineConfig({
       // Cedar has no grammar in Shiki: a policy is shown as plain text.
       expressiveCode: { shiki: { langAlias: { cedar: "txt" } } },
       sidebar: [
-        { label: "Start", items: [{ autogenerate: { directory: "start" } }] },
-        { label: "Workflows", items: [{ autogenerate: { directory: "workflows" } }] },
+        {
+          label: "Set up a company",
+          items: ["start/setup", "start/start-a-company", "start/install", "start/first-workflow"],
+        },
+        {
+          label: "Use your company’s app",
+          items: ["start/the-app", { autogenerate: { directory: "using-the-app" } }],
+        },
+        {
+          label: "Build with Sanoma",
+          items: [
+            "build/overview",
+            {
+              label: "Workflows",
+              items: [
+                "workflows/writing-workflows",
+                "workflows/built-ins",
+                "workflows/collections",
+                "workflows/your-own-operations",
+                "workflows/direct-calls",
+                "workflows/resources",
+                "workflows/credentials",
+                "workflows/ledger",
+                "workflows/approvals",
+                "workflows/changes",
+                "workflows/replay-safety",
+                "workflows/your-own-ui",
+              ],
+            },
+            { label: "Sites", items: [{ autogenerate: { directory: "sites" } }] },
+            {
+              label: "Building connectors",
+              items: ["building-connectors/define-a-connector", "workflows/connectors", "building-connectors/setup"],
+            },
+            "start/apps",
+            "start/agents-over-mcp",
+          ],
+        },
         { label: "People and policies", items: [{ autogenerate: { directory: "policies" } }] },
-        { label: "Sites", items: [{ autogenerate: { directory: "sites" } }] },
         { label: "Testing", items: [{ autogenerate: { directory: "testing" } }] },
         { label: "Hosting", items: [{ autogenerate: { directory: "hosting" } }] },
         {

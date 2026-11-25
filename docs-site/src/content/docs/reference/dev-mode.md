@@ -1,12 +1,36 @@
 ---
 title: Dev mode
-description: "When the repo's nodemodules/sanoma or any nodemodules/@sanoma-ai/ is a link into a sanoma checkout (pnpm link), or SANOMADEVREPO names one, sanoma runs sanoma serve --dev in a child process (serving t."
+description: When Sanoma uses a local checkout, which package changes restart the server, and what happens when you unlink it.
 sidebar:
   order: 3
 ---
 
-When the repo's `node_modules/sanoma` or any `node_modules/@sanoma-ai/*` is a link into a sanoma checkout (`pnpm link`), or `SANOMA_DEV_REPO` names one, `sanoma` runs `sanoma serve --dev` in a child process (serving the [sites](/sites/developing/) as `sanoma` does) and, in the directory of every linked package, its `pnpm run watch` (each package's own watch build: for `sanoma`, `tsc -b --watch` of its parts and `vite build --watch` of the app). A change under any `dist/` a linked package ships (`sanoma`'s own, `workflows/dist`, `app/dist` and the rest, but `testing/dist` and `dev/dist`, which a running company never loads) restarts the child, after three quarters of a second of quiet (with sites, except the app's own pages in `app/dist/client` and `app/dist/server`: the dev server serves the app's source from the checkout and hot-updates it), one restart at a time; a child that exits on its own is reported and started again on the next change.
+Dev mode runs a company against a local Sanoma checkout. The `sanoma` process runs the server as a child process and restarts it when a linked package’s build changes.
 
-The child and each watch run in a process group of their own, so a terminal's ctrl-c reaches `sanoma` alone, which then ends each group (SIGTERM, SIGKILL after 5 seconds) and exits. It does the same, saying `dev mode: the repo no longer links <checkout>; stopping`, once none of the repo's links into the checkout is left (`sanoma dev unlink`, an install; `node_modules` is looked at every second, and a link gone on two looks in a row is gone), so the checkout's server writes nothing more into the repo's `.sanoma/app` beside the installed sanoma.
+## Activation
 
-[`sanoma dev link`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/dev/README.md) links `sanoma` and every declared `@sanoma-ai/*` package the checkout has.
+Running `sanoma` in a company repo activates dev mode in either of these cases.
+
+- `node_modules/sanoma` or a package under `node_modules/@sanoma-ai/` links into a Sanoma checkout, as with `pnpm link`.
+- `SANOMA_DEV_REPO` names the checkout.
+
+[`sanoma dev link`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/dev/README.md) links `sanoma` and each declared `@sanoma-ai/*` package available in the checkout.
+
+## Processes
+
+| Process              | Behavior                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sanoma serve --dev` | Runs the company in a child process. It serves [local site edits](/sites/developing/) the same way as `sanoma`.                                   |
+| `pnpm run watch`     | Runs in each linked package’s directory. For `sanoma`, the watch script runs `tsc -b --watch` for its parts and `vite build --watch` for the app. |
+
+## Restarts
+
+Sanoma watches the build directories each linked package ships, including `dist/`, `workflows/dist`, and `app/dist`. It skips `testing/dist` and `dev/dist` because a running company never loads them. When the dev server serves the app’s pages from the checkout for a repo with sites, those pages update in place. Changes under `app/dist/client` and `app/dist/server` then skip the restart.
+
+After 750 milliseconds without another watched change, Sanoma restarts the child. Restarts run one at a time. If the child exits on its own, Sanoma reports the exit and waits for the next change to start it again.
+
+## Shutdown
+
+Ctrl+C stops the server and each package watcher. On Unix, each runs in its own process group. Sanoma sends each group `SIGTERM`, then `SIGKILL` if it is still running after five seconds. On Windows, Sanoma uses `taskkill /T /F` to stop each process tree.
+
+If the repo started with linked packages, Sanoma checks their links in `node_modules` once a second. When all the original links are gone on two consecutive checks, it prints `dev mode: the repo no longer links <checkout>; stopping` and shuts down. This can happen after `sanoma dev unlink` or a package install. Shutdown prevents the checkout’s server from writing to the company repo’s `.sanoma/app` after it switches back to installed packages.

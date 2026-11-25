@@ -1,11 +1,13 @@
 ---
 title: Agents over MCP
-description: "An AI agent such as Claude Code can use the company through /mcp, an MCP server over Streamable HTTP."
+description: "Connect an MCP client to a company, identify who acts on each call, and route multiple companies through one address."
 sidebar:
   order: 5
 ---
 
-An AI agent such as Claude Code can use the company through `/mcp`, an MCP server over Streamable HTTP. It serves clients of MCP 2026-07-28 and 2025-era clients alike, and keeps no session. The agent acts as the person the login names, so the policy decides each call and the ledger records it as theirs. On this machine the client names the person in the `x-sanoma-actor` header. For Claude Code, an `.mcp.json` entry:
+Connect a client such as Claude Code to the company’s `/mcp` endpoint. Sanoma supports the Model Context Protocol (MCP) over Streamable HTTP, including MCP 2026-07-28 and 2025-era clients. The server keeps no session. The login identifies the person, policy decides each call, and the ledger attributes recorded actions to that identity.
+
+On your own machine, identify the person with the `x-sanoma-actor` header. For Claude Code, add the following entry to `.mcp.json`.
 
 ```json title=".mcp.json"
 {
@@ -15,13 +17,29 @@ An AI agent such as Claude Code can use the company through `/mcp`, an MCP serve
 }
 ```
 
-To have the calls made by an agent on the person's behalf, declare the agent in `resources/people.ts` (`sanoma.agent({ id: "claude-code", client: "https://claude.ai/oauth/claude-code-client-metadata" })`, [People](/policies/people/)) and name it in the `x-sanoma-agent` header beside `x-sanoma-actor` (either may be URI-encoded): `"headers": { "x-sanoma-actor": "ada", "x-sanoma-agent": "claude-code" }`. Every tool call is then the agent's acting for Ada: the policy sees the agent, in its groups and `agents`, with `onBehalfOf` Ada (so an `@hold("on-behalf-of")` waits for her), and is asked again as Ada alone, the stricter answer standing, so the agent may do no more than she may ([People](/policies/people/)); `get_run`, the ledger, the run's trace and the Inbox say `claude-code for ada`.
+To have the calls made by an agent on the person's behalf, declare the agent in `resources/people.ts` (`sanoma.agent({ id: "claude-code", client: "https://claude.ai/oauth/claude-code-client-metadata" })`, [People](/policies/people/)) and name it in the `x-sanoma-agent` header beside `x-sanoma-actor` (either may be URI-encoded): `"headers": { "x-sanoma-actor": "ada", "x-sanoma-agent": "claude-code" }`.
 
-A name that is not a declared agent (a person's, one of the runtime's own agents', `sanoma-chat`, the app's chat's own, among them, a built-in client's agent that no file declares, anyone undeclared), or an agent declared to act for someone else, is refused (403, `not_admitted`). Ada may approve a hold on a run her agent started for her. The policy decides an agent's start of any workflow as it does Ada's (a `forbid` on `workflow:drift` for `agents` refuses it, not Ada); its start of one of the runtime's own workflows that does not only read (`apply`, say; `drift` and `plan` only read) also waits for a person in `admin`, unless a `permit` for agents lets it. Without the header, the calls are the person's, as above.
+Every tool call is then the agent's acting for Ada: the policy sees the agent, in its groups and `agents`, with `onBehalfOf` Ada (so an `@hold("on-behalf-of")` waits for her), and is asked again as Ada alone, the stricter answer standing, so the agent may do no more than she may ([People](/policies/people/)); `get_run`, the ledger, the run's trace and the Inbox say `claude-code for ada`.
 
-On a host, an MCP client signs in through the company's own staff sign-in, which is an OAuth 2.1 authorization server for `/mcp` ([Better Auth's](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/better-auth/README.md#agents-signing-in)). The instance has one agent address, set by `SANOMA_HOSTNAME`, the hostname the app is served at over HTTPS: `https://<hostname>/mcp`, with the sign-in at `https://<hostname>/auth/better-auth` as its issuer. Without a hostname it is set by `SANOMA_HOST_URL`, the instance's own URL: a Cloudflare host's Worker has its workers.dev URL there, and an instance reached at a port, an IP address or over plain http names itself there (`SANOMA_HOST_URL=http://10.0.0.7:3000`). Tokens are issued for that address alone and the metadata names it, whatever host a request arrives on. With neither variable the sign-in serves no OAuth, which `sanoma serve` says once when it starts: `/mcp` still answers a signed-in person's browser, and answers a client 401 with no challenge and an `error` that names both variables.
+A name that is not a declared agent (a person's, one of the runtime's own agents', `sanoma-chat`, the app's chat's own, among them, a built-in client's agent that no file declares, anyone undeclared), or an agent declared to act for someone else, is refused (403, `not_admitted`). Ada may approve a hold on a run her agent started for her.
 
-Add the address to the client (`claude mcp add --transport http acme https://acme.example/mcp`). Its first request without a token gets a 401 whose `WWW-Authenticate` points at the resource's metadata (`https://<hostname>/.well-known/oauth-protected-resource/mcp`, on a request that reached the app by another name too), which names the sign-in as its authorization server; the client then opens the sign-in in the person's browser, where they sign in by email code as they do to the app (signed in already, they go straight on), and a consent page asks whether the client may act for them, as which agent; it is shown at every sign-in of a client that takes its answer on the person's own computer (a loopback redirect, as Claude Code's: any program there could ask in its name), and once for a client whose redirect is an HTTPS address of its own, whose later sign-ins skip it while it still stands for the same agent (mapped to another, the person is asked again, and the tokens the client holds are refused until then: they are for the agent consented to). The client gets an access token for that address's `/mcp` alone, and each tool call is the agent's acting for that person, exactly as with `x-sanoma-agent` above.
+The policy decides an agent's start of any workflow as it does Ada's (a `forbid` on `workflow:drift` for `agents` refuses it, not Ada); its start of one of the runtime's own workflows that does not only read (`apply`, say; `drift` and `plan` only read) also waits for a person in `admin`, unless a `permit` for agents lets it. Without the header, the calls are the person's, as above.
+
+## Sign in to a hosted company
+
+On a host, an MCP client signs in through the company's own staff sign-in, which is an OAuth 2.1 authorization server for `/mcp` ([Better Auth's](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/better-auth/README.md#agents-signing-in)). The instance has one agent address, set by `SANOMA_HOSTNAME`, the hostname the app is served at over HTTPS: `https://<hostname>/mcp`, with the sign-in at `https://<hostname>/auth/better-auth` as its issuer.
+
+Without a hostname it is set by `SANOMA_HOST_URL`, the instance's own URL: a Cloudflare host's Worker has its workers.dev URL there, and an instance reached at a port, an IP address or over plain http names itself there (`SANOMA_HOST_URL=http://10.0.0.7:3000`). Tokens are issued for that address alone and the metadata names it, whatever host a request arrives on.
+
+With neither variable the sign-in serves no OAuth, which `sanoma serve` says once when it starts: `/mcp` still answers a signed-in person's browser, and answers a client 401 with no challenge and an `error` that names both variables.
+
+For Claude Code, run `claude mcp add --transport http acme https://acme.example/mcp`, substituting your company’s URL. The first unauthenticated request returns 401. Its `WWW-Authenticate` header points to `https://<hostname>/.well-known/oauth-protected-resource/mcp`, even when the request reached the app by another name. This metadata identifies the authorization server.
+
+The client opens staff sign-in in your browser. Sign in by email code if you have no session, then review which client and agent are requesting permission to act for you. Clients with a loopback redirect, including Claude Code, request consent on every sign-in because another local program could use the same name. A client with its own HTTPS redirect asks once while it continues to represent the same agent. If the mapping changes, existing tokens are refused until you consent to the new agent.
+
+The client gets an access token for that address's `/mcp` alone, and each tool call is the agent's acting for that person, exactly as with `x-sanoma-agent` above.
+
+### Built-in Claude clients
 
 Claude's clients are built in on every company, so they need no declaration. Each is known by the URL of its client ID metadata document and acts as a built-in agent, in the group `agents`, for the person who signed it in:
 
@@ -50,9 +68,15 @@ export const noClaude = sanoma.agent({ id: "claude-ai", off: true });
 - **Turn it off.** `sanoma.agent({ id: "<the built-in agent's id>", off: true })` turns that built-in off. The declaration is no agent, and `off` on any other id, or beside a `client` or an `onBehalfOf`, is a problem `sanoma check` reports.
 - **An id already taken.** A person or an agent with a built-in agent's id that does not declare its client keeps that id, and the built-in client is refused while it does; `sanoma check` warns. So `sanoma.agent({ id: "claude-code", client: "claude-code" })` still works on this machine as before, and Claude Code is refused on a host until the agent names the client's URL.
 
-Any other client is let in only as an agent `resources/people.ts` declares for it, by its client id (`sanoma.agent({ id, client })`). A built-in client turned off is refused the same way at authorize, the token endpoint and `/mcp`, with words that say it is turned off rather than where to declare it. A client no agent declares is refused when it asks to sign in, with a page that says where agents are declared and shows the client's id, to declare only for a client you chose to connect yourself (a link anyone sends can name any client); a token is refused (403, `not_admitted`) as soon as its agent's declaration goes or its built-in is turned off, and one for another host's `/mcp`, expired or not this company's is a 401 that sends the client to sign in again.
+### Other clients and bearer tokens
+
+Any other client is let in only as an agent `resources/people.ts` declares for it, by its client id (`sanoma.agent({ id, client })`). A built-in client turned off is refused the same way at authorize, the token endpoint and `/mcp`, with words that say it is turned off rather than where to declare it.
+
+A client no agent declares is refused when it asks to sign in, with a page that says where agents are declared and shows the client's id, to declare only for a client you chose to connect yourself (a link anyone sends can name any client); a token is refused (403, `not_admitted`) as soon as its agent's declaration goes or its built-in is turned off, and one for another host's `/mcp`, expired or not this company's is a 401 that sends the client to sign in again.
 
 A token is taken at `/mcp` alone, as `Authorization: Bearer` (the scheme in any case); a DPoP token is not one (the sign-in issues none), and gets the same 401. The client can end its refresh token itself (RFC 7009 revocation, with its client id alone); signing out of the app's sign-in does not, since that grant is the client's, not the browser's. A browser with a signed-in session still reaches `/mcp` as the person. The `x-sanoma-actor` header means nothing on a host, and `x-sanoma-agent` is refused there (400). An API token (`sca_…`) acts as a visitor and is refused.
+
+## Available tools
 
 It has five tools, as the person or the agent acting for them, the same the app's chat has (`src/server/catalog.ts`, one definition for both):
 
@@ -94,6 +118,8 @@ export default defineConfig({
 Whoever may write the companies collection controls where each company's agent traffic goes: authorization codes, refresh tokens, access tokens and every `/mcp` call for a company are sent to the URL its record holds. Give the write to that collection, in the policy, only to the people and workflows that provision companies.
 
 The router's hostname is its own: `sanoma serve` refuses to start when it is `SANOMA_HOSTNAME` or a public site's domain (`SANOMA_DOMAINS`); a Worker logs it and serves no router.
+
+### Router endpoints
 
 On the router's hostname the app serves these routes and nothing else (any other path is a 404, `/healthz` and the sign-in among them), ahead of every login. On the Worker, the hostname is one more host it answers beside `SANOMA_HOSTNAME` and the sites' domains, and a `cloudflare.host` attaches it ([below](#on-cloudflare)).
 
@@ -176,6 +202,8 @@ export default defineConfig({
 
 Without a value apply reports the problem and leaves the host out of its plan; it never uploads the Worker without the secret, and the Hosting page lists the secret as not stored. Apply refuses a value no router could send before it changes anything, and never shows it. Plans, states and the ledger hold the URL, the company and the secret's name.
 
-Take `agents` out of the data file, or `router` out of the config, and the next apply uploads the Worker without the bindings and detaches the router's hostname. Three things are problems in `sanoma check`: a host with `agents` in a company whose config has a `router` (the one variable cannot hold both secrets); a router's hostname that is a declared host's `hostname` or a site's domain; and, at apply, two hosts that derive in a config with a `router`, since both would attach its hostname. A config with a `router` takes one such host today. A declared host of another type (`docker.container`, say) gets a warning: it attaches no hostname and is given no secret, so route the hostname and set the variable yourself. A container that is running keeps the environment it started with, so after changing `agents` alone, or the secret's value, advance the host's `configurationRevision`. The connector's [README](https://github.com/Sanoma-AI/sanoma/blob/main/connectors/cloudflare/README.md#the-agents-router) has the requests and the refusals.
+Take `agents` out of the data file, or `router` out of the config, and the next apply uploads the Worker without the bindings and detaches the router's hostname. Three things are problems in `sanoma check`: a host with `agents` in a company whose config has a `router` (the one variable cannot hold both secrets); a router's hostname that is a declared host's `hostname` or a site's domain; and, at apply, two hosts that derive in a config with a `router`, since both would attach its hostname.
+
+A config with a `router` takes one such host today. A declared host of another type (`docker.container`, say) gets a warning: it attaches no hostname and is given no secret, so route the hostname and set the variable yourself. A container that is running keeps the environment it started with, so after changing `agents` alone, or the secret's value, advance the host's `configurationRevision`. The connector's [README](https://github.com/Sanoma-AI/sanoma/blob/main/connectors/cloudflare/README.md#the-agents-router) has the requests and the refusals.
 
 Not verified yet: no real Claude client has completed a sign-in that starts at the router's host and continues on a company's. The tests drive the whole flow with their own client, on Node and (for discovery and one `/mcp` call) on workerd. The Cloudflare host's bindings and the router's hostname are tested on its fake and on replies written from Cloudflare's API reference, not on a live account.

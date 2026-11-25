@@ -1,11 +1,13 @@
 ---
 title: The kit and RunForm
-description: "A site imports how its pages look from sanoma/ui, which is this package's sanoma/ui."
+description: "Use Sanoma’s UI components on a site and embed a workflow’s start form."
 sidebar:
   order: 4
 ---
 
-A site imports how its pages look from `sanoma/ui`, which is this package's `sanoma/ui`: the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too: `bg-card`, `text-muted-foreground`, `bg-primary/10`; the app's theme has only its tokens, so Tailwind's default palette, `bg-white` or `text-red-500`, generates nothing there, only in [a site's own stylesheet](/sites/stylesheet/) without [the kit's](/sites/stylesheet/#the-kit-on-a-site)). It is presentational only: nothing in it talks to the running app (its queries, server functions, actor or config), so it could ship as a package of its own. It is an explicit list, and nothing else of the app is public:
+Import visual components from `sanoma/ui`. These are the components the app uses, with no dependency on its actor, queries, server functions, or config. Only the listed components and helpers are public.
+
+Site pages can use the app’s Tailwind theme tokens, including `bg-card`, `text-muted-foreground`, and `bg-primary/10`. The app theme omits the default palette, so `bg-white` and `text-red-500` generate no styles there. To use that palette, give the site [its own stylesheet](/sites/stylesheet/) without importing [the kit’s theme](/sites/stylesheet/#the-kit-on-a-site).
 
 ## What the kit exports
 
@@ -15,12 +17,12 @@ A site imports how its pages look from `sanoma/ui`, which is this package's `san
 
 ## RunForm and useActor
 
-What talks to the app comes from `sanoma/site`, beside `api`:
+Import `RunForm` and `useActor` from `sanoma/site`, alongside `api`. They connect the page to the running app.
 
 - `RunForm({ workflow })`, the app's start form for a workflow, its fields drawn from the workflow's input schema;
 - the hook `useActor()`, who is signed in (`actor`, `groups`, and `signOut` when the login has its own routes; the `ActorState` type).
 
-`RunForm` names the workflow with a link to its page, starts a live run, with the server's complaints shown on the fields they name, and once the run starts stays on the page and links to the run, where its graph, ledger and approvals are. A name the config does not have renders a notice saying so.
+`RunForm` links to the workflow and starts a live run. Validation errors appear beside the affected fields. After the run starts, the form stays on the page and links to the run’s graph, ledger, and approvals. If the config has no workflow with the supplied name, the form displays a notice.
 
 ```tsx
 // sites/launches/routes/index.tsx
@@ -51,8 +53,12 @@ function LaunchDesk() {
 
 ![A site's page in the app: the bar, a Region of Facts and the announce workflow's RunForm](../../../assets/sites/site-page.png)
 
-A site's page inside the app's shell: the kit's `Region` and `Facts`, and `RunForm`, from `sanoma/site`, drawing announce's fields from its schema.
+The page uses `Region` and `Facts` to display the site’s data. The fields in `RunForm` come from the `announce` workflow’s input schema.
 
 ## Sites in the app
 
-With sites, the bar has a tile per site, between Workflows and the Setup group: its `icon` and its title, linking to its first page (its home, when it has one; a site whose every page has a path parameter has none, and no tile), lit on its pages. The build bundles only the Lucide icons the sites' `site.ts` name, so the server renders a site's icon in the page's first paint, and a name Lucide does not have shows the default for its kind. **Data**'s page header leads to **Sites** (`/sites`, the one path under `/sites` no site can take; Data is lit there), which lists each site in a table: its icon and title linking to its home, its app's name for an app's site, its folder, its pages, each named by its route's `staticData.crumb` or its path under the site (a page with a path parameter is left out), and where a public site answers, with its sitemap ([Public sites](/sites/public-sites/)). `sanoma/site` and `sanoma/ui` ship as source (`src/site.ts`, `src/ui.ts`), compiled by Vite in the company's build; they hold nothing server-side (a server function is a fetch in the browser).
+The sidebar shows site tiles between **Workflows** and the Setup group. A tile uses the site’s title and icon and opens its home or first page. A site with parameters on every page has no tile. The tile stays highlighted while you’re on the site. The build includes only the Lucide icons named in `site.ts` and renders them on the first paint. An unknown icon falls back to the default for that kind of site.
+
+Open **Data → Sites** (`/sites`) for the full list. The table shows each site’s folder, its app if applicable, and its pages. Page labels come from `staticData.crumb` or the route path. The list omits pages that require path parameters. For a [public site](/sites/public-sites/), it also shows the address and sitemap. Sanoma reserves `/sites` for this view and highlights **Data** there.
+
+Vite compiles `sanoma/site` and `sanoma/ui` from source (`src/site.ts` and `src/ui.ts`) in the company build. Both entries are browser-safe. A server function call becomes a fetch in the browser.

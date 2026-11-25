@@ -1,9 +1,17 @@
 ---
 title: Start a company
-description: "In an empty directory (dotfiles aside), sanoma init starts a company there, then runs it, as sanoma does there without its options."
+description: "Create a company in an empty directory, run it locally, and find the files for your first workflow."
+next:
+  link: /start/first-workflow/
+  label: Run your first workflow
+prev:
+  link: /start/setup/
+  label: Set up a company
 sidebar:
   order: 1
 ---
+
+Start in a new directory on a machine with Git installed and a Git user configured. The example creates a local company called Maple Street Studio. Substitute your name and sign-in email.
 
 ```sh
 mkdir maple-street && cd maple-street
@@ -12,12 +20,33 @@ npx sanoma init --name "Maple Street Studio" --you "Dana Reyes" --email dana@map
 
 ## What init writes
 
-In an empty directory (dotfiles aside), `sanoma init` starts a company there, then runs it, as `sanoma` does there without its options: it copies the template this package ships (`template/`: `sanoma.config.ts` with the Anthropic connector, the model the app's chat answers on, Resend, which sends sign-in codes (`login.sender`), GitHub, Sanoma Cloud, and the connectors of the chat's coding agents (OpenAI for Codex, OpenCode, Pi; Claude Code and Copilot come with Anthropic's and GitHub's), `secrets.ts` (the bootstrap keys' bindings, and `SANOMA_CLOUD_TOKEN` read from the environment only where it is set, as a host gives it), a `record-lead` workflow with its scenario, `resources/data.ts` (the Outbound board it records to), `resources/sanoma/infra.ts` (the database and host on Sanoma Cloud the company goes live on, the host at the company's address, `<slug>.sanoma.work`, its slug `--name` without its accents, made lower case, each run of other characters a dash, else the directory's name the same way when that leaves nothing (a name in another script); nothing is made until it goes live, and until then a merge deploys nothing), `policies/policy.cedar` (sending or publishing waits for `admin`) and `policies/changes.cedar` (every change waits for `admin`), `resources/people.ts` with you as its one person, in `admin` (named `--you`, else git's `user.name`, with `--email`, else git's `user.email`, as the email a host's sign-in sends codes to; your id is your GitHub login as `gh` is signed in, else this machine's user name), an empty `resources/` tree, `AGENTS.md`, `.env.example`), names the package after the directory, writes `--name` as the config's `name` (the company's name as the app shows it; without it, the package's name stands), writes `.env` with independent new `SANOMA_SIGNING_KEY` and `SANOMA_SECRETS_KEY` values (keeping what a `.env` there already sets; no database URL, so the company runs on [its own Postgres](/hosting/postgres/)), commits what it wrote (never a dotfile that was already there) as the first commit of a git repository on `main`, "Start a Sanoma company", as your git user, then installs with the package manager that ran it (`npm_config_user_agent`; pnpm when it names none), with `sanoma` at its own exact version and each connector the template names at the exact version released with it, and adds the lockfile to that commit.
+`sanoma init` copies the package’s `template/` into an empty directory. Existing dotfiles are allowed. Running `sanoma` there without options also initializes and starts the company.
+
+| File or directory                                    | What you’ll find                                                                                                                                                                                                                          |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sanoma.config.ts`                                   | The app’s Anthropic chat model, Resend for sign-in codes (`login.sender`), GitHub, Sanoma Cloud, and coding-agent connectors for Codex (OpenAI), OpenCode, and Pi. Claude Code and Copilot come with the Anthropic and GitHub connectors. |
+| `resources/data.ts`                                  | The Outbound board where the example `record-lead` workflow saves a lead. The template also includes the workflow’s scenario.                                                                                                             |
+| `resources/people.ts`                                | Your person declaration in the `admin` group.                                                                                                                                                                                             |
+| `policies/policy.cedar` and `policies/changes.cedar` | Sending or publishing waits for `admin` approval. So does every change.                                                                                                                                                                   |
+| `resources/sanoma/infra.ts`                          | The Sanoma Cloud database and host the company will use when it goes live. Until then, a merge deploys nothing.                                                                                                                           |
+| `secrets.ts`                                         | Bootstrap key bindings and an environment binding for `SANOMA_CLOUD_TOKEN` when set, as it is on a host.                                                                                                                                  |
+
+The template also sets up the resource directory structure, `AGENTS.md`, and `.env.example`. Sanoma derives the package name from the directory name. The app displays `--name` when supplied and the package name otherwise. For the host address, `<slug>.sanoma.work`, Sanoma removes accents from the name, lowercases it, and replaces runs of other characters with dashes. It uses the directory name the same way if the company name yields no slug.
+
+`--you` and `--email` default to Git’s `user.name` and `user.email`. The host sends sign-in codes to that email. Your person ID comes from your GitHub login if `gh` is signed in, or from your local username otherwise. Sanoma uses `founder` if that ID is empty, reserved, or already taken.
+
+Sanoma writes independent `SANOMA_SIGNING_KEY` and `SANOMA_SECRETS_KEY` values to `.env`, keeping existing values. With no database URL it runs [its own Postgres](/hosting/postgres/). It commits the generated files on `main` as your Git user, with the message `Start a Sanoma company`. Pre-existing dotfiles stay out of the commit.
+
+The installer uses the package manager named by `npm_config_user_agent`, defaulting to pnpm. It pins Sanoma and each template connector to their exact release versions and adds the lockfile to the first commit.
 
 ## Running it
 
-The `sanoma` it installed then serves the company; the chat asks for the Anthropic key, pasted on its connector page, before its first turn.
+Open the local address printed in the terminal and [run your first workflow](/start/first-workflow/). The sample uses the Outbound collection. If you also want to use chat, open the Anthropic connector page and enter your key before sending a message.
 
 ## When it stops
 
-Without git or a git user it stops before writing anything; a failed install leaves the commit, to install and run `sanoma` again in. A directory holding anything else and no `sanoma.config.ts` is refused, as for every command (`sanoma init` exits 2 there). An `--email` that is no address is refused (exit 2) before anything is written. [Sanoma-AI/company-template](https://github.com/Sanoma-AI/company-template), which Sanoma Cloud's sign-up makes a company from, is this template as each release pushes it there (`release.yml`), at that release's versions with a lockfile.
+If Git or the Git user is missing, setup stops before writing any files. An invalid `--email` also stops setup before any write, with exit code 2. If the directory contains more than dotfiles and has no `sanoma.config.ts`, `sanoma init` refuses it and exits 2.
+
+If dependency installation fails, the initial commit remains. Install the dependencies in that repo and run `sanoma` again.
+
+Sanoma Cloud sign-up uses the same template. The release workflow (`release.yml`) publishes it with pinned versions and a lockfile to [Sanoma-AI/company-template](https://github.com/Sanoma-AI/company-template).

@@ -1,17 +1,25 @@
 ---
 title: Drivers
-description: "A driver implements a connector's operations with defineDriver(connector, { resource."
+description: "Implement connector operations, handle retries safely, and report a vendor’s refusal."
 sidebar:
   order: 3
 ---
 
-A driver implements a connector's operations with `defineDriver(connector, { resource: { name: (input, call) => … } })`, typed by the connector's schemas, and its package attaches it to the connector it exports (`withSetup`). `call` carries `idempotencyKey`, the same on every retry and replay of one call: pass it to the vendor (or dedupe on it) so a crash between the vendor's reply and the checkpoint does not repeat the side effect. It carries the authenticated `principal` and selected `connection` metadata, and `secrets` too, the store `secret()` markers name (see [Secrets](/hosting/secrets/#secrets)), and `by`, who the call is made as (`run:<id>` inside a run). A driver reads its credentials when it is called, never from the config, and declares them (see [Credentials](/workflows/credentials/)).
+A driver implements the operations a connector declares. Use `defineDriver(connector, { resource: { name: (input, call) => … } })` to type the implementation against the connector’s schemas. Attach the driver to the exported connector with `withSetup`.
+
+Pass `call.idempotencyKey` to the vendor or use it to deduplicate calls. The key stays the same across retries and replays. If the worker stops after the vendor responds but before the result is checkpointed, the same key protects against repeating the side effect.
+
+The call includes the authenticated `principal`, selected `connection` metadata, and `by` (the identity making the call, `run:<id>` inside a run). Its `secrets` store resolves `secret()` markers. Declare credentials and read them at call time. See [Secrets](/hosting/secrets/#secrets) and [Credentials](/workflows/credentials/).
 
 ## Errors
 
-When the vendor says no, throw a `DriverError(message, { retryable, status?, vendorCode? })`. An operation declared `idempotent` is tried up to three times (after 1 and 2 seconds) unless the error says `retryable: false` or the reply fails the output schema; any other operation is tried once. When the tries run out, the run fails with the last try's error, not a wrapper: for a `DriverError`, `errorCode(err)` is `"driver_failed"` and the ledger records the vendor's message, status and code. Anything else a driver throws (a `TypeError`, a plain `Error`) fails the run as it is, with no code.
+When the vendor refuses a call, throw `DriverError(message, { retryable, status?, vendorCode? })`. Sanoma attempts an `idempotent` operation up to three times, waiting 1 second before the second attempt and 2 seconds before the third. A nonretryable error (`retryable: false`) or a response that fails the output schema stops retries. Other operations get one attempt.
 
-An error that holds a value the driver read (through `call.secrets`, a `secret()` marker, or a variable its `env` declares, eight characters or more) anywhere in its message, stack, cause or properties is replaced before it is recorded or thrown: a `DriverError` with that message, each value as `[redacted]`, keeping only what a `DriverError` said of itself (`status`, `vendorCode`, and `retryable`, which is false otherwise). An error that ends the run (a cancellation) is left as it is. A named connection's driver error is already replaced by `<vendor> operation failed`. A result is recorded as the driver returns it: a driver that returns what it read is trusted to.
+If all attempts fail, the run reports the last error. For a `DriverError`, `errorCode(err)` returns `"driver_failed"` and the ledger records the vendor’s message, status, and code. Other exceptions, such as `TypeError` or a plain `Error`, propagate without a code.
+
+An error that holds a value the driver read (through `call.secrets`, a `secret()` marker, or a variable its `env` declares, eight characters or more) anywhere in its message, stack, cause or properties is replaced before it is recorded or thrown: a `DriverError` with that message, each value as `[redacted]`, keeping only what a `DriverError` said of itself (`status`, `vendorCode`, and `retryable`, which is false otherwise). An error that ends the run (a cancellation) is left as it is.
+
+A named connection's driver error is already replaced by `<vendor> operation failed`. A result is recorded as the driver returns it: a driver that returns what it read is trusted to.
 
 ## Calling Cloud workflows
 
