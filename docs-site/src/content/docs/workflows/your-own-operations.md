@@ -31,7 +31,7 @@ Sanoma loads default-exported operations from `operations/` alongside workflows.
 
 `uses` lists connectors' and collections' operations only, and its `ctx` holds those and nothing else. An approval, a sleep and `ctx.all` are a workflow's, around operations, and so is another company operation: `defineOperation` refuses each (`defineOperation("quote"): uses lists operations only; …`). Its effect is the strongest of what it uses, in the order read, write, publish, send, money, access, and `read` with none; it is idempotent when all of them are.
 
-Its body is held to a workflow body's rules: the [lint](/reference/files/#the-lint) checks each file of `operations/` as it checks a workflow's (its imports, and what the outline cannot draw), and the worker reads the operation's outline from its file when it starts, refusing to start without it. A file of `operations/` may import `resources/data.ts` and the files beside it; a workflow may import the files of `operations/`, the root's or an app's.
+Its body is held to a workflow body's rules: the [lint](/reference/files/#the-lint) checks each file of `operations/` as it checks a workflow's (its imports, and what the outline cannot draw), and the worker reads the operation's outline from its file when it starts, refusing to start without it. A file of `operations/` may import `resources/data.ts` and the files beside it; a workflow may import the files of `operations/`, the root's or an app's. So put a helper that an operation shares with workflows in `operations/`: a workflow may import it from there, and an operation may not import from `workflows/`.
 
 ## In a workflow
 
@@ -63,7 +63,7 @@ A page calls an operation directly, in one request, with no run to poll: `api.op
 
 It may when every operation it uses may be called directly (`isDirect`: a collection's operations and a vendor's reads); one that uses a vendor's write is a workflow's step, which `sanoma check` says of a page that calls it, naming what keeps it from one ("which a page may not call directly, since it calls ghost.post.create: start a workflow that uses it"), and so does a direct call's refusal, and the generated `api` leaves it out.
 
-Its body runs on the server, as the person on the page ([direct calls](/workflows/direct-calls/)), so the Worker build refuses a file of `operations/` that imports what workerd does not have, as it refuses a site's, and the lint refuses `sanoma/invoices/pdf` in one: render a PDF in a workflow.
+Its body runs on the server, as the person on the page ([direct calls](/workflows/direct-calls/)), so the Worker build refuses a file of `operations/` that imports what workerd does not have, as it refuses a site's, and the lint refuses `sanoma/invoices/pdf` in one: render a PDF in a workflow. Its `ctx.startedBy` is the caller, as it is in a run, an api token's `subject` included.
 
 The policy decides the call as the person, its action `operations.quote.run`, then decides each call the body makes as a call in a run, with the operation's id where a run's workflow is. A deny of the operation, or of a call inside, throws `policy_denied`. A hold of either holds the whole operation: the call becomes a run of the built-in `call` workflow, which runs the operation once approved, and the page gets `approval_pending` with its run.
 

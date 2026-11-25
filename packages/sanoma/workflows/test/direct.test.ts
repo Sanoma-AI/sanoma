@@ -115,10 +115,22 @@ const follow = defineOperation({
   },
 });
 
+/** A lead owned by whoever calls, by account (`startedBy.subject`, else their id): a company operation that writes. */
+const claim = defineOperation({
+  name: "claim",
+  input: z.object({ company: z.string() }),
+  uses: [outbound.save],
+  run: async (ctx, { company }) => {
+    const owner = ctx.startedBy.subject ?? ctx.startedBy.id;
+    await ctx.data.outbound.save({ record: { company, contact: "ada@claim.test", stage: "researched", owner } });
+    return { owner };
+  },
+});
+
 /**
  * Allows, but denies a lead `lost` and holds one `won` for `lead`, and holds a pair that ends at a
  * `meeting`; lets `anonymous` look a lead up, and holds its read of the customer `Held` for `lead`;
- * lets a visitor save the lead `Tokened`.
+ * lets a visitor save the lead `Tokened` and claim a lead.
  */
 const root = rootWith({
   "policies/policy.cedar": `@reason("leads are not lost")
@@ -138,6 +150,8 @@ permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"data.outbound.save", resource)
 when { context.input.record.company == "Tokened" };
 
+permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"operations.claim.run", resource);
+
 @hold("lead")
 forbid (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"acme.customer.get", resource)
 when { context.input.id == "Held" };
@@ -153,7 +167,7 @@ const config: SanomaConfig = {
   workflows: [],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
-  operations: [lookup, pair, relabel, follow],
+  operations: [lookup, pair, relabel, follow, claim],
   root,
 };
 const lead = (company: string, stage = "researched") => ({
@@ -842,6 +856,29 @@ describe("a direct call", () => {
       expect(await rows()).toHaveLength(1);
     });
 
+    it("runs as an api token with its subject, as a run does, a person's as their id alone", async () => {
+      const subject = "visitor:better-auth:u2";
+      const { id, token } = await client.tokens.mint({ subject, groups: ["visitors"] });
+      const { principal: actor } = (await client.tokens.resolve(token))!;
+      const mine = { company: "Mine" };
+      expect(await client.call("operations.claim.run", mine, { actor, id: "c1" })).toEqual({ owner: subject });
+      expect(await client.call("operations.claim.run", { company: "Ours" }, { actor: ada, id: "c2" })).toEqual({
+        owner: "ada",
+      });
+      expect((await rows()).map((r) => [r.key, r.record.owner, r.updatedBy])).toEqual([
+        ["Mine", subject, actor.id],
+        ["Ours", "ada", "ada"],
+      ]);
+      // The same id from the same token answers what was recorded, and makes nothing more.
+      expect(await client.call("operations.claim.run", mine, { actor, id: "c1" })).toEqual({ owner: subject });
+      expect(await records()).toHaveLength(4);
+      // Revoked, it calls nothing.
+      await client.tokens.revoke({ id });
+      expect(await failure(client.call("operations.claim.run", mine, { actor, id: "c1" }))).toMatchObject({
+        code: "not_admitted",
+      });
+    });
+
     it("holds a visitor's operation whose call inside a forbid holds, as a run of call", async () => {
       const held = randomUUID();
       const runId = `call:anonymous:${held}`;
@@ -903,6 +940,7 @@ describe("the built-in call workflow in a config", () => {
       "data.outbound.list",
       "data.outbound.save",
       "data.outbound.saveMany",
+      "operations.claim.run",
       "operations.follow.run",
       "operations.lookup.run",
       "operations.pair.run",

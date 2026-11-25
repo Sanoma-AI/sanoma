@@ -118,7 +118,7 @@ describe("lintWorkflow", () => {
       ["../resources/github.ts", "../resources/area/data.ts", "../sanoma.config.ts"].map((spec) =>
         expect.stringMatching(
           new RegExp(
-            `^import "${spec.replaceAll(".", "\\.")}" .*outside workflows/.*only resources/data\\.ts \\(the collections, the root's or an app's apps/<app>/resources/data\\.ts\\) and the files of operations/ \\(the company's operations, the root's or an app's\\) may be imported$`,
+            `^import "${spec.replaceAll(".", "\\.")}" is not allowed in a workflow: it reaches outside workflows/.*only resources/data\\.ts \\(the collections, the root's or an app's apps/<app>/resources/data\\.ts\\) and the files of operations/ \\(the company's operations, the root's or an app's\\) may be imported$`,
           ),
         ),
       ),
@@ -159,7 +159,7 @@ describe("lintWorkflow", () => {
       ["../workflows/offer.ts", "../resources/github.ts"].map((spec) =>
         expect.stringMatching(
           new RegExp(
-            `^import "${spec.replaceAll(".", "\\.")}" .*outside operations/.*only resources/data\\.ts \\(the collections, the root's or an app's apps/<app>/resources/data\\.ts\\) may be imported$`,
+            `^import "${spec.replaceAll(".", "\\.")}" is not allowed in an operation: it reaches outside operations/.*only resources/data\\.ts \\(the collections, the root's or an app's apps/<app>/resources/data\\.ts\\) may be imported$`,
           ),
         ),
       ),
@@ -169,7 +169,7 @@ describe("lintWorkflow", () => {
   it("refuses sanoma/invoices/pdf in an operation, which may answer a page on the Worker, and allows it in a workflow", () => {
     const pdf = `import { renderInvoice } from "sanoma/invoices/pdf";`;
     const refused = [
-      'import "sanoma/invoices/pdf" is not allowed in a workflow: an operation may answer a page on the Worker, which has no PDF renderer: render it in a workflow',
+      'import "sanoma/invoices/pdf" is not allowed in an operation: it may answer a page on the Worker, which has no PDF renderer: render it in a workflow',
     ];
     expect(messages(pdf, "/repo/operations/invoice.ts")).toEqual(refused);
     expect(messages(pdf, "/repo/apps/crm/operations/invoice.ts")).toEqual(refused);
@@ -239,7 +239,7 @@ describe("lintWorkflow", () => {
         export * from "sanoma/workflows";
       `),
     ).toEqual([
-      expect.stringMatching(/^SanomaClient is not allowed in a workflow: .*approve its own approvals/),
+      expect.stringMatching(/^SanomaClient is not allowed in a workflow: .*approve a run's own approvals/),
       expect.stringMatching(/^startWorker is not allowed in a workflow/),
       expect.stringMatching(/^startApp is not allowed in a workflow/),
       expect.stringMatching(/^SanomaClient is not allowed in a workflow/),

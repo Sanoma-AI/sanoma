@@ -14,7 +14,7 @@ export type { LintProblem } from "./ast.ts";
  * import rules oxlint's built-in rules cannot express; the clock, randomness, the network
  * and the environment are oxlint's (the package's `oxlint.json`).
  */
-const THROUGH_CTX = "a workflow must call vendors through ctx, so the policy sees every call";
+const THROUGH_CTX = "vendors are called through ctx, so the policy sees every call";
 
 /**
  * The specifiers the author surface is imported from, each allowing the same names: `sanoma`
@@ -53,8 +53,8 @@ const WORKFLOW_IMPORTS: readonly string[] =
 const ALLOWED_NAMES = new Set(WORKFLOW_IMPORTS);
 
 const NOT_ALLOWED =
-  `a workflow imports only ${WORKFLOW_IMPORTS.join(", ")} and types from ` +
-  `${AUTHOR_PACKAGES.join(" or ")}: the rest could start runs, approve its own approvals, forge the ledger or read credentials`;
+  `import only ${WORKFLOW_IMPORTS.join(", ")} and types from ` +
+  `${AUTHOR_PACKAGES.join(" or ")}: the rest could start runs, approve a run's own approvals, forge the ledger or read credentials`;
 
 /**
  * Error classes a run must not test with `instanceof`: on a replay DBOS rethrows a serialized
@@ -95,26 +95,27 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   const { program, at } = read;
   const problems = [...read.problems];
   const root = filename === undefined ? undefined : kindDirOf(filename, ["workflows", "operations"]);
+  const kind = root !== undefined && basename(root) === "operations" ? "an operation" : "a workflow";
 
   const checkSource = (node: Node) => {
     const spec: string = node.source.value;
     const refusal = whyRefused(spec, filename, root);
     if (refusal) {
-      problems.push({ ...at(node.source.start), message: `import "${spec}" is not allowed in a workflow: ${refusal}` });
+      problems.push({ ...at(node.source.start), message: `import "${spec}" is not allowed in ${kind}: ${refusal}` });
       return;
     }
     if (!AUTHOR_PACKAGES.includes(spec)) return;
     if (node.type === "ExportAllDeclaration") {
       problems.push({
         ...at(node.start),
-        message: `export * from "${spec}" is not allowed in a workflow: it would re-export what a workflow may not import`,
+        message: `export * from "${spec}" is not allowed in ${kind}: it would re-export what ${kind} may not import`,
       });
     }
     for (const s of node.specifiers ?? []) {
       if (s.type === "ImportNamespaceSpecifier") {
         problems.push({
           ...at(s.start),
-          message: `import * from "${spec}" is not allowed in a workflow: import the names you use, so the rest stays out`,
+          message: `import * from "${spec}" is not allowed in ${kind}: import the names you use, so the rest stays out`,
         });
         continue;
       }
@@ -131,7 +132,7 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
       const named = s.imported ?? s.local;
       const imported: string = s.type === "ImportDefaultSpecifier" ? "default" : (named?.name ?? named?.value);
       if (!ALLOWED_NAMES.has(imported)) {
-        problems.push({ ...at(s.start), message: `${imported} is not allowed in a workflow: ${NOT_ALLOWED}` });
+        problems.push({ ...at(s.start), message: `${imported} is not allowed in ${kind}: ${NOT_ALLOWED}` });
       }
     }
   };
@@ -146,7 +147,7 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
     ) {
       checkSource(node);
     } else if (node.type === "ImportExpression") {
-      problems.push({ ...at(node.start), message: "dynamic import is not allowed in a workflow" });
+      problems.push({ ...at(node.start), message: `dynamic import is not allowed in ${kind}` });
     } else if (node.type === "BinaryExpression" && node.operator === "instanceof") {
       checkInstanceof(node);
     }
@@ -166,7 +167,7 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
       problems.push({
         ...at(node.start),
         message:
-          `instanceof ${name} is not allowed in a workflow: on a replay DBOS rethrows a copy of the error, ` +
+          `instanceof ${name} is not allowed in ${kind}: on a replay DBOS rethrows a copy of the error, ` +
           "which is no instance of it, so the run would take another branch; read `errorCode(err)`",
       });
     }
@@ -218,7 +219,7 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
   }
   // `@react-pdf/renderer`, which it loads, is left out of the Worker's bundle.
   if (spec === "sanoma/invoices/pdf" && root !== undefined && basename(root) === "operations") {
-    return "an operation may answer a page on the Worker, which has no PDF renderer: render it in a workflow";
+    return "it may answer a page on the Worker, which has no PDF renderer: render it in a workflow";
   }
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
   for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
