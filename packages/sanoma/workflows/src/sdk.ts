@@ -24,6 +24,13 @@ type Schema = Record<string, unknown>;
 type Refs = ReadonlyMap<unknown, unknown>;
 
 /**
+ * What an input's `$ref` names: nothing, so it is `unknown`. A resource type's state is described
+ * as an output (`describe.ts`), which an input holding it need not match: a default makes its key
+ * optional, a pipe takes another type.
+ */
+const INPUT_REFS: Refs = new Map();
+
+/**
  * `.sanoma/api.ts` for a description: one record type per collection, and `CompanyApi` (not `Api`,
  * which inside `declare module "sanoma/site"` is the module's own), one member per
  * workflow (`apiNameOf`), per vendor of the operations a person may call directly (`OpEntry.direct`,
@@ -39,7 +46,7 @@ export function generateApi(description: ConfigDescription): { source: string; p
   for (const wf of description.workflows) {
     const taken = wf.problems.filter((p) => p.message.startsWith(API_NAME_PROBLEM));
     if (taken.length) problems.push(...taken.map((p) => problemLine({ file: wf.file, ...p })));
-    else members.push(workflowMember(wf, refs));
+    else members.push(workflowMember(wf));
   }
   // The ops are sorted by id, so by vendor and then resource.
   const direct = description.ops.filter((op) => op.direct && op.vendor !== DATA_VENDOR);
@@ -77,7 +84,7 @@ export function generateApi(description: ConfigDescription): { source: string; p
     "// The types of `api` from sanoma/site: what a site may call, as the person on the page.",
     'import type { CollectionApi, OpFn, WorkflowFn } from "sanoma/site";',
     ...description.collections.map(
-      (c) => `\n${jsdoc(`A record of ${c.title ?? c.name}.`)}type ${recordName(c)} = ${typeOf(c.record, refs)};`,
+      (c) => `\n${jsdoc(`A record of ${c.title ?? c.name}.`)}type ${recordName(c)} = ${typeOf(c.record, INPUT_REFS)};`,
     ),
     "",
     `interface CompanyApi ${block(members)}`,
@@ -131,19 +138,22 @@ async function writeChanged(file: string, text: string): Promise<boolean> {
   return true;
 }
 
-const workflowMember = (wf: WorkflowEntry, refs: Refs) =>
+const workflowMember = (wf: WorkflowEntry) =>
   member(
     `${wf.title ?? wf.name}: the workflow \`${wf.name}\`${wf.builtin ? ", built in" : ""}.`,
     apiNameOf(wf.name),
-    `WorkflowFn<${typeOf(wf.input, refs)}, unknown>`,
+    `WorkflowFn<${typeOf(wf.input, INPUT_REFS)}, unknown>`,
   );
 
-/** An operation's member: its input and its output typed from their schemas (`unknown` for one it does not declare). */
+/**
+ * An operation's member: its input and its output typed from their schemas (`unknown` for one it
+ * does not declare), the output with `undefined` when it is optional (`OpEntry.optionalOutput`).
+ */
 const opMember = (op: OpEntry, refs: Refs) =>
   member(
     `${op.description ? `${op.description}\n\n` : ""}\`${op.id}\`, a ${op.effect}.`,
     op.name,
-    `OpFn<${typeOf(op.input, refs)}, ${typeOf(op.output, refs)}>`,
+    `OpFn<${typeOf(op.input, INPUT_REFS)}, ${union([typeOf(op.output, refs), ...(op.optionalOutput ? ["undefined"] : [])])}>`,
   );
 
 const collectionDoc = (c: CollectionEntry) =>
@@ -161,10 +171,11 @@ const recordName = (c: CollectionEntry) =>
 
 /**
  * A JSON Schema as a TypeScript type, for the kinds a start form draws (`fieldsOf` in the app):
- * strings (a date-time among them), numbers, integers, booleans, enums and constants, objects
- * (one with no `properties` a record of its `additionalProperties`) and arrays, each property with
- * its description, and unions of those, `null` among them (a collection's date, a date or a
- * date-time; a nullable field), and a `$ref` to a schema of `refs` as that schema; anything else
+ * strings (a date-time among them, but not a file's), numbers, integers, booleans, enums and
+ * constants, objects (one with no `properties` a record of its `additionalProperties`), arrays and
+ * tuples (`prefixItems`), each property with its description, and unions of those (`anyOf`, or
+ * `oneOf` as Zod writes a discriminated union), `null` among them (a collection's date, a date or
+ * a date-time; a nullable field), and a `$ref` to a schema of `refs` as that schema; anything else
  * is `unknown`.
  */
 const typeOf = (schema: unknown, refs: Refs): string => union(alternatives(schema, refs));
@@ -173,6 +184,12 @@ const typeOf = (schema: unknown, refs: Refs): string => union(alternatives(schem
 function union(types: string[]): string {
   const distinct = new Set(types);
   return distinct.has("unknown") ? "unknown" : [...distinct].join(" | ");
+}
+
+/** `union`, in parentheses when it is one of several, to stand before `[]` or `?`. */
+function grouped(types: string[]): string {
+  const type = union(types);
+  return new Set(types).size > 1 && type !== "unknown" ? `(${type})` : type;
 }
 
 /** The types a schema allows, one per alternative. */
@@ -185,13 +202,15 @@ function alternatives(schema: unknown, refs: Refs): string[] {
   if (Array.isArray(schema.enum) && schema.enum.length && schema.enum.every((v) => v === null || !isObject(v))) {
     return schema.enum.map((v) => JSON.stringify(v));
   }
-  if (Array.isArray(schema.anyOf) && schema.anyOf.length) return schema.anyOf.flatMap((one) => alternatives(one, refs));
+  const options = schema.anyOf ?? schema.oneOf;
+  if (Array.isArray(options) && options.length) return options.flatMap((one) => alternatives(one, refs));
   if (Array.isArray(schema.type) && schema.type.length) {
     return schema.type.flatMap((type) => alternatives({ ...schema, type }, refs));
   }
   switch (schema.type) {
     case "string":
-      return ["string"];
+      // A file (`z.file()`) is a `File`, not a string.
+      return [schema.format === "binary" ? "unknown" : "string"];
     case "number":
     case "integer":
       return ["number"];
@@ -200,9 +219,14 @@ function alternatives(schema: unknown, refs: Refs): string[] {
     case "null":
       return ["null"];
     case "array": {
-      const items = alternatives(schema.items, refs);
-      const item = union(items);
-      return [new Set(items).size > 1 && item !== "unknown" ? `(${item})[]` : `${item}[]`];
+      const rest = `${grouped(alternatives(schema.items, refs))}[]`;
+      if (!Array.isArray(schema.prefixItems)) return [rest];
+      // A tuple: its first `minItems` elements, the others of `prefixItems` optional, then `items` unless it is `false`.
+      const min = typeof schema.minItems === "number" ? schema.minItems : 0;
+      const elements = schema.prefixItems.map((one, i) =>
+        i < min ? typeOf(one, refs) : `${grouped(alternatives(one, refs))}?`,
+      );
+      return [`[${[...elements, ...(schema.items === false ? [] : [`...${rest}`])].join(", ")}]`];
     }
     case "object":
       return [

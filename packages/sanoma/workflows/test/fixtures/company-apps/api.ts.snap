@@ -40,7 +40,77 @@ interface CompanyApi {
     page?: string;
     plan?: {
       collection: string;
-      changes: unknown[];
+      changes: ({
+        kind: "add";
+        field: string;
+        type: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        required: boolean;
+        empty: number;
+      } | {
+        kind: "rename";
+        from: string;
+        to: string;
+      } | {
+        kind: "retype";
+        field: string;
+        to: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        decision?: "keep" | "clear";
+        from: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        wontConvert: {
+          count: number;
+          sample: {
+            key: string;
+            value: unknown;
+          }[];
+        };
+      } | {
+        kind: "require";
+        field: string;
+        empty: number;
+      } | {
+        kind: "hide";
+        field: string;
+        filled: number;
+      } | {
+        kind: "show";
+        field: string;
+        filled: number;
+      } | {
+        kind: "remove";
+        field: string;
+        filled: number;
+      } | {
+        kind: "convert";
+        field: string;
+        key: string;
+        to: string;
+        type: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        decision?: "keep" | "clear";
+        filled: number;
+        wontConvert: {
+          count: number;
+          sample: {
+            key: string;
+            value: unknown;
+          }[];
+        };
+      })[];
       rows: number;
     };
     save?: string;
@@ -57,7 +127,25 @@ interface CompanyApi {
     project?: string;
   }, unknown>;
   /** Follow the repository's host: the workflow `follow`, built in. */
-  follow: WorkflowFn<unknown, unknown>;
+  follow: WorkflowFn<{
+    kind: "pushed";
+    repo: {
+      owner: string;
+      name: string;
+    };
+    branch: string;
+    head: string;
+  } | {
+    kind: "closed";
+    repo: {
+      owner: string;
+      name: string;
+    };
+    branch: string;
+    number: number;
+    merged: boolean;
+    sha?: string;
+  }, unknown>;
   /** Go live: the workflow `go-live`, built in. */
   goLive: WorkflowFn<{
     owner: string;
@@ -95,7 +183,77 @@ interface CompanyApi {
     rename?: Record<string, string | null>;
     plan?: {
       collection: string;
-      changes: unknown[];
+      changes: ({
+        kind: "add";
+        field: string;
+        type: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        required: boolean;
+        empty: number;
+      } | {
+        kind: "rename";
+        from: string;
+        to: string;
+      } | {
+        kind: "retype";
+        field: string;
+        to: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        decision?: "keep" | "clear";
+        from: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        wontConvert: {
+          count: number;
+          sample: {
+            key: string;
+            value: unknown;
+          }[];
+        };
+      } | {
+        kind: "require";
+        field: string;
+        empty: number;
+      } | {
+        kind: "hide";
+        field: string;
+        filled: number;
+      } | {
+        kind: "show";
+        field: string;
+        filled: number;
+      } | {
+        kind: "remove";
+        field: string;
+        filled: number;
+      } | {
+        kind: "convert";
+        field: string;
+        key: string;
+        to: string;
+        type: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        decision?: "keep" | "clear";
+        filled: number;
+        wontConvert: {
+          count: number;
+          sample: {
+            key: string;
+            value: unknown;
+          }[];
+        };
+      })[];
       rows: number;
     };
   }, unknown>;

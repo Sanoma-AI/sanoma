@@ -289,6 +289,8 @@ export const OpEntrySchema = z.strictObject({
   input: JsonSchema,
   /** What a call returns once its schema has parsed the vendor's reply (`io: "output"`). */
   output: JsonSchema,
+  /** True when a call may answer nothing, `undefined`: its output is optional (`.optional()`, `.nullish()`), which JSON Schema cannot say. */
+  optionalOutput: z.literal(true).optional(),
   /** For a company operation: the app whose folder defines it (`apps/<app>/operations/`); absent for one at the root. */
   app: z.string().optional(),
   /** For a company operation: the operation ids it may call, in the order declared. */
