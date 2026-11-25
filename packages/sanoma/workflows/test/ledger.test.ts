@@ -5,9 +5,11 @@ import { join } from "node:path";
 import { testDatabaseUrl } from "sanoma/testing";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   allowAll,
   defineConnector,
+  defineWorkflow,
   errorCode,
   jsonlLedger,
   type LedgerRecord,
@@ -196,6 +198,42 @@ describe("postgresLedger", () => {
     await expect(store.read("closing")).rejects.toThrow("the ledger store is closed");
     await store.close();
     expect(end).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a workflow's opaque output", () => {
+  it("is the starter's from the result, and `<name>` in the run's ledger, in each item of a list on the way", async () => {
+    const box = defineWorkflow({
+      name: "box",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [],
+      opaque: ["url", "links.token"],
+      run: async () => ({
+        url: "https://box.test/?sig=abc",
+        expiresAt: "2026-11-25T13:00:00Z",
+        links: [{ token: "t1" }],
+      }),
+    });
+    // On a database of its own: another version of the app on the file's would be the latest.
+    const config = { ...minimal(testDatabaseUrl("ledger_opaque")), workflows: [box] };
+    const worker = await startWorker(config);
+    const client = await SanomaClient.connect(config);
+    try {
+      const runId = await client.start(box, {}, { startedBy: { id: "alice" } });
+      expect(await client.result(runId)).toEqual({
+        url: "https://box.test/?sig=abc",
+        expiresAt: "2026-11-25T13:00:00Z",
+        links: [{ token: "t1" }],
+      });
+      const finished = (await client.ledger(runId)).find((r) => r.type === "run.finished");
+      expect(finished).toMatchObject({
+        output: { url: "<url>", expiresAt: "2026-11-25T13:00:00Z", links: [{ token: "<token>" }] },
+      });
+    } finally {
+      await client.close();
+      await worker.stop();
+    }
   });
 });
 

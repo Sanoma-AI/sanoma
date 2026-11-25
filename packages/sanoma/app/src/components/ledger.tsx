@@ -204,7 +204,7 @@ export const LedgerRow = memo(function LedgerRow({
             />
           )}
           <Expandable label="Input" value={record.input} open={record.workflow === LOGIN_CODE_WORKFLOW} redacted />
-          {"output" in record && <Expandable label="Output" value={record.output} />}
+          {"output" in record && <Expandable label="Output" value={record.output} redacted />}
         </>
       );
       break;
@@ -263,7 +263,7 @@ export const LedgerRow = memo(function LedgerRow({
       kind = "finished";
       // The built-in plan's output as apply's approval shows it.
       const plan = record.workflow === PLAN_WORKFLOW ? asApplyPlan(record.output) : undefined;
-      body = plan ? <ApplyPlanView plan={plan} /> : <Expandable label="Output" value={record.output} />;
+      body = plan ? <ApplyPlanView plan={plan} /> : <Expandable label="Output" value={record.output} redacted />;
       break;
     }
     case "run.failed":

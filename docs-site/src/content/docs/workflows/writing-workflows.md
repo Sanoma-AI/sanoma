@@ -44,6 +44,25 @@ export default defineWorkflow({
 
 A workflow's `trigger` is `"manual"` or `{ schedule, timezone? }` (`Trigger`): a five-field cron expression in an IANA time zone, UTC without one. The worker of the app's latest version keeps DBOS's schedules to the config's, one per scheduled workflow named `<app>/<workflow>` on the app's queue, deleting those no longer declared; a tick missed while the instance was stopped fires once when it starts again. Each tick is a run of the workflow under its own name (run id `sched-<app>/<workflow>-<time>`, its `run.started` record's `scheduledFor`), started by the runtime's `schedule` agent with the input `{}`, so `defineWorkflow` refuses a schedule for a workflow whose input refuses `{}`. The policy decides the start as it would a manual start by that agent (`workflow:<name>`, the principal `schedule`, in `agents`): a deny fails the run with its reason, and so does a hold, since a schedule waits for no approval. `nextFire(schedule, timezone, from)` is when a cron fires next, as DBOS's scheduler finds it, and `nextScheduledFire(resolved, from)` the earliest over a config's workflows. A scheduled workflow can still be started by hand.
 
+## Output for the starter alone
+
+A run's output is in its `run.finished` record, which everyone who reads the ledger sees. A field that is for the run's starter alone, such as a short-lived link or a token, is named in `opaque`, with the same paths as an operation's: a dotted path goes into a field, and into each item of a list it holds.
+
+```ts
+export default defineWorkflow({
+  name: "box-open",
+  trigger: "manual",
+  input: z.object({ name: z.string() }),
+  uses: [boxes.box.open],
+  opaque: ["url"],
+  run: async (ctx, { name }) => ctx.boxes.box.open({ name }), // { id, url, expiresAt }
+});
+```
+
+The operation the field comes from declares it `opaque` too (`box.open` here), or the value sits in that operation's `op.called` record.
+
+`<api>.result` answers the run's output as it is to the run's starter: the same principal, and for an agent, acting for the same person. An opaque field is only readable by a starter with an identity: a signed-in person or visitor, an API token, or an agent acting for a person; every visitor who is not signed in is one `anonymous`, so their own run's field is hidden from them too. Every other read shows each `opaque` field as `"<url>"`: `.result` asked by anyone else, `.latest`, `.ledger`, the app's run page and `/mcp`'s `wait_run`. `defineWorkflow` refuses a path that is not names joined by dots. A workflow declares no output schema, so `sanoma check` cannot tell a path the output never has: such a path hides nothing. The real output stays in the database's record of the run, which `client.result(runId)` reads for code on the server.
+
 ## Describing the vendor
 
 A third argument says who the vendor is, so the app can show it: `defineConnector("shop", specs, { title: "Shop", logo: { svg, dark }, package, homepage })`. `logo.svg` is the vendor's mark as inline SVG markup, one `<svg>…</svg>` element (`defineConnector` refuses anything else, such as a file path or a URL), and `logo.dark` its variant for dark backgrounds, if it has one. The app shows a logo before each of the vendor's operations, in graphs and lists, and only ever as an image (`<img>` with a `data:` URL), where an SVG's scripts and external references never run or load. A vendor with no logo is shown by its operations' ids alone, as before. `package` is the connector's npm package name (`"@sanoma-ai/connector-resend"`), which the app's Connectors page links to on npm.

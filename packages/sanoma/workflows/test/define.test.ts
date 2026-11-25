@@ -35,6 +35,18 @@ describe("defineWorkflow", () => {
     );
   });
 
+  it("takes opaque paths of its output, names joined by dots, and refuses anything else", () => {
+    expect(defineWorkflow({ ...announce, name: "boxed", opaque: ["url", "links.token"] }).opaque).toEqual([
+      "url",
+      "links.token",
+    ]);
+    for (const opaque of [["links."], [""], ["a b"], "url", [7]]) {
+      expect(() => defineWorkflow({ ...announce, name: "boxed", opaque: opaque as never }), String(opaque)).toThrow(
+        'Workflow "boxed": opaque lists paths of its output, names joined by dots, such as ["url", "box.token"]',
+      );
+    }
+  });
+
   it("takes a schedule as its trigger: five cron fields, in an IANA time zone when it names one", () => {
     expect(at({ schedule: "0 9 * * 1-5", timezone: "Europe/Amsterdam" })().trigger).toEqual({
       schedule: "0 9 * * 1-5",

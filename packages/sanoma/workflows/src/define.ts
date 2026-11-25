@@ -314,6 +314,13 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
   /** Every operation and built-in the workflow may call. `ctx` is built from this list and nothing else. */
   readonly uses: U;
   readonly run: (ctx: Ctx<U>, input: z.output<S>) => Promise<unknown>;
+  /**
+   * Fields of its output for the one who started the run alone (a short-lived link, a token):
+   * `.result` answers them to the run's starter, and the ledger, the run's page and every other
+   * read show each as `"<name>"`. Paths as an operation's `opaque`: a dotted path goes into a
+   * field, and into each item of a list it holds.
+   */
+  readonly opaque?: readonly string[];
   /** Only the runtime starts it, through the client's own methods; a company workflow may not set it. */
   readonly internal?: true;
   /**
@@ -414,6 +421,9 @@ export function defineOperation<const N extends string, const U extends readonly
   >;
 }
 
+/** A path `opaque` takes: names joined by dots, none empty (`url`, `box.url`). */
+const OPAQUE_PATH = /^[^.\s]+(\.[^.\s]+)*$/;
+
 /**
  * Defines a workflow in its own file. Its `name` is a lowercase letter, then lowercase letters,
  * digits and dashes; in an app's folder (`apps/<app>/`, `appOfFile`) the runtime names it
@@ -426,6 +436,14 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
     throw new Error(`Workflow name "${def.name}" must be lowercase letters, digits and dashes`);
   }
   checkTrigger(def.name, def.trigger);
+  if (
+    def.opaque !== undefined &&
+    !(Array.isArray(def.opaque) && def.opaque.every((p: unknown) => typeof p === "string" && OPAQUE_PATH.test(p)))
+  ) {
+    throw new Error(
+      `Workflow "${def.name}": opaque lists paths of its output, names joined by dots, such as ["url", "box.token"]`,
+    );
+  }
   // A scheduled run starts with no input of its own.
   if (def.trigger !== "manual" && !acceptsEmpty(def.input)) {
     throw new Error(

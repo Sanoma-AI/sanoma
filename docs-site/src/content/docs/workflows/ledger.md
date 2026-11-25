@@ -13,6 +13,10 @@ The ledger is the audit record of a run: who started it, every operation call wi
 - `jsonlLedger(dir)`: `<dir>/<runId>.jsonl`, one record per line, for a ledger on disk or in a repo.
 - `memoryLedger()`: this process only, for tests.
 
+## Fields the ledger never holds
+
+Some values must not reach whoever reads the ledger. An operation's `opaque` fields (a resource type's `handle`, an attachment's bytes, a minted token; [resources](/workflows/resources/)) are recorded as `"<name>"` in its `op.called` record, its input and its output. A workflow's `opaque` fields ([writing workflows](/workflows/writing-workflows/#output-for-the-starter-alone)) are recorded the same way in its `run.finished` record. The app's run page shows each such field as "redacted".
+
 ## Repeated records
 
 Every store keeps the first record of an id: a run replayed after a restart writes its records again, with the same ids, and the store skips them (warning when a later one differs). A failed `append` is tried again three times, unless the store says the failure is final (`retryable: false`): a record that is not JSON, a corrupt file.

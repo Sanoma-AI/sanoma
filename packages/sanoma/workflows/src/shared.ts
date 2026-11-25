@@ -326,6 +326,22 @@ export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
+ * `value` with each field `opaque` names as `"<name>"`: an operation's `opaque` in its call's
+ * record, a workflow's in its run's output wherever it is recorded or read by another. A dotted
+ * path goes into a field, and into each item of a list it meets on the way.
+ */
+export const hideOpaque = (value: unknown, opaque: readonly string[] = []): unknown =>
+  opaque.reduce((out, path) => hide(out, path.split(".")), value);
+
+/** `value` with the field at `path` as `"<name>"`, in each item of a list it meets on the way. */
+function hide(value: unknown, path: string[]): unknown {
+  if (Array.isArray(value)) return value.map((item) => hide(item, path));
+  const [name, ...rest] = path;
+  if (!isRecord(value) || value[name!] === undefined) return value;
+  return { ...value, [name!]: rest.length ? hide(value[name!], rest) : `<${name}>` };
+}
+
+/**
  * Throws unless `collection()` takes this declaration: the name a lowercase letter then letters
  * and digits, at least one field, each a type, the type marked optional, an enum of distinct
  * strings or a link to a collection, the key a required text field, the title a string. `collection()` and the reader of
@@ -919,6 +935,13 @@ export const ANONYMOUS = "anonymous";
 
 /** `visitor:<login connector's vendor>:<provider subject>`: the form a signed-in visitor's id takes. */
 const VISITOR_ID = /^visitor:[^\s:]+:\S+$/;
+
+/**
+ * True when `stored` is `actor`: one id, acting for the same person (one agent acts for several
+ * people). Their groups aside: those are the people files' at the time, which may change.
+ */
+export const sameActor = (stored: Pick<Principal, "id" | "onBehalfOf"> | undefined, actor: Principal): boolean =>
+  stored?.id === actor.id && stored.onBehalfOf === actor.onBehalfOf;
 
 /** `token:<id>`: a caller of a public site's api with a token (`SanomaClient.tokens`), a visitor too. */
 const TOKEN_ID = /^token:\S+$/;

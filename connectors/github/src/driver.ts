@@ -6,6 +6,7 @@ import { owned } from "./owner.ts";
 import {
   appJwtOf,
   branchPath,
+  emptyRepository,
   failed as failure,
   GITHUB_APP_SECRETS,
   installationToken,
@@ -189,7 +190,7 @@ const Branch = z.object({
 const refused = (reply: { status: number; body: any }, what: RegExp) =>
   reply.status === 422 && what.test(JSON.stringify(reply.body?.errors ?? reply.body?.message ?? ""));
 
-/** How long, and how often, a commit waits for a repository just generated to fill from its template. */
+/** How long, and how often, a commit, a head and files wait for a repository just generated to fill from its template. */
 const FILL_TRIES = 10;
 const FILL_WAIT_MS = 1000;
 
@@ -220,14 +221,6 @@ async function defaultHead(token: string, repo: Repo, repository: string) {
     vendorCode: "no_branch",
   });
 }
-
-/** The 409 GitHub answers for an empty repository, as one just generated is until its template's copy lands: tried again. */
-const emptyRepository = (repository: string) =>
-  new DriverError(`github: ${repository} is empty until its template's copy lands`, {
-    retryable: true,
-    status: 409,
-    vendorCode: "no_branch",
-  });
 
 /** A file's contents as GitHub answers them, base64 (up to 1 MB). */
 const Contents = z.object({ type: z.literal("file"), encoding: z.literal("base64"), content: z.string() });
@@ -309,6 +302,7 @@ const appDriver = defineDriver(githubApp, {
     async head({ installation, repository, branch }, call) {
       const repo = repoOf(repository);
       const token = await tokenFor(call, installation, repo.name);
+      if (branch === undefined) return { sha: (await defaultHead(token, repo, repository)).sha };
       const path = `${repo.path}/branches/${branchPath(branch)}`;
       const reply = await send(token, "GET", path);
       if (reply.status === 409) throw emptyRepository(repository);

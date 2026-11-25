@@ -7,7 +7,7 @@ import { DriverError } from "sanoma/workflows";
 import type { z } from "zod";
 import { defineFake, type FakeOptions } from "sanoma/workflows/fake";
 import { githubApp, githubTf } from "./connector.ts";
-import { branchPath, failed } from "./rest.ts";
+import { branchPath, emptyRepository, failed } from "./rest.ts";
 import { owned } from "./owner.ts";
 
 /**
@@ -35,6 +35,8 @@ export interface FakeAppRepository {
   description?: string;
   defaultBranch: string;
   branches: Record<string, { sha: string; files: Record<string, string> }>;
+  /** Its default branch while its template's copy has not landed (`slowCopy`). */
+  copying?: FakeAppRepository["branches"][string];
   keys: { id: number; title: string; key: string; readOnly: boolean }[];
 }
 
@@ -48,6 +50,12 @@ export interface FakeGithubAppState extends Record<string, unknown> {
   installations: Record<number, FakeInstallation>;
   /** The repositories, by `<owner>/<name>`. */
   repositories: Record<string, FakeAppRepository>;
+  /**
+   * Set, a repository generated stays empty, as GitHub's does while it copies the template in the
+   * background, until a call that waits for the copy lands it (a commit, `repository.head` with
+   * no branch, `repository.files` with no ref); any other read of it answers GitHub's 409.
+   */
+  slowCopy?: boolean;
 }
 
 /** A SHA of `parts`, as a commit's: the same for the same parts. */
@@ -59,6 +67,16 @@ const fail = (where: string, status: number, message: string, errors: string[] =
   const body = { message, ...(errors.length && { errors: errors.map((e) => ({ message: e })) }) };
   return failed(method, path, { status, headers: new Headers(), body });
 };
+
+/** The repository's branches, its template's copy landed when the call `waits` for it, as the driver does; else an empty repository's 409. */
+function filled(repo: FakeAppRepository, repository: string, waits: boolean): FakeAppRepository["branches"] {
+  if (repo.copying) {
+    if (!waits) throw emptyRepository(repository);
+    repo.branches[repo.defaultBranch] = repo.copying;
+    delete repo.copying;
+  }
+  return repo.branches;
+}
 
 /** The fake's template, which `repository.generate` copies. */
 export const FAKE_TEMPLATE = "Sanoma-AI/company-template";
@@ -82,10 +100,10 @@ function starterFiles(): Record<string, string> {
 /**
  * The operations through the App, over an in-memory GitHub: installation 7 on the personal account
  * `acme`, 9 on the organization `acme-inc`, and the public template `Sanoma-AI/company-template`
- * (`main`, the starter `sanoma init` copies, from the installed `sanoma`). An installation
- * reaches the repositories of its own account; a commit's SHA is the same for the same parent,
- * message and files; a token minted (`ghs_…`, good for an hour) is the same for the same
- * installation, repository and permissions.
+ * (`main`, the starter `sanoma init` copies, from the installed `sanoma`), copied at once unless
+ * `slowCopy` is set. An installation reaches the repositories of its own account; a commit's SHA
+ * is the same for the same parent, message and files; a token minted (`ghs_…`, good for an hour)
+ * is the same for the same installation, repository and permissions.
  */
 export function fakeGithubApp(options: FakeOptions = {}) {
   return defineFake(
@@ -142,13 +160,14 @@ export function fakeGithubApp(options: FakeOptions = {}) {
                 throw fail(where, 422, "Validation Failed", ["name already exists on this account"]);
               }
               const files = structuredClone(from.branches[from.defaultBranch]?.files ?? {});
+              const copy = { sha: shaOf(fullName, files), files };
               const id = ++state.seq;
               state.repositories[fullName] = {
                 id,
                 private: isPrivate,
                 ...(description !== undefined && { description }),
                 defaultBranch: from.defaultBranch,
-                branches: { [from.defaultBranch]: { sha: shaOf(fullName, files), files } },
+                ...(state.slowCopy ? { branches: {}, copying: copy } : { branches: { [from.defaultBranch]: copy } }),
                 keys: [],
               };
               return {
@@ -161,7 +180,8 @@ export function fakeGithubApp(options: FakeOptions = {}) {
             },
             commit: async ({ installation, repository, branch, message, files }) => {
               const repo = reached(installation, repository, `GET /branches/${branchPath(branch)}`);
-              const head = repo.branches[branch] ?? repo.branches[repo.defaultBranch];
+              const branches = filled(repo, repository, true);
+              const head = branches[branch] ?? branches[repo.defaultBranch];
               if (!head)
                 throw new DriverError(`github: ${repository} has no ${repo.defaultBranch}`, {
                   retryable: false,
@@ -173,8 +193,9 @@ export function fakeGithubApp(options: FakeOptions = {}) {
             },
             files: async ({ installation, repository, paths, ref }) => {
               const repo = reached(installation, repository, "GET /contents");
+              const branches = filled(repo, repository, ref === undefined);
               const name = ref ?? repo.defaultBranch;
-              const at = repo.branches[name] ?? Object.values(repo.branches).find((b) => b.sha === name);
+              const at = branches[name] ?? Object.values(branches).find((b) => b.sha === name);
               if (!at) {
                 throw fail(
                   `GET /repos/${repository}/commits/${branchPath(name)}`,
@@ -185,9 +206,11 @@ export function fakeGithubApp(options: FakeOptions = {}) {
               return Object.fromEntries(paths.flatMap((path) => (path in at.files ? [[path, at.files[path]!]] : [])));
             },
             head: async ({ installation, repository, branch }) => {
-              const repo = reached(installation, repository, `GET /branches/${branchPath(branch)}`);
-              const head = repo.branches[branch];
-              if (!head) throw fail(`GET /repos/${repository}/branches/${branchPath(branch)}`, 404, "Branch not found");
+              // Without a branch, the driver reads the repository first, for its default branch.
+              const repo = reached(installation, repository, branch ? `GET /branches/${branchPath(branch)}` : "GET ");
+              const name = branch ?? repo.defaultBranch;
+              const head = filled(repo, repository, branch === undefined)[name];
+              if (!head) throw fail(`GET /repos/${repository}/branches/${branchPath(name)}`, 404, "Branch not found");
               return { sha: head.sha };
             },
             addDeployKey: async ({ installation, repository, title, key, readOnly }) => {
