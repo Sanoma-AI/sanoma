@@ -20,12 +20,13 @@ export const withPrincipal = createMiddleware({ type: "function" }).server(async
 /**
  * On a public site's host (`AppContext.site`) only `PUBLIC_FNS` answer, matched by name and by the
  * end of their file's path: any other is a 404, as if it were not there. Start names the file from
- * the build's root with `/`. Only a company's build serves a site's host, and its root is the repo.
+ * the build's root with `/`, so a package folder at the root itself has no `/` before it. Only a
+ * company's build serves a site's host, and its root is the repo.
  */
 export const publicOnly = createMiddleware({ type: "function" }).server(({ next, context, serverFnMeta }) => {
   if (
     (context as unknown as { app: AppContext }).app.site !== undefined &&
-    !(PUBLIC_FNS.has(serverFnMeta.name) && serverFnMeta.filename.endsWith(PUBLIC_FNS_FILE))
+    !(PUBLIC_FNS.has(serverFnMeta.name) && `/${serverFnMeta.filename}`.endsWith(PUBLIC_FNS_FILE))
   ) {
     throw new ApiError(404, { error: "Not found" });
   }

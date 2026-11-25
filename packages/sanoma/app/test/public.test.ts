@@ -129,7 +129,7 @@ describe("the server functions a public site's host answers", () => {
 
   it("are callFn and getActor of the app's functions.ts alone: any other is a 404 there, and answers on the app's host", () => {
     expect([[...PUBLIC_FNS], PUBLIC_FNS_FILE]).toEqual([["callFn", "getActor"], "/sanoma/app/src/functions.ts"]);
-    for (const filename of [installed, checkout, `C:/work/acme/${installed}`]) {
+    for (const filename of [installed, checkout, `C:/work/acme/${installed}`, "sanoma/app/src/functions.ts"]) {
       expect(call("callFn", filename, "hello")).toBe("answered");
       expect(call("getActor", filename, "hello")).toBe("answered");
     }
