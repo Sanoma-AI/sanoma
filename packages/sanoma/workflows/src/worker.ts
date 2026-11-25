@@ -304,7 +304,7 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
     startRun: async (name, runId, args) => {
       const fn = registered.get(name) as unknown as ((args: RunArgs) => Promise<unknown>) | undefined;
       if (!fn) throw new Error(`The worker has no workflow "${name}" to start`);
-      // A live apply, or a run one at a time per starter, waits its turn as the client's do (`queueFor`).
+      // A live apply, or a run one per person, waits its turn as the client's do (`queueFor`).
       const placed = queueFor(resolved, name, args, resolved.version);
       // A built-in run's code, as the client's start sets it, so a worker on another version may carry
       // it: a child (a change's apply and drift, a follow's apply) with its parent, which waits for it.
@@ -419,11 +419,14 @@ async function launchWorker(config: SanomaConfig, options: WorkerOptions): Promi
       DBOS.registerQueue(resolved.queueName, polling),
       // One live apply at a time: DBOS counts the running ones in Postgres, of every version.
       DBOS.registerQueue(resolved.applyQueueName, { globalConcurrency: 1, ...polling }),
-      // One run at a time in each partition (`queueFor`: a version's runs of a workflow by one starter).
-      DBOS.registerQueue(resolved.oneAtATimeQueueName, { partitionConcurrency: 1, ...polling }),
+      // One run at a time in each partition (`queueFor`: a version's runs of a workflow for one person).
+      DBOS.registerQueue(resolved.perPersonQueueName, { partitionConcurrency: 1, ...polling }),
     ]);
     // Built-in runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
-    if (isLatest) await carryBuiltInRuns(resolved, () => secrets.db());
+    if (isLatest) {
+      await carryBuiltInRuns(resolved, () => secrets.db());
+      await freePerPersonPlaces(resolved);
+    }
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
       await applyScheduled(resolved, registered, () => secrets.db());
@@ -618,6 +621,36 @@ async function carryBuiltInRuns(
     warn(
       `carrying the built-in runs of other versions onto ${version} failed, so they stay there: ${errorMessage(err)}`,
     );
+  }
+}
+
+/**
+ * Cancels each run of other code that holds a person's place on the per-person queue, as
+ * `carryBuiltInRuns` does a stranded apply: no worker of this version runs it (a company run is
+ * never carried), so it would hold the place for good, and a run queued behind it without a
+ * version (the local app's), which this worker would run, would never start. Assumes one live
+ * worker per database; a failure is warned about, and the worker starts.
+ */
+async function freePerPersonPlaces({ appName, version, perPersonQueueName }: ResolvedConfig) {
+  try {
+    const stranded = (
+      await DBOS.listWorkflows({
+        queueName: perPersonQueueName,
+        status: ["PENDING"],
+        applicationName: appName,
+        loadInput: false,
+        loadOutput: false,
+      })
+    )
+      .filter((r) => r.applicationVersion && r.applicationVersion !== version)
+      .map((r) => r.workflowID);
+    if (!stranded.length) return;
+    await DBOS.cancelWorkflows(stranded);
+    warn(
+      `cancelled ${stranded.length} run(s) started on other code, which no worker would run, so the runs queued behind them start: ${stranded.join(", ")}. Start them again.`,
+    );
+  } catch (err) {
+    warn(`freeing the places of runs of other versions on ${perPersonQueueName} failed: ${errorMessage(err)}`);
   }
 }
 

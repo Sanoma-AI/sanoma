@@ -91,7 +91,7 @@ export const CATALOG = {
     title: "Read a run",
     description:
       "A run's workflow, status, who started it, when, its approvals and its error, by its id. A queued run " +
-      "behind another (one apply runs at a time, and one run per starter of a workflow that runs one at a time) " +
+      "behind another (one apply runs at a time, and one run per person of a workflow that runs one per person) " +
       "names it in after.",
     input: z.object({ runId: RunId }),
     hint: "read",

@@ -308,7 +308,7 @@ function sealedShown(record: LedgerRecord): LedgerRecord {
 
 /**
  * The run that `run`, queued, waits for (`SanomaClient.runAhead`: an apply ahead of it, or its
- * starter's run ahead of it of a workflow with `oneAtATime`), as the page names it; undefined for
+ * person's run ahead of it of a workflow with `concurrency: "one per person"`), as the page names it; undefined for
  * any other run, and once it is the one running.
  */
 export async function runAheadOf(

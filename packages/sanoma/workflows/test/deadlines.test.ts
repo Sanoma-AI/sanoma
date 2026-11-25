@@ -236,7 +236,7 @@ const scope = {
   version: "app@v2",
   queueName: "sanoma:app",
   applyQueueName: "sanoma:app:apply",
-  oneAtATimeQueueName: "sanoma:app:one-at-a-time",
+  perPersonQueueName: "sanoma:app:per-person",
 };
 /** A run of `scope`'s, PENDING on its version and queue, but for what `s` says. */
 const status = (s: Partial<WorkflowStatus>): WorkflowStatus =>
@@ -297,7 +297,7 @@ describe("idle", () => {
 
   it("leaves out a run queued one at a time behind its starter's waiting run, never another starter's", async () => {
     const deadlines = deadlineRegistry();
-    const one = { queueName: scope.oneAtATimeQueueName };
+    const one = { queueName: scope.perPersonQueueName };
     const ahead = status({ ...one, queuePartitionKey: "ada" });
     void deadlines.running(ahead.workflowID, () =>
       deadlines.waiting(ahead.workflowID, { kind: "approval" }, () => new Promise<void>(() => {})),

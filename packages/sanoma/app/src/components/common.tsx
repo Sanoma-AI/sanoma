@@ -873,8 +873,8 @@ export const ShortId = ({ id, className }: { id: string; className?: string }) =
 );
 
 /**
- * Why a run has not started: one apply runs at a time, and one run of a workflow with `oneAtATime`
- * per starter, so a queued one names the run it waits for (`ahead`); an apply a worker on a new
+ * Why a run has not started: one apply runs at a time, and one run per person of a workflow with
+ * `concurrency: "one per person"`, so a queued one names the run it waits for (`ahead`); an apply a worker on a new
  * version cancelled says so. Nothing for any other run.
  */
 export function RunAheadNotice({
@@ -888,7 +888,7 @@ export function RunAheadNotice({
   if (!ahead) return null;
   return (
     <Notice>
-      {apply ? "One apply runs at a time." : "One run at a time per starter."} This one starts when{" "}
+      {apply ? "One apply runs at a time." : "One run at a time per person."} This one starts when{" "}
       <Link {...runLink({ ...ahead, workflow })}>{runName(ahead.runId)}</Link> ({ahead.status}, started{" "}
       <When at={ahead.createdAt} /> by {starterName(ahead)}) ends.
       {ahead.status === "waiting" && " It waits for a person in the Inbox."}

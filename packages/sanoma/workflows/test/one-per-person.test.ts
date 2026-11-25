@@ -15,10 +15,13 @@ import {
 } from "../src/index.ts";
 import { freshDatabase, pending, rootWith, stillQueued, waitFor } from "./harness.ts";
 
-// Needs Postgres: `pnpm db:up`. A workflow with `oneAtATime: "per starter"` runs each starter's
-// runs one after another, on DBOS's partitioned queue: a second run of alice's waits, queued, for
-// her first to end, and names it as the one ahead; bob's never waits for hers; the order holds
-// across a worker's restart, and a start held for an approval keeps its place.
+// Needs Postgres: `pnpm db:up`. A workflow with `concurrency: "one per person"` runs each person's
+// runs one after another, on DBOS's partitioned queue: a second run for alice waits, queued, for
+// her first to end, whoever started it (her, or an agent for her), and names it as the one ahead;
+// bob's never waits for hers; a run that ends in any way (finished, failed, cancelled) lets the
+// next start; the order holds across a worker's restart; a start held for an approval keeps its
+// place; a new version's worker cancels a run of the old code that holds a place no one would
+// free; and an anonymous start is refused.
 
 const PEOPLE = `import { sanoma } from "sanoma/resources";
 
@@ -26,6 +29,7 @@ export const alice = sanoma.person({ id: "alice" });
 export const bob = sanoma.person({ id: "bob" });
 export const wary = sanoma.person({ id: "wary" });
 export const lead = sanoma.person({ id: "lead" });
+export const bot = sanoma.agent({ id: "bot" });
 export const admin = sanoma.group({ name: "admin", members: [lead] });
 `;
 // Every start of wary's waits for the lead.
@@ -38,7 +42,7 @@ const openBox = defineWorkflow({
   trigger: "manual",
   input: z.object({ n: z.number() }),
   uses: ["approval"],
-  oneAtATime: "per starter",
+  concurrency: "one per person",
   run: async (ctx, { n }) => {
     await ctx.approval("Open it?", { approver: "lead" });
     return n;
@@ -49,9 +53,10 @@ const alice: Principal = { id: "alice" };
 const bob: Principal = { id: "bob" };
 const wary: Principal = { id: "wary" };
 const lead = { id: "lead" };
+const botForAlice: Principal = { id: "bot", onBehalfOf: "alice" };
 
-describe("one run at a time per starter", () => {
-  const databaseUrl = freshDatabase("one-at-a-time");
+describe("one run at a time per person", () => {
+  const databaseUrl = freshDatabase("one-per-person");
   const root = rootWith({ "resources/people.ts": PEOPLE, "policies/policy.cedar": POLICY });
   const config: SanomaConfig = { workflows: [openBox], connectors: [], ledger: memoryLedger(), root, databaseUrl };
   const resolved = resolveConfig(config);
@@ -78,17 +83,17 @@ describe("one run at a time per starter", () => {
   const recordAt = async (runId: string, type: string) => (await client.ledger(runId)).find((r) => r.type === type)!.at;
 
   it("registers the queue with one run at a time in each partition", async () => {
-    const queue = (await raw.listQueues(resolved.appName)).find((q) => q.name === resolved.oneAtATimeQueueName);
-    expect(resolved.oneAtATimeQueueName).toBe(`sanoma:${resolved.appName}:one-at-a-time`);
+    const queue = (await raw.listQueues(resolved.appName)).find((q) => q.name === resolved.perPersonQueueName);
+    expect(resolved.perPersonQueueName).toBe(`sanoma:${resolved.appName}:per-person`);
     expect(queue?.partitionConcurrency).toBe(1);
   });
 
-  it("starts a starter's second run only once the first ends, naming the first as the one ahead", async () => {
+  it("starts a person's second run only once the first ends, naming the first as the one ahead", async () => {
     const first = await client.start(openBox, { n: 1 }, { startedBy: alice });
     await waitFor(pending(() => client, first));
     const second = await client.start(openBox, { n: 2 }, { startedBy: alice });
     expect(await stillQueued(raw, second)).toBe(true);
-    expect(await row(second)).toMatchObject({ queueName: resolved.oneAtATimeQueueName });
+    expect(await row(second)).toMatchObject({ queueName: resolved.perPersonQueueName });
     expect(await client.run(second)).toMatchObject({ status: "queued" });
     expect(await client.runAhead(second)).toMatchObject({ runId: first, status: "waiting" });
     expect(await client.runAhead(first)).toBeUndefined();
@@ -103,7 +108,53 @@ describe("one run at a time per starter", () => {
     expect(await client.result(second)).toBe(2);
   });
 
-  it("never makes another starter's run wait", async () => {
+  it("makes an agent's run for a person wait for that person's own, and the reverse", async () => {
+    const hers = await client.start(openBox, { n: 1 }, { startedBy: alice });
+    await waitFor(pending(() => client, hers));
+    const its = await client.start(openBox, { n: 2 }, { startedBy: botForAlice });
+    expect(await stillQueued(raw, its)).toBe(true);
+    expect(await client.runAhead(its)).toMatchObject({ runId: hers, status: "waiting" });
+    const againHers = await client.start(openBox, { n: 3 }, { startedBy: alice });
+    expect(await stillQueued(raw, againHers)).toBe(true);
+    expect(await client.runAhead(againHers)).toMatchObject({ runId: hers });
+
+    await approve(hers);
+    expect(await client.result(hers)).toBe(1);
+    // The agent's, started first, goes next: held at its start for admin, it keeps the place.
+    await waitFor(pending(() => client, its));
+    expect(await stillQueued(raw, againHers)).toBe(true);
+    expect(await client.runAhead(againHers)).toMatchObject({ runId: its });
+  });
+
+  it("lets the next run start once the one ahead fails", async () => {
+    const failing = await client.start(openBox, { n: 1 }, { startedBy: alice });
+    await waitFor(pending(() => client, failing));
+    const next = await client.start(openBox, { n: 2 }, { startedBy: alice });
+    expect(await stillQueued(raw, next)).toBe(true);
+    // Rejected, its approval fails the run.
+    await client.decide(failing, { decision: "reject", by: lead });
+    await waitFor(async () => (await client.run(failing))?.status === "failed");
+    await waitFor(pending(() => client, next));
+  });
+
+  it("lets the next run start once the one ahead is cancelled", async () => {
+    const cancelled = await client.start(openBox, { n: 1 }, { startedBy: alice });
+    await waitFor(pending(() => client, cancelled));
+    const next = await client.start(openBox, { n: 2 }, { startedBy: alice });
+    expect(await stillQueued(raw, next)).toBe(true);
+    await raw.cancelWorkflow(cancelled);
+    await waitFor(pending(() => client, next));
+    expect(await client.run(cancelled)).toMatchObject({ status: "cancelled" });
+  });
+
+  it("refuses an anonymous start: every visitor not signed in is one anonymous", async () => {
+    await expect(client.start(openBox, { n: 1 }, { startedBy: "anonymous" })).rejects.toMatchObject({
+      code: "policy_denied",
+      message: expect.stringMatching(/runs one per person, so its starter must be signed in/),
+    });
+  });
+
+  it("never makes another person's run wait", async () => {
     const hers = await client.start(openBox, { n: 1 }, { startedBy: alice });
     await waitFor(pending(() => client, hers));
     const his = await client.start(openBox, { n: 2 }, { startedBy: bob });
@@ -136,7 +187,7 @@ describe("one run at a time per starter", () => {
   it("keeps the place of a start held for an approval, until it is decided and its run ends", async () => {
     const held = await client.start(openBox, { n: 1 }, { startedBy: wary });
     await waitFor(pending(() => client, held));
-    expect(await row(held)).toMatchObject({ status: "PENDING", queueName: resolved.oneAtATimeQueueName });
+    expect(await row(held)).toMatchObject({ status: "PENDING", queueName: resolved.perPersonQueueName });
     const behind = await client.start(openBox, { n: 2 }, { startedBy: wary });
     expect(await stillQueued(raw, behind)).toBe(true);
     expect(await client.runAhead(behind)).toMatchObject({ runId: held, status: "waiting" });
@@ -150,28 +201,71 @@ describe("one run at a time per starter", () => {
   });
 });
 
+describe("a new version's worker", () => {
+  const databaseUrl = freshDatabase("one-per-person-deploy");
+  const root = rootWith({ "resources/people.ts": PEOPLE, "policies/policy.cedar": POLICY });
+  const v1: SanomaConfig = { workflows: [openBox], connectors: [], ledger: memoryLedger(), root, databaseUrl };
+  // Other code, so another version: one more workflow.
+  const later = defineWorkflow({
+    name: "later",
+    trigger: "manual",
+    input: z.object({}),
+    uses: [],
+    run: async () => {},
+  });
+  const v2: SanomaConfig = { ...v1, workflows: [openBox, later] };
+  const workers: Worker[] = [];
+  let client: SanomaClient;
+  let raw: DBOSClient;
+  beforeAll(async () => {
+    client = await SanomaClient.connect(v1);
+    raw = await dbosClient(databaseUrl);
+  });
+  afterAll(async () => {
+    await raw?.destroy();
+    await client?.close();
+    await Promise.all(workers.map((w) => w.stop()));
+  });
+
+  it("cancels a run of the old code holding a person's place, so the run queued behind it without a version starts", async () => {
+    const old = await startTestWorker(v1, { databaseUrl });
+    // The local app's client queues with no version: the latest version's worker runs it.
+    const first = await client.start(openBox, { n: 1 }, { startedBy: alice });
+    await waitFor(pending(() => client, first));
+    const second = await client.start(openBox, { n: 2 }, { startedBy: alice });
+    expect(await stillQueued(raw, second)).toBe(true);
+    expect(await raw.getWorkflow(second)).toMatchObject({ applicationVersion: null });
+    await old.stop();
+
+    workers.push(await startTestWorker(v2, { databaseUrl, promote: true }));
+    await waitFor(async () => (await raw.getWorkflow(first))?.status === "CANCELLED");
+    await waitFor(pending(() => client, second));
+    expect(await raw.getWorkflow(second)).toMatchObject({ applicationVersion: resolveConfig(v2).version });
+    await client.decide(second, { decision: "approve", by: lead });
+    expect(await client.result(second)).toBe(2);
+  });
+});
+
 describe("queueFor", () => {
   const scope = {
     applyQueueName: "sanoma:acme:apply",
-    oneAtATimeQueueName: "sanoma:acme:one-at-a-time",
+    perPersonQueueName: "sanoma:acme:per-person",
     workflows: new Map([[openBox.name, openBox]]),
   };
   const place = (startedBy: Principal, { version = "v1", sandbox }: { version?: string; sandbox?: string } = {}) =>
     queueFor(scope, openBox.name, { startedBy, ...(sandbox !== undefined && { sandbox }) }, version);
 
-  it("keys a run by its version, workflow and starter, an agent with the person it acts for", () => {
+  it("keys a run by its version, workflow and the person it is for, an agent's by the person it acts for", () => {
     expect(place(alice)).toEqual({
-      queueName: scope.oneAtATimeQueueName,
-      queuePartitionKey: JSON.stringify(["v1", "open-box", "alice", null]),
+      queueName: scope.perPersonQueueName,
+      queuePartitionKey: JSON.stringify(["v1", "open-box", "alice"]),
     });
     expect(place({ id: "alice", groups: ["staff"] })).toEqual(place(alice));
-    const keys = [
-      place(alice),
-      place(bob),
-      place(alice, { version: "v2" }),
-      place({ id: "bot", onBehalfOf: "alice" }),
-      place({ id: "bot", onBehalfOf: "bob" }),
-    ].map((p) => p?.queuePartitionKey);
+    expect(place(botForAlice)).toEqual(place(alice));
+    expect(place({ id: "chat", onBehalfOf: "alice" })).toEqual(place(alice));
+    const keys = [place(alice), place(bob), place(alice, { version: "v2" }), place({ id: "bot" })].map(
+      (p) => p?.queuePartitionKey,
+    );
     expect(new Set(keys).size).toBe(keys.length);
   });
 
@@ -182,11 +276,11 @@ describe("queueFor", () => {
 
   it("is refused with a schedule, and for any other value", () => {
     const def = { name: "nightly", input: z.object({}), uses: [], run: async () => {} } as const;
-    expect(() => defineWorkflow({ ...def, trigger: { schedule: "0 3 * * *" }, oneAtATime: "per starter" })).toThrow(
+    expect(() => defineWorkflow({ ...def, trigger: { schedule: "0 3 * * *" }, concurrency: "one per person" })).toThrow(
       /a schedule's runs are the runtime's/,
     );
-    expect(() => defineWorkflow({ ...def, trigger: "manual", oneAtATime: "always" as never })).toThrow(
-      /oneAtATime is "per starter"/,
+    expect(() => defineWorkflow({ ...def, trigger: "manual", concurrency: "always" as never })).toThrow(
+      /concurrency is "one per person"/,
     );
   });
 });

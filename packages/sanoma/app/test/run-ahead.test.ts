@@ -6,7 +6,7 @@ import { type CallHost, runDetail } from "../src/server/core.ts";
 import { goLiveRunOf } from "../src/server/go-live.ts";
 
 // The run a queued run waits for, as Hosting and the run's page are given it: asked of the client
-// (`runAhead`: an apply, or the starter's run ahead of a workflow with `oneAtATime`) for a queued
+// (`runAhead`: an apply, or the person's run ahead of a workflow with `concurrency: "one per person"`) for a queued
 // run only, and cut to what the page names.
 
 const run = (s: Partial<RunSummary>): RunSummary =>

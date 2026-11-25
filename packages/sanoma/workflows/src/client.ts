@@ -34,6 +34,7 @@ import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection-driver.ts";
 import {
   limitedQueues,
+  personOf,
   queueFor,
   type ResolvedConfig,
   type ResolvedRouter,
@@ -92,6 +93,7 @@ import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
 import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
 import {
+  ANONYMOUS,
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
   CHANGE_EVENT,
@@ -142,6 +144,9 @@ const STARTED_BY = '`startedBy` must be a principal, such as "alice" or { id: "a
 
 /** Why a visitor's start of a built-in is refused: the app's own actions on the repository are staff's. */
 const VISITOR_BUILT_IN = "A visitor may not start the runtime's own workflows";
+
+/** Why an anonymous start of a workflow that runs one per person is refused: every visitor not signed in is the one `anonymous`, so one's run would hold up all the others'. */
+const ANONYMOUS_PER_PERSON = "It runs one per person, so its starter must be signed in";
 
 /** A principal, or its id alone. */
 const PrincipalOrId = z.union([
@@ -534,6 +539,9 @@ export class SanomaClient {
     const action = `${WORKFLOW_ACTION}${workflow.name}`;
     const visitor = isVisitor(startedBy);
     if (visitor && BUILT_IN_WORKFLOWS.has(workflow.name)) throw new PolicyDeniedError(action, VISITOR_BUILT_IN);
+    if (workflow.concurrency !== undefined && personOf(startedBy) === ANONYMOUS) {
+      throw new PolicyDeniedError(action, ANONYMOUS_PER_PERSON);
+    }
     // A visitor's start is decided whatever run its id names: a visitor shares an id (`anonymous`) with others.
     if (!visitor && runId !== undefined && (await this.row(runId))) return undefined;
     const decision = decideStart(this.config, workflow, input, startedBy);

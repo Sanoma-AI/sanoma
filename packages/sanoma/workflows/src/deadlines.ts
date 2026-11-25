@@ -92,7 +92,7 @@ export function deadlineRegistry(): DeadlineRegistry {
 /** The worker `idle` asks about: the app, the version it runs, and its queues. */
 export type IdleScope = Pick<
   ResolvedConfig,
-  "appName" | "version" | "queueName" | "applyQueueName" | "oneAtATimeQueueName"
+  "appName" | "version" | "queueName" | "applyQueueName" | "perPersonQueueName"
 >;
 
 /**
@@ -101,7 +101,7 @@ export type IdleScope = Pick<
  */
 export const onOwnQueue = (
   queue: string | undefined,
-  scope: Pick<IdleScope, "queueName" | "applyQueueName" | "oneAtATimeQueueName">,
+  scope: Pick<IdleScope, "queueName" | "applyQueueName" | "perPersonQueueName">,
 ): boolean => !queue || queue === scope.queueName || limitedQueues(scope).includes(queue) || queue.startsWith("_dbos_");
 
 /**
@@ -111,7 +111,7 @@ export const onOwnQueue = (
  * a wrapped wait; and the next deadline is past the horizon. A run of another version or queue
  * is not this worker's to run, so it never holds the worker up; nor does a run queued behind one
  * PENDING in its place, which cannot start until that one ends: an apply behind an apply waiting
- * for its plan's approval, a run of a workflow with `oneAtATime` behind its starter's.
+ * for its plan's approval, a run of a workflow with `concurrency: "one per person"` behind its person's.
  */
 export async function idle(deadlines: Deadlines, scope: IdleScope, horizonMs: number): Promise<boolean> {
   if (deadlines.busy > 0) return false;
