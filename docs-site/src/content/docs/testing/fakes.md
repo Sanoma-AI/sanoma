@@ -1,15 +1,23 @@
 ---
 title: Fake vendors and replay
-description: "sanoma/workflows/fake exports defineFake(connector, { initial, ops }, { calls? }), the fake a connector package attaches the maker of (withSetup), which builds an in-memory vendor for a connector."
+description: "Simulate vendor state and failures in memory, or test a driver against recorded HTTP replies."
 sidebar:
   order: 3
 ---
 
-`sanoma/workflows/fake` exports `defineFake(connector, { initial, ops }, { calls? })`, the fake a connector package attaches the maker of (`withSetup`), which builds an in-memory vendor for a connector: `ops` implements every operation against the fake's state, typed by the connector as `defineDriver` is, and the fake adds what a real vendor does around them (a repeated idempotency key gets the first reply and changes nothing) and faults a test can inject (`failNext`, `loseReply`, `rateLimit`, `hold`). `update(change)` changes the state as someone at the vendor would, so the next call sees it. `calls` logs into a list given, so several fakes share one ordered log. The connectors' own fakes (`@sanoma-ai/connector-ghost/fake` and the others) are built with it. The entry also declares `ResourceFake`, the contract of a fake that holds its vendor's objects by resource type and import id (`put`, `override`, `remove`, with fields in the resource's shape), which `sanoma/internal/bridge`'s `tfFake` meets and a scenario's [resource steps](/testing/scenarios/) seed through. It is a separate entry so the runtime carries no test tooling, and the lint refuses it in workflow files.
+Use a connector’s fake to exercise workflow behavior with an in-memory vendor. To test the driver’s HTTP requests, use [recorded replies](#replaying-a-vendors-api).
+
+Connector authors create the fake with `defineFake(connector, { initial, ops }, { calls? })` from `sanoma/workflows/fake` and attach its factory with `withSetup`. Each operation in `ops` works on the fake’s state and uses the same schema types as `defineDriver`. Repeating an idempotency key returns the original reply. Use `update(change)` to simulate a change at the vendor and `calls` to share an ordered log across fakes. The table below lists the available faults, including `failNext`, `loseReply`, `rateLimit`, and `hold`.
+
+Shipped fakes such as `@sanoma-ai/connector-ghost/fake` use this API. The separate entry point keeps test tooling out of the runtime. The linter rejects it in workflow files.
+
+For vendors that hold resources, `ResourceFake` defines `put`, `override`, and `remove` by resource type and import ID, using the resource’s field shape. The bridge’s `tfFake` in `sanoma/internal/bridge` implements it, so [scenario steps](/testing/scenarios/) can seed resources.
 
 ## Fake vendors
 
-Each connector carries its fake, and ships it at its own `/fake` entry, not in this package: `import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";`. Install the connectors you use; their READMEs ([Ghost](https://www.npmjs.com/package/@sanoma-ai/connector-ghost#testing), [Resend](https://www.npmjs.com/package/@sanoma-ai/connector-resend#testing), [Bluesky](https://www.npmjs.com/package/@sanoma-ai/connector-bluesky#testing), [GitHub](https://www.npmjs.com/package/@sanoma-ai/connector-github#testing), [Stripe](https://www.npmjs.com/package/@sanoma-ai/connector-stripe#testing)) say what each fake holds and adds. Each returns:
+Each connector carries its fake, and ships it at its own `/fake` entry, not in this package: `import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";`. Install the connectors you use; their READMEs ([Ghost](https://www.npmjs.com/package/@sanoma-ai/connector-ghost#testing), [Resend](https://www.npmjs.com/package/@sanoma-ai/connector-resend#testing), [Bluesky](https://www.npmjs.com/package/@sanoma-ai/connector-bluesky#testing), [GitHub](https://www.npmjs.com/package/@sanoma-ai/connector-github#testing), [Stripe](https://www.npmjs.com/package/@sanoma-ai/connector-stripe#testing)) say what each fake holds and adds.
+
+Each returns:
 
 | Member                 | What it does                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
@@ -52,7 +60,9 @@ it("creates a widget", async () => {
 });
 ```
 
-A fixture, `<name>.json`, is a list of exchanges: `{ method, path, status, headers?, body }`, where `path` is the URL's decoded path and query (the host is not compared) and `headers` keeps only rate-limit headers. `play(name)` answers the test's requests with them, in order; a request that is not next in the fixture, or an exchange no request asked for, fails the test. `play(name, exchanges)` serves a list the test builds instead, for the cases a vendor will not reproduce on cue. `fill(exchange, sent)`, an option, fills a fixture's placeholders from the request it answers, such as an id the request chose. `sent` holds the requests the test made, bodies parsed; `exchanges` the replies they got.
+A fixture, `<name>.json`, is a list of exchanges: `{ method, path, status, headers?, body }`, where `path` is the URL's decoded path and query (the host is not compared) and `headers` keeps only rate-limit headers. `play(name)` answers the test's requests with them, in order; a request that is not next in the fixture, or an exchange no request asked for, fails the test. `play(name, exchanges)` serves a list the test builds instead, for the cases a vendor will not reproduce on cue.
+
+`fill(exchange, sent)`, an option, fills a fixture's placeholders from the request it answers, such as an id the request chose. `sent` holds the requests the test made, bodies parsed; `exchanges` the replies they got.
 
 Two variables change what the same tests do:
 

@@ -1,21 +1,40 @@
 ---
 title: Keeping workflows replay-safe
-description: "A run is replayed after a restart by calling the function again and reading each step's result back, so workflows must do the same thing every time, and must reach vendors only through ctx so the policy sees every call."
+description: "Write workflows a worker can replay after a restart and diagnose the checks that reject unsafe code."
 sidebar:
   order: 12
 ---
 
-A run is replayed after a restart by calling the function again and reading each step's result back, so workflows must do the same thing every time, and must reach vendors only through `ctx` so the policy sees every call. Two checks guard against getting that wrong by accident, on files under `workflows/` and `operations/` (a company operation's body runs inside the run, so it is held to the same rules, its `run` to a workflow's `run`'s). They are not a sandbox: they read the source, and code written to get around them can.
+After a restart, the worker calls the workflow function again and reads back the result of each completed step. The function must therefore reach the same steps in the same order. Make vendor calls through `ctx` so the policy can evaluate each one.
+
+The linter and config checks inspect source in `workflows/` and `operations/`. A company operation’s `run` executes inside the workflow, so the same rules apply. These checks catch accidental mistakes. They do not isolate untrusted code.
 
 ## What the lint refuses
 
-oxlint, with the rules this package ships in `oxlint.json`, refuses the clock (`Date.now()`, `new Date()` and `Date()`, through the plugin's rule `sanoma/date`, which allows `new Date(await ctx.now())`; `performance`), randomness (`Math.random`, `crypto`), the network (`fetch`, `WebSocket`), timers, `process`, `globalThis`, `Promise.all` and its kin (use `ctx.all`; nothing races), and imports of `sanoma/testing`, `sanoma/app`, `sanoma/workflows/describe`, `sanoma/workflows/fake`, `sanoma/workflows/plugin`, `sanoma/workflows/scenario`, `sanoma/workflows/scenarios`, `sanoma/workflows/wakeup-service`, `@sanoma-ai/connector-*/fake` and `@sanoma-ai/connector-*/driver`. From `sanoma/workflows` it allows only `defineOperation`, `defineWorkflow`, `mayDecide`, `errorCode`, `z`, `sanoma` ([the runtime's own operations](/workflows/built-ins/#the-runtimes-own-operations)) (which `sanoma` re-exports) and types (the list is `allowImportNames` in `oxlint.json`; the `sanoma` package's own `oxlint.json` allows the same names from `sanoma` and refuses its subpaths): the rest could start runs or approve the run's own approvals (`SanomaClient`, `startWorker`), forge the audit record (`jsonlLedger`, `memoryLedger`: a store keeps the first record per id) or read credentials. Each message names the `ctx` replacement. `sanoma check` runs it, through `sanoma/oxlint.json`, which carries these rules.
+`sanoma check` runs oxlint with `sanoma/oxlint.json`. Its rules identify the unsupported API and name its `ctx` replacement where applicable.
+
+| Source of variation | What the linter checks |
+| --- | --- |
+| Time | `Date.now()`, `new Date()`, `Date()`, and `performance`. The `sanoma/date` rule allows `new Date(await ctx.now())`. |
+| Randomness, network, and process state | `Math.random`, `crypto`, `fetch`, `WebSocket`, timers, `process`, and `globalThis`. |
+| Concurrency | `Promise.all` and related combinators. Use `ctx.all` to group steps. Workflows cannot race steps. |
+
+Workflow files can import types and the following names from `sanoma/workflows` or the `sanoma` root entry: `defineOperation`, `defineWorkflow`, `mayDecide`, `errorCode`, `z`, and `sanoma` for [runtime operations](/workflows/built-ins/#the-runtimes-own-operations). The `allowImportNames` list lives in `oxlint.json`. The `sanoma` package’s own lint config also restricts subpath imports.
+
+Keep worker, test, and driver APIs outside workflows. Restricted imports include `sanoma/testing`, `sanoma/app`, `sanoma/workflows/describe`, `sanoma/workflows/fake`, `sanoma/workflows/plugin`, `sanoma/workflows/scenario`, `sanoma/workflows/scenarios`, `sanoma/workflows/wakeup-service`, `@sanoma-ai/connector-*/fake`, and `@sanoma-ai/connector-*/driver`. This keeps run control (`SanomaClient`, `startWorker`), credentials, and audit stores (`jsonlLedger`, `memoryLedger`, which keep the first record for an ID) outside the workflow’s authority.
 
 ## Checking a config
 
-`describeConfig` (`sanoma/workflows/describe`) reads each workflow's file once, the one way the worker does, and lists on the workflow's entry, in `problems`, what oxlint can't express: imports come only from `sanoma/workflows` or `sanoma`, a `@sanoma-ai/connector-<vendor>` package, zod, or a relative file that stays inside the file's `workflows/` directory (so not `../sanoma.config.ts`, which holds the config); no namespace import of either package; no dynamic `import()`; and no `instanceof` against `DriverError`, `SanomaError`, `PolicyDeniedError` or `RejectedError`. On a replay DBOS rethrows a serialized copy of an error, which is no instance of its class, so a branch on `instanceof` would go another way than the first time and the run's steps would fall out of step. Read `errorCode(err)` instead.
+`describeConfig` (`sanoma/workflows/describe`) reads each workflow's file once, the one way the worker does, and lists on the workflow's entry, in `problems`, what oxlint can't express: imports come only from `sanoma/workflows` or `sanoma`, a `@sanoma-ai/connector-<vendor>` package, zod, or a relative file that stays inside the file's `workflows/` directory (so not `../sanoma.config.ts`, which holds the config); no namespace import of either package; no dynamic `import()`; and no `instanceof` against `DriverError`, `SanomaError`, `PolicyDeniedError` or `RejectedError`.
 
-In each workflow's `run` it also lists what the run's graph could not show, the same problems that make the outline `{ error }` and `startWorker` refuse (see [Outline](/workflows/your-own-ui/#outline)): `ctx` used other than called directly or read for `ctx.runId` or `ctx.startedBy` (passed to a helper, aliased, destructured, or `run` taking it destructured); a call on `ctx` that is no operation or built-in (`ctx.ghost.post()`); `ctx.all` over members made elsewhere (write the list, or `items.map(…)`, in the call); a `ctx` call inside a function the outline does not read (one defined inside `run`, or a callback not passed to `ctx.all`, `.map`, `.forEach` or `.reduce`) or in a `finally`; and, in `run`, in a `finally` and in the callbacks that make `ctx` calls, a `return` before the end, a `throw` outside a `catch`, a `break` out of a loop or to a label, and `continue`; and a [step name](/workflows/built-ins/#step-names) that is not a literal or reads as an operation's id or `Sleep`, and two steps given one name.
+On a replay DBOS rethrows a serialized copy of an error, which is no instance of its class, so a branch on `instanceof` would go another way than the first time and the run's steps would fall out of step. Read `errorCode(err)` instead.
+
+The checker reports constructs it cannot represent in a workflow’s [outline](/workflows/your-own-ui/#outline). The outline then contains `{ error }` and `startWorker` refuses the workflow. Check these parts of `run`:
+
+- **Context access.** Call `ctx` methods directly or read `ctx.runId` and `ctx.startedBy`. Aliasing, passing, or destructuring `ctx` prevents analysis. Each call must name an operation or built-in. For example, `ctx.ghost.post()` names neither.
+- **Groups and callbacks.** Write the member list or `items.map(…)` inside `ctx.all`. A helper defined inside `run`, an unsupported callback, or a `finally` block cannot make context calls. The checker recognizes callbacks passed to `ctx.all`, `.map`, `.forEach`, and `.reduce`.
+- **Control flow.** In `run`, in a `finally` block, and in callbacks that make context calls, the checker rejects an early `return`, a `throw` outside a `catch`, a `break` out of a loop or to a label, and `continue`.
+- **Step names.** Use a unique literal for each [step name](/workflows/built-ins/#step-names). Operation IDs and `Sleep` are reserved.
 
 A function without `ctx` calls computes, and may do as it likes. Each message says what to write instead: inline the helper, use `if`/`else` around the rest, name the call. Each problem has its `line` and `column` in the entry's `file` (an unreadable file, or one that holds no workflow of the entry's name, is the outline's error at 1:1); `sanoma check` prints them, as `problemLine` does, and the app's startup warns of them. A test holds a repo to the same:
 
