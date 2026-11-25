@@ -8,6 +8,7 @@ import { z } from "zod";
 import { collection } from "../src/collection.ts";
 import { describeConfig, generateApi, writeApi } from "../src/describe.ts";
 import { defineConnector, defineDriver, defineOperation, defineWorkflow, withSetup } from "../src/index.ts";
+import { defineResource } from "../src/resource.ts";
 import companyApps from "./fixtures/company-apps/sanoma.config.ts";
 import score from "./fixtures/company-apps/apps/crm/operations/score.ts";
 import { customers as crmCustomers } from "./fixtures/company-apps/apps/crm/resources/data.ts";
@@ -70,11 +71,57 @@ const orders = collection({
   fields: { id: "text", customer: { link: "customers" }, extra: { type: "json", optional: true } },
 });
 
+/** A company operation a page may call, whose output is declared. */
+const price = defineOperation({
+  name: "price",
+  description: "What some items cost a customer",
+  input: z.object({ id: z.string(), items: z.number() }),
+  output: z.object({
+    total: z.number().describe("What the items cost, in cents."),
+    currency: z.enum(["EUR", "USD"]),
+    customer: z.object({ id: z.string() }).nullable(),
+    taxes: z.record(z.string(), z.number()).describe("Each tax on the total, in cents, by its name."),
+    range: z.tuple([z.number(), z.number().optional()]).describe("The lowest price, and the highest when it differs."),
+    lines: z.tuple([z.string()], z.number()).describe("A heading, then each item's price."),
+  }),
+  uses: [customers.get],
+  run: async (ctx, { id, items }) => ({
+    total: items * 900,
+    currency: "EUR" as const,
+    customer: (await ctx.data.customers.get({ key: id })) && { id },
+    taxes: { VAT: items * 189 },
+    range: [900] as [number],
+    lines: ["Items", ...Array.from({ length: items }, () => 900)] as [string, ...number[]],
+  }),
+});
+
+/** A company operation whose output is a discriminated union, which Zod writes as `oneOf`. */
+const pay = defineOperation({
+  name: "pay",
+  input: z.object({ cents: z.number() }),
+  output: z.discriminatedUnion("status", [
+    z.object({ status: z.literal("paid"), receipt: z.string() }),
+    z.object({ status: z.literal("declined"), reason: z.string() }),
+  ]),
+  uses: [],
+  run: async () => ({ status: "paid" as const, receipt: "r1" }),
+});
+
+/** A company operation whose output is optional: it may answer nothing. */
+const lookup = defineOperation({
+  name: "lookup",
+  input: z.object({ email: z.string() }),
+  output: z.object({ name: z.string() }).optional(),
+  uses: [],
+  run: async () => undefined,
+});
+
 const config = {
   ...outbound,
   connectors: [acme],
   workflows: [...(outbound.workflows ?? []), plan],
   collections: [...(outbound.collections ?? []), customers, orders],
+  operations: [price, pay, lookup],
 };
 
 describe("generateApi", () => {
@@ -111,6 +158,103 @@ describe("generateApi", () => {
     expect(source).toMatch(/operations: \{\n[\s\S]*quote: \{\n[\s\S]*run: OpFn<\{/);
     expect(source).toMatch(/crm: \{\n[\s\S]*score: \{\n[\s\S]*run: OpFn<\{\n\s+email: string;/);
     expect(source).not.toContain("relabel");
+    // Neither declares an output, so a page gets `unknown` from each.
+    expect(source).toMatch(/quote: \{\n[\s\S]*?items: number;\n\s+\}, unknown>;/);
+    expect(source).toMatch(/score: \{\n[\s\S]*?email: string;\n\s+\}, unknown>;/);
+  });
+
+  it("types an operation's output that holds a resource type's state as that state, and an input's as unknown", () => {
+    const forgeRepo = defineResource({
+      vendor: "forge",
+      type: "repo",
+      title: "Repo",
+      schema: z.object({ name: z.string(), url: z.string().nullish(), visibility: z.string().default("private") }),
+      fields: { immutable: ["name"], vendorOwned: ["url"], writeOnly: [] },
+    });
+    const forge = defineConnector(
+      "forge",
+      {
+        repo: forgeRepo,
+        search: {
+          find: {
+            effect: "read",
+            input: z.object({ q: z.string() }),
+            output: z.object({ repos: z.array(forgeRepo.schema) }),
+          },
+          // The state as an input: its `visibility` may be left out, which the output's state may not.
+          like: {
+            effect: "read",
+            input: z.object({ like: forgeRepo.schema }),
+            output: z.object({ count: z.number() }),
+          },
+        },
+      },
+      { package: "@forge/sanoma-connector" },
+    );
+    const description = describeConfig({ ...config, connectors: [forge] });
+    // The description refers to the state rather than repeating it.
+    expect(description.ops.find((op) => op.id === "forge.search.find")?.output).toMatchObject({
+      properties: { repos: { items: { $ref: "sanoma:resource-type/forge.repo" } } },
+    });
+    expect(description.ops.find((op) => op.id === "forge.search.like")?.input).toMatchObject({
+      properties: { like: { $ref: "sanoma:resource-type/forge.repo" } },
+    });
+    const { source } = generateApi(description);
+    expect(source).toContain(`      find: OpFn<{
+        q: string;
+      }, {
+        repos: {
+          name: string;
+          url?: string | null;
+          visibility: string;
+        }[];
+      }>;`);
+    // The state is described as an output, so an input's `$ref` to it is not read.
+    expect(source).toContain(`      like: OpFn<{
+        like: unknown;
+      }, {
+        count: number;
+      }>;`);
+  });
+
+  it("types a tuple, a discriminated union and an optional output, and leaves a file unknown", () => {
+    const shapes = defineOperation({
+      name: "shapes",
+      input: z.object({ upload: z.file(), pair: z.tuple([z.string(), z.union([z.number(), z.null()]).optional()]) }),
+      output: z
+        .object({
+          fixed: z.tuple([z.string(), z.boolean()]),
+          rest: z.tuple([z.string()], z.union([z.number(), z.boolean()])),
+          none: z.tuple([]),
+          event: z.discriminatedUnion("kind", [
+            z.object({ kind: z.literal("a"), n: z.number() }),
+            z.object({ kind: z.literal("b") }),
+          ]),
+        })
+        .nullish(),
+      uses: [],
+      run: async () => null,
+    });
+    const description = describeConfig({ ...config, operations: [shapes] });
+    expect(description.ops.find((op) => op.id === "operations.shapes.run")?.optionalOutput).toBe(true);
+    // Of the config's operations, the built-ins' among them, only `lookup`'s output is optional: none declared (`z.unknown()`) is not.
+    expect(describeConfig(config).ops.flatMap((op) => (op.optionalOutput ? [op.id] : []))).toEqual([
+      "operations.lookup.run",
+    ]);
+    expect(generateApi(description).source).toContain(`      run: OpFn<{
+        upload: unknown;
+        pair: [string, (number | null)?];
+      }, {
+        fixed: [string, boolean];
+        rest: [string, ...(number | boolean)[]];
+        none: [];
+        event: {
+          kind: "a";
+          n: number;
+        } | {
+          kind: "b";
+        };
+      } | null | undefined>;`);
   });
 
   it("is deterministic: the same description gives the same text", () => {
@@ -156,7 +300,36 @@ export async function page() {
   await api.outboundNext.start({ company: "x" });
   const leads = await api.data.outbound.list({ order: "-lastTouched" });
   const exact: Equal<typeof leads, Saved<Outbound>[]> = true;
-  await api.acme.customer.get({ id: "c1", include: ["orders"] });
+  const customer = await api.acme.customer.get({ id: "c1", include: ["orders"] });
+  const id: string = customer.id;
+  // A company operation's output, as its \`output\` declares it: no cast.
+  const quoted = await api.operations.price.run({ id, items: 2 });
+  const total: number = quoted.total;
+  const typed: Equal<
+    typeof quoted,
+    {
+      total: number;
+      currency: "EUR" | "USD";
+      customer: { id: string } | null;
+      taxes: Record<string, number>;
+      range: [number, number?];
+      lines: [string, ...number[]];
+    }
+  > = true;
+  // @ts-expect-error: not a field of its output
+  quoted.discount;
+  // @ts-expect-error: a currency is one of two
+  const yen: typeof quoted.currency = "JPY";
+  // A discriminated union narrows on its discriminant.
+  const paid = await api.operations.pay.run({ cents: 100 });
+  const said: string = paid.status === "paid" ? paid.receipt : paid.reason;
+  // @ts-expect-error: only a paid one has a receipt
+  paid.receipt;
+  // An optional output may be undefined.
+  const found = await api.operations.lookup.run({ email: "ada@example.com" });
+  const name: string | undefined = found?.name;
+  // @ts-expect-error: it may be undefined
+  found.name;
   await api.planLaunch({
     title: "Launch",
     at: "2026-10-20T09:00:00Z",
@@ -182,7 +355,7 @@ export async function page() {
   await api.data.outbound.save({ record: { company: "x", contact: "y", stage: "lunch", owner: "ada" } });
   // @ts-expect-error: a vendor's write is not called directly
   await api.acme.customer.rename({ id: "c1", name: "Acme" });
-  return exact;
+  return [exact, typed, total, yen, said, name];
 }
 `,
       "tsconfig.json": JSON.stringify({

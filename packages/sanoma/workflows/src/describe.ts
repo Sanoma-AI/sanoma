@@ -279,6 +279,9 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     direct: isDirect(op, resolved.types),
     input: toJsonSchema(op.input, `${op.id} input`, "input", refs),
     output: toJsonSchema(op.output, `${op.id} output`, "output", refs),
+    // Whether it may answer `undefined`, by Zod's own rule for leaving an object's key out of `required` in output mode.
+    // oxlint-disable-next-line eslint/no-underscore-dangle -- `optout` is on Zod's typed internals alone
+    ...(op.output._zod.optout === "optional" && { optionalOutput: true as const }),
     // A company operation's own code, as a workflow's.
     ...(isOperation(op) && {
       ...(op.app !== undefined && { app: op.app }),

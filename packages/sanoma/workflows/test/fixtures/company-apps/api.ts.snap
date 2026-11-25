@@ -40,7 +40,77 @@ interface CompanyApi {
     page?: string;
     plan?: {
       collection: string;
-      changes: unknown[];
+      changes: ({
+        kind: "add";
+        field: string;
+        type: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        required: boolean;
+        empty: number;
+      } | {
+        kind: "rename";
+        from: string;
+        to: string;
+      } | {
+        kind: "retype";
+        field: string;
+        to: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        decision?: "keep" | "clear";
+        from: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        wontConvert: {
+          count: number;
+          sample: {
+            key: string;
+            value: unknown;
+          }[];
+        };
+      } | {
+        kind: "require";
+        field: string;
+        empty: number;
+      } | {
+        kind: "hide";
+        field: string;
+        filled: number;
+      } | {
+        kind: "show";
+        field: string;
+        filled: number;
+      } | {
+        kind: "remove";
+        field: string;
+        filled: number;
+      } | {
+        kind: "convert";
+        field: string;
+        key: string;
+        to: string;
+        type: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        decision?: "keep" | "clear";
+        filled: number;
+        wontConvert: {
+          count: number;
+          sample: {
+            key: string;
+            value: unknown;
+          }[];
+        };
+      })[];
       rows: number;
     };
     save?: string;
@@ -57,7 +127,25 @@ interface CompanyApi {
     project?: string;
   }, unknown>;
   /** Follow the repository's host: the workflow `follow`, built in. */
-  follow: WorkflowFn<unknown, unknown>;
+  follow: WorkflowFn<{
+    kind: "pushed";
+    repo: {
+      owner: string;
+      name: string;
+    };
+    branch: string;
+    head: string;
+  } | {
+    kind: "closed";
+    repo: {
+      owner: string;
+      name: string;
+    };
+    branch: string;
+    number: number;
+    merged: boolean;
+    sha?: string;
+  }, unknown>;
   /** Go live: the workflow `go-live`, built in. */
   goLive: WorkflowFn<{
     owner: string;
@@ -80,7 +168,7 @@ interface CompanyApi {
     collection: string;
     mapping: ({
       field: string;
-      values?: Record<string, unknown>;
+      values?: Record<string, string>;
     } | null)[];
     rows: string[][];
     people?: string[];
@@ -92,10 +180,80 @@ interface CompanyApi {
       export: string;
     };
     fields: Record<string, unknown>;
-    rename?: Record<string, unknown>;
+    rename?: Record<string, string | null>;
     plan?: {
       collection: string;
-      changes: unknown[];
+      changes: ({
+        kind: "add";
+        field: string;
+        type: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        required: boolean;
+        empty: number;
+      } | {
+        kind: "rename";
+        from: string;
+        to: string;
+      } | {
+        kind: "retype";
+        field: string;
+        to: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        decision?: "keep" | "clear";
+        from: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        wontConvert: {
+          count: number;
+          sample: {
+            key: string;
+            value: unknown;
+          }[];
+        };
+      } | {
+        kind: "require";
+        field: string;
+        empty: number;
+      } | {
+        kind: "hide";
+        field: string;
+        filled: number;
+      } | {
+        kind: "show";
+        field: string;
+        filled: number;
+      } | {
+        kind: "remove";
+        field: string;
+        filled: number;
+      } | {
+        kind: "convert";
+        field: string;
+        key: string;
+        to: string;
+        type: "text" | "number" | "boolean" | "date" | "person" | "json" | {
+          enum: string[];
+        } | {
+          link: string;
+        };
+        decision?: "keep" | "clear";
+        filled: number;
+        wontConvert: {
+          count: number;
+          sample: {
+            key: string;
+            value: unknown;
+          }[];
+        };
+      })[];
       rows: number;
     };
   }, unknown>;
@@ -124,7 +282,9 @@ interface CompanyApi {
         /** The customer's id. */
         id: string;
         include?: ("orders" | "invoices")[];
-      }, unknown>;
+      }, {
+        id: string;
+      }>;
     };
   };
   /** operations: the operations a person may call directly. */
@@ -158,7 +318,23 @@ interface CompanyApi {
        *
        * `sanoma.apps.list`, a read.
        */
-      list: OpFn<{}, unknown>;
+      list: OpFn<{}, {
+        apps: {
+          repo: string;
+          url: string;
+          description?: string;
+          license?: string;
+          tier: "official" | "vendor-verified" | "community";
+          reviewed: boolean;
+          blocked?: string[];
+          solutions: {
+            id: string;
+            title: string;
+            demo?: string;
+          }[];
+        }[];
+        error?: string;
+      }>;
     };
     connection: {
       /** `sanoma.connection.activate`, a access. */
@@ -169,7 +345,18 @@ interface CompanyApi {
           revision?: string;
         };
         expectedRevision: string;
-      }, unknown>;
+      }, {
+        id: string;
+        vendor: string;
+        method: string;
+        account: string;
+        scopes: string[];
+        revision: string;
+        definition: string;
+        credentials?: {
+          $secret: string;
+        };
+      }>;
       /**
        * Admit an OAuth consent for a connection; the app then makes the attempt outside workflow history
        *
@@ -190,7 +377,39 @@ interface CompanyApi {
         redirectUri: string;
         replacesApplication: boolean;
         authorization: string;
-      }, unknown>;
+      }, {
+        target: {
+          connection: {
+            $connection: string;
+            vendor: string;
+            revision?: string;
+          };
+        } | {
+          rule: string;
+        };
+        id: string;
+        vendor: string;
+        method: string;
+        definition: string;
+        credential?: string;
+        location?: {
+          store: string;
+          namespace: string;
+          path: string;
+          management: "sanoma" | "external";
+        };
+        client?: string;
+        expectedRevision: string | null;
+        requiredScopes: string[];
+        expectedAccount?: string;
+        previousAccount?: string;
+        previousLocation?: {
+          store: string;
+          namespace: string;
+          path: string;
+          management: "sanoma" | "external";
+        };
+      }>;
       /** `sanoma.connection.bind`, a access. */
       bind: OpFn<{
         connection: {
@@ -201,7 +420,18 @@ interface CompanyApi {
         account: string;
         scopes: string[];
         expectedRevision: string | null;
-      }, unknown>;
+      }, {
+        id: string;
+        vendor: string;
+        method: string;
+        account: string;
+        scopes: string[];
+        revision: string;
+        definition: string;
+        credentials?: {
+          $secret: string;
+        };
+      }>;
       /** `sanoma.connection.configure`, a access. */
       configure: OpFn<{
         target: {
@@ -218,13 +448,35 @@ interface CompanyApi {
         definition: string;
         account: string;
         scopes: string[];
-      }, unknown>;
+      }, {
+        id: string;
+        vendor: string;
+        method: string;
+        account: string;
+        scopes: string[];
+        revision: string;
+        definition: string;
+        credentials?: {
+          $secret: string;
+        };
+      }>;
       /** `sanoma.connection.create`, a access. */
       create: OpFn<{
         rule: string;
         account: string;
         scopes: string[];
-      }, unknown>;
+      }, {
+        id: string;
+        vendor: string;
+        method: string;
+        account: string;
+        scopes: string[];
+        revision: string;
+        definition: string;
+        credentials?: {
+          $secret: string;
+        };
+      }>;
       /** `sanoma.connection.disconnect`, a access. */
       disconnect: OpFn<{
         connection: {
@@ -233,7 +485,11 @@ interface CompanyApi {
           revision?: string;
         };
         expectedRevision: string;
-      }, unknown>;
+      }, {
+        id: string;
+        revision: string;
+        status: "disconnected";
+      }>;
       /** `sanoma.connection.prepare`, a access. */
       prepare: OpFn<{
         target: {
@@ -248,7 +504,39 @@ interface CompanyApi {
         requestId: string;
         definition: string;
         authorization: string;
-      }, unknown>;
+      }, {
+        target: {
+          connection: {
+            $connection: string;
+            vendor: string;
+            revision?: string;
+          };
+        } | {
+          rule: string;
+        };
+        id: string;
+        vendor: string;
+        method: string;
+        definition: string;
+        credential?: string;
+        location?: {
+          store: string;
+          namespace: string;
+          path: string;
+          management: "sanoma" | "external";
+        };
+        client?: string;
+        expectedRevision: string | null;
+        requiredScopes: string[];
+        expectedAccount?: string;
+        previousAccount?: string;
+        previousLocation?: {
+          store: string;
+          namespace: string;
+          path: string;
+          management: "sanoma" | "external";
+        };
+      }>;
       /**
        * Renew a connected account's OAuth grant with its refresh token now, unless another process just did; the worker's renewal agent calls it when a scheduled renewal comes
        *
@@ -260,7 +548,11 @@ interface CompanyApi {
           vendor: string;
           revision?: string;
         };
-      }, unknown>;
+      }, {
+        id: string;
+        refreshed: boolean;
+        expiresAt?: number;
+      }>;
       /**
        * Revoke an account's OAuth grant at the provider, then disconnect it and delete the grant; the OAuth application stays
        *
@@ -273,7 +565,11 @@ interface CompanyApi {
           revision?: string;
         };
         expectedRevision: string;
-      }, unknown>;
+      }, {
+        id: string;
+        revision: string;
+        status: "disconnected";
+      }>;
       /** `sanoma.connection.test`, a read. */
       test: OpFn<{
         connection: {
@@ -281,7 +577,13 @@ interface CompanyApi {
           vendor: string;
           revision?: string;
         };
-      }, unknown>;
+      }, {
+        state: "missing" | "expired" | "revoked" | "rejected" | "wrong_account" | "scope_changed" | "uncertain" | "unavailable" | "unsupported" | "connected" | "disconnected" | "pending" | "configuration_changed" | "store_denied" | "invalid";
+        checkedAt: string;
+        externallyRenewed: boolean;
+        expiresAt?: string;
+        refreshedAt?: string;
+      }>;
     };
     run: {
       /**
@@ -291,7 +593,11 @@ interface CompanyApi {
        */
       inspect: OpFn<{
         runId: string;
-      }, unknown>;
+      }, {
+        runId: string;
+        status: "missing" | "active" | "finished" | "failed" | "cancelled" | "interrupted";
+        workflow?: string;
+      }>;
     };
     storeMigration: {
       /**
@@ -301,7 +607,10 @@ interface CompanyApi {
        */
       cancel: OpFn<{
         move: string;
-      }, unknown>;
+      }, {
+        phase: "cancelled";
+        atDestination: string[];
+      }>;
       /**
        * Plan moving the secrets Sanoma knows (connections, OAuth applications, bindings, data files' secrets) from the selected store to another in `secrets.stores`: names, paths, versions, sizes and kinds, never a value
        *
@@ -310,7 +619,46 @@ interface CompanyApi {
       plan: OpFn<{
         to: string;
         names?: string[];
-      }, unknown>;
+      }, {
+        source: {
+          store: string;
+          namespace: string;
+        };
+        destination: {
+          store: string;
+          namespace: string;
+          name: string;
+        };
+        capabilities: {
+          source: {
+            writable: boolean;
+            maxBytes: number;
+            conditionalWrites: "atomic" | "coordinated" | "none";
+            deletion: "destroy" | "soft-delete" | "unsupported";
+            changeDetection: "read" | "watch";
+          };
+          destination: {
+            writable: boolean;
+            maxBytes: number;
+            conditionalWrites: "atomic" | "coordinated" | "none";
+            deletion: "destroy" | "soft-delete" | "unsupported";
+            changeDetection: "read" | "watch";
+          };
+        };
+        items: {
+          name: string;
+          kind: "value" | "oauth-client" | "api-key" | "fields" | "signed" | "oauth2";
+          management: "sanoma" | "external";
+          action: "copy" | "kept" | "external" | "bound" | "missing";
+          sourcePath: string;
+          destinationPath: string;
+          bytes?: number;
+          sourceVersion?: string;
+          connections: string[];
+          reauthorize?: "client_changed" | "client_missing";
+        }[];
+        problems: string[];
+      }>;
     };
   };
   /** The company's collections. */
