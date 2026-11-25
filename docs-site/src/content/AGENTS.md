@@ -37,10 +37,12 @@ Add troubleshooting when there is a known symptom and a specific recovery. Use a
 
 ## Help readers scan
 
+- Give each sentence one main idea. Split where the actor or action changes. Keep a condition beside the action it governs. For example, “If the worker is offline, your approval decision stays queued. The run reads it when the worker resumes.” See [Google Technical Writing on short sentences](https://developers.google.com/tech-writing/one/short-sentences).
+- Give each paragraph one job. Lead with the action or answer and keep the details needed to use it together. Start a new paragraph when the reader’s question changes. If an app procedure turns into an explanation of worker behavior, link to the explanation at that point. See [Google Technical Writing on paragraphs](https://developers.google.com/tech-writing/one/paragraphs) and the [Diátaxis editing workflow](https://diataxis.fr/how-to-use-diataxis/).
 - Use sentence case for titles and headings. Name the task (“Start a company”), the thing a reader will look up (“Approvals”), or the question a section answers (“What an approval covers”).
 - Make the frontmatter description useful on its own. Say what the reader can do or what the feature does. Skip openings like “This guide explains…”.
 - Put the answer or first action near the top. Keep the common case together and link to background or uncommon cases where a reader might need them.
-- Use numbered steps for a sequence and a table for a lookup. Use emphasis sparingly and consistently. Read the headings on their own to check that a reader can find a step or answer.
+- Use numbered steps for a sequence and a table for a lookup. Read the headings alone: can you find the action you came for? See [Microsoft’s guidance on scannable content](https://learn.microsoft.com/en-us/style-guide/scannable-content/).
 
 ## Say who does what
 
