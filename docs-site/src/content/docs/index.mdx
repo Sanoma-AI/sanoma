@@ -3,24 +3,25 @@ title: Sanoma
 description: "Set up a company, use its app, or build workflows, sites, and connectors in its repository."
 ---
 
-import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+import { CardGrid } from "@astrojs/starlight/components";
+import SectionLinkCard from "../../components/SectionLinkCard.astro";
 
 Sanoma runs the workflows and sites defined in your company’s repository. Teammates use the company app to start runs, review approvals, and see what happened.
 
 ## Start here
 
 <CardGrid>
-  <LinkCard
+  <SectionLinkCard
     title="Set up a company"
     href="/start/setup/"
     description="Start in a new or existing repository, then run the sample workflow in a sandbox."
   />
-  <LinkCard
+  <SectionLinkCard
     title="Use your company’s app"
     href="/start/the-app/"
     description="Sign in, find a workflow, or decide a request waiting in your Inbox."
   />
-  <LinkCard
+  <SectionLinkCard
     title="Build with Sanoma"
     href="/build/overview/"
     description="Write a workflow, create a site, or add support for a vendor."

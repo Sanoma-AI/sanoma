@@ -61,7 +61,11 @@ export default defineConfig({
       social: [{ icon: "github", label: "Sanoma on GitHub", href: REPO }],
       editLink: { baseUrl: `${REPO}/edit/main/docs-site/` },
       customCss: ["./src/styles/sanoma.css"],
-      components: { Head: "./src/components/Head.astro", Footer: "./src/components/Footer.astro" },
+      components: {
+        Head: "./src/components/Head.astro",
+        Footer: "./src/components/Footer.astro",
+        PageTitle: "./src/components/PageTitle.astro",
+      },
       // Cedar has no grammar in Shiki: a policy is shown as plain text.
       expressiveCode: { shiki: { langAlias: { cedar: "txt" } } },
       sidebar: [

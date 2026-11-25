@@ -1,0 +1,22 @@
+---
+import Default from "@astrojs/starlight/components/PageTitle.astro";
+import SectionIcon from "./SectionIcon.astro";
+---
+
+<div class="section-heading">
+  <SectionIcon size="0.7em" />
+  <Default />
+</div>
+
+<style>
+  .section-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35em;
+    font-size: var(--sl-text-h1);
+  }
+
+  .section-heading > :global(svg) {
+    flex: none;
+  }
+</style>
