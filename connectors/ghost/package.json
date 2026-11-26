@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-ghost",
-  "version": "0.11.28",
+  "version": "0.11.29",
   "description": "Ghost Admin API operations for Sanoma workflows",
   "keywords": [
     "blog",
