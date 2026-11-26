@@ -50,10 +50,18 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: dbos
+          # docker-compose.yml's max_connections, not the image's 100 (#882): initdb writes it to postgresql.conf.
+          POSTGRES_INITDB_ARGS: "-c max_connections=300"
+        ports: ["5433:5432"]
+        # Over TCP: the image's first-start setup runs a server on its socket only, then restarts it.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres" --health-interval 2s --health-retries 15
     steps:
-      # Postgres with docker-compose.yml's max_connections, not the image's 100 (#882): not a service
-      # container, which cannot be given `-c`.
-      - run: docker run -d --name postgres -p 5433:5432 -e POSTGRES_PASSWORD=dbos postgres:18 -c max_connections=300
       - uses: actions/checkout@v4
       # Node and pnpm from .mise.toml, the one pin; pnpm then switches to `packageManager`.
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
@@ -78,8 +86,6 @@ jobs:
       - if: steps.postgres.outputs.cache-hit != 'true'
         run: pnpm --filter "./packages/postgres-bin/*" run prepack
       - run: pnpm postgres:download --check
-      # Over TCP: the image's first-start setup runs a server on its socket only, then restarts it.
-      - run: timeout 60 sh -c 'until docker exec postgres pg_isready -h 127.0.0.1 -U postgres; do sleep 1; done'
       - run: pnpm test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # The one result a pull request reads, whatever the number of shards.
