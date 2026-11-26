@@ -55,9 +55,12 @@ jobs:
         image: postgres:18
         env:
           POSTGRES_PASSWORD: dbos
+          # docker-compose.yml's max_connections, not the image's 100 (#882): initdb writes it to postgresql.conf.
+          POSTGRES_INITDB_ARGS: "-c max_connections=300"
         ports: ["5433:5432"]
+        # Over TCP: the image's first-start setup runs a server on its socket only, then restarts it.
         options: >-
-          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 15
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres" --health-interval 2s --health-retries 15
     steps:
       - uses: actions/checkout@v4
       # Node and pnpm from .mise.toml, the one pin; pnpm then switches to `packageManager`.

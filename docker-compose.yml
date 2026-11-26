@@ -2,7 +2,7 @@
 services:
   postgres:
     image: postgres:17
-    # Each worktree's test gate peaks near 60 connections, and gates run side by side.
+    # A test gate's four files at once peak near 100 connections, past it on CI (#882), and gates run side by side.
     command: ["postgres", "-c", "max_connections=300"]
     environment:
       POSTGRES_PASSWORD: dbos

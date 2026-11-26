@@ -2444,9 +2444,10 @@ describe("an app configured otherwise", () => {
     it("starts runs as the principal it resolves, groups included", async () => {
       const started = await post("sso-user");
       expect(started.status).toBeUndefined();
+      // Waiting, so the block's afterAll withdraws it: the file's own cannot admit sso-user.
       const run = await waitFor(
         () => detail(started.body.runId),
-        (d) => d.run.startedBy !== undefined,
+        (d) => d.run.status === "waiting",
       );
       expect(run.run.startedBy).toEqual({ id: "sso-user", groups: ["marketing"] });
     });
