@@ -13,7 +13,7 @@ export default defineConfig({
     // The workspace's other packages from source. Keep in sync with `paths` in tsconfig.json.
     alias: [
       {
-        find: /^@sanoma-ai\/connector-([a-z0-9-]+)\/(driver|fake|resources|remote|vault|boxes)$/,
+        find: /^@sanoma-ai\/connector-([a-z0-9-]+)\/(driver|fake|resources|remote|vault)$/,
         replacement: src("./connectors/$1/src/$2.ts"),
       },
       { find: /^@sanoma-ai\/connector-([a-z0-9-]+)$/, replacement: src("./connectors/$1/src/index.ts") },
