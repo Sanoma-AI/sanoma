@@ -4,6 +4,7 @@ import { cloudOps } from "./connector.ts";
 import { cloudDriver, workflowsApi } from "./driver.ts";
 import { fakeCloud } from "./fake.ts";
 
+export { BOX_INPUTS, boxProblem } from "./boxes.ts";
 export { REGIONS } from "./connector.ts";
 
 /**

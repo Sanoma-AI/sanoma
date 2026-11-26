@@ -2,8 +2,7 @@ import { z } from "zod";
 
 // The rules a box's name and hosts are held to, as the Cloud checks them: the backend and the
 // fake before they start a box's workflow, and the service on the other side of the connector,
-// which imports them from this entry (`@sanoma-ai/connector-sanoma-cloud/boxes`). Zod alone: no
-// driver, no secret.
+// whose workflows import them from the package root. Zod alone: no driver, no secret.
 
 /** One label of a domain name. */
 const LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";

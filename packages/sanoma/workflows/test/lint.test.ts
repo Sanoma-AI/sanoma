@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ensureBuilt } from "sanoma/testing";
 import { lintWorkflow } from "../src/lint.ts";
-import { ensureSanomaBuilt } from "../../test/fixture.ts";
+import { ensureSanomaBuilt, repo } from "../../test/fixture.ts";
 
 const messages = (src: string, filename?: string) => lintWorkflow(src, filename).map((p) => p.message);
 
@@ -80,6 +81,19 @@ describe("lintWorkflow", () => {
       expect.stringMatching(/^import "sanoma\/app" .*approve itself/),
       expect.stringMatching(/^import "\.\.\/sanoma\.config\.ts" .*outside workflows\/.*through ctx/),
     ]);
+  });
+
+  it("lets a workflow import a connector's own names, the Cloud's box rules, from its root", () => {
+    const BOX_RULES = 'import { BOX_INPUTS, boxProblem } from "@sanoma-ai/connector-sanoma-cloud";';
+    expect(messages(BOX_RULES, "workflows/cloud-box-open.ts")).toEqual([]);
+    // The built package, as Node resolves it for a company: its root carries both names.
+    ensureSanomaBuilt();
+    const connector = join(repo, "connectors/sanoma-cloud");
+    ensureBuilt(connector, ["dist/index.js"], ["pnpm", "run", "build"]);
+    const check = `${BOX_RULES} console.log(boxProblem(BOX_INPUTS.open, { name: "Ada", hosts: ["example.com"] }));`;
+    const out = spawnSync(process.execPath, ["--input-type=module", "-e", check], { cwd: connector, encoding: "utf8" });
+    expect(out.stderr).toBe("");
+    expect(out.stdout).toMatch(/^name is no box name/);
   });
 
   it("refuses the KMS store entry in workflows", () => {
@@ -591,7 +605,6 @@ const bad = (line: number, rule: string, text: RegExp) => ({
 // The fragment consumers extend from their `.oxlintrc.json`. Its override globs resolve against
 // the extending config, so the test writes one into a temp project the way a consumer would.
 describe("oxlint.json", () => {
-  const repo = fileURLToPath(new URL("../../../../", import.meta.url));
   const fragment = fileURLToPath(new URL("../oxlint.json", import.meta.url));
   let dir = "";
   const write = (path: string, src: string) => {
