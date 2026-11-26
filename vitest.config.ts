@@ -32,7 +32,7 @@ export default defineConfig({
     ],
     testTimeout: 60_000,
     hookTimeout: 60_000,
-    // Four files at once peak near 60 connections; docker-compose.yml leaves room for several gates.
+    // Postgres needs docker-compose.yml's max_connections for four files at once, CI's too.
     maxWorkers: 4,
     // Every spy is undone before the next test, so a test needs no try/finally to put one back.
     restoreMocks: true,
