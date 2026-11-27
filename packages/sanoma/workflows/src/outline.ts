@@ -274,7 +274,7 @@ export function outlineBody(
   fn: Node,
   { consts, source, kind }: { consts: ReadonlyMap<string, string>; source: string; kind: DefinedKind },
 ): { nodes: OutlineNode[]; problems: OutlineProblem[] } {
-  const noun = kind === "operation" ? "an operation" : "a workflow";
+  const noun = KIND_NOUN[kind];
   const problems: OutlineProblem[] = [];
   const problem = (node: Node, message: string): OutlineNode[] => {
     problems.push({ start: node.start, message });
@@ -680,6 +680,8 @@ const DEFINERS = new Map([
 
 /** What a literal of `workflowLiterals` defines. */
 type DefinedKind = "workflow" | "operation";
+/** How a message names what a file defines: the outline's by its literal, the lint's imports by its folder. */
+export const KIND_NOUN: Readonly<Record<DefinedKind, string>> = { workflow: "a workflow", operation: "an operation" };
 
 /**
  * Every workflow literal in a parsed file: the object literal `defineWorkflow({ name, …, run })`

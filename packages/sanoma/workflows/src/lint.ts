@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
-import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
+import { constsOf, KIND_NOUN, outlineBody, workflowLiterals } from "./outline.ts";
 import { APPS_DIR, COLLECTIONS_FILE, inside, kindDirOf, RELATIVE } from "./paths.ts";
 import { LOCAL_ENTRIES } from "./shared.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
@@ -95,7 +95,7 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   const { program, at } = read;
   const problems = [...read.problems];
   const root = filename === undefined ? undefined : kindDirOf(filename, ["workflows", "operations"]);
-  const kind = root !== undefined && basename(root) === "operations" ? "an operation" : "a workflow";
+  const kind = KIND_NOUN[root !== undefined && basename(root) === "operations" ? "operation" : "workflow"];
 
   const checkSource = (node: Node) => {
     const spec: string = node.source.value;

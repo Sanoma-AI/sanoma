@@ -681,6 +681,17 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("refuses the same globals and properties in an operation's file as in a workflow's, in its own words", () => {
+    const { overrides } = JSON.parse(readFileSync(fragment, "utf8")) as {
+      overrides: { files: string[]; rules: Record<string, unknown> }[];
+    };
+    const unworded = (folder: string) => {
+      const { rules } = overrides.find((o) => o.files.includes(`${folder}/**`) && !o.rules["no-restricted-imports"])!;
+      return JSON.stringify(rules, (key, value) => (key === "message" ? undefined : value));
+    };
+    expect(unworded("operations")).toBe(unworded("workflows"));
+  });
+
   // oxlint runs once, over the whole project: each test reads its part.
   let found: ReturnType<typeof lint> = [];
   const lint = () => {
