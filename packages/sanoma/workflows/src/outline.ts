@@ -132,7 +132,7 @@ export function outlineWithSource(
   const name = writtenName(isOperation(wf) ? { name: wf.resource, app: wf.app } : wf);
   const fn = runIn(file.program, kind, name, consts);
   if (!fn) return { outline: { error: `${file.file} holds no ${kind} named "${name}"` }, found: false };
-  const { nodes, problems } = outlineBody(fn, { consts, source: file.source });
+  const { nodes, problems } = outlineBody(fn, { consts, source: file.source, kind });
   if (problems.length) {
     const lines = problems.map((p) => {
       const { line, column } = file.at(p.start);
@@ -217,22 +217,23 @@ const UNREAD =
   "ctx.all, .map, .forEach or .reduce, so the run's graph shows them";
 const FINALLY =
   "ctx is not allowed in a finally: the graph does not draw one; move the call after the try, or into the catch";
-const RETURN =
-  "`return` before the end of run is not allowed in a workflow: the graph runs top to bottom; use if/else around the rest";
-const THROW =
-  "`throw` outside a catch is not allowed in a workflow: the graph shows no way out; let the failing call end the run, or use if/else";
-const BREAK =
-  "`break` out of a loop, or to a label, is not allowed in a workflow: the graph repeats the whole body; use if/else, or a condition in the loop";
-const CONTINUE =
-  "`continue` is not allowed in a workflow: the graph repeats the whole body; use if/else around the rest of it";
+// The rules on control flow, by what the file defines (`a workflow`, `an operation`).
+const RETURN = (noun: string) =>
+  `\`return\` before the end of run is not allowed in ${noun}: the graph runs top to bottom; use if/else around the rest`;
+const THROW = (noun: string) =>
+  `\`throw\` outside a catch is not allowed in ${noun}: the graph shows no way out; let the failing call end the run, or use if/else`;
+const BREAK = (noun: string) =>
+  `\`break\` out of a loop, or to a label, is not allowed in ${noun}: the graph repeats the whole body; use if/else, or a condition in the loop`;
+const CONTINUE = (noun: string) =>
+  `\`continue\` is not allowed in ${noun}: the graph repeats the whole body; use if/else around the rest of it`;
 const NAME =
   'a step\'s name must be a string literal, or a top-level const holding one, so the outline can read it: `{ name: "…" }`';
 const DEFAULT_LIKE = (name: string) =>
   `"${name}" is what a call without a name is called (an operation's id, or "${DEFAULT_SLEEP_NAME}"), so a test ` +
   'could not tell this step from those: name it in words, such as `{ name: "Draft the post" }`';
 /** Two steps given one name, and how to tell them apart. */
-const TWICE = (name: string, fix: string) =>
-  `two steps of this workflow are named "${name}": a name given is one step's, so a test or the graph can tell them apart; ${fix}`;
+const TWICE = (kind: DefinedKind, name: string, fix: string) =>
+  `two steps of this ${kind} are named "${name}": a name given is one step's, so a test or the graph can tell them apart; ${fix}`;
 /**
  * A name given that reads as an operation's id, four segments only for an app's collection or
  * company operation: what an unnamed call is called.
@@ -266,12 +267,14 @@ const READS = new Set(["now", "runId", "startedBy"]);
  * reads callbacks (`ctx.all`'s members, `.map`, `.forEach` and `.reduce`), elsewhere it is a
  * problem; a `finally` may not use `ctx`; and in a body the outline reads, `return` comes last,
  * `throw` only in a `catch`, `break` leaves only a `switch`, and there is no `continue`. A
- * callback without `ctx` computes, and is not read.
+ * callback without `ctx` computes, and is not read. The problems name `kind`, what `fn` is the
+ * `run` of: a workflow, or a company operation.
  */
 export function outlineBody(
   fn: Node,
-  { consts, source }: { consts: ReadonlyMap<string, string>; source: string },
+  { consts, source, kind }: { consts: ReadonlyMap<string, string>; source: string; kind: DefinedKind },
 ): { nodes: OutlineNode[]; problems: OutlineProblem[] } {
+  const noun = KIND_NOUN[kind];
   const problems: OutlineProblem[] = [];
   const problem = (node: Node, message: string): OutlineNode[] => {
     problems.push({ start: node.start, message });
@@ -354,17 +357,17 @@ export function outlineBody(
       case "ReturnStatement": {
         // Last at the top of the function's body: anywhere else, what follows would be drawn as run.
         const body = at.fn.body;
-        if (!(body?.type === "BlockStatement" && body.body.at(-1) === node)) problem(node, RETURN);
+        if (!(body?.type === "BlockStatement" && body.body.at(-1) === node)) problem(node, RETURN(noun));
         return children(node.argument);
       }
       case "ThrowStatement":
-        if (!at.inCatch) problem(node, THROW);
+        if (!at.inCatch) problem(node, THROW(noun));
         return children(node.argument);
       case "BreakStatement":
-        if (node.label || at.breakable === "loop") problem(node, BREAK);
+        if (node.label || at.breakable === "loop") problem(node, BREAK(noun));
         return [];
       case "ContinueStatement":
-        return problem(node, CONTINUE);
+        return problem(node, CONTINUE(noun));
     }
     // A function's body runs when the function is called, wherever and however often that is,
     // which a reading of the source cannot follow. Only the callbacks of ctx.all and of `.map`,
@@ -547,7 +550,7 @@ export function outlineBody(
   };
 
   const nodes = walk(fn.body, bodyOf(fn));
-  problems.push(...twiceNamed(nodes));
+  problems.push(...twiceNamed(nodes, kind));
   return { nodes, problems: problems.toSorted((a, b) => a.start - b.start) };
 }
 
@@ -556,7 +559,7 @@ export function outlineBody(
  * approval's title. An unnamed call's name (its operation's id, or `Sleep`) may be several
  * calls': the same operation in two arms of an `if`, a retry in a `catch`.
  */
-function twiceNamed(nodes: readonly OutlineNode[]): OutlineProblem[] {
+function twiceNamed(nodes: readonly OutlineNode[], kind: DefinedKind): OutlineProblem[] {
   const seen = new Set<string>();
   const problems: OutlineProblem[] = [];
   for (const node of flatten(nodes)) {
@@ -570,7 +573,7 @@ function twiceNamed(nodes: readonly OutlineNode[]): OutlineProblem[] {
       given = node.name === undefined ? undefined : { name: node.name, fix: "rename one" };
     }
     if (!given) continue;
-    if (seen.has(given.name)) problems.push({ start: node.span[0], message: TWICE(given.name, given.fix) });
+    if (seen.has(given.name)) problems.push({ start: node.span[0], message: TWICE(kind, given.name, given.fix) });
     seen.add(given.name);
   }
   return problems;
@@ -677,6 +680,8 @@ const DEFINERS = new Map([
 
 /** What a literal of `workflowLiterals` defines. */
 type DefinedKind = "workflow" | "operation";
+/** How a message names what a file defines: the outline's by its literal, the lint's imports by its folder. */
+export const KIND_NOUN: Readonly<Record<DefinedKind, string>> = { workflow: "a workflow", operation: "an operation" };
 
 /**
  * Every workflow literal in a parsed file: the object literal `defineWorkflow({ name, …, run })`

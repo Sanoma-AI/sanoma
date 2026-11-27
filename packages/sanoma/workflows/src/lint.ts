@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
-import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
+import { constsOf, KIND_NOUN, outlineBody, workflowLiterals } from "./outline.ts";
 import { APPS_DIR, COLLECTIONS_FILE, inside, kindDirOf, RELATIVE } from "./paths.ts";
 import { LOCAL_ENTRIES } from "./shared.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
@@ -33,10 +33,10 @@ const ALLOWED_PACKAGE = new RegExp(
 /** Packages refused by name, with the reason. */
 const REFUSED_PACKAGES: [RegExp, string][] = [
   [/^sanoma\/testing(\/|$)/, `fakes and test helpers belong in tests; ${THROUGH_CTX}`],
-  [/^sanoma\/app(\/|$)/, "the app starts runs and decides approvals, so a workflow could approve itself"],
+  [/^sanoma\/app(\/|$)/, "the app starts runs and decides approvals, so a run could approve its own approvals"],
   [/^@sanoma-ai\/connector-[^/]+\/(fake|driver|remote|vault)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
   // Its other subpaths (`sanoma/workflows`, an author package, and `LOCAL_ENTRIES` are allowed first).
-  [/^sanoma\//, "`sanoma` has no entry points for a workflow: import its names from `sanoma` itself"],
+  [/^sanoma\//, "`sanoma` has no entry points for it: import its names from `sanoma` itself"],
 ];
 
 /**
@@ -95,7 +95,7 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   const { program, at } = read;
   const problems = [...read.problems];
   const root = filename === undefined ? undefined : kindDirOf(filename, ["workflows", "operations"]);
-  const kind = root !== undefined && basename(root) === "operations" ? "an operation" : "a workflow";
+  const kind = KIND_NOUN[root !== undefined && basename(root) === "operations" ? "operation" : "workflow"];
 
   const checkSource = (node: Node) => {
     const spec: string = node.source.value;
@@ -177,8 +177,9 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   // Each workflow's `run` as the worker reads it when it starts: what the outline cannot draw,
   // the worker refuses to start with. One reading, so the lint and the worker agree.
   const outlined = { consts: constsOf(program), source: typeof input === "string" ? input : input.source };
-  for (const { run } of workflowLiterals(program))
-    for (const { start, message } of outlineBody(run, outlined).problems) problems.push({ ...at(start), message });
+  for (const literal of workflowLiterals(program))
+    for (const { start, message } of outlineBody(literal.run, { ...outlined, kind: literal.kind }).problems)
+      problems.push({ ...at(start), message });
   return byPosition(problems);
 }
 
