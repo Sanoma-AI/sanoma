@@ -154,7 +154,9 @@ describe("the shipped oxlint.json", () => {
         file: "operations/quote.ts",
         line: 2,
         rule: "sanoma(date)",
-        text: expect.stringMatching(/reads the clock with `await ctx\.now\(\)`, never `Date`/),
+        text: expect.stringMatching(
+          /^Operations are replayed, so an operation reads the clock with `await ctx\.now\(\)`, never `Date`/,
+        ),
       },
       {
         file: "workflows/via-sanoma.ts",
@@ -166,14 +168,14 @@ describe("the shipped oxlint.json", () => {
         file: "workflows/via-sanoma.ts",
         line: 3,
         rule: imports,
-        text: expect.stringMatching(/sanoma\/app\/build.*no entry points for a workflow/),
+        text: expect.stringMatching(/sanoma\/app\/build.*no entry points for a workflow or an operation/),
       },
       {
         file: "workflows/via-sanoma.ts",
         line: 4,
         rule: "sanoma(date)",
         text: expect.stringMatching(
-          /reads the clock with `await ctx\.now\(\)`, never `Date`: `new Date\(await ctx\.now\(\)\)` for a date/,
+          /^Workflows are replayed, so a workflow reads the clock with `await ctx\.now\(\)`, never `Date`: `new Date\(await ctx\.now\(\)\)` for a date/,
         ),
       },
     ]);

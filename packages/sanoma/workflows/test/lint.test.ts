@@ -77,7 +77,7 @@ describe("lintWorkflow", () => {
       expect.stringMatching(/^import "@sanoma-ai\/connector-ghost\/driver" .*through ctx/),
       expect.stringMatching(/^import "@sanoma-ai\/connector-supabase\/vault" .*through ctx/),
       expect.stringMatching(/^import "@sanoma-ai\/connector-github\/remote" .*through ctx/),
-      expect.stringMatching(/^import "sanoma\/app" .*approve itself/),
+      expect.stringMatching(/^import "sanoma\/app" .*approve its own approvals/),
       expect.stringMatching(/^import "\.\.\/sanoma\.config\.ts" .*outside workflows\/.*through ctx/),
     ]);
   });
@@ -209,22 +209,40 @@ describe("lintWorkflow", () => {
     }
   });
 
-  it("holds an operation's run to a workflow body's rules, and lets it import defineOperation", () => {
+  it("holds an operation's run to a workflow body's rules, in an operation's words, and lets it import defineOperation", () => {
     const src = `
       import { defineOperation, z } from "sanoma";
+      import { ghost } from "@sanoma-ai/connector-ghost";
       export default defineOperation({
         name: "quote",
-        input: z.object({}),
-        uses: [],
-        run: async (ctx) => {
+        input: z.object({ ts: z.array(z.string()) }),
+        uses: [ghost.post.create],
+        run: async (ctx, input) => {
+          for (const t of input.ts) {
+            if (!t) continue;
+            if (t === "last") break;
+          }
+          await ctx.ghost.post.create({ title: "a" }, { name: "Post" });
+          await ctx.ghost.post.create({ title: "b" }, { name: "Post" });
           if (ctx.runId === "") return 0;
           throw new Error("no");
         },
       });
     `;
     expect(messages(src, "/repo/operations/quote.ts")).toEqual([
-      expect.stringMatching(/^`return` before the end of run is not allowed in a workflow/),
-      expect.stringMatching(/^`throw` outside a catch is not allowed in a workflow/),
+      "`continue` is not allowed in an operation: the graph repeats the whole body; use if/else around the rest of it",
+      "`break` out of a loop, or to a label, is not allowed in an operation: the graph repeats the whole body; use if/else, or a condition in the loop",
+      'two steps of this operation are named "Post": a name given is one step\'s, so a test or the graph can tell them apart; rename one',
+      "`return` before the end of run is not allowed in an operation: the graph runs top to bottom; use if/else around the rest",
+      "`throw` outside a catch is not allowed in an operation: the graph shows no way out; let the failing call end the run, or use if/else",
+    ]);
+    // The same rules in a workflow's file name a workflow.
+    expect(messages(src.replaceAll("defineOperation", "defineWorkflow"), "/repo/workflows/quote.ts")).toEqual([
+      expect.stringMatching(/^`continue` is not allowed in a workflow:/),
+      expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow:/),
+      expect.stringMatching(/^two steps of this workflow are named "Post":/),
+      expect.stringMatching(/^`return` before the end of run is not allowed in a workflow:/),
+      expect.stringMatching(/^`throw` outside a catch is not allowed in a workflow:/),
     ]);
   });
 
@@ -561,6 +579,15 @@ const Clock = Date;
 export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k, resolveDatabaseUrl, ghostDriver, id, g, ws, p, vendor, fanned, settled, raced, first, today, called, Clock];
 `;
 
+/** What an operation's file may not do that a workflow's remedy would not fix: wait, fan out, read the clock. */
+const OPERATION_BAD = `const t = Date.now();
+setTimeout(() => {}, 1);
+const fanned = await Promise.all([t, t]);
+await fetch("https://example.com");
+const k = process.env.KEY;
+export const all = [fanned, k];
+`;
+
 describe("lintWorkflow on a workflow that tries everything", () => {
   it("refuses each import and instanceof it can see, on its line", () => {
     const refused = lintWorkflow(BAD, "workflows/bad.ts").map((p) => [p.line, p.message.split(" is not allowed")[0]]);
@@ -648,6 +675,8 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
     }
     // Outside workflows/, nothing is restricted.
     write("lib/clock.ts", `export const now = () => Date.now() + Math.random();\n`);
+    // A company operation's file, held to the same rules in an operation's words.
+    write("operations/bad.ts", OPERATION_BAD);
     found = lint();
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -676,10 +705,11 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
 
   it("reports the clock, randomness, the network, timers, the environment, globals and the bypass imports", () => {
     const problems = found
+      .filter((f) => !f.file.startsWith("operations/"))
       .map(({ file, line, rule, text }) => ({ file, line, rule, text }))
       .toSorted((a, b) => a.file.localeCompare(b.file) || a.line! - b.line!);
     expect(problems).toEqual([
-      bad(1, imports, /'SanomaClient'.*approve its own approvals/),
+      bad(1, imports, /'SanomaClient'.*approve a run's own approvals/),
       bad(1, imports, /'jsonlLedger'.*forge the ledger/),
       bad(1, imports, /'DriverError'/),
       bad(2, imports, /sanoma\/testing.*through ctx/),
@@ -715,5 +745,47 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
         text: expect.stringMatching(/sanoma\/workflows\/scenario.*through ctx/),
       },
     ]);
+  });
+
+  it("names an operation in an operation's file, with an operation's remedies, and a workflow in a workflow's", () => {
+    const operation = found
+      .filter((f) => f.file === "operations/bad.ts")
+      .map(({ line, rule, text }) => ({ line, rule, text }))
+      .toSorted((a, b) => a.line! - b.line!);
+    expect(operation).toEqual([
+      {
+        line: 1,
+        rule: date,
+        text: expect.stringMatching(
+          /Operations are replayed, so an operation reads the clock with `await ctx\.now\(\)`/,
+        ),
+      },
+      {
+        line: 2,
+        rule: globals,
+        text: expect.stringMatching(
+          /'setTimeout'.*Operations are replayed, and an operation does not wait: sleep with `ctx\.sleep` in the workflow that calls it/,
+        ),
+      },
+      {
+        line: 3,
+        rule: "eslint(no-restricted-properties)",
+        text: expect.stringMatching(
+          /Promise\.all.*await each in turn\. A fan-out, `ctx\.all\(\[\.\.\.\]\)`, is a workflow's/,
+        ),
+      },
+      { line: 4, rule: globals, text: expect.stringMatching(/'fetch'.*An operation must call vendors through ctx/) },
+      {
+        line: 5,
+        rule: globals,
+        text: expect.stringMatching(/'process'.*Operations are replayed: pass configuration as operation input/),
+      },
+    ]);
+    const inWorkflow = (line: number) => found.find((f) => f.file === "workflows/bad.ts" && f.line === line)?.text;
+    expect(inWorkflow(4)).toMatch(
+      /Workflows are replayed, so a workflow reads the clock .*`ctx\.sleep\(\{ until \}\)`/,
+    );
+    expect(inWorkflow(5)).toMatch(/A workflow must call vendors through ctx/);
+    expect(inWorkflow(10)).toMatch(/Workflows are replayed: use `ctx\.sleep`/);
   });
 });

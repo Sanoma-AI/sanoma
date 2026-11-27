@@ -1,7 +1,7 @@
 // Writes this package's `oxlint.json`, the lint a company repo's `.oxlintrc.json` extends: run by
 // `build`. It is self-contained, with no `extends` into `node_modules` (which the
 // installer lays out), made of:
-// - the runtime's `workflows/oxlint.json` (its overrides for `workflows/**`), with an entry for `sanoma`
+// - the runtime's `workflows/oxlint.json` (its overrides for `workflows/**` and `operations/**`), with an entry for `sanoma`
 //   derived from `sanoma/workflows`'s (the same names), each other entry of `sanoma` that file does
 //   not name refused but those that compute locally (`LOCAL_ENTRIES`), and the
 //   plugin (`date`) loaded from this package's `dist/`;
@@ -48,13 +48,13 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
             {
               ...author,
               name: own,
-              message: `A workflow imports only these and types from ${own}: the rest (defineConfig, the ledger stores) belongs in sanoma.config.ts, where the drivers and credentials are. Ask for approval with \`ctx.approval\`.`,
+              message: `Only these names and types are imported from ${own}: the rest (defineConfig, the ledger stores) belongs in sanoma.config.ts, where the drivers and credentials are. Ask for approval in a workflow, with \`ctx.approval\`.`,
             },
             ...entries
               .filter((name) => !named.has(name))
               .map((name) => ({
                 name,
-                message: `\`${own}\` has no entry points for a workflow: import its names from \`${own}\` itself.`,
+                message: `\`${own}\` has no entry points for a workflow or an operation: import its names from \`${own}\` itself.`,
               })),
           ],
           patterns,

@@ -1,6 +1,8 @@
 // An oxlint JS plugin with one rule, on the trees oxlint has already parsed, which the package's
-// `oxlint.json` turns on for `workflows/**`: `sanoma/date`, `Date` reading the clock. Typed here by
-// the little it uses, so the package needs no oxlint types.
+// `oxlint.json` turns on for `workflows/**` and `operations/**`: `sanoma/date`, `Date` reading the
+// clock. Typed here by the little it uses, so the package needs no oxlint types.
+import { basename } from "node:path";
+import { kindDirOf } from "./paths.ts";
 
 interface Context {
   filename: string;
@@ -25,6 +27,9 @@ interface Node {
 
 const DATE_MESSAGE =
   "Workflows are replayed, so a workflow reads the clock with `await ctx.now()`, never `Date`: `new Date(await ctx.now())` for a date, `new Date(value)`, `Date.parse` or `Date.UTC` for one it has, and `ctx.sleep({ until })` to wait for a date.";
+/** The same in a company operation's file, which does not wait: a workflow sleeps around it. */
+const OPERATION_DATE_MESSAGE =
+  "Operations are replayed, so an operation reads the clock with `await ctx.now()`, never `Date`: `new Date(await ctx.now())` for a date, and `new Date(value)`, `Date.parse` or `Date.UTC` for one it has.";
 
 /** Where `Date` names the type, which the build erases: `d: Date`, `typeof Date`, `implements Date`. */
 const TYPE_PARENTS = new Set([
@@ -71,10 +76,13 @@ const plugin = {
         docs: { description: "A workflow reads the clock with `await ctx.now()`, never `Date`" },
       },
       create(context: Context) {
+        // Which kind's folder the file is in, as the lint reads it (`lintWorkflow`).
+        const operation = basename(kindDirOf(context.filename, ["workflows", "operations"])) === "operations";
+        const message = operation ? OPERATION_DATE_MESSAGE : DATE_MESSAGE;
         return {
           Identifier(node: Node) {
             if (node.name !== "Date" || readsNoClock(node)) return;
-            if (context.sourceCode.isGlobalReference(node)) context.report({ message: DATE_MESSAGE, node });
+            if (context.sourceCode.isGlobalReference(node)) context.report({ message, node });
           },
         };
       },
